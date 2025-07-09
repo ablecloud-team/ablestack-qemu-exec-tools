@@ -1,0 +1,4 @@
+uptime
+df -h
+free -m
+ps aux

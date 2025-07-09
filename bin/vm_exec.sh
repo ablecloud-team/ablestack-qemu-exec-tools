@@ -16,6 +16,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ===== 공통 라이브러리 로드 =====
+LIBDIR="/usr/local/lib/ablestack-qemu-exec-tools"
+source "$LIBDIR/common.sh"
+source "$LIBDIR/parse_linux_table.sh"
+source "$LIBDIR/parse_windows_table.sh"
+source "$LIBDIR/parse_csv.sh"
 
 print_usage() {
   echo "Usage:"
@@ -31,7 +37,7 @@ print_usage() {
   echo "  --json                     : Output result in JSON format"
   echo "  --csv                      : Parse CSV format output"
   echo "  --table                    : Parse table format output"
-  echo "  --headers \"col1,col2,...\"  : Use fixed-width columns based on header names (only with --table)"
+  echo "  --headers "col1,col2,..."  : Use fixed-width columns based on header names (only with --table)"
   echo "  --parallel                 : Execute commands in parallel (file mode only)"
   exit 1
 }
@@ -44,7 +50,6 @@ MODE="$1"
 VM_NAME="$2"
 shift 2
 
-# Normalize MODE value
 case "$MODE" in
   --linux) MODE="-l" ;;
   --windows) MODE="-w" ;;
@@ -110,224 +115,6 @@ done
 CMD_NAME="${CMD_ARR[0]}"
 CMD_ARGS=("${CMD_ARR[@]:1}")
 
-escape_win_path() {
-  echo "$1" | sed 's/\\/\\\\/g'
-}
-
-parse_csv_to_json() {
-  local csv_data="$1"
-  local IFS=$'\n'
-  local lines
-  mapfile -t lines < <(echo "$csv_data" | sed 's/\r//g' | grep '^"')
-
-  local header_line=""
-  local result='[]'
-  local start_index=-1
-
-  for ((i = 0; i < ${#lines[@]}; i++)); do
-    if [[ "${lines[$i]}" == *"PDH-CSV"* ]]; then
-      if [[ $((i)) -lt ${#lines[@]} ]]; then
-        header_line="${lines[$((i))]}"
-        start_index=$((i + 1))
-      fi
-      break
-    fi
-  done
-
-  if [[ -z "$header_line" || $start_index -eq -1 ]]; then
-    echo '[]' && return
-  fi
-
-  local headers
-  IFS=',' read -ra headers <<< "$header_line"
-  headers[0]="timestamp"
-
-  for ((i = start_index; i < ${#lines[@]}; i++)); do
-    local line="${lines[$i]}"
-    [[ "$line" =~ Exiting ]] && continue
-    [[ "$line" =~ The\ command\ completed ]] && continue
-
-    local values
-    IFS=',' read -ra values <<< "$line"
-    if [[ ${#headers[@]} -ne ${#values[@]} ]]; then
-      continue
-    fi
-
-    local obj='{}'
-    for ((j = 0; j < ${#headers[@]}; j++)); do
-      local key=$(echo "${headers[$j]}" | sed 's/^"//;s/"$//')
-      local val=$(echo "${values[$j]}" | sed 's/^"//;s/"$//')
-      obj=$(echo "$obj" | jq --arg k "$key" --arg v "$val" '. + {($k): $v}')
-    done
-    result=$(echo "$result" | jq --argjson row "$obj" '. + [ $row ]')
-  done
-
-  echo "$result"
-}
-
-parse_windows_table() {
-  local raw_data="$1"
-  local lines
-  mapfile -t lines < <(echo "$raw_data" | sed 's/\r//' | grep -vE '^[=\s]*$')
-
-  [[ "${#lines[@]}" -lt 2 ]] && echo '[]' && return
-
-  local header_line=""
-  local header_index=0
-  local headers=()
-  local field_widths=()
-  local field_keys=()
-
-  if [[ -n "$USER_DEFINED_HEADERS" ]]; then
-    IFS=',' read -ra headers <<< "$USER_DEFINED_HEADERS"
-
-# 첫 번째 header 문자열의 일부로 라인 탐색
-    local first_header="${headers[0]}"
-    local first_word=$(echo "$first_header" | sed 's/^ *//;s/ *$//' | awk '{print $1}')
-
-    for ((i = 0; i < ${#lines[@]}; i++)); do
-      if echo "${lines[$i]}" | grep -Fq "$first_word"; then
-        header_line="${lines[$i]}"
-        header_index=$i
-        break
-      fi
-    done
-
-    if [[ -z "$header_line" ]]; then
-      echo "❌ Header keyword '$first_word' not found in data." >&2
-      echo '[]'
-      return
-    fi
-
-    for header in "${headers[@]}"; do
-      local width=$(echo -n "$header" | wc -c)
-      field_widths+=("$width")
-      field_keys+=( "$(echo "$header" | sed 's/^ *//;s/ *$//')" )
-    done
-  else
-    header_line="${lines[0]}"
-    header_index=0
-    IFS=' ' read -ra field_keys <<< "$header_line"
-  fi
-
-  local result='[]'
-
-  for ((i = header_index + 1; i < ${#lines[@]}; i++)); do
-    local line="${lines[$i]}"
-    [[ -z "$line" ]] && continue
-
-    local obj='{}'
-    if [[ -n "$USER_DEFINED_HEADERS" ]]; then
-      local pos=0
-      for ((j = 0; j < ${#field_keys[@]}; j++)); do
-        local width="${field_widths[$j]}"
-        local key="${field_keys[$j]}"
-        local raw_field="${line:$pos:$width}"
-        local val=$(echo "$raw_field" | sed 's/^[ \t]*//;s/[ \t]*$//')
-        obj=$(echo "$obj" | jq --arg k "$key" --arg v "$val" '. + {($k): $v}')
-        pos=$((pos + width))
-      done
-    else
-      read -ra fields <<< "$line"
-      for ((j = 0; j < ${#field_keys[@]}; j++)); do
-        local key="${field_keys[$j]}"
-        local val="${fields[$j]:-}"
-        obj=$(echo "$obj" | jq --arg k "$key" --arg v "$val" '. + {($k): $v}')
-      done
-    fi
-
-    result=$(echo "$result" | jq --argjson row "$obj" '. + [ $row ]')
-  done
-
-  echo "$result"
-}
-
-parse_linux_table() {
-  local raw_data="$1"
-  local lines
-  mapfile -t lines < <(echo "$raw_data" | sed 's/\r//' | grep -vE '^[=\s]*$')
-
-  [[ "${#lines[@]}" -lt 2 ]] && echo '[]' && return
-
-  local header_line=""
-  local header_index=0
-  local headers=()
-  local field_keys=()
-  local field_widths=()
-
-  if [[ -n "$USER_DEFINED_HEADERS" ]]; then
-# --headers 옵션이 있는 경우
-    IFS=',' read -ra headers <<< "$USER_DEFINED_HEADERS"
-
-# 첫 번째 헤더 키워드 추출 (공백 제거 + 첫 단어)
-    local first_header="${headers[0]}"
-    local first_word=$(echo "$first_header" | sed 's/^ *//;s/ *$//' | awk '{print $1}')
-
-# 헤더 라인 탐색
-    for ((i = 0; i < ${#lines[@]}; i++)); do
-      if echo "${lines[$i]}" | grep -Fq "$first_word"; then
-        header_line="${lines[$i]}"
-        header_index=$i
-        break
-      fi
-    done
-
-    if [[ -z "$header_line" ]]; then
-      echo "❌ Header keyword '$first_word' not found in data." >&2
-      echo '[]'
-      return
-    fi
-
-    for header in "${headers[@]}"; do
-      local width=$(echo -n "$header" | wc -c)
-      field_widths+=("$width")
-      field_keys+=( "$(echo "$header" | sed 's/^ *//;s/ *$//')" )
-    done
-  else
-# --headers 옵션이 없는 경우: 자동 감지
-    for line in "${lines[@]}"; do
-      if [[ "$line" =~ ^Proto|^USER ]]; then
-        header_line="$line"
-        break
-      fi
-    done
-    [[ -z "$header_line" ]] && header_line="${lines[0]}"
-    header_index=0
-    IFS=' ' read -ra field_keys <<< "$header_line"
-  fi
-
-  local result='[]'
-
-  for ((i = header_index + 1; i < ${#lines[@]}; i++)); do
-    local line="${lines[$i]}"
-    [[ -z "$line" ]] && continue
-
-    local obj='{}'
-    if [[ -n "$USER_DEFINED_HEADERS" ]]; then
-      local pos=0
-      for ((j = 0; j < ${#field_keys[@]}; j++)); do
-        local width="${field_widths[$j]}"
-        local key="${field_keys[$j]}"
-        local raw_field="${line:$pos:$width}"
-        local val=$(echo "$raw_field" | sed 's/^[ \t]*//;s/[ \t]*$//')
-        obj=$(echo "$obj" | jq --arg k "$key" --arg v "$val" '. + {($k): $v}')
-        pos=$((pos + width))
-      done
-    else
-      read -ra fields <<< "$line"
-      for ((j = 0; j < ${#field_keys[@]}; j++)); do
-        local key="${field_keys[$j]}"
-        local val="${fields[$j]:-}"
-        obj=$(echo "$obj" | jq --arg k "$key" --arg v "$val" '. + {($k): $v}')
-      done
-    fi
-
-    result=$(echo "$result" | jq --argjson row "$obj" '. + [ $row ]')
-  done
-
-  echo "$result"
-}
-
 parse_table_to_json() {
   local raw_data="$1"
   case "$MODE" in
@@ -345,13 +132,12 @@ parse_table_to_json() {
 
 run_guest_exec() {
   local args=("virsh" "qemu-agent-command" "$VM_NAME" "--pretty")
-
   local cmd_path="${CMD_ARR[0]}"
   local cmd_args=("${CMD_ARR[@]:1}")
   local json_args=""
   for arg in "${cmd_args[@]}"; do
-    escaped=$(printf '%s' "$arg" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    json_args+="\"$escaped\"," 
+    escaped=$(escape_string "$arg")
+    json_args+=""$escaped"," 
   done
   json_args="${json_args%,}"
 
@@ -368,36 +154,20 @@ EOF
 )
 
   local response=$(virsh qemu-agent-command "$VM_NAME" "$json" --pretty)
-  if [[ $? -ne 0 || -z "$response" ]]; then
-    echo "❌ virsh qemu-agent-command failed or returned empty response."
-    exit 1
-  fi
+  [[ $? -ne 0 || -z "$response" ]] && abort "virsh qemu-agent-command failed or returned empty response."
+
   local pid=$(echo "$response" | jq -r '.return.pid')
-  if [[ -z "$pid" || "$pid" == "null" ]]; then
-    echo "❌ Failed to parse PID from virsh response."
-    exit 1
-  fi
+  [[ -z "$pid" || "$pid" == "null" ]] && abort "Failed to parse PID from virsh response."
 
-  if [[ "$pid" == "null" || -z "$pid" ]]; then
-    echo "❌ Failed to get PID. Is qemu-guest-agent running in guest?"
-    exit 1
-  fi
-
-  local done=false
-  local out="" err="" exitcode=""
-
+  local done=false out="" err="" exitcode=""
   while ! $done; do
     sleep 0.5
-    local poll=$(virsh qemu-agent-command "$VM_NAME" "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}" --pretty)
-  if [[ $? -ne 0 || -z "$response" ]]; then
-    echo "❌ virsh qemu-agent-command failed or returned empty response."
-    exit 1
-  fi
+    local poll=$(virsh qemu-agent-command "$VM_NAME" "{"execute":"guest-exec-status","arguments":{"pid":$pid}}" --pretty)
+    [[ $? -ne 0 || -z "$poll" ]] && abort "virsh qemu-agent-command poll failed."
+
     done=$(echo "$poll" | jq -r '.return.exited')
     out=$(echo "$poll" | jq -r '.return."out-data"' 2>/dev/null | base64 --decode || true)
-    if [[ $? -ne 0 ]]; then echo "⚠️ base64 decode failed"; fi
     err=$(echo "$poll" | jq -r '.return."err-data"' 2>/dev/null | base64 --decode || true)
-    if [[ $? -ne 0 ]]; then echo "⚠️ base64 decode failed"; fi
     exitcode=$(echo "$poll" | jq -r '.return.exitcode')
   done
 
@@ -408,8 +178,7 @@ EOF
     elif $PARSE_TABLE; then
       parsed=$(parse_table_to_json "$out")
     fi
-    jq -n --arg cmd "$MODE ${CMD_ARR[*]}" --arg stdout "$out" --arg stderr "$err" --argjson parsed "$parsed" --argjson exit_code "$exitcode" \
-      '{command: $cmd, parsed: $parsed, stdout_raw: $stdout, stderr: $stderr, exit_code: $exit_code}'
+    jq -n --arg cmd "$MODE ${CMD_ARR[*]}" --arg stdout "$out" --arg stderr "$err" --argjson parsed "$parsed" --argjson exit_code "$exitcode"       '{command: $cmd, parsed: $parsed, stdout_raw: $stdout, stderr: $stderr, exit_code: $exit_code}'
   else
     echo "===== $MODE: ${CMD_ARR[*]} STDOUT ====="
     echo "$out"
@@ -443,6 +212,3 @@ run_command() {
 }
 
 run_command
-
-
-
