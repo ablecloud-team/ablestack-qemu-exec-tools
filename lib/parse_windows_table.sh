@@ -16,7 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-source "$(dirname "$0")/common.sh"
+LIBDIR="/usr/local/lib/ablestack-qemu-exec-tools"
+source "$LIBDIR/common.sh"
 
 parse_windows_table() {
   local raw_data="$1"
