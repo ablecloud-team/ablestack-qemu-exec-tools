@@ -137,7 +137,7 @@ run_guest_exec() {
   local json_args=""
   for arg in "${cmd_args[@]}"; do
     escaped=$(escape_string "$arg")
-    json_args+=""$escaped"," 
+    json_args+="\"$escaped\","
   done
   json_args="${json_args%,}"
 
@@ -162,7 +162,7 @@ EOF
   local done=false out="" err="" exitcode=""
   while ! $done; do
     sleep 0.5
-    local poll=$(virsh qemu-agent-command "$VM_NAME" "{"execute":"guest-exec-status","arguments":{"pid":$pid}}" --pretty)
+    local poll=$(virsh qemu-agent-command "$VM_NAME" "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}" --pretty)
     [[ $? -ne 0 || -z "$poll" ]] && abort "virsh qemu-agent-command poll failed."
 
     done=$(echo "$poll" | jq -r '.return.exited')
