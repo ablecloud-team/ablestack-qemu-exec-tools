@@ -1,11 +1,11 @@
 #!/bin/bash
 #
-# install.sh - ablestack-qemu-exec-tools 설치 스크립트
+# install.sh - ablestack-qemu-exec-tools 설치 스크립트 (통합)
 #
 # Copyright 2025 ABLECLOUD
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
+# You may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
@@ -19,7 +19,7 @@
 set -e
 
 INSTALL_PREFIX="/usr/local"
-BIN_TARGET="${INSTALL_PREFIX}/bin/vm_exec"
+BIN_DIR="${INSTALL_PREFIX}/bin"
 LIB_TARGET="${INSTALL_PREFIX}/lib/ablestack-qemu-exec-tools"
 
 echo "▶ ablestack-qemu-exec-tools 설치를 시작합니다..."
@@ -30,16 +30,27 @@ if ! command -v jq &> /dev/null; then
   exit 1
 fi
 
-# 실행 파일 설치
-echo "➤ 실행 파일 링크 생성: ${BIN_TARGET}"
-mkdir -p "$(dirname "$BIN_TARGET")"
-ln -sf "$(pwd)/bin/vm_exec.sh" "$BIN_TARGET"
+# 1. 실행 파일 설치/업데이트 (vm_exec, agent_policy_fix)
+BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh")
+for script in "${BIN_SCRIPTS[@]}"; do
+  src="bin/${script}"
+  target="${BIN_DIR}/${script%.sh}"  # .sh 확장자 제거
+  if [ -f "$src" ]; then
+    echo "➤ 실행 파일 링크 생성: $target"
+    mkdir -p "$(dirname "$target")"
+    ln -sf "$(pwd)/$src" "$target"
+    chmod +x "$src"
+  fi
+done
 
-# 라이브러리 설치
+# 2. 라이브러리 설치
 echo "➤ 라이브러리 설치 경로: ${LIB_TARGET}"
 mkdir -p "$LIB_TARGET"
 cp -a lib/* "$LIB_TARGET/" 2>/dev/null || true
 
 echo "✅ 설치 완료! 다음 명령으로 실행할 수 있습니다:"
 echo ""
-echo "   vm_exec -l|-w|-d <vm-name> <command> [args...] [options]"
+echo "   vm_exec         # 호스트에서 VM 명령 실행"
+echo "   agent_policy_fix # 게스트에서 qemu-guest-agent 정책 자동화"
+echo ""
+echo "▶ 자세한 사용법은 README.md 및 docs/usage.md를 참고하세요."

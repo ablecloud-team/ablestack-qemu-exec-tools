@@ -1,0 +1,9 @@
+Package: ablestack-qemu-exec-tools
+Version: 0.1-1
+Section: utils
+Priority: optional
+Architecture: all
+Depends: bash, jq, libvirt-clients
+Maintainer: ABLECLOUD <dev@ablecloud.io>
+Description: QEMU guest-agent 기반 VM 명령 실행 및 정책 자동화 도구
+ QEMU/libvirt 환경에서 qemu-guest-agent를 이용한 VM 명령 실행, 정책 자동화 bash 스크립트 도구 세트.
