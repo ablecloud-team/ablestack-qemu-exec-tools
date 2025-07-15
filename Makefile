@@ -77,7 +77,7 @@ deb:
 	@if [ -f usage_agent_policy_fix.md ]; then cp -a usage_agent_policy_fix.md $(DEB_DOC_DIR)/; fi
 	@if [ -d examples ]; then cp -a examples/* $(DEB_DOC_DIR)/; fi
 	# control 파일 필요(최상위에 있어야 함)
-	cp control $(DEB_DEBIAN_DIR)/
+	cp deb/control $(DEB_DEBIAN_DIR)/
 	chmod 755 $(DEB_BIN_DIR)/*
 	dpkg-deb --build $(DEB_BUILD_DIR)
 	@echo "✅ DEB package created: $(DEB_PKG).deb"
