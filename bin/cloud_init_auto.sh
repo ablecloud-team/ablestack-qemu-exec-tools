@@ -16,28 +16,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-LIB_DIR="$(dirname "$0")/../lib"
-. "$LIB_DIR/cloud_init_common.sh"
+LIBDIR="/usr/local/lib/ablestack-qemu-exec-tools"
+source "$LIBDIR/cloud_init_common.sh"
 
-echo "[INFO] cloud-init 설치 확인 중..."
+msg "[INFO] cloud-init 설치 확인 중..." "[INFO] Checking cloud-init installation..."
 if check_cloud_init_installed; then
-    echo "[INFO] cloud-init이 이미 설치되어 있습니다."
+    msg "[INFO] cloud-init이 이미 설치되어 있습니다." "[INFO] cloud-init is already installed."
 else
-    echo "[INFO] cloud-init이 설치되어 있지 않아 설치를 진행합니다."
-    install_cloud_init || { echo "[ERROR] cloud-init 설치 실패!"; exit 1; }
+    msg "[INFO] cloud-init이 설치되어 있지 않아 설치를 진행합니다." \
+        "[INFO] cloud-init is not installed, so installation will proceed."
+    install_cloud_init || { msg "[ERROR] cloud-init 설치 실패!" "[ERROR] cloud-init installation failed!"; exit 1; }
 fi
 
-echo "[INFO] metadata provider를 ConfigDrive, CloudStack으로 지정합니다..."
+msg "[INFO] metadata provider를 ConfigDrive, CloudStack으로 지정합니다..." \
+    "[INFO] Specify metadata provider as ConfigDrive, CloudStack..."
 set_metadata_provider_configdrive_cloudstack
 
-echo "[INFO] cloud.cfg에서 users 항목을 root로 설정합니다..."
+msg "[INFO] cloud.cfg에서 users 항목을 root로 설정합니다..." \
+    "[INFO] Set users entry to root in cloud.cfg..."
 patch_cloud_cfg_users_root
 
-echo "[INFO] cloud-init의 cloud_init_modules를 매 부팅마다 실행하도록 설정합니다..."
-set_cloud_cfg_everyboot
-
-echo "[INFO] set_hostname, set_passwords, ssh, runcmd 항목만 매 부팅(always) 실행으로 패치합니다..."
-patch_cloud_init_modules_frequency_partial
+msg "[INFO] set_hostname, set_passwords, ssh, runcmd 항목만 매 부팅(always) 실행으로 패치합니다..." \
+    "[INFO] Patch only set_hostname, set_passwords, ssh, runcmd items to always run on every boot..."
+patch_cloud_init_and_config_modules_frequency_partial
 
 print_final_message
 exit 0

@@ -93,80 +93,120 @@ set_metadata_provider_configdrive_cloudstack() {
 
 patch_cloud_cfg_users_root() {
     CFG="/etc/cloud/cloud.cfg"
-
-    if [ ! -f "$CFG" ]; then
-        msg "[ERROR] $CFG 파일이 존재하지 않습니다." "[ERROR] $CFG file does not exist."
-        return 1
-    fi
-
-    # 백업
     sudo cp -a "$CFG" "$CFG.ablestack.bak"
 
-    # users: ~ 섹션을 모두 주석처리 또는 삭제 후 users: - root 추가
-    # 기존 users: ... - default  등 패턴을 치환
-    if grep -q "^users:" "$CFG"; then
-        # users:부터 다음 상위 키 또는 파일 끝까지 삭제 후 users: - root로 대체
-        sudo awk '
-            BEGIN {inusers=0}
-            /^users:/ {print "users:"; print "  - root"; inusers=1; next}
-            /^[^[:space:]]/ {inusers=0}
-            !inusers
-        ' "$CFG" > "$CFG.tmp" && sudo mv "$CFG.tmp" "$CFG"
+    # 1. users 항목을 root로(주석은 유지)
+    TMP="$(mktemp)"
+    in_users=0
+    while IFS= read -r line; do
+        # users 블록 시작
+        if [[ "$line" =~ ^users: ]]; then
+            in_users=1
+            echo "users:" >> "$TMP"
+            echo "  - root" >> "$TMP"
+            continue
+        fi
+        # users 블록 종료: 다음 최상위 키(공백없는 라인) 또는 주석/빈줄이면서 이전에 users블록이면 종료
+        if [[ $in_users -eq 1 ]]; then
+            if [[ "$line" =~ ^[^[:space:]] || "$line" =~ ^# || -z "$line" ]]; then
+                in_users=0
+            else
+                continue
+            fi
+        fi
+        # 그 외 내용 그대로
+        echo "$line" >> "$TMP"
+    done < "$CFG"
+    sudo mv "$TMP" "$CFG"
+
+    # 2. disable_root: 값을 false로 교체 (존재시 치환, 없으면 users: 뒤에 추가)
+    if grep -q '^disable_root:' "$CFG"; then
+        sudo sed -i 's/^disable_root:.*$/disable_root: false/' "$CFG"
     else
-        echo -e "\nusers:\n  - root" | sudo tee -a "$CFG" >/dev/null
+        sudo sed -i '/^users:/a disable_root: false' "$CFG"
     fi
 
-    msg "[INFO] cloud.cfg의 users 항목을 root로 변경 완료" "[INFO] Completed changing users entry in cloud.cfg to root"
+    # 3. ssh_pwauth: 값을 true로 교체 (존재시 치환, 없으면 users: 뒤에 추가)
+    if grep -q '^ssh_pwauth:' "$CFG"; then
+        sudo sed -i 's/^ssh_pwauth:.*$/ssh_pwauth: true/' "$CFG"
+    else
+        sudo sed -i '/^users:/a ssh_pwauth: true' "$CFG"
+    fi
+
+    msg "[INFO] users, disable_root, ssh_pwauth 항목이 root/false/true로 패치 완료" \
+        "[INFO] users, disable_root, ssh_pwauth have been patched to root/false/true"
 }
 
-set_cloud_cfg_everyboot() {
-    CFGD="/etc/cloud/cloud.cfg.d"
-    CFG="$CFGD/99_ablestack_everyboot.cfg"
-    sudo mkdir -p "$CFGD"
-
-    # always_run_init_modules로 cloud_init_modules 매 부팅마다 실행
-    cat <<EOF | sudo tee "$CFG" >/dev/null
-# ablestack: cloud-init every boot 적용
-always_run_init_modules: true
-EOF
-
-    msg "[INFO] cloud-init의 cloud_init_modules (ssh-key, password, runcmd, hostname 등) 매 부팅마다 실행 설정 완료" \
-        "[INFO] Setting up cloud-init's cloud_init_modules (ssh-key, password, runcmd, hostname, etc.) to run on every boot completed"
-}
-
-patch_cloud_init_modules_frequency_partial() {
+patch_cloud_init_and_config_modules_frequency_partial() {
     CFG="/etc/cloud/cloud.cfg"
     sudo cp -a "$CFG" "$CFG.ablestack.bak"
 
-    # 패치 대상 모듈
-    modules_to_always=(set_hostname set_passwords ssh runcmd)
+    # 각 블록별 패치 대상 지정
+    modules_to_always_init=(set_hostname set_passwords ssh)
+    modules_to_always_config=(runcmd)
 
-    # awk로 cloud_init_modules 블록만 수정
-    sudo awk -v mods="$(IFS=,; echo "${modules_to_always[*]}")" '
-    BEGIN {
-        split(mods, always_mods, ",");
-        for (i in always_mods) always_map[always_mods[i]] = 1;
-    }
-    /^cloud_init_modules:/ {inblock=1}
-    inblock && /^[^[:space:]]/ {inblock=0}
-    {
-        if (!inblock) print $0;
-        else if ($1 ~ /^-/) {
-            # 모듈명 추출
-            gsub("^- *", "", $1);
-            gsub(",", "", $1);
-            mod=$1;
-            if (mod in always_map) {
-                print "  - [" mod ", always]";
-            } else {
-                print "  - " mod;
-            }
-        }
-    }
-    ' "$CFG" > "$CFG.tmp" && sudo mv "$CFG.tmp" "$CFG"
+    TMP="$(mktemp)"
+    in_block=0
+    block_type=""
 
-    msg "[INFO] cloud_init_modules: set_hostname, set_passwords, ssh, runcmd 만 always로 지정 완료" \
-        "[INFO] cloud_init_modules: set_hostname, set_passwords, ssh, runcmd only specified as always"
+    while IFS= read -r line; do
+        # 블록 시작 감지
+        if [[ "$line" =~ ^cloud_init_modules: ]]; then
+            in_block=1
+            block_type="init"
+            echo "$line" >> "$TMP"
+            continue
+        fi
+        if [[ "$line" =~ ^cloud_config_modules: ]]; then
+            in_block=1
+            block_type="config"
+            echo "$line" >> "$TMP"
+            continue
+        fi
+
+        # 블록 내부
+        if [[ $in_block -eq 1 ]]; then
+            # 블록 종료 감지(최상위 키)
+            if [[ "$line" =~ ^[^[:space:]] && ! "$line" =~ ^- ]]; then
+                in_block=0
+                block_type=""
+                echo "$line" >> "$TMP"
+                continue
+            fi
+
+            # - 모듈명 항목만 패치
+            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*([a-zA-Z0-9_]+) ]]; then
+                mod="${BASH_REMATCH[1]}"
+                patch=0
+                if [[ "$block_type" == "init" ]]; then
+                    for tmod in "${modules_to_always_init[@]}"; do
+                        if [[ "$mod" == "$tmod" ]]; then patch=1; fi
+                    done
+                elif [[ "$block_type" == "config" ]]; then
+                    for tmod in "${modules_to_always_config[@]}"; do
+                        if [[ "$mod" == "$tmod" ]]; then patch=1; fi
+                    done
+                fi
+                if [[ $patch -eq 1 ]]; then
+                    indent=$(echo "$line" | grep -o '^[[:space:]]*')
+                    echo "${indent}- [ $mod, always ]" >> "$TMP"
+                else
+                    echo "$line" >> "$TMP"
+                fi
+            else
+                echo "$line" >> "$TMP"
+            fi
+            continue
+        fi
+
+        # 블록 외에는 그대로
+        echo "$line" >> "$TMP"
+    done < "$CFG"
+
+    sudo mv "$TMP" "$CFG"
+
+    msg "[INFO] 지정된 모듈만 always로 패치 완료 (cloud_init_modules, cloud_config_modules)" \
+        "[INFO] Only the specified modules set to always (cloud_init_modules, cloud_config_modules)."
 }
 
 print_final_message() {

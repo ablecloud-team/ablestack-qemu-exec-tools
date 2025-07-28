@@ -31,7 +31,7 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # 1. 실행 파일 설치/업데이트 (vm_exec, agent_policy_fix)
-BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh")
+BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh")
 for script in "${BIN_SCRIPTS[@]}"; do
   src="bin/${script}"
   target="${BIN_DIR}/${script%.sh}"  # .sh 확장자 제거
