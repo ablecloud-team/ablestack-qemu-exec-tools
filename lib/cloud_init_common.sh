@@ -86,9 +86,9 @@ set_metadata_provider_configdrive_cloudstack() {
     sudo sed -i '/^datasource_list:/d' "$MAIN_CFG" 2>/dev/null
 
     # 99_ablestack_datasource.cfg에 datasource_list 작성 (최우선 적용)
-    echo "datasource_list: [ ConfigDrive, CloudStack ]" | sudo tee "$CUSTOM_CFG" >/dev/null
+    echo "datasource_list: [ ConfigDrive, None ]" | sudo tee "$CUSTOM_CFG" >/dev/null
 
-    msg "[INFO] metadata provider를 ConfigDrive, CloudStack으로 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, CloudStack"
+    msg "[INFO] metadata provider를 ConfigDrive, None 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, CloudStack"
 }
 
 patch_cloud_cfg_users_root() {
