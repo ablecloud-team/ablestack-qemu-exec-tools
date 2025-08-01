@@ -95,29 +95,85 @@ patch_cloud_cfg_users_root() {
     CFG="/etc/cloud/cloud.cfg"
     sudo cp -a "$CFG" "$CFG.ablestack.bak"
 
-    # 1. users 항목을 root로(주석은 유지)
+    # 시스템 ID 추출
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        os_id="${ID,,}"
+    else
+        os_id="unknown"
+    fi
+
     TMP="$(mktemp)"
-    in_users=0
+    in_sysinfo=0
+    sysinfo_done=0
     while IFS= read -r line; do
-        # users 블록 시작
-        if [[ "$line" =~ ^users: ]]; then
-            in_users=1
-            echo "users:" >> "$TMP"
-            echo "  - root" >> "$TMP"
+        # system_info 블록 시작 감지
+        if [[ "$line" =~ ^system_info: ]]; then
+            in_sysinfo=1
+            sysinfo_done=1
+            echo "$line" >> "$TMP"
+            # 다음 줄에 원하는 내용을 직접 추가
+            echo "  # This will affect which distro class gets used" >> "$TMP"
+            echo "  distro: $os_id" >> "$TMP"
+            echo "  # Default user name + that default users groups (if added/used)" >> "$TMP"
+            echo "  default_user:" >> "$TMP"
+            echo "    name: root" >> "$TMP"
+            echo "    lock_passwd: false" >> "$TMP"
+            echo "    gecos: root" >> "$TMP"
+            echo "    groups: [root, adm, systemd-journal]" >> "$TMP"
+            echo "    sudo: [\"ALL=(ALL) NOPASSWD:ALL\"]" >> "$TMP"
+            echo "    shell: /bin/bash" >> "$TMP"
+            echo "  network:" >> "$TMP"
+            echo "    renderers: ['eni', 'netplan', 'network-manager', 'sysconfig', 'networkd']" >> "$TMP"
+            echo "  # Other config here will be given to the distro class and/or path classes" >> "$TMP"
+            echo "  paths:" >> "$TMP"
+            echo "    cloud_dir: /var/lib/cloud/" >> "$TMP"
+            echo "    templates_dir: /etc/cloud/templates/" >> "$TMP"
+            echo "  ssh_svcname: sshd" >> "$TMP"
+            # system_info 아래 기존 내용은 모두 스킵
             continue
         fi
-        # users 블록 종료: 다음 최상위 키(공백없는 라인) 또는 주석/빈줄이면서 이전에 users블록이면 종료
-        if [[ $in_users -eq 1 ]]; then
-            if [[ "$line" =~ ^[^[:space:]] || "$line" =~ ^# || -z "$line" ]]; then
-                in_users=0
-            else
-                continue
+        # system_info 블록 내부는 건너뜀
+        if [[ $in_sysinfo -eq 1 ]]; then
+            # 다음 상위 섹션(비인덴트 줄, 예: #, users:, cloud_init_modules:)에서 끝냄
+            if [[ "$line" =~ ^[^[:space:]] ]]; then
+                in_sysinfo=0
+                echo "$line" >> "$TMP"
             fi
+            continue
         fi
-        # 그 외 내용 그대로
+        # 나머지 줄은 그대로 복사
         echo "$line" >> "$TMP"
     done < "$CFG"
+
+    # 만약 system_info가 아예 없었다면, 마지막에 추가
+    if [[ $sysinfo_done -eq 0 ]]; then
+        echo "" >> "$TMP"
+        echo "system_info:" >> "$TMP"
+        echo "  # This will affect which distro class gets used" >> "$TMP"
+        echo "  distro: $os_id" >> "$TMP"
+        echo "  # Default user name + that default users groups (if added/used)" >> "$TMP"
+        echo "  default_user:" >> "$TMP"
+        echo "    name: root" >> "$TMP"
+        echo "    lock_passwd: false" >> "$TMP"
+        echo "    gecos: root" >> "$TMP"
+        echo "    groups: [root, adm, systemd-journal]" >> "$TMP"
+        echo "    sudo: [\"ALL=(ALL) NOPASSWD:ALL\"]" >> "$TMP"
+        echo "    shell: /bin/bash" >> "$TMP"
+        echo "  network:" >> "$TMP"
+        echo "    renderers: ['eni', 'netplan', 'network-manager', 'sysconfig', 'networkd']" >> "$TMP"
+        echo "  # Other config here will be given to the distro class and/or path classes" >> "$TMP"
+        echo "  paths:" >> "$TMP"
+        echo "    cloud_dir: /var/lib/cloud/" >> "$TMP"
+        echo "    templates_dir: /etc/cloud/templates/" >> "$TMP"
+        echo "  ssh_svcname: sshd" >> "$TMP"
+
+    fi
+
     sudo mv "$TMP" "$CFG"
+
+    msg "[INFO] system_info 블록(distro, default_user)만 패치 완료, users는 그대로 유지" \
+        "[INFO] Only patched system_info block (distro, default_user); users left as-is"
 
     # 2. disable_root: 값을 false로 교체 (존재시 치환, 없으면 users: 뒤에 추가)
     if grep -q '^disable_root:' "$CFG"; then
@@ -139,7 +195,7 @@ patch_cloud_cfg_users_root() {
 
 patch_cloud_init_and_config_modules_frequency_partial() {
     CFG="/etc/cloud/cloud.cfg"
-    sudo cp -a "$CFG" "$CFG.ablestack.bak"
+    sudo cp -a "$CFG" "$CFG.ablestack.bak.freq"
 
     # 각 블록별 패치 대상 지정
     modules_to_always_init=(set_hostname set_passwords ssh)
@@ -208,6 +264,30 @@ patch_cloud_init_and_config_modules_frequency_partial() {
     msg "[INFO] 지정된 모듈만 always로 패치 완료 (cloud_init_modules, cloud_config_modules)" \
         "[INFO] Only the specified modules set to always (cloud_init_modules, cloud_config_modules)."
 }
+
+setup_cloud_init_clean_on_shutdown() {
+    UNIT_PATH="/etc/systemd/system/cloud-init-clean-shutdown.service"
+    sudo tee "$UNIT_PATH" >/dev/null <<EOF
+[Unit]
+Description=Cloud-init clean at shutdown
+DefaultDependencies=no
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cloud-init clean
+
+[Install]
+WantedBy=shutdown.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable cloud-init-clean-shutdown.service
+
+    msg "[INFO] cloud-init clean이 가상머신 종료 시점에 자동으로 실행되도록 systemd 서비스가 설정되었습니다." \
+        "[INFO] cloud-init clean will now run automatically at VM shutdown (systemd service configured)."
+}
+
 
 print_final_message() {
     # 현재 OS 로케일 감지

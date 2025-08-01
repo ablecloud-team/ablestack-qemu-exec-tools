@@ -40,5 +40,9 @@ msg "[INFO] set_hostname, set_passwords, ssh, runcmd 항목만 매 부팅(always
     "[INFO] Patch only set_hostname, set_passwords, ssh, runcmd items to always run on every boot..."
 patch_cloud_init_and_config_modules_frequency_partial
 
+msg "[INFO] cloud-init 초기화 설정을 가상머신 셧다운 시에 재설정(clean) 하도록 서비스를 등록합니다." \
+    "[INFO] Register a service to reset (clean) cloud-init initialization settings when the virtual machine is shut down."
+setup_cloud_init_clean_on_shutdown
+
 print_final_message
 exit 0
