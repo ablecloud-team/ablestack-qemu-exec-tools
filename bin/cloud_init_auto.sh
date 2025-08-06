@@ -28,8 +28,8 @@ else
     install_cloud_init || { msg "[ERROR] cloud-init 설치 실패!" "[ERROR] cloud-init installation failed!"; exit 1; }
 fi
 
-msg "[INFO] metadata provider를 ConfigDrive, CloudStack으로 지정합니다..." \
-    "[INFO] Specify metadata provider as ConfigDrive, CloudStack..."
+msg "[INFO] metadata provider를 ConfigDrive로 지정합니다..." \
+    "[INFO] Specify metadata provider as ConfigDrive..."
 set_metadata_provider_configdrive_cloudstack
 
 msg "[INFO] cloud.cfg에서 users 항목을 root로 설정합니다..." \

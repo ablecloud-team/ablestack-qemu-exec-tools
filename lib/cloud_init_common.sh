@@ -88,7 +88,7 @@ set_metadata_provider_configdrive_cloudstack() {
     # 99_ablestack_datasource.cfg에 datasource_list 작성 (최우선 적용)
     echo "datasource_list: [ ConfigDrive, None ]" | sudo tee "$CUSTOM_CFG" >/dev/null
 
-    msg "[INFO] metadata provider를 ConfigDrive, None 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, CloudStack"
+    msg "[INFO] metadata provider를 ConfigDrive, None 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, None"
 }
 
 patch_cloud_cfg_users_root() {
@@ -175,18 +175,19 @@ patch_cloud_cfg_users_root() {
     msg "[INFO] system_info 블록(distro, default_user)만 패치 완료, users는 그대로 유지" \
         "[INFO] Only patched system_info block (distro, default_user); users left as-is"
 
-    # 2. disable_root: 값을 false로 교체 (존재시 치환, 없으면 users: 뒤에 추가)
+    # 2. disable_root: 값을 false로 교체 (존재시 치환, 없으면 루트 레벨 마지막에 추가)
     if grep -q '^disable_root:' "$CFG"; then
         sudo sed -i 's/^disable_root:.*$/disable_root: false/' "$CFG"
     else
-        sudo sed -i '/^users:/a disable_root: false' "$CFG"
+        # 맨 마지막 users: 뒤가 아니라, 파일 마지막에 추가
+        echo "disable_root: false" | sudo tee -a "$CFG" >/dev/null
     fi
 
-    # 3. ssh_pwauth: 값을 true로 교체 (존재시 치환, 없으면 users: 뒤에 추가)
+    # 3. ssh_pwauth: 값을 true로 교체 (존재시 치환, 없으면 루트 레벨 마지막에 추가)
     if grep -q '^ssh_pwauth:' "$CFG"; then
         sudo sed -i 's/^ssh_pwauth:.*$/ssh_pwauth: true/' "$CFG"
     else
-        sudo sed -i '/^users:/a ssh_pwauth: true' "$CFG"
+        echo "ssh_pwauth: true" | sudo tee -a "$CFG" >/dev/null
     fi
 
     msg "[INFO] users, disable_root, ssh_pwauth 항목이 root/false/true로 패치 완료" \
