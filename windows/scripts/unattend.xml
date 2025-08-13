@@ -1,86 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
-  <settings pass="windowsPE">
-    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <SetupUILanguage>
-        <UILanguage>ko-KR</UILanguage>
-      </SetupUILanguage>
-      <InputLocale>0412:00000412</InputLocale>
-      <SystemLocale>ko-KR</SystemLocale>
-      <UILanguage>ko-KR</UILanguage>
-      <UserLocale>ko-KR</UserLocale>
-    </component>
-    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <UserData>
-        <AcceptEula>true</AcceptEula>
-        <FullName>Administrator</FullName>
-        <Organization>ablestack</Organization>
-      </UserData>
-      <ImageInstall>
-        <OSImage>
-          <!-- 버전에 따라 자동 선택 또는 설치 UI에서 지정 -->
-          <!-- 아래 섹션 전체 주석 또는 삭제해도 자동 설치됨 -->
-          <!--
-          <InstallFrom>
-            <MetaData wcm:action="add">
-              <Key>/IMAGE/NAME</Key>
-              <Value>Windows Server 2022 STANDARD</Value>
-            </MetaData>
-          </InstallFrom>
-          <InstallTo>
-            <DiskID>0</DiskID>
-            <PartitionID>1</PartitionID>
-          </InstallTo>
-          <WillShowUI>OnError</WillShowUI>
-          -->
-        </OSImage>
-      </ImageInstall>
+  <settings pass="generalize">
+    <component name="Microsoft-Windows-PnpSysprep" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <PersistAllDeviceInstalls>true</PersistAllDeviceInstalls>
     </component>
   </settings>
   <settings pass="oobeSystem">
-    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <InputLocale>0412:00000412</InputLocale>
-      <SystemLocale>ko-KR</SystemLocale>
-      <UILanguage>ko-KR</UILanguage>
-      <UserLocale>ko-KR</UserLocale>
-    </component>
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <AutoLogon>
-        <Password>
-          <Value></Value>
-          <PlainText>true</PlainText>
-        </Password>
-        <Enabled>true</Enabled>
-        <Username>Administrator</Username>
-      </AutoLogon>
-      <RegisteredOrganization>ablestack</RegisteredOrganization>
-      <RegisteredOwner>Administrator</RegisteredOwner>
-      <TimeZone>Korea Standard Time</TimeZone>
-      <UserAccounts>
-        <AdministratorPassword>
-          <Value></Value>
-          <PlainText>true</PlainText>
-        </AdministratorPassword>
-      </UserAccounts>
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
         <NetworkLocation>Work</NetworkLocation>
-        <ProtectYourPC>3</ProtectYourPC>
-        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>1</ProtectYourPC>
         <SkipMachineOOBE>true</SkipMachineOOBE>
         <SkipUserOOBE>true</SkipUserOOBE>
       </OOBE>
-      <ShowWindowsLive>false</ShowWindowsLive>
-      <BluetoothTaskbarIconEnabled>false</BluetoothTaskbarIconEnabled>
-      <DisableAutoDaylightTimeSet>false</DisableAutoDaylightTimeSet>
-      <FirstLogonCommands>
-        <SynchronousCommand wcm:action="add">
-          <Order>1</Order>
-          <CommandLine>cmd /c echo Welcome!</CommandLine>
-          <Description>Welcome message</Description>
-        </SynchronousCommand>
-      </FirstLogonCommands>
     </component>
   </settings>
-  <!-- cpi:offlineImage 섹션은 버전 종속이므로 생략 가능 -->
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>cmd.exe /c ""C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" --config-file "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init-unattend.conf" &amp;&amp; exit 1 || exit 2"</Path>
+          <Description>Run Cloudbase-Init to set the hostname</Description>
+          <WillReboot>OnRequest</WillReboot>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
 </unattend>
