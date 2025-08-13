@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" 
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension" 
+     xmlns:sched="http://schemas.microsoft.com/wix/ScheduledTask">
+  <Product Id="*" Name="AbleStack CloudInit Automator" Language="1033" Version="1.0.0.0" Manufacturer="ABLECLOUD" UpgradeCode="2B9C6E7A-7C6E-4EBA-A2F7-7A5D2C2C0A01">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MediaTemplate />
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <Feature Id="MainFeature" Title="Core" Level="1" Absent="disallow">
+      <ComponentGroupRef Id="AppComponents" />
+      <ComponentRef Id="RegPhaseSeed" />
+      <ComponentRef Id="ScheduledTaskPhaseRunner" />
+    </Feature>
+  </Product>
+
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLDIR" Name="AbleStack\CloudInit" />
+      </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="APPDATAABL" Name="AbleStack\CloudInit">
+          <Directory Id="APPDATALOGS" Name="Logs" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="AppComponents" Directory="INSTALLDIR">
+      <Component Id="cmpPhaseRunner" Guid="*">
+        <File Id="filPhaseRunner" Source="$(var.SourceDir)\phase-runner.ps1" KeyPath="yes" />
+      </Component>
+
+      <!-- Optional assets deployed to Program Files (reference-only; runner may copy/use them) -->
+      <Component Id="cmpAssets" Guid="*">
+        <File Id="filCloudbaseInitConf" Source="$(var.SourceDir)\assets\cloudbase-init.conf" KeyPath="yes" />
+        <File Id="filCloudbaseInitUnattendConf" Source="$(var.SourceDir)\assets\cloudbase-init-unattend.conf" />
+        <File Id="filUnattendXml" Source="$(var.SourceDir)\assets\unattend.xml" />
+        <File Id="filInstallCbiPs1" Source="$(var.SourceDir)\assets\install_cloudbase_init.ps1" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <!-- Initial phase seed in registry: Phase=1 -->
+    <Component Id="RegPhaseSeed" Guid="*">
+      <RegistryKey Root="HKLM" Key="SOFTWARE\AbleStack\CloudInit" ForceDeleteOnUninstall="yes">
+        <RegistryValue Name="Phase" Type="string" Value="1" KeyPath="yes" />
+      </RegistryKey>
+    </Component>
+
+    <!-- Scheduled Task: SYSTEM, on Boot and Logon (30s delay), ignores concurrent instances -->
+    <Component Id="ScheduledTaskPhaseRunner" Guid="*">
+      <sched:ScheduledTask Id="TaskPhaseRunner" Name="AbleStack-CloudInit-PhaseRunner" ApplicationName="powershell.exe"
+                           Arguments="-NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLDIR]phase-runner.ps1&quot; -SysprepAfterPhase2"
+                           StartIn="[INSTALLDIR]"
+                           Comment="Run AbleStack Phase Runner to complete Phase1/Phase2 safely and unattended."
+                           Enabled="yes" DeleteWhenNotApplicable="yes" Execute="system" >
+        <sched:Triggers>
+          <sched:LogonTrigger Delay="PT30S" />
+          <sched:BootTrigger  Delay="PT30S" />
+        </sched:Triggers>
+        <sched:Settings MultipleInstances="IgnoreNew" DisallowStartIfOnBatteries="no" StopIfGoingOnBatteries="no" StartWhenAvailable="yes" />
+      </sched:ScheduledTask>
+    </Component>
+  </Fragment>
+</Wix>
