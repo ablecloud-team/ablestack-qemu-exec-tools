@@ -1,18 +1,15 @@
 param(
-  [switch]$Continue
+  [switch]$Phase2  # optional: force Phase 2
 )
 
 # ================= Common settings =================
-# Project-relative paths (adjust if your layout differs)
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $MsiPath         = Join-Path $ScriptDir "..\cloudbase-init\CloudbaseInitSetup_x64.msi"
 
-# Customized input files located next to this script
 $ConfMainSrc     = Join-Path $ScriptDir "cloudbase-init.conf"
 $ConfUnattSrc    = Join-Path $ScriptDir "cloudbase-init-unattend.conf"
 $UnattendSrc     = Join-Path $ScriptDir "Unattend.xml"
 
-# System deployment targets
 $ConfDir         = "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf"
 $ConfMainDst     = Join-Path $ConfDir "cloudbase-init.conf"
 $ConfUnattDst    = Join-Path $ConfDir "cloudbase-init-unattend.conf"
@@ -21,10 +18,14 @@ $UnattendDst     = "C:\Windows\Panther\Unattend.xml"
 $SysprepExe      = "$env:SystemRoot\System32\Sysprep\Sysprep.exe"
 $SysprepArgs     = "/generalize /oobe /shutdown /unattend:$UnattendDst"
 
-# Logging
+# State & logging
+$StateDir        = "C:\ablestack\state"
+$Marker          = Join-Path $StateDir "cbi_preclean_done.flag"
 $LogDir          = "C:\ablestack\logs"
 $LogFile         = Join-Path $LogDir "install_cloudbase_init.log"
-New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
+New-Item -ItemType Directory -Path $LogDir  -Force | Out-Null
+
 Start-Transcript -Path $LogFile -Append | Out-Null
 
 function Abort($msg) {
@@ -33,16 +34,27 @@ function Abort($msg) {
   exit 1
 }
 
-# Register self-resume via RunOnce after reboot
-function Set-RunOnceResume {
-  $cmd = "powershell.exe -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Continue"
-  New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' -Force | Out-Null
-  Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' -Name 'AblestackCbiResume' -Value $cmd
+function Show-WarningPopup($text, $title="Ablestack Cloudbase-Init Installer") {
+  try {
+    # Lightweight popup; works on Server/Desktop without adding assemblies
+    $wshell = New-Object -ComObject WScript.Shell
+    # Popup(text, timeout sec, title, type)
+    # type 48 = Exclamation icon + OK
+    $wshell.Popup($text, 15, $title, 48) | Out-Null
+  } catch {
+    # Fallback: no-op if COM not available
+  }
 }
 
-# Remove user-scoped AppxPackages for all local users and remove provisioned packages
-function PreClean-AppxPackages {
-  Write-Host "[INFO] Pre-clean: removing Appx packages for all local user profiles..."
+# ---------- Phase 1: remove Appx (may kill the shell) ----------
+function Phase1-Preclean {
+  Write-Host "[INFO] Phase 1: Pre-clean (Appx removal) starts."
+  Write-Host "[WARN] PowerShell window MAY close unexpectedly during Appx removal."
+  Write-Host "[WARN] If it closes, please run THIS script again to continue with Phase 2."
+
+  Show-WarningPopup "Phase 1 will remove Appx packages. Your PowerShell window MAY close unexpectedly. If it closes, re-run this script to continue (Phase 2)."
+
+  # Remove user-scoped Appx packages for all local users
   $sids = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' |
           Where-Object { $_.GetValue('ProfileImagePath') -like 'C:\Users\*' } |
           ForEach-Object { $_.PSChildName }
@@ -54,20 +66,28 @@ function PreClean-AppxPackages {
     } catch {}
   }
 
-  Write-Host "[INFO] Removing provisioned Appx packages (for new users)..."
+  # Remove provisioned packages (for new users)
+  Write-Host "[INFO] Removing provisioned Appx packages (for future users)..."
   try {
     Get-AppxProvisionedPackage -Online | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
   } catch {}
+
+  # Mark Phase 1 completion
+  Set-Content -Path $Marker -Value (Get-Date).ToString("s") -Force
+  Write-Host "[INFO] Phase 1 finished. If your shell closed, simply re-run this script. If not closed, please CLOSE this window and run the script again for Phase 2."
+
+  try { Stop-Transcript | Out-Null } catch {}
+  # Intentionally exit without reboot. The user will run Phase 2 manually.
+  exit 0
 }
 
-# Install Cloudbase-Init via MSI
+# ---------- Phase 2: install, deploy configs, sysprep ----------
 function Install-CloudbaseInit {
   Write-Host "[INFO] Installing Cloudbase-Init MSI..."
   if (-not (Test-Path $MsiPath)) { Abort "[ERROR] MSI file not found: $MsiPath" }
   Unblock-File -Path $MsiPath -ErrorAction SilentlyContinue
   $absMsi = (Resolve-Path $MsiPath).Path
 
-  # Quiet install; capture exit code
   $proc = Start-Process msiexec.exe -ArgumentList "/i `"$absMsi`" /qn /norestart" -Wait -PassThru
   if ($proc.ExitCode -ne 0) {
     Abort "[ERROR] MSI installation failed (exitcode: $($proc.ExitCode)). Try UI install (/qb) or verify MSI integrity."
@@ -75,7 +95,6 @@ function Install-CloudbaseInit {
   Write-Host "[INFO] MSI installation completed."
 }
 
-# Deploy both configuration files
 function Deploy-Configs {
   Write-Host "[INFO] Deploying Cloudbase-Init configuration files..."
   if (-not (Test-Path $ConfMainSrc))  { Abort "[ERROR] cloudbase-init.conf source not found: $ConfMainSrc" }
@@ -90,7 +109,6 @@ function Deploy-Configs {
   Write-Host "  - $ConfUnattDst"
 }
 
-# Restart service (best-effort)
 function Restart-CbiService {
   Write-Host "[INFO] Attempting to restart cloudbase-init service..."
   try {
@@ -100,7 +118,6 @@ function Restart-CbiService {
   }
 }
 
-# Deploy Unattend.xml
 function Deploy-Unattend {
   Write-Host "[INFO] Deploying Unattend.xml..."
   if (-not (Test-Path $UnattendSrc)) { Abort "[ERROR] Unattend.xml source not found: $UnattendSrc" }
@@ -108,7 +125,6 @@ function Deploy-Unattend {
   Write-Host "  - $UnattendDst"
 }
 
-# Run Sysprep
 function Run-Sysprep {
   Write-Host "[INFO] Running Sysprep. The system will shut down on completion..."
   if (-not (Test-Path $SysprepExe)) { Abort "[ERROR] Sysprep executable not found: $SysprepExe" }
@@ -116,24 +132,15 @@ function Run-Sysprep {
   Write-Host "[INFO] Sysprep completed. The system should power off soon."
 }
 
-# ================= Execution flow =================
-if (-not $Continue) {
-  # Phase 1: pre-clean and reboot with auto-resume
-  Write-Host "[INFO] Phase 1: starting pre-clean for Sysprep (Appx removal)."
-  PreClean-AppxPackages
+# ================= Entry =================
+$phase2Ready = (Test-Path $Marker) -or $Phase2
 
-  Write-Host "[INFO] Registering auto-resume after reboot (RunOnce)."
-  Set-RunOnceResume
-
-  Write-Host "[INFO] Rebooting now. Phase 2 will resume automatically after reboot."
-  try { Stop-Transcript | Out-Null } catch {}
-  Restart-Computer -Force
-  exit 0
-}
-else {
-  # Phase 2: install/configure and sysprep
-  Write-Host "[INFO] Phase 2: resumed after reboot. Proceeding with install/config/sysprep."
-
+if (-not $phase2Ready) {
+  # Phase 1
+  Phase1-Preclean
+} else {
+  # Phase 2
+  Write-Host "[INFO] Phase 2: continuing (pre-clean marker found or -Phase2 supplied)."
   Install-CloudbaseInit
   Deploy-Configs
   Restart-CbiService
@@ -144,10 +151,8 @@ else {
   Write-Host "      - Cloudbase-Init installed"
   Write-Host "      - cloudbase-init.conf / cloudbase-init-unattend.conf deployed"
   Write-Host "      - Unattend.xml placed (specialize will use the unattend conf)"
-  Write-Host "      - Appx packages cleaned"
   Write-Host "      - Sysprep executed (/generalize /oobe /shutdown)"
   Write-Host "[INFO] Power off the VM (it should shut down automatically) and register it as a template/image for cloning."
-
   try { Stop-Transcript | Out-Null } catch {}
   exit 0
 }
