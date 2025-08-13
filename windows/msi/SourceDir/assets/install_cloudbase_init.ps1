@@ -4,7 +4,7 @@ param(
 
 # ================= Common settings =================
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$MsiPath         = Join-Path $ScriptDir "..\cloudbase-init\CloudbaseInitSetup_x64.msi"
+$MsiPath         = Join-Path $ScriptDir "\CloudbaseInitSetup_x64.msi"
 
 $ConfMainSrc     = Join-Path $ScriptDir "cloudbase-init.conf"
 $ConfUnattSrc    = Join-Path $ScriptDir "cloudbase-init-unattend.conf"
