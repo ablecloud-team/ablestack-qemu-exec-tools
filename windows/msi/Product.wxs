@@ -7,13 +7,12 @@
     Manufacturer="ABLECLOUD"
     Version="1.0.0.0"
     Scope="perMachine"
-    Platform="x64"
     UpgradeCode="2B9C6E7A-7C6E-4EBA-A2F7-7A5D2C2C0A01">
 
     <MediaTemplate />
     <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
 
-    <!-- 표준 디렉터리 (v4) -->
+    <!-- x64 install location; requires -arch x64 at build -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLDIR" Name="AbleStack\CloudInit" />
     </StandardDirectory>
@@ -26,116 +25,123 @@
 
     <Feature Id="MainFeature" Title="Core" Level="1">
       <ComponentRef Id="cmpPhaseRunner" />
-      <ComponentRef Id="cmpAssets">
-        <File Id="filCloudbaseMsi" Source="$(var.SourceDir)\assets\CloudbaseInitSetup_x64.msi" />
-      </ComponentRef>
+      <ComponentRef Id="cmpAssets" />
       <ComponentRef Id="RegPhaseSeed" />
-      <!-- 스케줄러 작업은 QuietExec 커스텀액션으로 생성/삭제 -->
     </Feature>
+
+    <!-- ========== Reboot policy (Manual / Auto) ========== -->
+    <!-- 기본: Manual → 재부팅 억제(3010 반환). Auto 요청 시 강제 재부팅 -->
+    <Property Id="REBOOTMODE" Value="Manual" />
+    <SetProperty Id="SetRebootManual"
+                Value="ReallySuppress"
+                Before="InstallValidate"
+                Sequence="execute"
+                Condition="REBOOTMODE=&quot;Manual&quot;" />
+
+    <!-- Auto: 설치 종료 직후 자동 재부팅 -->
+    <SetProperty Id="SetRebootAuto"
+                Value="Force"
+                Before="InstallValidate"
+                Sequence="execute"
+                Condition="REBOOTMODE=&quot;Auto&quot;" />
+
+    <!-- 설치/제거 끝에서 재부팅 필요 플래그 설정 -->
+    <InstallExecuteSequence>
+      <ScheduleReboot Before="InstallFinalize"
+                      Condition="(NOT Installed) OR (REMOVE=&quot;ALL&quot;)" />
+    </InstallExecuteSequence>
+
+    <!-- ========== Scheduled Tasks via schtasks.exe + WixQuietExec ========== -->
+    <!-- 작업 이름 -->
+    <Property Id="TASK_NAME_BOOT"  Value="AbleStack-CloudInit-PhaseRunner-Boot"/>
+    <Property Id="TASK_NAME_LOGON" Value="AbleStack-CloudInit-PhaseRunner-Logon"/>
+
+    <!-- ===== Properties를 설정하는 CustomAction들 ===== -->
+    <CustomAction Id="SetCreateBootTask"
+                  Property="CreateBootTask"
+                  Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_BOOT]&quot; /SC ONSTART /RU SYSTEM /RL HIGHEST /TR &quot;\&quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe\&quot; -NoProfile -ExecutionPolicy Bypass -File \&quot;\&quot;[INSTALLDIR]phase-runner.ps1\&quot;\&quot; -SysprepAfterPhase2&quot; /F" />
+
+    <CustomAction Id="SetCreateLogonTask"
+                  Property="CreateLogonTask"
+                  Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_LOGON]&quot; /SC ONLOGON /RU SYSTEM /RL HIGHEST /TR &quot;\&quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe\&quot; -NoProfile -ExecutionPolicy Bypass -File \&quot;\&quot;[INSTALLDIR]phase-runner.ps1\&quot;\&quot; -SysprepAfterPhase2&quot; /F" />
+
+    <CustomAction Id="SetDeleteBootTask"
+                  Property="DeleteBootTask"
+                  Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_BOOT]&quot; /F" />
+
+    <CustomAction Id="SetDeleteLogonTask"
+                  Property="DeleteLogonTask"
+                  Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_LOGON]&quot; /F" />
+
+
+    <!-- ===== 실제 실행하는 QuietExec CustomAction들 (기존과 동일) ===== -->
+    <!-- 이미 사용 중인 WixQuietExec 기반 CA 정의를 유지합니다. -->
+    <CustomAction Id="CreateBootTask"
+                  BinaryKey="BinaryData"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <CustomAction Id="CreateLogonTask"
+                  BinaryKey="BinaryData"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <CustomAction Id="DeleteBootTask"
+                  BinaryKey="BinaryData"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <CustomAction Id="DeleteLogonTask"
+                  BinaryKey="BinaryData"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+
+    <!-- ===== 실행 순서 (기존 흐름 유지; 필요 시 아래처럼 명시) ===== -->
+    <InstallExecuteSequence>
+      <!-- 설치 시: 파일 설치 후 Set → Create 실행 -->
+      <Custom Action="SetCreateBootTask"  After="InstallFiles">NOT REMOVE~="ALL"</Custom>
+      <Custom Action="CreateBootTask"     After="SetCreateBootTask">NOT REMOVE~="ALL"</Custom>
+
+      <Custom Action="SetCreateLogonTask" After="CreateBootTask">NOT REMOVE~="ALL"</Custom>
+      <Custom Action="CreateLogonTask"    After="SetCreateLogonTask">NOT REMOVE~="ALL"</Custom>
+
+      <!-- 제거 시: Set → Delete 실행 -->
+      <Custom Action="SetDeleteLogonTask" Before="RemoveFiles">REMOVE~="ALL"</Custom>
+      <Custom Action="DeleteLogonTask"    After="SetDeleteLogonTask">REMOVE~="ALL"</Custom>
+
+      <Custom Action="SetDeleteBootTask"  After="DeleteLogonTask">REMOVE~="ALL"</Custom>
+      <Custom Action="DeleteBootTask"     After="SetDeleteBootTask">REMOVE~="ALL"</Custom>
+    </InstallExecuteSequence>
   </Package>
 
+  <!-- Files -->
   <Fragment>
-    <Component Id="cmpPhaseRunner" Directory="INSTALLDIR" Win64="yes" Guid="{6C6AF2F6-6D86-4A40-9F24-2B2D0C9D0D10}">
+    <Component Id="cmpPhaseRunner" Directory="INSTALLDIR" Guid="{6C6AF2F6-6D86-4A40-9F24-2B2D0C9D0D10}">
       <File Id="filPhaseRunner" Source="$(var.SourceDir)\phase-runner.ps1" KeyPath="yes" />
     </Component>
 
-    <Component Id="cmpAssets" Directory="INSTALLDIR" Win64="yes" Guid="{A8C5E3B4-1D2F-4F9D-A7E8-4C3A7D85C1F2}">
+    <Component Id="cmpAssets" Directory="INSTALLDIR" Guid="{A8C5E3B4-1D2F-4F9D-A7E8-4C3A7D85C1F2}">
       <File Id="filCloudbaseInitConf" Source="$(var.SourceDir)\assets\cloudbase-init.conf" KeyPath="yes" />
       <File Id="filCloudbaseInitUnattendConf" Source="$(var.SourceDir)\assets\cloudbase-init-unattend.conf" />
       <File Id="filUnattendXml" Source="$(var.SourceDir)\assets\unattend.xml" />
       <File Id="filInstallCbiPs1" Source="$(var.SourceDir)\assets\install_cloudbase_init.ps1" />
+      <!-- Optional vendor MSI bundling -->
+      <File Id="filCloudbaseMsi" Source="$(var.SourceDir)\assets\CloudbaseInitSetup_x64.msi" />
     </Component>
 
-    <Component Id="RegPhaseSeed" Directory="INSTALLDIR" Win64="yes" Guid="{E1B7B3D9-5B6A-4F7C-B2B4-9C7F6E2B1A4C}">
+    <Component Id="RegPhaseSeed" Directory="INSTALLDIR" Guid="{E1B7B3D9-5B6A-4F7C-B2B4-9C7F6E2B1A4C}">
       <RegistryKey Root="HKLM" Key="SOFTWARE\AbleStack\CloudInit">
         <RegistryValue Name="Phase" Type="string" Value="1" KeyPath="yes" />
       </RegistryKey>
     </Component>
-  </Fragment>
-
-  <!-- ===== 스케줄러 작업 생성/삭제 (schtasks.exe + WixQuietExec) ===== -->
-
-  <Fragment>
-    <!-- 작업 이름 Property (Value 속성 사용) -->
-    <Property Id="TASK_NAME_BOOT"  Value="AbleStack-CloudInit-PhaseRunner-Boot" />
-    <Property Id="TASK_NAME_LOGON" Value="AbleStack-CloudInit-PhaseRunner-Logon" />
-
-    <!-- 커맨드는 SetProperty로 'CA와 같은 Id'에 설정 (deferred 규칙) -->
-    <!-- Boot 트리거용 -->
-    <SetProperty Id="CreateBootTask"
-                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_BOOT]&quot; /SC ONSTART /RU &quot;SYSTEM&quot; /RL HIGHEST /TR &quot;powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;&quot;[INSTALLDIR]phase-runner.ps1&quot;&quot; -SysprepAfterPhase2&quot; /F"
-                 Before="CreateBootTask" Sequence="execute"/>
-
-    <!-- Logon 트리거용 -->
-    <SetProperty Id="CreateLogonTask"
-                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_LOGON]&quot; /SC ONLOGON /RU &quot;SYSTEM&quot; /RL HIGHEST /TR &quot;powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;&quot;[INSTALLDIR]phase-runner.ps1&quot;&quot; -SysprepAfterPhase2&quot; /F"
-                 Before="CreateLogonTask" Sequence="execute"/>
-
-    <!-- 삭제 커맨드 -->
-    <SetProperty Id="DeleteBootTask"
-                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_BOOT]&quot; /F"
-                 Before="DeleteBootTask" Sequence="execute"/>
-
-    <SetProperty Id="DeleteLogonTask"
-                 Value="&quot;[SystemFolder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_LOGON]&quot; /F"
-                 Before="DeleteLogonTask" Sequence="execute"/>
-
-    <!-- WixQuietExec 호출 (Util 확장) -->
-    <CustomAction Id="CreateBootTask"
-                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred" Impersonate="no" Return="check" />
-
-    <CustomAction Id="CreateLogonTask"
-                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred" Impersonate="no" Return="check" />
-
-    <CustomAction Id="DeleteBootTask"
-                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred" Impersonate="no" Return="ignore" />
-
-    <CustomAction Id="DeleteLogonTask"
-                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred" Impersonate="no" Return="ignore" />
-
-    <!-- 시퀀스 & 조건: inner text 금지 → Condition 속성 사용 -->
-    <InstallExecuteSequence>
-      <Custom Action="CreateBootTask"  After="InstallFiles" Condition="NOT Installed" />
-      <Custom Action="CreateLogonTask" After="InstallFiles" Condition="NOT Installed" />
-
-      <Custom Action="DeleteBootTask"  Before="InstallValidate" Condition="REMOVE=&quot;ALL&quot;" />
-      <Custom Action="DeleteLogonTask" Before="InstallValidate" Condition="REMOVE=&quot;ALL&quot;" />
-    </InstallExecuteSequence>
-  </Fragment>
-
-  <!-- ===== Reboot policy (Manual / Auto) ===== -->
-  <Fragment>
-    <!-- 기본값: Manual (자동 재부팅 안 함). 관리자/배포에서 3010을 감지해 재부팅 수행 -->
-    <Property Id="REBOOTMODE" Value="Manual" />
-
-    <!-- 모드에 따라 MSI 표준 REBOOT 속성 설정 -->
-    <!-- Manual: 모든 재부팅/프롬프트 억제 → 3010 반환만 하도록 -->
-    <SetProperty Id="REBOOT"
-                 Value="ReallySuppress"
-                 Before="InstallValidate"
-                 Condition="REBOOTMODE=&quot;Manual&quot;" />
-
-    <!-- Auto: 설치 종료 직후 자동 재부팅 -->
-    <SetProperty Id="REBOOT"
-                 Value="Force"
-                 Before="InstallValidate"
-                 Condition="REBOOTMODE=&quot;Auto&quot;" />
-
-    <!-- 설치/제거 시 '종료 시점 재부팅'을 스케줄 -->
-    <!-- (즉시 재부팅을 유발하는 ForceReboot가 아니라, 끝에서 한 번 재부팅) -->
-    <InstallExecuteSequence>
-      <!-- 신규 설치 끝나면 재부팅 필요 상태로 마킹 -->
-      <ScheduleReboot Before="InstallFinalize" Condition="NOT Installed" />
-      <!-- 제거(언인스톨) 끝나도 필요 시 재부팅 -->
-      <ScheduleReboot Before="InstallFinalize" Condition="REMOVE=&quot;ALL&quot;" />
-    </InstallExecuteSequence>
   </Fragment>
 </Wix>
