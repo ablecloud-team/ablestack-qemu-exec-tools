@@ -81,50 +81,37 @@
     <!-- ===== 실제 실행하는 QuietExec CustomAction들 (기존과 동일) ===== -->
     <!-- 이미 사용 중인 WixQuietExec 기반 CA 정의를 유지합니다. -->
     <CustomAction Id="CreateBootTask"
-                  BinaryKey="BinaryData"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="check" />
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
     <CustomAction Id="CreateLogonTask"
-                  BinaryKey="BinaryData"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="check" />
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
     <CustomAction Id="DeleteBootTask"
-                  BinaryKey="BinaryData"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="check" />
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
     <CustomAction Id="DeleteLogonTask"
-                  BinaryKey="BinaryData"
-                  DllEntry="WixQuietExec"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="check" />
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
 
     <!-- ===== 실행 순서 (기존 흐름 유지; 필요 시 아래처럼 명시) ===== -->
     <InstallExecuteSequence>
-      <!-- 설치 시: 파일 설치 후 Set → Create 실행 -->
-      <Custom Action="SetCreateBootTask"  After="InstallFiles">NOT REMOVE~="ALL"</Custom>
-      <Custom Action="CreateBootTask"     After="SetCreateBootTask">NOT REMOVE~="ALL"</Custom>
+      <!-- 설치/업그레이드 -->
+      <Custom Action="SetCreateBootTask"   After="InstallFiles"       Condition="NOT REMOVE" />
+      <Custom Action="CreateBootTask"      After="SetCreateBootTask"  Condition="NOT REMOVE" />
+      <Custom Action="SetCreateLogonTask"  After="CreateBootTask"     Condition="NOT REMOVE" />
+      <Custom Action="CreateLogonTask"     After="SetCreateLogonTask" Condition="NOT REMOVE" />
 
-      <Custom Action="SetCreateLogonTask" After="CreateBootTask">NOT REMOVE~="ALL"</Custom>
-      <Custom Action="CreateLogonTask"    After="SetCreateLogonTask">NOT REMOVE~="ALL"</Custom>
-
-      <!-- 제거 시: Set → Delete 실행 -->
-      <Custom Action="SetDeleteLogonTask" Before="RemoveFiles">REMOVE~="ALL"</Custom>
-      <Custom Action="DeleteLogonTask"    After="SetDeleteLogonTask">REMOVE~="ALL"</Custom>
-
-      <Custom Action="SetDeleteBootTask"  After="DeleteLogonTask">REMOVE~="ALL"</Custom>
-      <Custom Action="DeleteBootTask"     After="SetDeleteBootTask">REMOVE~="ALL"</Custom>
+      <!-- 제거 -->
+      <Custom Action="SetDeleteLogonTask"  Before="RemoveFiles"       Condition="REMOVE" />
+      <Custom Action="DeleteLogonTask"     After="SetDeleteLogonTask" Condition="REMOVE" />
+      <Custom Action="SetDeleteBootTask"   After="DeleteLogonTask"    Condition="REMOVE" />
+      <Custom Action="DeleteBootTask"      After="SetDeleteBootTask"  Condition="REMOVE" />
     </InstallExecuteSequence>
+
   </Package>
 
   <!-- Files -->
