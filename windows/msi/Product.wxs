@@ -57,21 +57,25 @@
     <Property Id="TASK_NAME_LOGON" Value="AbleStack-CloudInit-PhaseRunner-Logon"/>
 
     <!-- ===== Properties를 설정하는 CustomAction들 ===== -->
+    <!-- Boot 트리거 -->
     <CustomAction Id="SetCreateBootTask"
-                  Property="CreateBootTask"
-                  Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_BOOT]&quot; /SC ONSTART /RU SYSTEM /RL HIGHEST /TR &quot;\&quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe\&quot; -NoProfile -ExecutionPolicy Bypass -File \&quot;\&quot;[INSTALLDIR]phase-runner.ps1\&quot;\&quot; -SysprepAfterPhase2&quot; /F" />
+      Property="CreateBootTask"
+      Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_BOOT]&quot; /SC ONSTART /RU SYSTEM /RL HIGHEST /TR &quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File \&quot;[INSTALLDIR]phase-runner.ps1\&quot; -SysprepAfterPhase2&quot; /F" />
 
+    <!-- Logon 트리거 -->
     <CustomAction Id="SetCreateLogonTask"
-                  Property="CreateLogonTask"
-                  Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_LOGON]&quot; /SC ONLOGON /RU SYSTEM /RL HIGHEST /TR &quot;\&quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe\&quot; -NoProfile -ExecutionPolicy Bypass -File \&quot;\&quot;[INSTALLDIR]phase-runner.ps1\&quot;\&quot; -SysprepAfterPhase2&quot; /F" />
+      Property="CreateLogonTask"
+      Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_LOGON]&quot; /SC ONLOGON /RU SYSTEM /RL HIGHEST /TR &quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File \&quot;[INSTALLDIR]phase-runner.ps1\&quot; -SysprepAfterPhase2&quot; /F" />
 
+    <!-- 삭제 -->
     <CustomAction Id="SetDeleteBootTask"
-                  Property="DeleteBootTask"
-                  Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_BOOT]&quot; /F" />
+      Property="DeleteBootTask"
+      Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_BOOT]&quot; /F" />
 
     <CustomAction Id="SetDeleteLogonTask"
-                  Property="DeleteLogonTask"
-                  Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_LOGON]&quot; /F" />
+      Property="DeleteLogonTask"
+      Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_LOGON]&quot; /F" />
+
 
 
     <!-- ===== 실제 실행하는 QuietExec CustomAction들 (기존과 동일) ===== -->
