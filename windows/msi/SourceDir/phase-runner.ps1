@@ -60,7 +60,7 @@ function Invoke-Phase1 {
     # Warn user (best-effort)
     try {
       $wshell = New-Object -ComObject WScript.Shell
-      $wshell.Popup("Phase 1 will remove Appx packages. PowerShell may close unexpectedly. If it closes, this process will resume automatically on next boot (Phase 2).", 10, "ABLESTACK CloudInit – Phase1", 48) | Out-Null
+      $wshell.Popup("Phase 1 will remove Appx packages. PowerShell may close unexpectedly. If it closes, this process will resume automatically on next boot (Phase 2).", 10, "ABLESTACK CloudInit Phase1", 48) | Out-Null
     } catch {}
 
     # Remove user-scoped Appx packages for all local users
