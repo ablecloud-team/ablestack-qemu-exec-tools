@@ -73,7 +73,7 @@ function Invoke-Phase1 {
         try {
           Get-AppxPackage -User $sid | Remove-AppxPackage -ErrorAction SilentlyContinue
         } catch {
-          Write-Log "WARN: Remove-AppxPackage for SID $sid: $($_.Exception.Message)"
+          Write-Log "WARN: Remove-AppxPackage for SID $sid : $($_.Exception.Message)"
         }
       }
     } catch { Write-Log "WARN: Enumerating SIDs failed: $($_.Exception.Message)" }
