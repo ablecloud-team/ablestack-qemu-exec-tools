@@ -16,7 +16,7 @@ $ConfUnattDst    = Join-Path $ConfDir "cloudbase-init-unattend.conf"
 $UnattendDst     = "C:\ProgramData\AbleStack\CloudInit\Unattend.xml"
 
 $SysprepExe      = "$env:SystemRoot\System32\Sysprep\Sysprep.exe"
-$SysprepArgs     = "/generalize /oobe /shutdown /unattend:$UnattendDst"
+$SysprepArgs     = "/generalize /oobe /shutdown /quiet /unattend:$UnattendDst"
 $SetupActLog     = "$env:WINDIR\System32\Sysprep\Panther\setupact.log"
 $PantherLog      = "$env:WINDIR\System32\Sysprep\Panther\setupact.log"
 $SuccessTag      = "$env:WINDIR\System32\Sysprep\Sysprep_succeeded.tag"
@@ -135,26 +135,29 @@ function Run-Sysprep {
 
     # --- helpers ---
     function Invoke-SysprepOnce {
-        param([datetime]$Since)
+        param([datetime]$Since, [int]$TimeoutSeconds = 900) # 15분 타임아웃 (원하면 조정)
 
-        Write-Host "[INFO] Start sysprep - $SysprepExe $SysprepArgs"
-        # sysprep는 프리-검증 실패시에도 0으로 끝날 수 있으므로 ExitCode는 참고만
-        $p = Start-Process -FilePath $SysprepExe -ArgumentList $SysprepArgs -PassThru -Wait
-        Write-Host "[INFO] Sysprep exited with code $($p.ExitCode)"
+        Write-Host "[INFO] Start sysprep: $SysprepExe $SysprepArgs"
+        $p = Start-Process -FilePath $SysprepExe -ArgumentList $SysprepArgs -PassThru
+        $done = $p.WaitForExit($TimeoutSeconds * 1000)
 
-        # 성공 신호1 - tag 파일
+        if (-not $done) {
+            Write-Host "[WARN] Sysprep did not exit in $TimeoutSeconds sec. Killing process."
+            try { $p.Kill() } catch {}
+            # 혹시 자식 sysprep 프로세스가 남으면 함께 정리
+            Get-Process -Name sysprep -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $p.Id } | Stop-Process -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "[INFO] Sysprep exited with code $($p.ExitCode)"
+        }
+
         if (Test-Path $SuccessTag) {
             Write-Host "[INFO] Sysprep_succeeded.tag detected."
             return @{ Success = $true; Offenders = @() }
         }
 
-        # 성공 신호2/실패 신호 - 최신 로그 구간 분석
         $offenders = Get-OffendingPackages -Since $Since
-        if ($offenders.Count -gt 0) {
-            return @{ Success = $false; Offenders = $offenders }
-        }
+        if ($offenders.Count -gt 0) { return @{ Success = $false; Offenders = $offenders } }
 
-        # Error가 없고 tag도 없으면 불확실 -> 실패로 처리
         return @{ Success = $false; Offenders = @() }
     }
 
