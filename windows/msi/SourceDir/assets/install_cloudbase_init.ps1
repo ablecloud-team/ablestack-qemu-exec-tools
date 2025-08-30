@@ -162,28 +162,45 @@ function Run-Sysprep {
     }
 
     function Get-OffendingPackages {
-        param([datetime]$Since)
+        param(
+            [string]$PantherLog = "$env:WINDIR\System32\Sysprep\Panther\setupact.log",
+            [datetime]$Since
+        )
 
         if (-not (Test-Path $PantherLog)) { return @() }
-        # 라인 앞의 타임스탬프를 파싱 - "2025-08-30 14:01:17, Error SYSPRP Package ..."
-        $rxTime = '^(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),'
-        $rxPkg  = [regex]'Package\s+([^\s]+)\s+was\s+installed\s+for\s+a\s+user'
-        $list = New-Object System.Collections.Generic.List[string]
+
+        $rxTime = [regex]'^(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),'
+        $rxErr  = [regex]'SYSPRP.*?Package\s+([^\s]+)\s+was\s+installed\s+for\s+a\s+user'
+        $culture = [System.Globalization.CultureInfo]::InvariantCulture
+        $styles  = [System.Globalization.DateTimeStyles]::None
+        $found   = New-Object System.Collections.Generic.List[string]
 
         Get-Content -Path $PantherLog | ForEach-Object {
             $line = $_
-            $ts = $null
-            $m = [regex]::Match($line, $rxTime)
-            if ($m.Success) { [datetime]::TryParse($m.Groups['ts'].Value, [ref]$ts) | Out-Null }
-            if ($ts -and $ts -lt $Since) { return }
+            $consider = $true
 
-            if ($line -like '*Error*SYSPRP*' -and $line -like '*Package*') {
-                $pm = $rxPkg.Match($line)
-                if ($pm.Success) { [void]$list.Add($pm.Groups[1].Value) }
+            $m = $rxTime.Match($line)
+            if ($m.Success) {
+                $tsParsed = [datetime]::MinValue
+                $ok = [datetime]::TryParseExact(
+                    $m.Groups['ts'].Value,
+                    'yyyy-MM-dd HH:mm:ss',
+                    $culture,
+                    $styles,
+                    [ref]$tsParsed
+                )
+                if ($ok -and $Since) {
+                    if ($tsParsed -lt $Since) { $consider = $false }
+                }
+            }
+
+            if ($consider -and $rxErr.IsMatch($line)) {
+                $pkg = $rxErr.Match($line).Groups[1].Value
+                if ($pkg) { [void]$found.Add($pkg) }
             }
         }
 
-        return $list | Sort-Object -Unique
+        return $found | Sort-Object -Unique
     }
 
     function Remove-PackageEverywhere {
