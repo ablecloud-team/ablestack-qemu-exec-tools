@@ -250,7 +250,7 @@ function Run-Sysprep {
             $off | ForEach-Object { Write-Host "  - $_"; Remove-PackageEverywhere -PackageFullName $_ }
             if ($attempt -lt $MaxAttempts) {
                 Write-Host "[INFO] Retrying sysprep after cleanup..."
-                Start-Sleep -Seconds 10 * $off.Count
+                Start-Sleep -Seconds ($off.Count * 10)
                 continue
             }
         }
