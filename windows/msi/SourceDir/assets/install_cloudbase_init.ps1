@@ -20,7 +20,7 @@ $SysprepArgs     = "/generalize /oobe /shutdown /quiet /unattend:$UnattendDst"
 $SetupActLog     = "$env:WINDIR\System32\Sysprep\Panther\setupact.log"
 $PantherLog      = "$env:WINDIR\System32\Sysprep\Panther\setupact.log"
 $SuccessTag      = "$env:WINDIR\System32\Sysprep\Sysprep_succeeded.tag"
-$MaxAttempts     = 2
+$MaxAttempts     = 10
 
 # State & logging
 $StateDir        = "C:\ProgramData\AbleStack\CloudInit\state"
