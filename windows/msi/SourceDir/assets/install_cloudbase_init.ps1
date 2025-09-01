@@ -155,7 +155,6 @@ function Run-Sysprep {
             return @{ Success = $true; Offenders = @() }
         }
 
-        Start-Sleep -Seconds 3     # 로그 플러시 대기
         $offenders = Get-OffendingPackages -Since $Since
         if ($offenders.Count -gt 0) { return @{ Success = $false; Offenders = $offenders } }
 
@@ -251,11 +250,11 @@ function Run-Sysprep {
             $off | ForEach-Object { Write-Host "  - $_"; Remove-PackageEverywhere -PackageFullName $_ }
             if ($attempt -lt $MaxAttempts) {
                 Write-Host "[INFO] Retrying sysprep after cleanup..."
-                Start-Sleep -Seconds 3
+                Start-Sleep -Seconds 10 * $off.Count
                 continue
             }
         }
-
+        
         throw "Sysprep failed (no success tag and/or SYSPRP errors remain)."
     }
 }
