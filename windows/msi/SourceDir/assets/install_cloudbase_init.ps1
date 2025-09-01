@@ -155,6 +155,7 @@ function Run-Sysprep {
             return @{ Success = $true; Offenders = @() }
         }
 
+        Start-Sleep -Seconds 3     # 로그 플러시 대기
         $offenders = Get-OffendingPackages -Since $Since
         if ($offenders.Count -gt 0) { return @{ Success = $false; Offenders = $offenders } }
 
