@@ -71,7 +71,7 @@ function Show-Status {
     # 로그인 사용자에게 화면 알림 (SYSTEM 컨텍스트에서도 표시됨)
     if (-not $NoToast.IsPresent) {
         try {
-            & msg.exe * /TIME:4 ("AbleStack Init: " + $Label) | Out-Null
+            & msg.exe * /TIME:10 ("AbleStack Init: " + $Label) | Out-Null
         } catch { }  # 세션 없거나 권한 문제시 무시
     }
 }
@@ -292,6 +292,7 @@ function Run-Sysprep {
     # --- main attempts ---
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "[INFO] Sysprep attempt $attempt / $MaxAttempts"
+        Show-Status -Label ("Sysprep {0}/{1} Trying..." -f $attempt, $MaxAttempts) -StepIndex 5
         $since = (Get-Date).AddSeconds(-3)
         $result = Invoke-SysprepOnce -Since $since
         if ($result.Success) {
@@ -303,6 +304,7 @@ function Run-Sysprep {
         if ($off.Count -gt 0) {
             Write-Host "[WARN] Sysprep failed; offending packages - $($off.Count):"
             foreach ($pkg in $off) {
+              Show-Status -Label ("Removing Non All Users Appx {0}..." -f $pkg)
               Remove-PackageEverywhere -PackageFullName $pkg
               [void]$script:HandledPkgs.Add($pkg)
             }
@@ -339,11 +341,10 @@ if (-not $phase2Ready) {
   Restart-CbiService
   Deploy-Unattend
 
-  Show-Status -Label "Wait!! Trying Sysprep..." -StepIndex 5
   Run-Sysprep
 
   Show-Status -Label "Finished Sysprep, System shutdown immediately..." -StepIndex 6
-  
+
   Write-Host "`n[INFO] All tasks completed -"
   Write-Host "      - Cloudbase-Init installed"
   Write-Host "      - cloudbase-init.conf / cloudbase-init-unattend.conf deployed"
