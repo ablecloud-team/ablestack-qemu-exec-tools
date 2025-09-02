@@ -133,6 +133,10 @@ function Run-Sysprep {
     if (-not (Test-Path $SysprepExe)) { throw "sysprep.exe not found - $SysprepExe" }
     if (-not (Test-Path $UnattendDst)) { throw "Unattend.xml not found - $UnattendDst" }
 
+    if (-not $script:HandledPkgs) {
+        $script:HandledPkgs = New-Object System.Collections.Generic.HashSet[string]
+    }
+
     # --- helpers ---
     function Invoke-SysprepOnce {
         param([datetime]$Since, [int]$TimeoutSeconds = 900) # 15분 타임아웃 (원하면 조정)
@@ -155,7 +159,12 @@ function Run-Sysprep {
             return @{ Success = $true; Offenders = @() }
         }
 
+        Start-Sleep -Seconds 1
+
         $offenders = Get-OffendingPackages -Since $Since
+        $offenders = $offenders | Sort-Object -Unique
+        $offenders = $offenders | Where-Object { -not $script:HandledPkgs.Contains($_) } 
+
         if ($offenders.Count -gt 0) { return @{ Success = $false; Offenders = $offenders } }
 
         return @{ Success = $false; Offenders = @() }
@@ -173,6 +182,7 @@ function Run-Sysprep {
         $rxErr  = [regex]'SYSPRP.*?Package\s+([^\s]+)\s+was\s+installed\s+for\s+a\s+user'
         $culture = [System.Globalization.CultureInfo]::InvariantCulture
         $styles  = [System.Globalization.DateTimeStyles]::None
+        $cutoff  = if ($Since) { $Since.AddSeconds(-2) } else { [datetime]::MinValue }
         $found   = New-Object System.Collections.Generic.List[string]
 
         Get-Content -Path $PantherLog | ForEach-Object {
@@ -190,7 +200,7 @@ function Run-Sysprep {
                     [ref]$tsParsed
                 )
                 if ($ok -and $Since) {
-                    if ($tsParsed -lt $Since) { $consider = $false }
+                    if ($tsParsed -lt $cutoff) { $consider = $false }
                 }
             }
 
@@ -237,7 +247,7 @@ function Run-Sysprep {
     # --- main attempts ---
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "[INFO] Sysprep attempt $attempt / $MaxAttempts"
-        $since = Get-Date
+        $since = (Get-Date).AddSenconds(-3)
         $result = Invoke-SysprepOnce -Since $since
         if ($result.Success) {
             Write-Host "[INFO] Sysprep succeeded."
@@ -246,8 +256,12 @@ function Run-Sysprep {
 
         $off = @($result.Offenders)
         if ($off.Count -gt 0) {
-            Write-Host "[WARN] Sysprep failed; offending packages -"
-            $off | ForEach-Object { Write-Host "  - $_"; Remove-PackageEverywhere -PackageFullName $_ }
+            Write-Host "[WARN] Sysprep failed; offending packages - $($off.Count):"
+            foreach ($pkg in $off) {
+              Remove-PackageEverywhere -PackageFullName $pkg
+              [void]$script:HandledPkgs.Add($pkg)
+            }
+
             if ($attempt -lt $MaxAttempts) {
                 Write-Host "[INFO] Retrying sysprep after cleanup..."
                 Start-Sleep -Seconds ($off.Count * 10)
