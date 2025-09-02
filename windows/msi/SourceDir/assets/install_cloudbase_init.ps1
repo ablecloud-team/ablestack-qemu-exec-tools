@@ -247,7 +247,7 @@ function Run-Sysprep {
     # --- main attempts ---
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "[INFO] Sysprep attempt $attempt / $MaxAttempts"
-        $since = (Get-Date).AddSenconds(-3)
+        $since = (Get-Date).AddSeconds(-3)
         $result = Invoke-SysprepOnce -Since $since
         if ($result.Success) {
             Write-Host "[INFO] Sysprep succeeded."
