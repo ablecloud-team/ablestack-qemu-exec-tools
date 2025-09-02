@@ -2,6 +2,12 @@ param(
   [switch]$Phase2  # optional - force Phase 2
 )
 
+# 표시 옵션
+$global:ABL_StatusDir  = "C:\ProgramData\AbleStack\CloudInit"
+$global:ABL_StatusPath = Join-Path $ABL_StatusDir "status.json"
+$global:ABL_TotalSteps = 6   # 대략적 단계 수(원하면 조정)
+$global:ABL_StepIndex  = 0
+
 # ================= Common settings =================
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $MsiPath         = Join-Path $ScriptDir ".\CloudbaseInitSetup_x64.msi"
@@ -31,6 +37,44 @@ New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
 New-Item -ItemType Directory -Path $LogDir  -Force | Out-Null
 
 Start-Transcript -Path $LogFile -Append | Out-Null
+
+function Show-Status {
+    param(
+        [Parameter(Mandatory)] [string]$Label,
+        [int]$StepIndex = $null,
+        [int]$TotalSteps = $null,
+        [switch]$NoToast       # 과도한 팝업 방지용
+    )
+    if (-not (Test-Path $ABL_StatusDir)) { New-Item -ItemType Directory -Force -Path $ABL_StatusDir | Out-Null }
+
+    # 단계/퍼센트 계산
+    if ($StepIndex -ne $null) { $global:ABL_StepIndex = $StepIndex }
+    if ($TotalSteps -ne $null) { $global:ABL_TotalSteps = $TotalSteps }
+    $idx = [Math]::Max(0, [int]$global:ABL_StepIndex)
+    $tot = [Math]::Max(1, [int]$global:ABL_TotalSteps)
+    $pct = [Math]::Min(100, [Math]::Round(($idx / $tot) * 100))
+
+    # 콘솔 진행바 + 표준 로그
+    Write-Progress -Activity "AbleStack CloudInit - Phase2" -Status $Label -PercentComplete $pct
+    Write-Host ("[STEP {0}/{1}] {2}" -f $idx, $tot, $Label)
+
+    # 상태 파일
+    $status = [ordered]@{
+        time   = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        step   = $idx
+        total  = $tot
+        label  = $Label
+        sysprepAttempt = $script:ABL_SysprepAttempt
+    }
+    $status | ConvertTo-Json | Out-File -FilePath $ABL_StatusPath -Encoding UTF8 -Force
+
+    # 로그인 사용자에게 화면 알림 (SYSTEM 컨텍스트에서도 표시됨)
+    if (-not $NoToast.IsPresent) {
+        try {
+            & msg.exe * /TIME:4 ("AbleStack Init: " + $Label) | Out-Null
+        } catch { }  # 세션 없거나 권한 문제시 무시
+    }
+}
 
 function Abort($msg) {
   Write-Error $msg
@@ -101,6 +145,7 @@ function Install-CloudbaseInit {
 
 function Deploy-Configs {
   Write-Host "[INFO] Deploying Cloudbase-Init configuration files..."
+
   if (-not (Test-Path $ConfMainSrc))  { Abort "[ERROR] cloudbase-init.conf source not found - $ConfMainSrc" }
   if (-not (Test-Path $ConfUnattSrc)) { Abort "[ERROR] cloudbase-init-unattend.conf source not found - $ConfUnattSrc" }
 
@@ -282,12 +327,23 @@ if (-not $phase2Ready) {
 } else {
   # Phase 2
   Write-Host "[INFO] Phase 2 - continuing (pre-clean marker found or -Phase2 supplied)."
+  Show-Status -Label "Please wait. The system will initialize and shut down shortly." -StepIndex 1 -TotalSteps 6
+
+  Show-Status -Label "Installing Cloudbase-Init MSI..." -StepIndex 2
   Install-CloudbaseInit
+
+  Show-Status -Label "Deploying Cloudbase-Init Config..." -StepIndex 3
   Deploy-Configs
+
+  Show-Status -Label "Deploying Unattend.xml..." -StepIndex 4
   Restart-CbiService
   Deploy-Unattend
+
+  Show-Status -Label "Wait!! Trying Sysprep..." -StepIndex 5
   Run-Sysprep
 
+  Show-Status -Label "Finished Sysprep, System shutdown immediately..." -StepIndex 6
+  
   Write-Host "`n[INFO] All tasks completed -"
   Write-Host "      - Cloudbase-Init installed"
   Write-Host "      - cloudbase-init.conf / cloudbase-init-unattend.conf deployed"
