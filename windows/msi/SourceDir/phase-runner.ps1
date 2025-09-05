@@ -70,6 +70,7 @@ function Invoke-Phase1 {
       $wshell.Popup("Phase 1 will remove Appx packages. PowerShell may close unexpectedly. If it closes, this process will resume automatically on next boot (Phase 2).", 10, "ABLESTACK CloudInit Phase1", 48) | Out-Null
     } catch {}
 
+<#
     # Remove user-scoped Appx packages for all local users
     try {
       $sids = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' |
@@ -93,10 +94,11 @@ function Invoke-Phase1 {
         catch { Write-Log "WARN: Remove-AppxProvisionedPackage '$($_.PackageName)': $($_.Exception.Message)" }
       }
     } catch { Write-Log "WARN: Provisioned Appx removal failed: $($_.Exception.Message)" }
+#>
 
     # Ensure Cloudbase-Init service is set to auto (install may happen in Phase2)
     try {
-      sc.exe config cloudbase-init start= auto | Out-Null
+      sc.exe config cloudbase-init start= disabled | Out-Null
       Write-Log "cloudbase-init service set to Automatic (if installed)"
     } catch { Write-Log "WARN: service config: $($_.Exception.Message)" }
   }
@@ -118,6 +120,9 @@ function Invoke-Phase2 {
     Write-Log "ERROR: install_cloudbase_init.ps1 not found at $installer"
     throw "Missing installer script"
   }
+
+  Write-Log "=== Phase2 complete ==="
+  Set-Phase "Done"
 
   # Run the installer with -Phase2 (so it skips its own Phase1)
   $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -143,9 +148,6 @@ function Invoke-Phase2 {
   if ($SysprepAfterPhase2.IsPresent) {
     Write-Log "SysprepAfterPhase2 requested, but install script already performs sysprep. Skipping."
   }
-
-  Write-Log "=== Phase2 complete ==="
-  Set-Phase "Done"
 }
 
 # ---- Main ----

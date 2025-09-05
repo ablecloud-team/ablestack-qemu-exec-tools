@@ -203,7 +203,7 @@ function Deploy-Configs {
 function Disable-CbiService {
   Write-Host "[INFO] Attempting to disable cloudbase-init service..."
   try {
-    sc config cloudbase-init start= disabled | Out-Null
+    sc.exe config cloudbase-init start= disabled | Out-Null
   } catch {
     Write-Host "[WARN] Service disable deferred; it may start on next boot. Continuing."
   }
