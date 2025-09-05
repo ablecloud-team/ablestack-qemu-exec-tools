@@ -45,12 +45,19 @@ function Get-Phase {
       if ($t) { return $t.Trim() }
     }
   } catch {}
-  return "1"
+  return "Done"
 }
 
 function Save-State([hashtable]$h) {
   if (-not (Test-Path (Split-Path $global:StateFile))) { New-Item -ItemType Directory -Path (Split-Path $global:StateFile) -Force | Out-Null }
   $h | ConvertTo-Json -Depth 6 | Out-File -FilePath $global:StateFile -Encoding UTF8 -Force
+}
+
+function Test-SetupInProgress {
+  try {
+    $k = Get-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -ErrorAction Stop
+    return (($k.SystemSetupInProgress -eq 1) -or ($k.OOBEInProgress -eq 1))
+  } catch { return $false }
 }
 
 # ---- Phase1: pre-clean (Appx, service mode) + reboot ----
@@ -143,6 +150,11 @@ function Invoke-Phase2 {
 
 # ---- Main ----
 try {
+  if (Test-SetupInProgress) {
+    Write-Log "Setup/OOBE in progress → Phase-Runner exits."
+    exit 0
+  }
+  
   Write-Log "Phase runner started as $(whoami)"
   $phase = Get-Phase
   Write-Log "Detected phase: $phase"

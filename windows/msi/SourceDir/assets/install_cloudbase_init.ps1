@@ -6,7 +6,13 @@ param(
 $global:ABL_StatusDir  = "C:\ProgramData\AbleStack\CloudInit"
 $global:ABL_StatusPath = Join-Path $ABL_StatusDir "status.json"
 $global:ABL_TotalSteps = 6   # 대략적 단계 수(원하면 조정)
-$global:ABL_StepIndex  = 0
+$global:ABL_StepIndex  = 
+
+$ABL_Root    = "C:\ProgramData\AbleStack\CloudInit"
+$ABL_RegKey  = "HKLM:\SOFTWARE\AbleStack\CloudInit"
+$ABL_RegName = "Phase"
+$ABL_Marker  = Join-Path $ABL_Root "phase.marker"
+$ABL_Status  = Join-Path $ABL_Root "status.json"
 
 # ================= Common settings =================
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -37,6 +43,42 @@ New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
 New-Item -ItemType Directory -Path $LogDir  -Force | Out-Null
 
 Start-Transcript -Path $LogFile -Append | Out-Null
+
+
+function Disable-PhaseRunnerTasks {
+    param([string[]]$Names = @(
+        'AbleStack-CloudInit-PhaseRunner-Boot',
+        'AbleStack-CloudInit-PhaseRunner-Logon'
+    ))
+    try {
+        $svc = New-Object -ComObject 'Schedule.Service'
+        $svc.Connect(); $root = $svc.GetFolder('\')
+        foreach($n in $Names){
+            try { $null = $root.GetTask($n); $root.DeleteTask($n,0); Write-Host "[INFO] Deleted task $n" }
+            catch { }
+        }
+    } catch {
+        foreach($n in $Names){ schtasks /Delete /TN $n /F | Out-Null }
+    }
+}
+
+function Set-PhaseDone {
+    if (-not (Test-Path $ABL_Root)) { New-Item -ItemType Directory -Path $ABL_Root -Force | Out-Null }
+    # Registry
+    if (-not (Test-Path $ABL_RegKey)) { New-Item -Path $ABL_RegKey -Force | Out-Null }
+    Set-ItemProperty -Path $ABL_RegKey -Name $ABL_RegName -Value 'Done' -Force
+    # Marker file
+    'Done' | Out-File -FilePath $ABL_Marker -Encoding ascii -Force
+    # UI 상태파일은 다음 부팅에서 헷갈리지 않게 제거
+    Remove-Item $ABL_Status -ErrorAction SilentlyContinue
+    Write-Host "[INFO] Phase marked as Done (registry + marker)"
+}
+
+function Seal-Template {
+    Write-Host "[INFO] Sealing template: deleting Phase-Runner tasks and marking Done..."
+    Disable-PhaseRunnerTasks
+    Set-PhaseDone
+}
 
 function Show-Status {
     param(
@@ -158,12 +200,12 @@ function Deploy-Configs {
   Write-Host "  - $ConfUnattDst"
 }
 
-function Restart-CbiService {
-  Write-Host "[INFO] Attempting to restart cloudbase-init service..."
+function Disable-CbiService {
+  Write-Host "[INFO] Attempting to disable cloudbase-init service..."
   try {
-    Restart-Service cloudbase-init -ErrorAction Stop
+    sc config cloudbase-init start= disabled | Out-Null
   } catch {
-    Write-Host "[WARN] Service restart deferred; it may start on next boot. Continuing."
+    Write-Host "[WARN] Service disable deferred; it may start on next boot. Continuing."
   }
 }
 
@@ -297,6 +339,7 @@ function Run-Sysprep {
         $result = Invoke-SysprepOnce -Since $since
         if ($result.Success) {
             Write-Host "[INFO] Sysprep succeeded."
+            Seal-Template
             return
         }
 
@@ -338,7 +381,7 @@ if (-not $phase2Ready) {
   Deploy-Configs
 
   Show-Status -Label "Deploying Unattend.xml..." -StepIndex 4
-  Restart-CbiService
+  Disable-CbiService
   Deploy-Unattend
 
   Run-Sysprep
