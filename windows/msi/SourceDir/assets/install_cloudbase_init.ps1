@@ -28,7 +28,7 @@ $ConfUnattDst    = Join-Path $ConfDir "cloudbase-init-unattend.conf"
 $UnattendDst     = "C:\ProgramData\AbleStack\CloudInit\Unattend.xml"
 
 $SysprepExe      = "$env:SystemRoot\System32\Sysprep\Sysprep.exe"
-$SysprepArgs     = "/generalize /oobe /shutdown /quiet /unattend:$UnattendDst"
+$SysprepArgs     = "/generalize /oobe /shutdown /quiet /mode:vm /unattend:$UnattendDst"
 $SetupActLog     = "$env:WINDIR\System32\Sysprep\Panther\setupact.log"
 $PantherLog      = "$env:WINDIR\System32\Sysprep\Panther\setupact.log"
 $SuccessTag      = "$env:WINDIR\System32\Sysprep\Sysprep_succeeded.tag"
