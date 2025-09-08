@@ -14,7 +14,9 @@
 
     <!-- x64 install location; requires -arch x64 at build -->
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLDIR" Name="AbleStack\CloudInit" />
+      <Directory Id="INSTALLDIR" Name="AbleStack\CloudInit">
+        <Directory Id="LOCALSCRIPTS" Name="LocalScripts" />
+      </Directory>
     </StandardDirectory>
 
     <StandardDirectory Id="CommonAppDataFolder">
@@ -26,6 +28,7 @@
     <Feature Id="MainFeature" Title="Core" Level="1">
       <ComponentRef Id="cmpPhaseRunner" />
       <ComponentRef Id="cmpAssets" />
+      <ComponentRef Id="cmpLocalScripts" />
       <ComponentRef Id="RegPhaseSeed" />
     </Feature>
 
@@ -127,6 +130,13 @@
       <File Id="filInstallCbiPs1" Source="$(var.SourceDir)\assets\install_cloudbase_init.ps1" />
       <!-- Optional vendor MSI bundling -->
       <File Id="filCloudbaseMsi" Source="$(var.SourceDir)\assets\CloudbaseInitSetup_x64.msi" />
+    </Component>
+
+    <Component Id="cmpLocalScripts" Directory="LOCALSCRIPTS" Guid="{BCE7A9B7-8F3B-44E5-9F4B-1E7C33A6F4D2}">
+      <File Id="filResetCbiPluginState"
+            Source="$(var.SourceDir)\assets\99-reset-cbi-plugin-state.ps1"
+            Name="99-reset-cbi-plugin-state.ps1"
+            KeyPath="yes" />
     </Component>
 
     <Component Id="RegPhaseSeed" Directory="INSTALLDIR" Guid="{E1B7B3D9-5B6A-4F7C-B2B4-9C7F6E2B1A4C}">
