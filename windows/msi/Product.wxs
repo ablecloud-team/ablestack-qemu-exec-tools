@@ -28,6 +28,8 @@
     <Feature Id="MainFeature" Title="Core" Level="1">
       <ComponentRef Id="cmpPhaseRunner" />
       <ComponentRef Id="cmpAssets" />
+      <ComponentRef Id="cmpUnattendServer" />
+      <ComponentRef Id="cmpUnattendClient" />
       <ComponentRef Id="cmpLocalScripts" />
       <ComponentRef Id="RegPhaseSeed" />
     </Feature>
@@ -126,10 +128,25 @@
     <Component Id="cmpAssets" Directory="INSTALLDIR" Guid="{A8C5E3B4-1D2F-4F9D-A7E8-4C3A7D85C1F2}">
       <File Id="filCloudbaseInitConf" Source="$(var.SourceDir)\assets\cloudbase-init.conf" KeyPath="yes" />
       <File Id="filCloudbaseInitUnattendConf" Source="$(var.SourceDir)\assets\cloudbase-init-unattend.conf" />
-      <File Id="filUnattendXml" Source="$(var.SourceDir)\assets\unattend.xml" />
       <File Id="filInstallCbiPs1" Source="$(var.SourceDir)\assets\install_cloudbase_init.ps1" />
       <!-- Optional vendor MSI bundling -->
       <File Id="filCloudbaseMsi" Source="$(var.SourceDir)\assets\CloudbaseInitSetup_x64.msi" />
+    </Component>
+
+    <Component Id="cmpUnattendServer" Directory="INSTALLDIR" Guid="{D4F5E6A7-B8C9-4D0E-9F1A-2B3C4D5E6F70}">
+      <File Id="filUnattendServer"
+            Name="unattend.xml"
+            Source="$(var.SourceDir)\assets\unattend-server2025.xml"
+            KeyPath="yes" />
+      <Condition><![CDATA[MsiNTProductType=3]]></Condition>
+    </Component>
+
+    <Component Id="cmpUnattendClient" Directory="INSTALLDIR" Guid="{CBEE7A9B7-8F3B-44E5-9F4B-1E7C33A6F4D1}">
+      <File Id="filUnattendClient"
+            Name="unattend.xml"
+            Source="$(var.SourceDir)\assets\unattend-windows11.xml"
+            KeyPath="yes" />
+      <Condition><![CDATA[MsiNTProductType=1]]></Condition>
     </Component>
 
     <Component Id="cmpLocalScripts" Directory="LOCALSCRIPTS" Guid="{BCE7A9B7-8F3B-44E5-9F4B-1E7C33A6F4D2}">
