@@ -28,11 +28,20 @@
     <Feature Id="MainFeature" Title="Core" Level="1">
       <ComponentRef Id="cmpPhaseRunner" />
       <ComponentRef Id="cmpAssets" />
-      <ComponentRef Id="cmpUnattendServer" />
-      <ComponentRef Id="cmpUnattendClient" />
       <ComponentRef Id="cmpLocalScripts" />
       <ComponentRef Id="RegPhaseSeed" />
     </Feature>
+
+    <Feature Id="ServerFeature" Title="Server Unattend" Level="1">
+      <Condition>MsiNTProductType=3</Condition>
+      <ComponentRef Id="cmpUnattendServer" />
+    </Feature>
+
+    <Feature Id="ClientFeature" Title="Client Unattend" Level="1">
+      <Condition>MsiNTProductType=1</Condition>
+      <ComponentRef Id="cmpUnattendClient" />
+    </Feature>
+
 
     <!-- ========== Reboot policy (Manual / Auto) ========== -->
     <!-- 기본: Manual → 재부팅 억제(3010 반환). Auto 요청 시 강제 재부팅 -->
@@ -137,18 +146,14 @@
       <File Id="filUnattendServer"
             Name="unattend.xml"
             Source="$(var.SourceDir)\assets\unattend-server2025.xml"
-            KeyPath="yes">
-        <Condition>MsiNTProductType=3</Condition>
-      </File>
+            KeyPath="yes" />
     </Component>
 
     <Component Id="cmpUnattendClient" Directory="INSTALLDIR" Guid="{F1E2D3C4-B5A6-4789-8A9B-0C1D2E3F4A50}">
       <File Id="filUnattendClient"
             Name="unattend.xml"
             Source="$(var.SourceDir)\assets\unattend-windows11.xml"
-            KeyPath="yes">
-        <Condition>MsiNTProductType=1</Condition>
-      </File>
+            KeyPath="yes" />
     </Component>
 
     <Component Id="cmpLocalScripts" Directory="LOCALSCRIPTS" Guid="{BCE7A9B7-8F3B-44E5-9F4B-1E7C33A6F4D2}">
