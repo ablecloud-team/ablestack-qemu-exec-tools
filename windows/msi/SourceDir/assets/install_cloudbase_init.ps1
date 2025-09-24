@@ -216,6 +216,39 @@ function Deploy-Unattend {
   Write-Host "  - $UnattendDst"
 }
 
+function Disable-BitLockerIfNeeded {
+    Write-Host "[INFO] Checking BitLocker status..."
+
+    $volumes = Get-BitLockerVolume -ErrorAction SilentlyContinue
+    if (-not $volumes) {
+        Write-Host "[INFO] BitLocker is not available on this system."
+        return
+    }
+
+    foreach ($vol in $volumes) {
+        if ($vol.ProtectionStatus -eq 'On') {
+            Write-Host "[WARN] BitLocker is enabled on $($vol.MountPoint). Disabling..."
+            Disable-BitLocker -MountPoint $vol.MountPoint -ErrorAction Stop
+        }
+    }
+
+    # Wait for decryption to complete (max 120 minutes)
+    $maxWaitMinutes = 120
+    $waited = 0
+    while ($true) {
+        $pending = Get-BitLockerVolume | Where-Object { $_.LockStatus -eq 'Unlocked' -and $_.VolumeStatus -ne 'FullyDecrypted' }
+        if (-not $pending) { break }
+        if ($waited -ge $maxWaitMinutes) {
+            throw "BitLocker decryption did not complete within $maxWaitMinutes minutes."
+        }
+        Write-Host "[INFO] Waiting for BitLocker decryption to finish... ($waited/$maxWaitMinutes min)"
+        Start-Sleep -Seconds 60
+        $waited++
+    }
+
+    Write-Host "[INFO] All BitLocker volumes are fully decrypted."
+}
+
 function Run-Sysprep {
     if (-not (Test-Path $SysprepExe)) { throw "sysprep.exe not found - $SysprepExe" }
     if (-not (Test-Path $UnattendDst)) { throw "Unattend.xml not found - $UnattendDst" }
@@ -384,6 +417,7 @@ if (-not $phase2Ready) {
   Disable-CbiService
   Deploy-Unattend
 
+  Disable-BitLockerIfNeeded
   Run-Sysprep
 
   Show-Status -Label "Finished Sysprep, System shutdown immediately..." -StepIndex 6
