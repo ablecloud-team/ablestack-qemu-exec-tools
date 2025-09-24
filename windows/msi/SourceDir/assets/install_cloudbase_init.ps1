@@ -2,10 +2,10 @@ param(
   [switch]$Phase2  # optional - force Phase 2
 )
 
-# 표시 옵션
+# Options for status UI
 $global:ABL_StatusDir  = "C:\ProgramData\AbleStack\CloudInit"
 $global:ABL_StatusPath = Join-Path $ABL_StatusDir "status.json"
-$global:ABL_TotalSteps = 6   # 대략적 단계 수(원하면 조정)
+$global:ABL_TotalSteps = 6   # about 6 steps, can be adjusted
 $global:ABL_StepIndex  = 
 
 $ABL_Root    = "C:\ProgramData\AbleStack\CloudInit"
@@ -69,7 +69,7 @@ function Set-PhaseDone {
     Set-ItemProperty -Path $ABL_RegKey -Name $ABL_RegName -Value 'Done' -Force
     # Marker file
     'Done' | Out-File -FilePath $ABL_Marker -Encoding ascii -Force
-    # UI 상태파일은 다음 부팅에서 헷갈리지 않게 제거
+    # Remove status file
     Remove-Item $ABL_Status -ErrorAction SilentlyContinue
     Write-Host "[INFO] Phase marked as Done (registry + marker)"
 }
@@ -85,22 +85,22 @@ function Show-Status {
         [Parameter(Mandatory)] [string]$Label,
         [int]$StepIndex = $null,
         [int]$TotalSteps = $null,
-        [switch]$NoToast       # 과도한 팝업 방지용
+        [switch]$NoToast       # Refrain from toast notification (for silent mode
     )
     if (-not (Test-Path $ABL_StatusDir)) { New-Item -ItemType Directory -Force -Path $ABL_StatusDir | Out-Null }
 
-    # 단계/퍼센트 계산
+    # Calculate progress
     if ($StepIndex -ne $null) { $global:ABL_StepIndex = $StepIndex }
     if ($TotalSteps -ne $null) { $global:ABL_TotalSteps = $TotalSteps }
     $idx = [Math]::Max(0, [int]$global:ABL_StepIndex)
     $tot = [Math]::Max(1, [int]$global:ABL_TotalSteps)
     $pct = [Math]::Min(100, [Math]::Round(($idx / $tot) * 100))
 
-    # 콘솔 진행바 + 표준 로그
+    # Console progress + log
     Write-Progress -Activity "AbleStack CloudInit - Phase2" -Status $Label -PercentComplete $pct
     Write-Host ("[STEP {0}/{1}] {2}" -f $idx, $tot, $Label)
 
-    # 상태 파일
+    # Status file
     $status = [ordered]@{
         time   = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         step   = $idx
@@ -110,11 +110,11 @@ function Show-Status {
     }
     $status | ConvertTo-Json | Out-File -FilePath $ABL_StatusPath -Encoding UTF8 -Force
 
-    # 로그인 사용자에게 화면 알림 (SYSTEM 컨텍스트에서도 표시됨)
+    # Toast notification (best-effort)
     if (-not $NoToast.IsPresent) {
         try {
             & msg.exe * /TIME:10 ("AbleStack Init: " + $Label) | Out-Null
-        } catch { }  # 세션 없거나 권한 문제시 무시
+        } catch { }  # Ignore errors
     }
 }
 
@@ -218,17 +218,22 @@ function Deploy-Unattend {
 
 function Disable-BitLockerIfNeeded {
     Write-Host "[INFO] Checking BitLocker status..."
+    Show-Status -Label ("[INFO] Checking BitLocker status...")
 
     $volumes = Get-BitLockerVolume -ErrorAction SilentlyContinue
     if (-not $volumes) {
         Write-Host "[INFO] BitLocker is not available on this system."
+        Show-Status -Label ("[INFO] BitLocker is not available on this system.")
         return
     }
 
     foreach ($vol in $volumes) {
-        if ($vol.ProtectionStatus -eq 'On') {
-            Write-Host "[WARN] BitLocker is enabled on $($vol.MountPoint). Disabling..."
-            Disable-BitLocker -MountPoint $vol.MountPoint -ErrorAction Stop
+        # Case 1: If protection is on, turn it off
+        # Case 2: If volume status is FullyEncrypted (but ProtectionStatus is Off), turn it off to start decryption
+        if ($vol.ProtectionStatus -eq 'On' -or $vol.VolumeStatus -eq 'FullyEncrypted') {
+            Write-Host "[WARN] BitLocker detected on $($vol.MountPoint). Starting decryption..."
+            Show-Status -Label ("[WARN] BitLocker detected on $($vol.MountPoint). Starting decryption...")
+            Disable-BitLocker -MountPoint $vol.MountPoint -ErrorAction SilentlyContinue
         }
     }
 
@@ -236,17 +241,21 @@ function Disable-BitLockerIfNeeded {
     $maxWaitMinutes = 120
     $waited = 0
     while ($true) {
-        $pending = Get-BitLockerVolume | Where-Object { $_.LockStatus -eq 'Unlocked' -and $_.VolumeStatus -ne 'FullyDecrypted' }
+        $pending = Get-BitLockerVolume | Where-Object {
+            $_.VolumeStatus -ne 'FullyDecrypted'
+        }
         if (-not $pending) { break }
         if ($waited -ge $maxWaitMinutes) {
             throw "BitLocker decryption did not complete within $maxWaitMinutes minutes."
         }
         Write-Host "[INFO] Waiting for BitLocker decryption to finish... ($waited/$maxWaitMinutes min)"
+        Show-Status -Label ("[INFO] Waiting for BitLocker decryption to finish... ($waited/$maxWaitMinutes min)")
         Start-Sleep -Seconds 60
         $waited++
     }
 
     Write-Host "[INFO] All BitLocker volumes are fully decrypted."
+    Show-Status -Label ("[INFO] All BitLocker volumes are fully decrypted.")
 }
 
 function Run-Sysprep {
@@ -259,7 +268,7 @@ function Run-Sysprep {
 
     # --- helpers ---
     function Invoke-SysprepOnce {
-        param([datetime]$Since, [int]$TimeoutSeconds = 900) # 15분 타임아웃 (원하면 조정)
+        param([datetime]$Since, [int]$TimeoutSeconds = 900) # Timeout default 15 min
 
         Write-Host "[INFO] Start sysprep: $SysprepExe $SysprepArgs"
         $p = Start-Process -FilePath $SysprepExe -ArgumentList $SysprepArgs -PassThru
@@ -268,7 +277,7 @@ function Run-Sysprep {
         if (-not $done) {
             Write-Host "[WARN] Sysprep did not exit in $TimeoutSeconds sec. Killing process."
             try { $p.Kill() } catch {}
-            # 혹시 자식 sysprep 프로세스가 남으면 함께 정리
+            # If sysprep spawns child processes, kill them too
             Get-Process -Name sysprep -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $p.Id } | Stop-Process -Force -ErrorAction SilentlyContinue
         } else {
             Write-Host "[INFO] Sysprep exited with code $($p.ExitCode)"
