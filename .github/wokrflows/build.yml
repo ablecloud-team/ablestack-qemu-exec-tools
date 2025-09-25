@@ -1,0 +1,111 @@
+name: Build and Release ablestack-qemu-exec-tools
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-rpm:
+    runs-on: ubuntu-latest
+    container: rockylinux:9
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: dnf -y install make rpm-build tar git
+
+      - name: Build RPM
+        run: make rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-package
+          path: rpmbuild/RPMS/**
+
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make dpkg-dev debhelper git
+
+      - name: Build DEB
+        run: make deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: build/deb/*.deb
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup WiX Toolset v4
+        uses: wixtoolset/wix-action@v1
+
+      - name: Build MSI
+        shell: pwsh
+        run: make windows
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msi-package
+          path: windows/msi/out/*.msi
+
+  release:
+    needs: [build-rpm, build-deb, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p release
+          find dist -type f -exec cp {} release/ \;
+          ls -lh release
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          TAG_NAME=${GITHUB_REF##*/}
+          VERSION=${TAG_NAME#v}
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk -v ver="## [$VERSION]" '
+              $0 ~ ver {flag=1; next}
+              /^## / && flag {flag=0}
+              flag {print}
+            ' CHANGELOG.md)
+            if [ -n "$NOTES" ]; then
+              echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
+              echo "## $TAG_NAME" >> $GITHUB_ENV
+              echo "$NOTES" >> $GITHUB_ENV
+              echo "EOF" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --oneline $PREV_TAG..HEAD)
+          else
+            NOTES=$(git log --oneline)
+          fi
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
+          echo "## $TAG_NAME" >> $GITHUB_ENV
+          echo "$NOTES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ env.RELEASE_NOTES }}
+          files: release/*

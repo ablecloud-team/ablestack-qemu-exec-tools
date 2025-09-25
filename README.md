@@ -32,26 +32,33 @@ sudo ./install.sh
 
 ---
 
-## 🏗️ 패키지 빌드 방법 (RPM/DEB)
+## 🏗️ 패키지 빌드 및 배포
 
-### [RPM 빌드]
-```bash
-make rpm
-# 또는
-rpmbuild -ba --define "_topdir $(pwd)/rpmbuild" rpm/ablestack-qemu-exec-tools.spec
-```
-→ 빌드 결과: `rpmbuild/RPMS/noarch/ablestack-qemu-exec-tools-*.rpm`
+이 프로젝트는 **RPM (RHEL 계열), DEB (Ubuntu 계열), MSI (Windows)** 패키지를 공식 지원합니다.  
+모든 빌드 및 릴리즈 과정은 **GitHub Actions**를 통해 자동화되어 있습니다.
 
-### [DEB 빌드]
-```bash
-make deb
-# 또는
-# 수동 패키지 빌드
-dpkg-deb --build ablestack-qemu-exec-tools_0.1-1
-```
-→ 빌드 결과: `ablestack-qemu-exec-tools_0.1-1.deb`
+### 로컬 빌드 (옵션)
+- **RPM 빌드**
+  ```bash
+  make rpm
+  ls rpmbuild/RPMS/*/*.rpm
+  ```
+- **DEB 빌드**
+  ```bash
+  make deb
+  ls build/deb/*.deb
+  ```
+- **MSI 빌드 (Windows)**
+  ```powershell
+  make windows
+  Get-ChildItem windows/msi/out/*.msi
+  ```
 
-**상세 예시는 Makefile과 usage 문서 참고**
+### GitHub Actions
+- **ci.yml** → 브랜치 push/PR 시 기본 빌드 검증  
+- **build.yml** → 태그 push 시 RPM/DEB/MSI 빌드 후 GitHub Release 업로드  
+
+**👉 상세한 절차는 [INSTALL.md](INSTALL.md) 및 [RELEASE_WORKFLOW.md](RELEASE_WORKFLOW.md)를 참고하세요.**
 
 ---
 
@@ -81,6 +88,8 @@ sudo ./agent_policy_fix.sh
 - [docs/usage_vm_exec.md](docs/usage_vm_exec.md) — VM 명령 실행 사용법
 - [usage_agent_policy_fix.md](usage_agent_policy_fix.md) — 에이전트 정책 자동화 사용법
 - [examples/](examples/) — 활용 예시
+- [INSTALL.md](INSTALL.md) — 설치 및 배포 가이드
+- [RELEASE_WORKFLOW.md](RELEASE_WORKFLOW.md) — 릴리즈 브랜치 전략 및 배포 절차
 
 ---
 

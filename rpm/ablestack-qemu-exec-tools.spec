@@ -15,8 +15,8 @@
 # limitations under the License.
 
 Name:           ablestack-qemu-exec-tools
-Version:        0.1
-Release:        1%{?dist}
+Version:        %{version}
+Release:        %{release}%{?dist}
 Summary:        QEMU guest-agent 기반 VM 명령 실행 및 파싱 유틸리티
 
 License:        Apache-2.0
@@ -60,6 +60,6 @@ cp -a usage_agent_policy_fix.md %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null 
 /usr/share/doc/%{name}/*
 
 %changelog
-* Wed Jul 10 2025 ABLECLOUD <dev@ablecloud.io> 0.1-1
+* Wed Jul 10 2025 ABLECLOUD <dev@ablecloud.io> %{version}-%{release}
 - 최초 패키지화 및 agent_policy_fix.sh, 사용설명서, install.sh 추가
-
+- Git hash: %{githash}

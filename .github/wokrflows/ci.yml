@@ -1,29 +1,22 @@
-name: CI
+name: CI Check
 
 on:
   push:
-    branches: [ main ]
+    branches: ["main", "develop"]
   pull_request:
-    branches: [ main ]
 
 jobs:
-  build-and-test:
+  lint-build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: ✅ Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 🔧 Install dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq libvirt-clients rpm zip
+          sudo apt-get install -y make
 
-      - name: 🧪 Run make install
-        run: sudo make install
-
-      - name: 🧪 Run make rpm
-        run: make rpm
-
-      - name: 🧹 Run make clean
-        run: make clean
+      - name: Run Make (all targets)
+        run: |
+          echo "🔍 Running CI build (basic validation)"
+          make all

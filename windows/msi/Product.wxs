@@ -3,14 +3,19 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <Package
-    Name="AbleStack CloudInit Automator"
+    Name="AbleStack QEMU Exec Tools $(var.ProductVersion)-$(var.ProductRelease)-$(var.GitHash)"
     Manufacturer="ABLECLOUD"
-    Version="1.0.0.0"
+    Version="$(var.ProductVersion)"
     Scope="perMachine"
     UpgradeCode="2B9C6E7A-7C6E-4EBA-A2F7-7A5D2C2C0A01">
 
     <MediaTemplate />
     <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+
+    <!-- 버전/릴리즈/깃해시를 MSI Property로 저장 -->
+    <Property Id="PRODUCT_VERSION" Value="$(var.ProductVersion)" />
+    <Property Id="PRODUCT_RELEASE" Value="$(var.ProductRelease)" />
+    <Property Id="PRODUCT_GITHASH" Value="$(var.GitHash)" />
 
     <!-- x64 install location; requires -arch x64 at build -->
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -32,6 +37,7 @@
       <ComponentRef Id="cmpUnattendClient" />
       <ComponentRef Id="cmpLocalScripts" />
       <ComponentRef Id="RegPhaseSeed" />
+      <ComponentRef Id="RegInstallInfo" />
     </Feature>
 
     <!-- ========== Reboot policy (Manual / Auto) ========== -->
@@ -157,6 +163,16 @@
     <Component Id="RegPhaseSeed" Directory="INSTALLDIR" Guid="{E1B7B3D9-5B6A-4F7C-B2B4-9C7F6E2B1A4C}">
       <RegistryKey Root="HKLM" Key="SOFTWARE\AbleStack\CloudInit">
         <RegistryValue Name="Phase" Type="string" Value="1" KeyPath="yes" />
+      </RegistryKey>
+    </Component>
+
+    <!-- Write Installation Information to registry -->
+    <Component Id="RegInstallInfo" Directory="INSTALLDIR" Guid="{A8B6D7B3-9D23-4D5C-9A53-7F9B8B6A1F10}">
+      <RegistryKey Root="HKLM" Key="SOFTWARE\AbleStack\QemuExecTools">
+        <RegistryValue Name="Version" Type="string" Value="[PRODUCT_VERSION]" KeyPath="yes" />
+        <RegistryValue Name="Release" Type="string" Value="[PRODUCT_RELEASE]" />
+        <RegistryValue Name="GitHash" Type="string" Value="[PRODUCT_GITHASH]" />
+        <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLDIR]" />
       </RegistryKey>
     </Component>
   </Fragment>

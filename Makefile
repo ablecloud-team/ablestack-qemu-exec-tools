@@ -15,8 +15,14 @@
 # limitations under the License.
 
 NAME = ablestack-qemu-exec-tools
-VERSION = 0.1
-RELEASE = 1
+
+# Read VERSION file
+VERSION_FILE := $(shell cat VERSION)
+VERSION := $(shell echo "$(VERSION_FILE)" | grep VERSION | cut -d '=' -f2)
+RELEASE := $(shell echo "$(VERSION_FILE)" | grep RELEASE | cut -d '=' -f2)
+# Git hash는 실행 시점에서 자동으로 추출
+GIT_HASH := $(shell git rev-parse --short HEAD)
+
 INSTALL_PREFIX = /usr/local
 BIN_DIR = $(INSTALL_PREFIX)/bin
 LIB_TARGET = $(INSTALL_PREFIX)/lib/$(NAME)
@@ -28,10 +34,11 @@ DEB_BIN_DIR = $(DEB_BUILD_DIR)/usr/local/bin
 DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/local/lib/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 
-.PHONY: all install uninstall rpm deb clean
+.PHONY: all install uninstall rpm deb windows clean
 
 all:
-	@echo "Available targets: install, uninstall, rpm, deb, clean"
+	@echo "Available targets: install, uninstall, rpm, deb, windows, clean"
+	@echo "VERSION: $(VERSION), RELEASE: $(RELEASE), GIT_HASH: $(GIT_HASH)"
 
 install:
 	@echo "🔧 Installing $(NAME)..."
@@ -55,34 +62,52 @@ rpm:
 	@echo "📦 Building RPM..."
 	mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 	tar czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz --transform="s,^,$(NAME)-$(VERSION)/," .
-	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" rpm/$(NAME).spec
+	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" \
+	         --define "version $(VERSION)" \
+	         --define "release $(RELEASE)" \
+	         --define "githash $(GIT_HASH)" \
+	         rpm/$(NAME).spec
 	@echo "✅ RPM built under rpmbuild/RPMS/"
 
 deb:
 	@echo "📦 Building DEB..."
 	rm -rf $(DEB_BUILD_DIR)
-	mkdir -p $(DEB_DEBIAN_DIR)
-	mkdir -p $(DEB_BIN_DIR)
-	mkdir -p $(DEB_LIB_DIR)
-	mkdir -p $(DEB_DOC_DIR)
+	mkdir -p $(DEB_DEBIAN_DIR) $(DEB_BIN_DIR) $(DEB_LIB_DIR) $(DEB_DOC_DIR)
+
 	# bin
 	install -m 0755 bin/vm_exec.sh $(DEB_BIN_DIR)/vm_exec
 	install -m 0755 bin/agent_policy_fix.sh $(DEB_BIN_DIR)/agent_policy_fix
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(DEB_BIN_DIR)/install_ablestack_qemu_exec_tools; fi
+
 	# lib
 	cp -a lib/* $(DEB_LIB_DIR)/
-	# 문서 및 예제
+
+	# docs & examples
 	cp -a README.md $(DEB_DOC_DIR)/
 	@if [ -d docs ]; then cp -a docs/* $(DEB_DOC_DIR)/; fi
 	@if [ -f usage_agent_policy_fix.md ]; then cp -a usage_agent_policy_fix.md $(DEB_DOC_DIR)/; fi
 	@if [ -d examples ]; then cp -a examples/* $(DEB_DOC_DIR)/; fi
-	# control 파일 필요(최상위에 있어야 함)
-	cp deb/control $(DEB_DEBIAN_DIR)/
+
+	# control 파일 치환 (템플릿 -> 실제 버전 적용)
+	sed -e "s/\${VERSION}/$(VERSION)/" \
+	    -e "s/\${RELEASE}/$(RELEASE)/" \
+	    deb/control > $(DEB_DEBIAN_DIR)/control
+
 	chmod 755 $(DEB_BIN_DIR)/*
+	
 	dpkg-deb --build $(DEB_BUILD_DIR)
-	@echo "✅ DEB package created: $(DEB_PKG).deb"
+	mkdir -p build/deb
+	mv $(DEB_BUILD_DIR).deb build/deb/$(DEB_PKG).deb
+	@echo "✅ DEB package created: build/deb/$(DEB_PKG).deb"
+
+windows:
+	@echo "📦 Building Windows MSI..."
+	powershell -ExecutionPolicy Bypass -File windows/msi/build-msi.ps1 \
+		-Version $(VERSION) -Release $(RELEASE) -GitHash $(GIT_HASH)
+	@echo "✅ Windows MSI built under build/msi/"
 
 clean:
 	rm -rf rpmbuild
 	rm -rf $(DEB_BUILD_DIR)
 	rm -f *.deb
+	rm -rf build/*
