@@ -17,7 +17,8 @@ windows/
       assets/
         cloudbase-init.conf             # (copied from repo/uploads) deployed alongside
         cloudbase-init-unattend.conf    # (copied from repo/uploads)
-        unattend.xml                    # (copied from repo/uploads)
+        unattend-server2025.xml         # (copied from repo/uploads)
+        unattend-windows11.xml          # (copied from repo/uploads)
         install_cloudbase_init.ps1      # (copied from repo/uploads)
 ```
 
