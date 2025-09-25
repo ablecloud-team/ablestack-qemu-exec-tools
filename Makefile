@@ -17,11 +17,11 @@
 NAME = ablestack-qemu-exec-tools
 
 # Read VERSION file
-VERSION_FILE := $(shell cat VERSION)
-VERSION := $(shell echo "$(VERSION_FILE)" | grep VERSION | cut -d '=' -f2)
-RELEASE := $(shell echo "$(VERSION_FILE)" | grep RELEASE | cut -d '=' -f2)
+VERSION := $(shell . ./VERSION; printf "%s" "$$VERSION" | tr -d '\r\n[:space:]')
+RELEASE := $(shell . ./VERSION; printf "%s" "$$RELEASE" | tr -d '\r\n[:space:]')
+
 # Git hash는 실행 시점에서 자동으로 추출
-GIT_HASH := $(shell git rev-parse --short HEAD)
+GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 
 INSTALL_PREFIX = /usr/local
 BIN_DIR = $(INSTALL_PREFIX)/bin
@@ -61,7 +61,9 @@ uninstall:
 rpm:
 	@echo "📦 Building RPM..."
 	mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-	tar czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz --transform="s,^,$(NAME)-$(VERSION)/," .
+	tar czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
+  			 --transform="s,^,$(NAME)-$(VERSION)/," .
+
 	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" \
 	         --define "version $(VERSION)" \
 	         --define "release $(RELEASE)" \
@@ -94,7 +96,7 @@ deb:
 	    deb/control > $(DEB_DEBIAN_DIR)/control
 
 	chmod 755 $(DEB_BIN_DIR)/*
-	
+
 	dpkg-deb --build $(DEB_BUILD_DIR)
 	mkdir -p build/deb
 	mv $(DEB_BUILD_DIR).deb build/deb/$(DEB_PKG).deb

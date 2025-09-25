@@ -8,9 +8,13 @@ on:
 jobs:
   build-rpm:
     runs-on: ubuntu-latest
-    container: rockylinux:9
+    container:
+      image: rockylinux:9
+      options: --user 0
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install build dependencies
         run: dnf -y install make rpm-build tar git
@@ -46,8 +50,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup WiX Toolset v4
-        uses: wixtoolset/wix-action@v1
+      - name: Install WiX v4
+        run: dotnet tool install --global wix --version 4.*
+
+      - name: Add dotnet tools to PATH
+        shell: pwsh
+        run: echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build MSI
         shell: pwsh
@@ -57,6 +65,7 @@ jobs:
         with:
           name: msi-package
           path: windows/msi/out/*.msi
+
 
   release:
     needs: [build-rpm, build-deb, build-windows]
