@@ -91,9 +91,10 @@ deb:
 	@if [ -d examples ]; then cp -a examples/* $(DEB_DOC_DIR)/; fi
 
 	# control 파일 치환 (템플릿 -> 실제 버전 적용)
-	sed -e "s/\${VERSION}/$(VERSION)/" \
-	    -e "s/\${RELEASE}/$(RELEASE)/" \
-	    deb/control > $(DEB_DEBIAN_DIR)/control
+	sed -e "s/\$${VERSION}/$(VERSION)/" \
+		-e "s/\$${RELEASE}/$(RELEASE)/" \
+		deb/control > $(DEB_DEBIAN_DIR)/control
+
 
 	chmod 755 $(DEB_BIN_DIR)/*
 
