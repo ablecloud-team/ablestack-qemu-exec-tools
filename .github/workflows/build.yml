@@ -83,6 +83,15 @@ jobs:
           find dist -type f -exec cp {} release/ \;
           ls -lh release
 
+      - name: Generate ISO
+        run: |
+          sudo apt-get update && sudo apt-get install -y genisoimage
+          VERSION=${GITHUB_REF##*/}
+          mkisofs -o release/ablestack-qemu-exec-tools-${VERSION}.iso \
+            -V "ablestack-qemu-exec-tools ${VERSION}" \
+            release/
+          ls -lh release
+
       - name: Generate Release Notes
         id: notes
         run: |
