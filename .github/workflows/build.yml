@@ -64,7 +64,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: msi-package
-          path: windows/msi/out/*.msi
+          path: windows/msi/out/*
 
 
   release:
