@@ -77,11 +77,34 @@ jobs:
         with:
           path: dist
 
-      - name: Collect artifacts
+      - name: Collect artifacts into structured dirs
         run: |
-          mkdir -p release
-          find dist -type f -exec cp {} release/ \;
-          ls -lh release
+          mkdir -p release/rpm release/deb release/msi
+          # rpm
+          find dist -type f -name "*.rpm" -exec cp {} release/rpm/ \;
+          # deb
+          find dist -type f -name "*.deb" -exec cp {} release/deb/ \;
+          # msi + wixpdb + cab
+          find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
+
+          # ISO 루트에 README.txt 생성
+          cat > release/README.txt <<EOF
+ablestack-qemu-exec-tools 패키지 모음 ISO
+==========================================
+이 ISO에는 다음과 같은 패키지가 포함되어 있습니다:
+
+- RPM (RHEL/Rocky/Alma 계열): rpm/ 디렉토리
+- DEB (Ubuntu/Debian 계열): deb/ 디렉토리
+- MSI (Windows): msi/ 디렉토리
+
+설치 방법은 [INSTALL.md](https://github.com/ablecloud-team/ablestack-qemu-exec-tools/blob/main/INSTALL.md)
+를 참고하세요.
+
+릴리즈 버전: ${GITHUB_REF##*/}
+EOF
+
+          echo "Release directory structure:"
+          tree release || ls -R release
 
       - name: Generate ISO
         run: |
