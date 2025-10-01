@@ -30,8 +30,8 @@ LIB_TARGET = $(INSTALL_PREFIX)/lib/$(NAME)
 DEB_PKG = $(NAME)_$(VERSION)-$(RELEASE)
 DEB_BUILD_DIR = $(DEB_PKG)
 DEB_DOC_DIR = $(DEB_BUILD_DIR)/usr/share/doc/$(NAME)
-DEB_BIN_DIR = $(DEB_BUILD_DIR)/usr/local/bin
-DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/local/lib/$(NAME)
+DEB_BIN_DIR = $(DEB_BUILD_DIR)/usr/bin
+DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 
 .PHONY: all install uninstall rpm deb windows clean
@@ -68,8 +68,13 @@ rpm:
 	         --define "version $(VERSION)" \
 	         --define "release $(RELEASE)" \
 	         --define "githash $(GIT_HASH)" \
-	         rpm/$(NAME).spec
-	@echo "✅ RPM built under rpmbuild/RPMS/"
+	         spec/$(NAME).spec
+
+	# 산출물 정리
+	mkdir -p build/rpm
+	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
+	@echo "✅ RPM package created: build/rpm/"
+
 
 deb:
 	@echo "📦 Building DEB..."
@@ -79,10 +84,11 @@ deb:
 	# bin
 	install -m 0755 bin/vm_exec.sh $(DEB_BIN_DIR)/vm_exec
 	install -m 0755 bin/agent_policy_fix.sh $(DEB_BIN_DIR)/agent_policy_fix
+	install -m 0755 bin/cloud_init_auto.sh $(DEB_BIN_DIR)/cloud_init_auto
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(DEB_BIN_DIR)/install_ablestack_qemu_exec_tools; fi
 
 	# lib
-	cp -a lib/* $(DEB_LIB_DIR)/
+	cp -a lib/* $(DEB_LIB_DIR)/ 2>/dev/null || :
 
 	# docs & examples
 	cp -a README.md $(DEB_DOC_DIR)/
@@ -95,6 +101,11 @@ deb:
 		-e "s/\$${RELEASE}/$(RELEASE)/" \
 		deb/control > $(DEB_DEBIAN_DIR)/control
 
+	# postinst 파일 추가
+	@if [ -f deb/postinst ]; then \
+		cp deb/postinst $(DEB_DEBIAN_DIR)/postinst; \
+		chmod 755 $(DEB_DEBIAN_DIR)/postinst; \
+	fi
 
 	chmod 755 $(DEB_BIN_DIR)/*
 

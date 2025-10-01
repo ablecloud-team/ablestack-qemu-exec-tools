@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+echo "Running post-install tasks for ablestack-qemu-exec-tools..."
+
+if [ -x /usr/bin/agent_policy_fix ]; then
+    /usr/bin/agent_policy_fix || echo "[WARN] agent_policy_fix failed"
+fi
+
+if [ -x /usr/bin/cloud_init_auto ]; then
+    /usr/bin/cloud_init_auto || echo "[WARN] cloud_init_auto failed"
+fi
+
+exit 0

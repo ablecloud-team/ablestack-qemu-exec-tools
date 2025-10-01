@@ -25,7 +25,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: rpm-package
-          path: rpmbuild/RPMS/**
+          path: build/rpm/*.rpm   # 수정됨
 
   build-deb:
     runs-on: ubuntu-latest
@@ -43,7 +43,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: deb-package
-          path: build/deb/*.deb
+          path: build/deb/*.deb   # 유지됨
 
   build-windows:
     runs-on: windows-latest
@@ -64,8 +64,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: msi-package
-          path: windows/msi/out/*
-
+          path: build/msi/*   # 수정됨
 
   release:
     needs: [build-rpm, build-deb, build-windows]
@@ -84,8 +83,10 @@ jobs:
           find dist -type f -name "*.rpm" -exec cp {} release/rpm/ \;
           # deb
           find dist -type f -name "*.deb" -exec cp {} release/deb/ \;
-          # msi + wixpdb + cab
-          find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
+          # msi
+          find dist -type f -name "*.msi" -exec cp {} release/msi/ \;
+          find dist -type f -name "*.wixpdb" -exec cp {} release/msi/ \;
+          find dist -type f -name "*.cab" -exec cp {} release/msi/ \;
 
           echo "Release directory structure:"
           tree release || ls -R release
@@ -95,13 +96,26 @@ jobs:
           cat <<'EOF' > release/README.txt
           ablestack-qemu-exec-tools 패키지 모음 ISO
           ==========================================
+
           이 ISO에는 다음과 같은 패키지가 포함되어 있습니다:
 
           - RPM (RHEL/Rocky/Alma 계열): rpm/ 디렉토리
           - DEB (Ubuntu/Debian 계열): deb/ 디렉토리
           - MSI (Windows): msi/ 디렉토리
 
-          설치 방법은 INSTALL.md를 참고하세요:
+          설치 경로
+          ---------
+          모든 Linux 패키지(RPM, DEB)는 다음 표준 경로에 설치됩니다:
+            - 실행 스크립트: /usr/bin
+            - 라이브러리/모듈: /usr/libexec/ablestack-qemu-exec-tools
+            - 문서: /usr/share/doc/ablestack-qemu-exec-tools
+
+          Windows MSI는 "C:\\Program Files\\ABLESTACK QEMU Exec Tools" 
+          경로에 설치됩니다.
+
+          설치 방법
+          ---------
+          Linux (RPM/DEB) 및 Windows (MSI) 설치 방법은 INSTALL.md를 참고하세요:
           https://github.com/ablecloud-team/ablestack-qemu-exec-tools/blob/main/INSTALL.md
 
           릴리즈 버전: ${GITHUB_REF##*/}

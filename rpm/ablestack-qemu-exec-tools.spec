@@ -17,7 +17,7 @@
 Name:           ablestack-qemu-exec-tools
 Version:        %{version}
 Release:        %{release}%{?dist}
-Summary:        QEMU guest-agent 기반 VM 명령 실행 및 파싱 유틸리티
+Summary:        QEMU guest-agent based VM command execution and parsing utilities
 
 License:        Apache-2.0
 URL:            https://github.com/ablecloud-team/ablestack-qemu-exec-tools
@@ -27,39 +27,54 @@ BuildArch:      noarch
 Requires:       bash
 Requires:       jq
 Requires:       libvirt-client
+Requires:       cloud-init
+#Requires:       qemu-guest-agent   # 필요시 추가
 
 %description
-ablestack-qemu-exec-tools는 QEMU / libvirt 환경에서 qemu-guest-agent를 이용하여
-가상머신 내부 명령을 원격으로 실행하고, 그 결과를 JSON 등으로 파싱하는 Bash 기반 도구입니다.
+ablestack-qemu-exec-tools is a Bash-based tool that enables remote execution 
+of commands inside virtual machines via qemu-guest-agent, with JSON parsing support.
 
 %prep
 %setup -q
 
 %install
-mkdir -p %{buildroot}/usr/local/bin
-install -m 0755 bin/vm_exec.sh %{buildroot}/usr/local/bin/vm_exec
-install -m 0755 bin/agent_policy_fix.sh %{buildroot}/usr/local/bin/agent_policy_fix
-install -m 0755 install.sh %{buildroot}/usr/local/bin/install_ablestack_qemu_exec_tools
+# Binaries
+mkdir -p %{buildroot}/usr/bin
+install -m 0755 bin/vm_exec.sh %{buildroot}/usr/bin/vm_exec
+install -m 0755 bin/agent_policy_fix.sh %{buildroot}/usr/bin/agent_policy_fix
+install -m 0755 bin/cloud_init_auto.sh %{buildroot}/usr/bin/cloud_init_auto
+install -m 0755 install.sh %{buildroot}/usr/bin/install_ablestack_qemu_exec_tools
 
-mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools
-cp -a lib/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/ 2>/dev/null || :
+# Libraries
+mkdir -p %{buildroot}/usr/libexec/%{name}
+cp -a lib/* %{buildroot}/usr/libexec/%{name}/ 2>/dev/null || :
 
+# Docs
 mkdir -p %{buildroot}/usr/share/doc/%{name}
+cp -a README.md %{buildroot}/usr/share/doc/%{name}/
 cp -a docs/* %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null || :
 cp -a examples/* %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null || :
-cp -a README.md %{buildroot}/usr/share/doc/%{name}/
-cp -a docs/usage_vm_exec.md %{buildroot}/usr/share/doc/%{name}/
 cp -a usage_agent_policy_fix.md %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null || :
 
 %files
 %license LICENSE
-/usr/local/bin/vm_exec
-/usr/local/bin/agent_policy_fix
-/usr/local/bin/install_ablestack_qemu_exec_tools
-/usr/local/lib/ablestack-qemu-exec-tools/*
-/usr/share/doc/%{name}/*
+%doc README.md docs/* examples/* usage_agent_policy_fix.md
+/usr/bin/vm_exec
+/usr/bin/agent_policy_fix
+/usr/bin/cloud_init_auto
+/usr/bin/install_ablestack_qemu_exec_tools
+/usr/libexec/%{name}/*
 
 %changelog
 * Wed Jul 10 2025 ABLECLOUD <dev@ablecloud.io> %{version}-%{release}
-- 최초 패키지화 및 agent_policy_fix.sh, 사용설명서, install.sh 추가
+- Initial packaging with vm_exec.sh, agent_policy_fix.sh, cloud_init_auto.sh
 - Git hash: %{githash}
+
+%post
+echo "[INFO] Running post-install tasks for %{name}..."
+if [ -x /usr/bin/agent_policy_fix ]; then
+    /usr/bin/agent_policy_fix || echo "[WARN] agent_policy_fix failed"
+fi
+if [ -x /usr/bin/cloud_init_auto ]; then
+    /usr/bin/cloud_init_auto || echo "[WARN] cloud_init_auto failed"
+fi

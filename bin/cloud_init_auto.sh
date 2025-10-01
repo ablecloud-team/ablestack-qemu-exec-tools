@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-LIBDIR="/usr/local/lib/ablestack-qemu-exec-tools"
+LIBDIR="/usr/libexec/ablestack-qemu-exec-tools"
 source "$LIBDIR/cloud_init_common.sh"
 
 msg "[INFO] cloud-init 설치 확인 중..." "[INFO] Checking cloud-init installation..."

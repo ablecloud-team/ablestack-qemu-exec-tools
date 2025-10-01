@@ -133,7 +133,7 @@ function Show-Status {
     # Toast notification (best-effort)
     if (-not $NoToast.IsPresent) {
         try {
-            & msg.exe * /TIME:60 ("AbleStack Init: " + $Label) | Out-Null
+            & msg.exe * /TIME:10 ("AbleStack Init: " + $Label) | Out-Null
         } catch { }  # Ignore errors
     }
 }
