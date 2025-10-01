@@ -65,10 +65,11 @@ rpm:
   			 --transform="s,^,$(NAME)-$(VERSION)/," .
 
 	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" \
-	         --define "version $(VERSION)" \
-	         --define "release $(RELEASE)" \
-	         --define "githash $(GIT_HASH)" \
-	         spec/$(NAME).spec
+			--define "version $(VERSION)" \
+			--define "release $(RELEASE)" \
+			--define "githash $(GIT_HASH)" \
+			$(NAME).spec
+
 
 	# 산출물 정리
 	mkdir -p build/rpm
