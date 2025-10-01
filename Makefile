@@ -64,11 +64,14 @@ rpm:
 	tar czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
   			 --transform="s,^,$(NAME)-$(VERSION)/," .
 
+	cp $(NAME).spec rpmbuild/SPECS/
+
 	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" \
 			--define "version $(VERSION)" \
 			--define "release $(RELEASE)" \
 			--define "githash $(GIT_HASH)" \
-			$(NAME).spec
+			rpmbuild/SPECS/$(NAME).spec
+
 
 
 	# 산출물 정리
