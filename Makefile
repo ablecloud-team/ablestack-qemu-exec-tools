@@ -120,7 +120,10 @@ windows:
 	@echo "📦 Building Windows MSI..."
 	powershell -ExecutionPolicy Bypass -File windows/msi/build-msi.ps1 \
 		-Version $(VERSION) -Release $(RELEASE) -GitHash $(GIT_HASH)
+	mkdir -p build/msi
+	cp windows/msi/out/* build/msi/ || echo "[WARN] No MSI files copied"
 	@echo "✅ Windows MSI built under build/msi/"
+
 
 clean:
 	rm -rf rpmbuild
