@@ -62,23 +62,21 @@ rpm:
 	@echo "📦 Building RPM..."
 	mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 	tar czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
-  			 --transform="s,^,$(NAME)-$(VERSION)/," .
+		--transform="s,^,$(NAME)-$(VERSION)/," .
 
-	cp $(NAME).spec rpmbuild/SPECS/
+	# spec 파일 복사 (rpm 디렉토리에서 가져오기)
+	cp rpm/$(NAME).spec rpmbuild/SPECS/
 
 	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" \
-			--define "version $(VERSION)" \
-			--define "release $(RELEASE)" \
-			--define "githash $(GIT_HASH)" \
-			rpmbuild/SPECS/$(NAME).spec
-
-
+	         --define "version $(VERSION)" \
+	         --define "release $(RELEASE)" \
+	         --define "githash $(GIT_HASH)" \
+	         rpmbuild/SPECS/$(NAME).spec
 
 	# 산출물 정리
 	mkdir -p build/rpm
 	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
 	@echo "✅ RPM package created: build/rpm/"
-
 
 deb:
 	@echo "📦 Building DEB..."
