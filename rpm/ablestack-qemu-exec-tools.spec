@@ -115,12 +115,12 @@ if [ -f /etc/os-release ]; then
         # cloud-init service override
         mkdir -p /etc/systemd/system/cloud-init.service.d
         cat > /etc/systemd/system/cloud-init.service.d/override.conf <<'EOF'
-        [Unit]
-        # Re-declare Before= but without network-online.target
-        Wants=cloud-init-local.service sshd-keygen.service sshd.service network-online.target
-        After=cloud-init-local.service systemd-networkd-wait-online.service network-online.target
-        Before=sshd-keygen.service sshd.service systemd-user-session.service
-        EOF
+[Unit]
+# Re-declare Before= but without network-online.target
+Wants=cloud-init-local.service sshd-keygen.service sshd.service network-online.target
+After=cloud-init-local.service systemd-networkd-wait-online.service network-online.target
+Before=sshd-keygen.service sshd.service systemd-user-session.service
+EOF
 
         systemctl daemon-reexec
         systemctl daemon-reload
