@@ -78,6 +78,7 @@ set_metadata_provider_configdrive_cloudstack() {
     MAIN_CFG="$CFG_DIR/cloud.cfg"
     CFGD_DIR="$CFG_DIR/cloud.cfg.d"
     CUSTOM_CFG="$CFGD_DIR/99_ablestack_datasource.cfg"
+    DSIDENTIFY_CFG="$CFGD_DIR/ds-identify.cfg"
 
     # cloud.cfg.d가 없으면 생성
     sudo mkdir -p "$CFGD_DIR"

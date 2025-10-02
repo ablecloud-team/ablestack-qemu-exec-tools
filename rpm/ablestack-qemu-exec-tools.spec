@@ -101,8 +101,32 @@ if [ -f /etc/os-release ]; then
 @@ class Dhcpcd(DHCPClient):
 -    def get_newest_lease(self, interface: str) -> Dict[str, Any]:
 -        """Return a dict of dhcp options.
--        ...
--        return self.parse_dhcpcd_lease(lease_dump, interface)
+-
+-        @param interface: which interface to dump the lease from
+-        @raises: InvalidDHCPLeaseFileError on empty or unparsable leasefile
+-            content.
+-        """
+-        try:
+-            return self.parse_dhcpcd_lease(
+-                subp.subp(
+-                    [
+-                        self.client_name,
+-                        "--dumplease",
+-                        "--ipv4only",
+-                        interface,
+-                    ],
+-                ).stdout,
+-                interface,
+-            )
+-
+-        except subp.ProcessExecutionError as error:
+-            LOG.debug(
+-                "dhcpcd exited with code: %s stderr: %r stdout: %r",
+-                error.exit_code,
+-                error.stderr,
+-                error.stdout,
+-            )
+-            raise NoDHCPLeaseError from error
 +    def get_newest_lease(self, interface: str) -> Dict[str, Any]:
 +        """Return a dict of dhcp options with fallback for Rocky/RHEL 10."""
 +        try:
