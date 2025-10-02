@@ -72,9 +72,79 @@ cp -a usage_agent_policy_fix.md %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null 
 
 %post
 echo "[INFO] Running post-install tasks for %{name}..."
+
+# agent_policy_fix / cloud_init_auto 실행
 if [ -x /usr/bin/agent_policy_fix ]; then
     /usr/bin/agent_policy_fix || echo "[WARN] agent_policy_fix failed"
 fi
 if [ -x /usr/bin/cloud_init_auto ]; then
     /usr/bin/cloud_init_auto || echo "[WARN] cloud_init_auto failed"
+fi
+
+# ----- Rocky/RHEL 10 전용 dhcpcd + dhcp.py 패치 -----
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "$ID" =~ (rocky|rhel) && "$VERSION_ID" =~ ^10 ]]; then
+        echo "[INFO] Detected $ID $VERSION_ID, enabling dhcpcd and patching cloud-init dhcp.py..."
+
+        # 1. dhcpcd 서비스 활성화
+        systemctl enable dhcpcd.service >/dev/null 2>&1 || true
+
+        # 2. dhcp.py 패치
+        PATCH_FILE="/usr/lib/python3.12/site-packages/cloudinit/net/dhcp.py"
+        if [ -f "$PATCH_FILE" ]; then
+            cp -n "$PATCH_FILE" "${PATCH_FILE}.bak"
+
+            patch -N "$PATCH_FILE" >/dev/null 2>&1 <<'EOF'
+*** dhcp.py.orig   2025-10-01 00:00:00.000000000 +0000
+--- dhcp.py        2025-10-02 00:00:00.000000000 +0000
+@@ class Dhcpcd(DHCPClient):
+-    def get_newest_lease(self, interface: str) -> Dict[str, Any]:
+-        """Return a dict of dhcp options.
+-        ...
+-        return self.parse_dhcpcd_lease(lease_dump, interface)
++    def get_newest_lease(self, interface: str) -> Dict[str, Any]:
++        """Return a dict of dhcp options with fallback for Rocky/RHEL 10."""
++        try:
++            lease_dump = subp.subp(
++                [self.client_name, "--dumplease", "--ipv4only", interface],
++            ).stdout
++
++            if not lease_dump.strip():
++                LOG.warning("Empty lease dump for %s, fallback to lease file", interface)
++                lease_file = f"/var/lib/dhcpcd/{interface}.lease"
++                try:
++                    dhcp_message = util.load_binary_file(lease_file)
++                    lease = {"interface": interface, "lease-file": lease_file}
++                    try:
++                        opt_50 = Dhcpcd.parse_unknown_options_from_packet(dhcp_message, 50)
++                        if opt_50:
++                            lease["ip-address"] = socket.inet_ntoa(opt_50)
++                        opt_3 = Dhcpcd.parse_unknown_options_from_packet(dhcp_message, 3)
++                        if opt_3:
++                            lease["routers"] = socket.inet_ntoa(opt_3)
++                        opt_12 = Dhcpcd.parse_unknown_options_from_packet(dhcp_message, 12)
++                        if opt_12:
++                            lease["host-name"] = opt_12.decode(errors="ignore")
++                    except Exception as e:
++                        LOG.warning("Partial DHCP parse error from %s: %s", lease_file, e)
++                    return lease
++                except Exception as e:
++                    LOG.error("Fallback lease file unusable: %s", e)
++                    raise InvalidDHCPLeaseFileError("Empty lease dump and fallback failed")
++
++            return self.parse_dhcpcd_lease(lease_dump, interface)
++
++        except subp.ProcessExecutionError as error:
++            LOG.debug(
++                "dhcpcd exited with code: %s stderr: %r stdout: %r",
++                error.exit_code, error.stderr, error.stdout,
++            )
++            raise NoDHCPLeaseError from error
+EOF
+            echo "[INFO] cloud-init dhcp.py patch applied successfully"
+        else
+            echo "[WARN] cloud-init dhcp.py not found, patch skipped"
+        fi
+    fi
 fi

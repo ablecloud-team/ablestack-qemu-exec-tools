@@ -86,9 +86,12 @@ set_metadata_provider_configdrive_cloudstack() {
     sudo sed -i '/^datasource_list:/d' "$MAIN_CFG" 2>/dev/null
 
     # 99_ablestack_datasource.cfg에 datasource_list 작성 (최우선 적용)
-    echo "datasource_list: [ ConfigDrive, None ]" | sudo tee "$CUSTOM_CFG" >/dev/null
+    echo "datasource_list: [ ConfigDrive, CloudStack, None ]" | sudo tee "$CUSTOM_CFG" >/dev/null
 
-    msg "[INFO] metadata provider를 ConfigDrive, None 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, None"
+    # ds-identify.cfg에 policy: enabled 기록 (기존 내용 제거 후 새로 작성)
+    echo "policy: enabled" | sudo tee "$DSIDENTIFY_CFG" >/dev/null
+
+    msg "[INFO] metadata provider를 ConfigDrive, CloudStack, None 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, CloudStack, None"
 }
 
 patch_cloud_cfg_users_root() {
@@ -277,6 +280,7 @@ Before=shutdown.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/cloud-init clean
+ExecStart=/usr/bin/cloud-init init --local
 
 [Install]
 WantedBy=shutdown.target
