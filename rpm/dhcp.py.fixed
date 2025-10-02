@@ -855,15 +855,18 @@ class Dhcpcd(DhcpClient):
         @param interface: which interface to dump the lease from
         @raises: InvalidDHCPLeaseFileError on empty or unparsable leasefile
         """
+        import time
+
         try:
-            lease_dump = subp.subp(
-                [
-                    self.client_name,
-                    "--dumplease",
-                    "--ipv4only",
-                    interface,
-                ],
-            ).stdout
+            for attempt in range(3):
+                lease_dump = subp.subp(
+                    [self.client_name, "--dumplease", "--ipv4only", interface],
+                ).stdout
+                if lease_dump.strip():
+                    return self.parse_dhcpcd_lease(lease_dump, interface)
+
+                LOG.warning("Empty lease dump for %s (attempt %d)", interface, attempt+1)
+                time.sleep(1)
 
             if not lease_dump.strip():
                 LOG.warning(
@@ -900,8 +903,6 @@ class Dhcpcd(DhcpClient):
                         f"Empty lease dump and could not parse fallback {lease_file}"
                     )
 
-            return self.parse_dhcpcd_lease(lease_dump, interface)
-
         except subp.ProcessExecutionError as error:
             LOG.debug(
                 "dhcpcd exited with code: %s stderr: %r stdout: %r",
@@ -910,7 +911,7 @@ class Dhcpcd(DhcpClient):
                 error.stdout,
             )
             raise NoDHCPLeaseError from error
-            
+
     @staticmethod
     def parse_static_routes(routes: str) -> List[Tuple[str, str]]:
         """
