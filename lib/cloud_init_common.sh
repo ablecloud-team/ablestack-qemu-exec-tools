@@ -89,6 +89,9 @@ set_metadata_provider_configdrive_cloudstack() {
     # 99_ablestack_datasource.cfg에 datasource_list 작성 (최우선 적용)
     echo "datasource_list: [ ConfigDrive, CloudStack, None ]" | sudo tee "$CUSTOM_CFG" >/dev/null
 
+    # cloud-init 초기화
+    sudo cloud-init clean --logs
+
     # ds-identify.cfg에 policy: enabled 기록 (기존 내용 제거 후 새로 작성)
     echo "policy: enabled" | sudo tee "$DSIDENTIFY_CFG" >/dev/null
 
