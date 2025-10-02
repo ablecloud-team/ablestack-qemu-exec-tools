@@ -40,9 +40,21 @@ msg "[INFO] set_hostname, set_passwords, ssh, runcmd 항목만 매 부팅(always
     "[INFO] Patch only set_hostname, set_passwords, ssh, runcmd items to always run on every boot..."
 patch_cloud_init_and_config_modules_frequency_partial
 
-msg "[INFO] cloud-init 초기화 설정을 가상머신 셧다운 시에 재설정(clean) 하도록 서비스를 등록합니다." \
-    "[INFO] Register a service to reset (clean) cloud-init initialization settings when the virtual machine is shut down."
-setup_cloud_init_clean_on_shutdown
+# OS별 조건 처리
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    case "$ID" in
+        ubuntu|debian)
+            msg "[INFO] Ubuntu/Debian detected: shutdown clean 서비스 등록을 건너뜁니다." \
+                "[INFO] Ubuntu/Debian detected: skipping setup_cloud_init_clean_on_shutdown."
+            ;;
+        *)
+            msg "[INFO] cloud-init 초기화 설정을 가상머신 셧다운 시에 재설정(clean) 하도록 서비스를 등록합니다." \
+                "[INFO] Register a service to reset (clean) cloud-init initialization settings when the virtual machine is shut down."
+            setup_cloud_init_clean_on_shutdown
+            ;;
+    esac
+fi
 
 print_final_message
 exit 0
