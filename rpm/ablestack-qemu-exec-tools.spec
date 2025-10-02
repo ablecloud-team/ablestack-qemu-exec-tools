@@ -28,6 +28,8 @@ Requires:       bash
 Requires:       jq
 Requires:       libvirt-client
 Requires:       cloud-init
+BuildRequires:  patch
+Requires(post): patch
 #Requires:       qemu-guest-agent   # 필요시 추가
 
 %description
@@ -56,6 +58,10 @@ cp -a docs/* %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null || :
 cp -a examples/* %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null || :
 cp -a usage_agent_policy_fix.md %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null || :
 
+# cloud-init dhcp.py fix
+mkdir -p %{buildroot}/usr/share/ablestack-qemu-exec-tools
+cp -a rpm/dhcp.py.fixed %{buildroot}/usr/share/ablestack-qemu-exec-tools/ 2>/dev/null || :
+
 %files
 %license LICENSE
 %doc README.md docs/* examples/* usage_agent_policy_fix.md
@@ -64,6 +70,7 @@ cp -a usage_agent_policy_fix.md %{buildroot}/usr/share/doc/%{name}/ 2>/dev/null 
 /usr/bin/cloud_init_auto
 /usr/bin/install_ablestack_qemu_exec_tools
 /usr/libexec/%{name}/*
+/usr/share/ablestack-qemu-exec-tools/dhcp.py.fixed
 
 %changelog
 * Wed Jul 10 2025 ABLECLOUD <dev@ablecloud.io> %{version}-%{release}
@@ -81,94 +88,28 @@ if [ -x /usr/bin/cloud_init_auto ]; then
     /usr/bin/cloud_init_auto || echo "[WARN] cloud_init_auto failed"
 fi
 
-# ----- Rocky/RHEL 10 전용 dhcpcd + dhcp.py 패치 -----
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     if [[ "$ID" =~ (rocky|rhel) && "$VERSION_ID" =~ ^10 ]]; then
-        echo "[INFO] Detected $ID $VERSION_ID, enabling dhcpcd and patching cloud-init dhcp.py..."
+        echo "[INFO] Detected $ID $VERSION_ID, enabling dhcpcd and replacing cloud-init dhcp.py..."
 
-        # 1. dhcpcd 서비스 활성화
+        # dhcpcd enable (not start)
         systemctl enable dhcpcd.service >/dev/null 2>&1 || true
 
-        # 2. dhcp.py 패치
-        PATCH_FILE="/usr/lib/python3.12/site-packages/cloudinit/net/dhcp.py"
-        if [ -f "$PATCH_FILE" ]; then
-            cp -n "$PATCH_FILE" "${PATCH_FILE}.bak"
+        # cloud-init dhcp.py 위치 찾기
+        PATCH_FILE=$(python3 -c "import cloudinit.net.dhcp as d; print(d.__file__)" 2>/dev/null || true)
+        if [ -z "$PATCH_FILE" ] || [ ! -f "$PATCH_FILE" ]; then
+            PATCH_FILE=$(find /usr/lib /usr/lib64 -path "*/site-packages/cloudinit/net/dhcp.py" 2>/dev/null | head -n1)
+        fi
 
-            patch -N "$PATCH_FILE" >/dev/null 2>&1 <<'EOF'
-*** dhcp.py.orig   2025-10-01 00:00:00.000000000 +0000
---- dhcp.py        2025-10-02 00:00:00.000000000 +0000
-@@ class Dhcpcd(DHCPClient):
--    def get_newest_lease(self, interface: str) -> Dict[str, Any]:
--        """Return a dict of dhcp options.
--
--        @param interface: which interface to dump the lease from
--        @raises: InvalidDHCPLeaseFileError on empty or unparsable leasefile
--            content.
--        """
--        try:
--            return self.parse_dhcpcd_lease(
--                subp.subp(
--                    [
--                        self.client_name,
--                        "--dumplease",
--                        "--ipv4only",
--                        interface,
--                    ],
--                ).stdout,
--                interface,
--            )
--
--        except subp.ProcessExecutionError as error:
--            LOG.debug(
--                "dhcpcd exited with code: %s stderr: %r stdout: %r",
--                error.exit_code,
--                error.stderr,
--                error.stdout,
--            )
--            raise NoDHCPLeaseError from error
-+    def get_newest_lease(self, interface: str) -> Dict[str, Any]:
-+        """Return a dict of dhcp options with fallback for Rocky/RHEL 10."""
-+        try:
-+            lease_dump = subp.subp(
-+                [self.client_name, "--dumplease", "--ipv4only", interface],
-+            ).stdout
-+
-+            if not lease_dump.strip():
-+                LOG.warning("Empty lease dump for %s, fallback to lease file", interface)
-+                lease_file = f"/var/lib/dhcpcd/{interface}.lease"
-+                try:
-+                    dhcp_message = util.load_binary_file(lease_file)
-+                    lease = {"interface": interface, "lease-file": lease_file}
-+                    try:
-+                        opt_50 = Dhcpcd.parse_unknown_options_from_packet(dhcp_message, 50)
-+                        if opt_50:
-+                            lease["ip-address"] = socket.inet_ntoa(opt_50)
-+                        opt_3 = Dhcpcd.parse_unknown_options_from_packet(dhcp_message, 3)
-+                        if opt_3:
-+                            lease["routers"] = socket.inet_ntoa(opt_3)
-+                        opt_12 = Dhcpcd.parse_unknown_options_from_packet(dhcp_message, 12)
-+                        if opt_12:
-+                            lease["host-name"] = opt_12.decode(errors="ignore")
-+                    except Exception as e:
-+                        LOG.warning("Partial DHCP parse error from %s: %s", lease_file, e)
-+                    return lease
-+                except Exception as e:
-+                    LOG.error("Fallback lease file unusable: %s", e)
-+                    raise InvalidDHCPLeaseFileError("Empty lease dump and fallback failed")
-+
-+            return self.parse_dhcpcd_lease(lease_dump, interface)
-+
-+        except subp.ProcessExecutionError as error:
-+            LOG.debug(
-+                "dhcpcd exited with code: %s stderr: %r stdout: %r",
-+                error.exit_code, error.stderr, error.stdout,
-+            )
-+            raise NoDHCPLeaseError from error
-EOF
-            echo "[INFO] cloud-init dhcp.py patch applied successfully"
+        FIXED_FILE="/usr/share/ablestack-qemu-exec-tools/dhcp.py.fixed"
+
+        if [ -n "$PATCH_FILE" ] && [ -f "$PATCH_FILE" ] && [ -f "$FIXED_FILE" ]; then
+            cp -n "$PATCH_FILE" "${PATCH_FILE}.bak"
+            cp -f "$FIXED_FILE" "$PATCH_FILE"
+            echo "[INFO] cloud-init dhcp.py replaced successfully: $PATCH_FILE"
         else
-            echo "[WARN] cloud-init dhcp.py not found, patch skipped"
+            echo "[WARN] dhcp.py replacement skipped (file not found)"
         fi
     fi
 fi
