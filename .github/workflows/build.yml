@@ -15,7 +15,7 @@ jobs:
         os_version: [9, 10]
     runs-on: ubuntu-latest
     container:
-      image: rockylinux:${{ matrix.os_version }}
+      image: rockylinux/rockylinux:${{ matrix.os_version }}
       options: --user 0
     steps:
       - uses: actions/checkout@v4
