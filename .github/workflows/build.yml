@@ -73,25 +73,40 @@ jobs:
           find build/deb -type f -name "*.deb" -exec cp {} repo/pool/ \;
           cd repo/pool
 
-          for pkg in *.deb; do
-            PKGNAME=$(dpkg-deb -f "$pkg" Package)
-            DEPS=$(dpkg-deb -f "$pkg" Depends | sed 's/,/\n/g' | cut -d' ' -f1 | sort -u)
-            echo "[INFO] Level-1 dependencies for $PKGNAME: $DEPS"
+          echo "[INFO] Starting recursive dependency collection..."
+          seen=""
+          while true; do
+            new_pkgs=0
+            for pkg in *.deb; do
+              PKGNAME=$(dpkg-deb -f "$pkg" Package)
+              if echo "$seen" | grep -qx "$PKGNAME"; then
+                continue
+              fi
+              seen="$seen $PKGNAME"
 
-            # 전체 의존성 트리 (재귀)
-            ALL_DEPS=$(apt-rdepends $DEPS 2>/dev/null | grep -v "^ " | grep -v "^Reading" | sort -u)
-            echo "[INFO] Full dependency tree: $ALL_DEPS"
+              DEPENDS=$(dpkg-deb -f "$pkg" Depends | tr ',' '\n' | sed -E 's/\(.*\)//g' | sed 's/|/ /g' | awk '{print $1}' | sort -u)
+              echo "[INFO] [$PKGNAME] depends on: $DEPENDS"
 
-            for dep in $ALL_DEPS; do
-              apt-get download "$dep" || true
+              for dep in $DEPENDS; do
+                if [ -z "$dep" ]; then continue; fi
+                if ls | grep -q "^${dep}_.*\.deb$"; then
+                  continue
+                fi
+                apt-get download "$dep" && new_pkgs=1 || true
+              done
             done
+
+            # 더 이상 새로운 패키지가 없으면 종료
+            if [ "$new_pkgs" -eq 0 ]; then
+              break
+            fi
           done
 
           cd ../..
           mkdir -p repo/dists/stable/main/binary-amd64
           dpkg-scanpackages ./repo/pool /dev/null | gzip -9c > ./repo/dists/stable/main/binary-amd64/Packages.gz
           mv repo "deb-ubuntu${{ matrix.os_version }}"
-          echo "[INFO] DEB repo for Ubuntu ${{ matrix.os_version }} created."
+          echo "[INFO] DEB repo for Ubuntu ${{ matrix.os_version }} created with full dependency chain."
 
       - uses: actions/upload-artifact@v4
         with:
