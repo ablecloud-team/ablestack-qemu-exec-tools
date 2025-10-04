@@ -34,7 +34,6 @@ jobs:
           mkdir -p repo/rpm-rocky${{ matrix.os_version }}
           cp rpmbuild/RPMS/*/*.rpm repo/rpm-rocky${{ matrix.os_version }}/
           createrepo_c repo/rpm-rocky${{ matrix.os_version }}
-
           mkdir -p release/rpm
           mv repo release/rpm/
 
@@ -159,11 +158,29 @@ jobs:
       - name: Collect artifacts into structured dirs
         run: |
           mkdir -p release/rpm release/deb release/msi
-          find dist -type f -path "*/rpm-package-*/repo/*" -exec cp --parents {} release/ \;
-          find dist -type f -path "*/deb-package-*/repo/*" -exec cp --parents {} release/ \;
+
+          # RPM (Rocky 9 / 10)
+          for ver in 9 10; do
+            SRC_DIR=$(find dist -type d -path "*/rpm-package-${ver}/release/rpm/repo/rpm-rocky${ver}" | head -n 1)
+            if [ -d "$SRC_DIR" ]; then
+              mkdir -p release/rpm/rpm-rocky${ver}
+              cp -r $SRC_DIR/* release/rpm/rpm-rocky${ver}/
+            fi
+          done
+
+          # DEB (Ubuntu 22.04 / 24.04)
+          for ver in 22.04 24.04; do
+            SRC_DIR=$(find dist -type d -path "*/deb-package-${ver}/release/deb/deb-ubuntu${ver}" | head -n 1)
+            if [ -d "$SRC_DIR" ]; then
+              mkdir -p release/deb/deb-ubuntu${ver}
+              cp -r $SRC_DIR/* release/deb/deb-ubuntu${ver}/
+            fi
+          done
+
+          # MSI
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
 
-          echo "Release directory structure:"
+          echo "✅ Final ISO source directory:"
           tree release || ls -R release
 
       - name: Create install-linux.sh (universal installer)
