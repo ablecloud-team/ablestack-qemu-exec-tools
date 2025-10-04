@@ -159,25 +159,31 @@ jobs:
         run: |
           mkdir -p release/rpm release/deb release/msi
 
-          # RPM (Rocky 9 / 10)
+          echo "🔍 Collecting RPM artifacts..."
           for ver in 9 10; do
-            SRC_DIR=$(find dist -type d -path "*/rpm-package-${ver}/release/rpm/repo/rpm-rocky${ver}" | head -n 1)
+            SRC_DIR=$(find dist -type d -path "*/rpm-package-${ver}/repo/rpm-rocky${ver}" | head -n 1)
             if [ -d "$SRC_DIR" ]; then
+              echo "[INFO] Found $SRC_DIR"
               mkdir -p release/rpm/rpm-rocky${ver}
               cp -r $SRC_DIR/* release/rpm/rpm-rocky${ver}/
+            else
+              echo "[WARN] No RPM repo found for version ${ver}"
             fi
           done
 
-          # DEB (Ubuntu 22.04 / 24.04)
+          echo "🔍 Collecting DEB artifacts..."
           for ver in 22.04 24.04; do
             SRC_DIR=$(find dist -type d -path "*/deb-package-${ver}/release/deb/deb-ubuntu${ver}" | head -n 1)
             if [ -d "$SRC_DIR" ]; then
+              echo "[INFO] Found $SRC_DIR"
               mkdir -p release/deb/deb-ubuntu${ver}
               cp -r $SRC_DIR/* release/deb/deb-ubuntu${ver}/
+            else
+              echo "[WARN] No DEB repo found for version ${ver}"
             fi
           done
 
-          # MSI
+          echo "🔍 Collecting MSI artifacts..."
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
 
           echo "✅ Final ISO source directory:"
