@@ -71,10 +71,16 @@ jobs:
           mkdir -p repo/pool
           find build/deb -type f -name "*.deb" -exec cp {} repo/pool/ \;
           cd repo/pool
+
           for pkg in *.deb; do
             PKGNAME=$(dpkg-deb -f "$pkg" Package)
-            apt-rdepends "$PKGNAME" | grep -v "^ " | xargs -n1 apt-get download || true
+            DEPS=$(dpkg-deb -f "$pkg" Depends | sed 's/,/\n/g' | cut -d' ' -f1 | sort -u)
+            echo "[INFO] Found dependencies for $PKGNAME: $DEPS"
+            for dep in $DEPS; do
+              apt-get download "$dep" || true
+            done
           done
+
           cd ../..
           mkdir -p repo/dists/stable/main/binary-amd64
           dpkg-scanpackages repo/pool /dev/null | gzip -9c > repo/dists/stable/main/binary-amd64/Packages.gz
