@@ -206,14 +206,16 @@ jobs:
           chmod +x release/install-linux.sh
 
       # --- ISO 생성 ---
-      - name: Generate ISO
+      - name: Create ISO
         run: |
           sudo apt-get update && sudo apt-get install -y genisoimage
           VERSION=${GITHUB_REF##*/}
           mkisofs -o release/ablestack-qemu-exec-tools-${VERSION}.iso \
             -V "ablestack-qemu-exec-tools ${VERSION}" \
+            -R -J -iso-level 3 \
             release/
           ls -lh release
+
 
       # --- Release Notes 생성 ---
       - name: Generate Release Notes
