@@ -81,37 +81,37 @@ jobs:
           mkdir -p release/rpm/Packages release/deb/pool release/msi
           echo "Directory structure prepared."
 
-      # --- RPM 계열: 의존성 포함 다운로드 ---
-      - name: Download RPM dependencies
-        run: |
-          sudo dnf -y install dnf-plugins-core createrepo_c
-          # 복사된 빌드 RPM 가져오기
-          find dist -type f -name "*.rpm" -exec cp {} release/rpm/Packages/ \;
-          # 의존성까지 모두 다운로드
-          for pkg in release/rpm/Packages/*.rpm; do
-            dnf download --resolve "$pkg" --destdir release/rpm/Packages || true
-          done
-          # repo 메타데이터 생성
-          createrepo_c release/rpm
+      # ---------- RPM: RHEL 컨테이너 내부에서 ----------
+      - name: Generate RPM repo with dependencies
+        uses: addnab/docker-run-action@v3
+        with:
+          image: rockylinux:9
+          options: --user 0 -v ${{ github.workspace }}:/workspace
+          run: |
+            cd /workspace
+            dnf -y install dnf-plugins-core createrepo_c
+            find dist -type f -name "*.rpm" -exec cp {} release/rpm/Packages/ \;
+            for pkg in release/rpm/Packages/*.rpm; do
+              dnf download --resolve "$pkg" --destdir release/rpm/Packages || true
+            done
+            createrepo_c release/rpm
+            echo "[INFO] RPM repo created successfully."
 
-      # --- DEB 계열: 의존성 포함 다운로드 ---
-      - name: Download DEB dependencies
+      # ---------- DEB: Ubuntu 환경에서 ----------
+      - name: Generate DEB repo with dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y apt-rdepends dpkg-dev
-          # 빌드된 DEB 복사
           find dist -type f -name "*.deb" -exec cp {} release/deb/pool/ \;
           cd release/deb/pool
-          # 의존성 패키지 다운로드
           for pkg in *.deb; do
-            # 파일 이름에서 패키지명 추출
             PKGNAME=$(dpkg-deb -f "$pkg" Package)
             apt-rdepends "$PKGNAME" | grep -v "^ " | xargs -n1 apt-get download || true
           done
           cd ../..
-          # repo 메타데이터 생성
           mkdir -p release/deb/dists/stable/main/binary-amd64
           dpkg-scanpackages release/deb/pool /dev/null | gzip -9c > release/deb/dists/stable/main/binary-amd64/Packages.gz
+          echo "[INFO] DEB repo created successfully."
 
       # --- Windows MSI ---
       - name: Collect Windows MSI
