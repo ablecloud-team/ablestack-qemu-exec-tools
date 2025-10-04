@@ -208,9 +208,15 @@ jobs:
             fi
           done
 
+          echo "[DEBUG] Checking DEB directory structure:"
+          find dist -maxdepth 3 -type d
+
           echo "🔍 Collecting DEB repos..."
           for ver in 22.04 24.04; do
-            SRC_DIR=$(find dist -type d -path "*/deb-package-${ver}/release/deb/deb-ubuntu${ver}" | head -n 1)
+            SRC_DIR=$(find dist -type d \( \
+                        -path "*/deb-package-${ver}/release/deb/deb-ubuntu${ver}" -o \
+                        -path "*/deb-package-${ver}/deb-ubuntu${ver}" \
+                      \) | head -n 1)
             if [ -d "$SRC_DIR" ]; then
               echo "[INFO] Found $SRC_DIR"
               mkdir -p release/deb/deb-ubuntu${ver}
