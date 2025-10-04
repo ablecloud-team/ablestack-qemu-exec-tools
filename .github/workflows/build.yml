@@ -66,6 +66,7 @@ jobs:
       - name: Build DEB
         run: make deb
 
+      # 완전한 의존성 수집
       - name: Download dependencies and create repo
         run: |
           mkdir -p repo/pool
@@ -75,15 +76,20 @@ jobs:
           for pkg in *.deb; do
             PKGNAME=$(dpkg-deb -f "$pkg" Package)
             DEPS=$(dpkg-deb -f "$pkg" Depends | sed 's/,/\n/g' | cut -d' ' -f1 | sort -u)
-            echo "[INFO] Found dependencies for $PKGNAME: $DEPS"
-            for dep in $DEPS; do
+            echo "[INFO] Level-1 dependencies for $PKGNAME: $DEPS"
+
+            # 전체 의존성 트리 (재귀)
+            ALL_DEPS=$(apt-rdepends $DEPS 2>/dev/null | grep -v "^ " | grep -v "^Reading" | sort -u)
+            echo "[INFO] Full dependency tree: $ALL_DEPS"
+
+            for dep in $ALL_DEPS; do
               apt-get download "$dep" || true
             done
           done
 
           cd ../..
           mkdir -p repo/dists/stable/main/binary-amd64
-          dpkg-scanpackages repo/pool /dev/null | gzip -9c > repo/dists/stable/main/binary-amd64/Packages.gz
+          dpkg-scanpackages ./repo/pool /dev/null | gzip -9c > ./repo/dists/stable/main/binary-amd64/Packages.gz
           mv repo "deb-ubuntu${{ matrix.os_version }}"
           echo "[INFO] DEB repo for Ubuntu ${{ matrix.os_version }} created."
 
@@ -131,32 +137,31 @@ jobs:
       - name: Collect all artifacts
         run: |
           mkdir -p release/{rpm,deb,msi}
-          # RPM repos
           find dist -type d -name "rpm-rocky*" -exec cp -r {} release/rpm/ \;
-          # DEB repos
           find dist -type d -name "deb-ubuntu*" -exec cp -r {} release/deb/ \;
-          # MSI
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
-
-          echo "[INFO] Final release structure:"
           tree release || ls -R release
 
-      # Add install-linux.sh
+      # install-linux.sh 추가 (경로 보정)
       - name: Add install-linux.sh
         run: |
           cat > release/install-linux.sh <<'EOF'
           #!/usr/bin/env bash
           set -e
           ISO_MNT=$(dirname "$0")
+
           echo "[INFO] ABLESTACK QEMU Exec Tools Installer"
           echo "[INFO] Detecting distribution type..."
+
           if [ -f /etc/os-release ]; then
               . /etc/os-release
               DISTRO=$ID
+              VERSION_ID=$(echo $VERSION_ID | cut -d'.' -f1,2)
           else
               echo "[ERROR] Cannot detect distribution!"
               exit 1
           fi
+
           case "$DISTRO" in
               rocky|rhel|centos|almalinux|fedora)
                   echo "[INFO] Detected RPM-based system ($DISTRO $VERSION_ID)"
@@ -210,7 +215,7 @@ jobs:
           릴리즈 버전: ${GITHUB_REF##*/}
           EOF
 
-      # ISO 생성
+      # ISO 생성 (긴 파일명 지원)
       - name: Create ISO
         run: |
           sudo apt-get update && sudo apt-get install -y genisoimage
