@@ -110,9 +110,14 @@ jobs:
 
           cd ../..
           mkdir -p repo/dists/stable/main/binary-amd64
-          dpkg-scanpackages ./repo/pool /dev/null | gzip -9c > ./repo/dists/stable/main/binary-amd64/Packages.gz
+
+          # ✅ fix: dpkg-scanpackages must run inside repo
+          pushd repo >/dev/null
+          dpkg-scanpackages pool /dev/null | gzip -9c > dists/stable/main/binary-amd64/Packages.gz
+          popd >/dev/null
+
           mv repo "deb-ubuntu${{ matrix.os_version }}"
-          echo "[INFO] DEB repo for Ubuntu ${{ matrix.os_version }} created with full dependency chain."
+          echo "[INFO] DEB repo for Ubuntu ${{ matrix.os_version }} created with correct path references."
 
       - uses: actions/upload-artifact@v4
         with:
@@ -212,6 +217,8 @@ jobs:
           esac
 
           echo "[INFO] Installation complete."
+          EOF
+          chmod +x release/install-linux.sh
 
       # README.txt
       - name: Create README.txt
