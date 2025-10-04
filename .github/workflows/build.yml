@@ -73,33 +73,39 @@ jobs:
           find build/deb -type f -name "*.deb" -exec cp {} repo/pool/ \;
           cd repo/pool
 
-          echo "[INFO] Starting recursive dependency collection..."
-          seen=""
+          echo "[INFO] Starting dependency collection..."
+          seen_packages=""
+          last_count=0
+
           while true; do
-            new_pkgs=0
+            current_count=$(ls -1 *.deb 2>/dev/null | wc -l)
+            if [ "$current_count" -eq "$last_count" ]; then
+              echo "[INFO] No new packages detected. Dependency collection complete."
+              break
+            fi
+            last_count=$current_count
+
             for pkg in *.deb; do
               PKGNAME=$(dpkg-deb -f "$pkg" Package)
-              if echo "$seen" | grep -qx "$PKGNAME"; then
+              if echo "$seen_packages" | grep -qw "$PKGNAME"; then
                 continue
               fi
-              seen="$seen $PKGNAME"
+              seen_packages="$seen_packages $PKGNAME"
 
-              DEPENDS=$(dpkg-deb -f "$pkg" Depends | tr ',' '\n' | sed -E 's/\(.*\)//g' | sed 's/|/ /g' | awk '{print $1}' | sort -u)
+              DEPENDS=$(dpkg-deb -f "$pkg" Depends | \
+                        tr ',' '\n' | sed -E 's/\(.*\)//g' | sed 's/|/ /g' | \
+                        awk '{print $1}' | sort -u)
               echo "[INFO] [$PKGNAME] depends on: $DEPENDS"
 
               for dep in $DEPENDS; do
                 if [ -z "$dep" ]; then continue; fi
-                if ls | grep -q "^${dep}_.*\.deb$"; then
+                if echo "$seen_packages" | grep -qw "$dep"; then
                   continue
                 fi
-                apt-get download "$dep" && new_pkgs=1 || true
+                echo "[INFO] Downloading dependency: $dep"
+                apt-get download "$dep" || true
               done
             done
-
-            # 더 이상 새로운 패키지가 없으면 종료
-            if [ "$new_pkgs" -eq 0 ]; then
-              break
-            fi
           done
 
           cd ../..
