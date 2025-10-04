@@ -7,12 +7,15 @@ on:
 
 jobs:
   # ───────────────────────────────────────────────
-  # 1. RPM BUILD
+  # 1️⃣ RPM BUILD (Rocky 9 + 10 병행)
   # ───────────────────────────────────────────────
   build-rpm:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os_version: [9, 10]
     container:
-      image: rockylinux/rockylinux:9
+      image: rockylinux/rockylinux:${{ matrix.os_version }}
       options: --user 0
     steps:
       - uses: actions/checkout@v4
@@ -26,26 +29,22 @@ jobs:
       - name: Build RPM
         run: make rpm
 
-      - name: Create RPM repo (Rocky 9 / 10)
+      - name: Create RPM repo for Rocky ${{ matrix.os_version }}
         run: |
-          mkdir -p repo/rpm-rocky9 repo/rpm-rocky10
-          # Rocky 9 repo
-          cp rpmbuild/RPMS/*/*.rpm repo/rpm-rocky9/
-          createrepo_c repo/rpm-rocky9
-          # Rocky 10 repo (공유 동일 rpm, 버전 확인 후 필요시 별도)
-          cp rpmbuild/RPMS/*/*.rpm repo/rpm-rocky10/
-          createrepo_c repo/rpm-rocky10
+          mkdir -p repo/rpm-rocky${{ matrix.os_version }}
+          cp rpmbuild/RPMS/*/*.rpm repo/rpm-rocky${{ matrix.os_version }}/
+          createrepo_c repo/rpm-rocky${{ matrix.os_version }}
 
           mkdir -p release/rpm
-          mv repo release/rpm
+          mv repo release/rpm/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpm-package
+          name: rpm-package-${{ matrix.os_version }}
           path: release/rpm/**
 
   # ───────────────────────────────────────────────
-  # 2. DEB BUILD
+  # 2️⃣ DEB BUILD (Ubuntu 22.04 / 24.04)
   # ───────────────────────────────────────────────
   build-deb:
     runs-on: ubuntu-latest
@@ -117,11 +116,11 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: deb-package
+          name: deb-package-${{ matrix.os_version }}
           path: release/deb/**
 
   # ───────────────────────────────────────────────
-  # 3. WINDOWS BUILD
+  # 3️⃣ WINDOWS MSI BUILD
   # ───────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
@@ -145,7 +144,7 @@ jobs:
           path: windows/msi/out/*
 
   # ───────────────────────────────────────────────
-  # 4. RELEASE + ISO CREATION
+  # 4️⃣ RELEASE + ISO CREATION
   # ───────────────────────────────────────────────
   release:
     needs: [build-rpm, build-deb, build-windows]
@@ -160,12 +159,10 @@ jobs:
       - name: Collect artifacts into structured dirs
         run: |
           mkdir -p release/rpm release/deb release/msi
-          # RPM
-          find dist -type f -path "*/rpm-package/*" -exec cp --parents {} release/ \;
-          # DEB
-          find dist -type f -path "*/deb-package/*" -exec cp --parents {} release/ \;
-          # MSI
+          find dist -type f -path "*/rpm-package-*/repo/*" -exec cp --parents {} release/ \;
+          find dist -type f -path "*/deb-package-*/repo/*" -exec cp --parents {} release/ \;
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
+
           echo "Release directory structure:"
           tree release || ls -R release
 
@@ -225,7 +222,7 @@ jobs:
         run: |
           cat <<'EOF' > release/README.txt
           ablestack-qemu-exec-tools Offline Installation ISO
-          ================================================
+          ==================================================
           Contains pre-built packages for:
             - RPM (Rocky / RHEL 9, 10)
             - DEB (Ubuntu 22.04 / 24.04)
