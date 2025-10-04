@@ -263,8 +263,13 @@ jobs:
           enabled=1
           gpgcheck=0
           EOR
+                  if [ ! -f "$REPO_FILE" ]; then
+                      echo "[ERROR] Repo file not found: $REPO_FILE"
+                      exit 1
+                  fi
                   sudo dnf clean all
-                  sudo dnf -y install ablestack-qemu-exec-tools
+                  # 기존 repo 비활성화, 오프라인 로컬 repo만 사용
+                  sudo dnf -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
                   ;;
               ubuntu|debian)
                   echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"
