@@ -1,4 +1,4 @@
-name: Build and Release ablestack-qemu-exec-tools (Multi-OS Airgapped)
+name: Build and Release ablestack-qemu-exec-tools
 
 on:
   push:
@@ -6,16 +6,13 @@ on:
       - "v*"
 
 jobs:
-  # =====================================================
-  # 1️⃣  RPM Build (Rocky 9 / 10)
-  # =====================================================
+  # ───────────────────────────────────────────────
+  # 1. RPM BUILD
+  # ───────────────────────────────────────────────
   build-rpm:
-    strategy:
-      matrix:
-        os_version: [9, 10]
     runs-on: ubuntu-latest
     container:
-      image: rockylinux/rockylinux:${{ matrix.os_version }}
+      image: rockylinux/rockylinux:9
       options: --user 0
     steps:
       - uses: actions/checkout@v4
@@ -23,50 +20,49 @@ jobs:
           fetch-depth: 0
 
       - name: Install build dependencies
-        run: dnf -y install make rpm-build tar git
+        run: |
+          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Build RPM
         run: make rpm
 
-      - name: Download dependencies and create repo
+      - name: Create RPM repo (Rocky 9 / 10)
         run: |
-          dnf -y install dnf-plugins-core createrepo_c
-          mkdir -p repo/Packages
-          find rpmbuild/RPMS -type f -name "*.rpm" -exec cp {} repo/Packages/ \;
-          for pkg in repo/Packages/*.rpm; do
-            dnf download --resolve "$pkg" --destdir repo/Packages || true
-          done
-          createrepo_c repo
-          mv repo "rpm-rocky${{ matrix.os_version }}"
-          echo "[INFO] RPM repo for Rocky ${{ matrix.os_version }} created."
+          mkdir -p repo/rpm-rocky9 repo/rpm-rocky10
+          # Rocky 9 repo
+          cp rpmbuild/RPMS/*/*.rpm repo/rpm-rocky9/
+          createrepo_c repo/rpm-rocky9
+          # Rocky 10 repo (공유 동일 rpm, 버전 확인 후 필요시 별도)
+          cp rpmbuild/RPMS/*/*.rpm repo/rpm-rocky10/
+          createrepo_c repo/rpm-rocky10
+
+          mkdir -p release/rpm
+          mv repo release/rpm
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpm-rocky${{ matrix.os_version }}
-          path: rpm-rocky${{ matrix.os_version }}
+          name: rpm-package
+          path: release/rpm/**
 
-  # =====================================================
-  # 2️⃣  DEB Build (Ubuntu 22.04 / 24.04)
-  # =====================================================
+  # ───────────────────────────────────────────────
+  # 2. DEB BUILD
+  # ───────────────────────────────────────────────
   build-deb:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         os_version: [22.04, 24.04]
-    runs-on: ubuntu-${{ matrix.os_version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential make dpkg-dev debhelper git apt-rdepends
+          sudo apt-get install -y build-essential make dpkg-dev debhelper apt-utils git
 
       - name: Build DEB
         run: make deb
 
-      # 완전한 의존성 수집
       - name: Download dependencies and create repo
         run: |
           mkdir -p repo/pool
@@ -110,23 +106,23 @@ jobs:
 
           cd ../..
           mkdir -p repo/dists/stable/main/binary-amd64
-
-          # ✅ fix: dpkg-scanpackages must run inside repo
           pushd repo >/dev/null
           dpkg-scanpackages pool /dev/null | gzip -9c > dists/stable/main/binary-amd64/Packages.gz
           popd >/dev/null
 
           mv repo "deb-ubuntu${{ matrix.os_version }}"
-          echo "[INFO] DEB repo for Ubuntu ${{ matrix.os_version }} created with correct path references."
+          mkdir -p release/deb
+          mv deb-ubuntu${{ matrix.os_version }} release/deb/
+          echo "[INFO] DEB repo for Ubuntu ${{ matrix.os_version }} created."
 
       - uses: actions/upload-artifact@v4
         with:
-          name: deb-ubuntu${{ matrix.os_version }}
-          path: deb-ubuntu${{ matrix.os_version }}
+          name: deb-package
+          path: release/deb/**
 
-  # =====================================================
-  # 3️⃣  Windows MSI Build
-  # =====================================================
+  # ───────────────────────────────────────────────
+  # 3. WINDOWS BUILD
+  # ───────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
@@ -148,30 +144,34 @@ jobs:
           name: msi-package
           path: windows/msi/out/*
 
-  # =====================================================
-  # 4️⃣  ISO & Release
-  # =====================================================
+  # ───────────────────────────────────────────────
+  # 4. RELEASE + ISO CREATION
+  # ───────────────────────────────────────────────
   release:
     needs: [build-rpm, build-deb, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
 
-      - name: Collect all artifacts
+      - name: Collect artifacts into structured dirs
         run: |
-          mkdir -p release/{rpm,deb,msi}
-          find dist -type d -name "rpm-rocky*" -exec cp -r {} release/rpm/ \;
-          find dist -type d -name "deb-ubuntu*" -exec cp -r {} release/deb/ \;
+          mkdir -p release/rpm release/deb release/msi
+          # RPM
+          find dist -type f -path "*/rpm-package/*" -exec cp --parents {} release/ \;
+          # DEB
+          find dist -type f -path "*/deb-package/*" -exec cp --parents {} release/ \;
+          # MSI
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
+          echo "Release directory structure:"
           tree release || ls -R release
 
-      # install-linux.sh 추가 (경로 보정)
-      - name: Add install-linux.sh
+      - name: Create install-linux.sh (universal installer)
         run: |
-          cat > release/install-linux.sh <<'EOF'
+          cat <<'EOF' > release/install-linux.sh
           #!/usr/bin/env bash
           set -e
           ISO_MNT=$(dirname "$0")
@@ -182,7 +182,7 @@ jobs:
           if [ -f /etc/os-release ]; then
               . /etc/os-release
               DISTRO=$ID
-              VERSION_ID=$(echo $VERSION_ID | cut -d'.' -f1,2)
+              MAJOR_VERSION=$(echo $VERSION_ID | cut -d'.' -f1)
           else
               echo "[ERROR] Cannot detect distribution!"
               exit 1
@@ -190,12 +190,13 @@ jobs:
 
           case "$DISTRO" in
               rocky|rhel|centos|almalinux|fedora)
-                  echo "[INFO] Detected RPM-based system ($DISTRO $VERSION_ID)"
+                  echo "[INFO] Detected RPM-based system ($DISTRO $MAJOR_VERSION)"
                   REPO_FILE=/etc/yum.repos.d/ablestack-qemu-exec-tools.repo
+                  REPO_PATH=$(realpath "$ISO_MNT/rpm/rpm-rocky$MAJOR_VERSION")
                   cat <<EOR | sudo tee $REPO_FILE >/dev/null
           [ablestack-qemu-exec-tools]
           name=ablestack-qemu-exec-tools
-          baseurl=file://$(realpath $ISO_MNT)/rpm/rpm-rocky$VERSION_ID
+          baseurl=file://$REPO_PATH
           enabled=1
           gpgcheck=0
           EOR
@@ -203,8 +204,8 @@ jobs:
                   sudo dnf -y install ablestack-qemu-exec-tools
                   ;;
               ubuntu|debian)
-                  echo "[INFO] Detected DEB-based system ($DISTRO $VERSION_ID)"
-                  REPO_PATH=$(realpath "$ISO_MNT/deb/deb-ubuntu$VERSION_ID")
+                  echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"
+                  REPO_PATH=$(realpath "$ISO_MNT/deb/deb-ubuntu$MAJOR_VERSION.04")
                   LIST_FILE=/etc/apt/sources.list.d/ablestack-qemu-exec-tools.list
                   echo "deb [trusted=yes] file://$REPO_PATH stable main" | sudo tee $LIST_FILE >/dev/null
                   sudo apt-get update
@@ -220,42 +221,31 @@ jobs:
           EOF
           chmod +x release/install-linux.sh
 
-      # README.txt
       - name: Create README.txt
         run: |
           cat <<'EOF' > release/README.txt
-          ablestack-qemu-exec-tools Air-gapped ISO
-          ==========================================
-          이 ISO는 오프라인 환경에서도 설치 가능한 완전한 설치 미디어입니다.
-
-          포함 내용:
-          - rpm/    → Rocky 9, 10 / RHEL 9, 10 용 Repo
-          - deb/    → Ubuntu 22.04, 24.04 용 Repo
-          - msi/    → Windows Installer
-          - install-linux.sh → 자동 설치 스크립트 (RPM/DEB 공용)
-
-          사용 방법:
-            mount -o loop ablestack-qemu-exec-tools-<VERSION>.iso /mnt
-            cd /mnt
-            sudo ./install-linux.sh
-
-          릴리즈 버전: ${GITHUB_REF##*/}
+          ablestack-qemu-exec-tools Offline Installation ISO
+          ================================================
+          Contains pre-built packages for:
+            - RPM (Rocky / RHEL 9, 10)
+            - DEB (Ubuntu 22.04 / 24.04)
+            - MSI (Windows)
+          Also includes a universal installer (install-linux.sh) for Linux systems.
           EOF
 
-      # ISO 생성 (긴 파일명 지원)
-      - name: Create ISO
+      - name: Generate ISO
         run: |
           sudo apt-get update && sudo apt-get install -y genisoimage
           VERSION=${GITHUB_REF##*/}
-          mkisofs -o release/ablestack-qemu-exec-tools-${VERSION}.iso \
+          mkisofs -o ablestack-qemu-exec-tools-${VERSION}.iso \
             -V "ablestack-qemu-exec-tools ${VERSION}" \
-            -R -J -iso-level 3 \
-            release/
-          ls -lh release
+            -r -J release
+          mkdir -p build/iso
+          mv ablestack-qemu-exec-tools-${VERSION}.iso build/iso/
+          ls -lh build/iso
 
-      # GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body: "Air-gapped, multi-OS offline installer with full dependencies."
-          files: release/*
+          body: "Auto-built offline ISO for all OS types (RPM/DEB/MSI)."
+          files: build/iso/*.iso
