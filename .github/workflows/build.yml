@@ -171,7 +171,7 @@ jobs:
           path: windows/msi/out/*
 
   # ───────────────────────────────────────────────
-  # 4) RELEASE + ISO CREATION
+  # 4) RELEASE + ISO CREATION (VirtIO 통합 포함)
   # ───────────────────────────────────────────────
   release:
     needs: [build-rpm, build-deb, build-windows]
@@ -179,9 +179,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # dist/ 아래에 모든 아티팩트 내려받기
       - uses: actions/download-artifact@v4
         with:
           path: dist
+
+      - name: Install packaging tools (genisoimage, 7zip)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y genisoimage p7zip-full
 
       - name: Collect artifacts into structured dirs
         run: |
@@ -196,7 +202,6 @@ jobs:
               mkdir -p release/rpm/rpm-rocky${ver}
               cp -r "$SRC_DIR"/* release/rpm/rpm-rocky${ver}/
             else
-              # (fallback) 일부 runner에서 경로가 약간 다를 가능성 방지
               SRC_DIR=$(find dist -type d -path "*/rpm-package-${ver}/repo/rpm-rocky${ver}" | head -n 1)
               if [ -d "$SRC_DIR" ]; then
                 echo "[INFO] Found (fallback) $SRC_DIR"
@@ -207,9 +212,6 @@ jobs:
               fi
             fi
           done
-
-          echo "[DEBUG] Checking DEB directory structure:"
-          find dist -maxdepth 3 -type d
 
           echo "🔍 Collecting DEB repos..."
           for ver in 22.04 24.04; do
@@ -229,10 +231,158 @@ jobs:
           echo "🔍 Collecting MSI artifacts..."
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
 
-          echo "✅ Final ISO source directory:"
-          tree release || ls -R release
+      # VirtIO Windows Stable ISO 다운로드 및 추출 → release/virtio 에 포함
+      - name: Download & expand VirtIO Windows ISO (stable)
+        run: |
+          set -e
+          mkdir -p dist/virtio-src release/virtio
+          curl -fL -o dist/virtio-win.iso \
+            "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+          7z x -y -o"dist/virtio-src" dist/virtio-win.iso
+          cp -rv dist/virtio-src/* release/virtio/ || true
 
-      - name: Create install-linux.sh (universal installer)
+      # Windows 설치 스크립트 생성 (루트: install.ps1/install.bat)
+      - name: Create Windows installer scripts
+        shell: bash
+        run: |
+          cat > release/install.ps1 << 'PS1'
+          Param(
+            [switch]$Silent
+          )
+
+          function Ensure-Admin {
+            $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $p  = New-Object Security.Principal.WindowsPrincipal($id)
+            if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+              Write-Host "[INFO] Elevation required. Re-launching as Administrator..."
+              $psi = New-Object System.Diagnostics.ProcessStartInfo
+              $psi.FileName  = "powershell.exe"
+              $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" " + ($args -join ' ')
+              $psi.Verb = "runas"
+              [Diagnostics.Process]::Start($psi) | Out-Null
+              exit
+            }
+          }
+          Ensure-Admin
+
+          $logPath = "C:\Windows\Temp\ablestack-virtio-install.log"
+          Start-Transcript -Path $logPath -Append | Out-Null
+
+          try {
+            $ScriptDir = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
+            $VirtioDir = Join-Path $ScriptDir "virtio"
+            $MsiDir    = Join-Path $ScriptDir "msi"
+
+            if (-not (Test-Path $MsiDir)) { throw "MSI folder not found: $MsiDir" }
+
+            # Prefer virtio-win-guest-tools.exe (auto install)
+            $candidateExe = @(
+              (Join-Path $ScriptDir  "virtio-win-guest-tools.exe"),
+              (Join-Path $VirtioDir  "virtio-win-guest-tools.exe")
+            ) + (Get-ChildItem -Path $VirtioDir -Recurse -Filter "virtio-win-guest-tools.exe" -ErrorAction SilentlyContinue | Select-Object -Expand FullName)
+            $virtioExe = $candidateExe | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+            # MSI fallback
+            $candidateMsi = @(
+              (Join-Path $ScriptDir "virtio-win-gt-x64.msi"),
+              (Join-Path $VirtioDir "virtio-win-gt-x64.msi")
+            ) + (Get-ChildItem -Path $VirtioDir -Recurse -Filter "virtio-win-gt-*.msi" -ErrorAction SilentlyContinue | Select-Object -Expand FullName)
+            $virtioMsi = $candidateMsi | Where-Object { Test-Path $_ } | Sort-Object -Descending | Select-Object -First 1
+
+            $installOk = $false
+            if ($virtioExe) {
+              Write-Host "[STEP] Installing VirtIO guest tools (EXE): $virtioExe"
+              $exeTry = @('/quiet /norestart','/qn /norestart','/S','/s')
+              foreach ($argsStr in $exeTry) {
+                Write-Host "  -> Trying args: $argsStr"
+                $p = Start-Process -FilePath $virtioExe -ArgumentList $argsStr -PassThru -Wait -NoNewWindow
+                if ($p.ExitCode -eq 0) { $installOk = $true; break }
+                Write-Warning "    ExitCode=$($p.ExitCode). Trying next switch..."
+              }
+            }
+
+            if (-not $installOk) {
+              if (-not $virtioMsi) { throw "Neither virtio-win-guest-tools.exe nor virtio-win-gt-*.msi could be executed/found." }
+              Write-Host "[STEP] Installing VirtIO guest tools (MSI fallback): $virtioMsi"
+              $msiLog = Join-Path $env:TEMP "virtio-win-guest-tools-msi.log"
+              $msiArgs = "/i `"$virtioMsi`" /qn /norestart /l*v `"$msiLog`" ADDLOCAL=ALL"
+              $p = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -PassThru -Wait -NoNewWindow
+              if ($p.ExitCode -ne 0) {
+                throw "VirtIO MSI install failed with code $($p.ExitCode). See $msiLog"
+              }
+              $installOk = $true
+            }
+
+            Write-Host "[OK] VirtIO installation completed."
+
+            Write-Host "[STEP] Installing ablestack-qemu-exec-tools (MSI)"
+            $execMsi = Get-ChildItem -Path $MsiDir -Filter *.msi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if (-not $execMsi) { throw "No ablestack MSI found in $MsiDir" }
+
+            $execLog = Join-Path $env:TEMP "ablestack-qemu-exec-tools-msi.log"
+            $execArgs = "/i `"$($execMsi.FullName)`" /qn /norestart /l*v `"$execLog`""
+            $p = Start-Process -FilePath "msiexec.exe" -ArgumentList $execArgs -PassThru -Wait -NoNewWindow
+            if ($p.ExitCode -ne 0) {
+              throw "ablestack MSI install failed with code $($p.ExitCode). See $execLog"
+            }
+
+            Write-Host "[SUCCESS] All installations completed."
+            if (-not $Silent) { Write-Host "Reboot is recommended to finalize driver binding." }
+          }
+          catch {
+            Write-Error $_
+            exit 1
+          }
+          finally {
+            Stop-Transcript | Out-Null
+          }
+          PS1
+
+          cat > release/install.bat << 'BAT'
+          @echo off
+          setlocal
+          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
+          if errorlevel 1 (
+            echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
+            exit /b 1
+          )
+          echo [OK] Install finished. A reboot is recommended.
+          endlocal
+          BAT
+
+      - name: Create README.txt (updated)
+        run: |
+          cat <<'EOF' > release/README.txt
+          ablestack-qemu-exec-tools Offline Installation ISO
+          ==================================================
+          Contents
+            - RPM repos:
+                rpm/rpm-rocky9
+                rpm/rpm-rocky10
+            - DEB repos:
+                deb/deb-ubuntu22.04
+                deb/deb-ubuntu24.04
+            - Windows:
+                msi/ (ablestack-qemu-exec-tools .msi)
+                virtio/ (VirtIO Windows drivers + Guest Tools from stable-virtio)
+            - Universal installer:
+                install-linux.sh
+            - Windows installers:
+                install.bat / install.ps1
+
+          Windows (recommended)
+            1) Mount ISO in the Windows VM.
+            2) Run install.bat (or install.ps1) as Administrator.
+               - Installs VirtIO Guest Tools (drivers & agent) silently.
+               - Installs ablestack-qemu-exec-tools (MSI) silently.
+            3) Reboot is recommended after completion.
+
+          Linux
+            1) mount -o loop ablestack-qemu-exec-tools-<VERSION>.iso /mnt
+            2) cd /mnt && sudo ./install-linux.sh
+          EOF
+
+      - name: Create install-linux.sh (unchanged)
         run: |
           cat <<'EOF' > release/install-linux.sh
           #!/usr/bin/env bash
@@ -263,17 +413,11 @@ jobs:
           enabled=1
           gpgcheck=0
           EOR
-                  if [ ! -f "$REPO_FILE" ]; then
-                      echo "[ERROR] Repo file not found: $REPO_FILE"
-                      exit 1
-                  fi
                   sudo dnf clean all
-                  # 기존 repo 비활성화, 오프라인 로컬 repo만 사용
                   sudo dnf -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
                   ;;
               ubuntu|debian)
                   echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"
-                  # Ubuntu는 22/24 전용: 22→22.04, 24→24.04 매핑
                   UBUNTU_DIR="${MAJOR_VERSION}.04"
                   REPO_PATH=$(realpath "$ISO_MNT/deb/deb-ubuntu${UBUNTU_DIR}")
                   LIST_FILE=/etc/apt/sources.list.d/ablestack-qemu-exec-tools.list
@@ -291,31 +435,8 @@ jobs:
           EOF
           chmod +x release/install-linux.sh
 
-      - name: Create README.txt
-        run: |
-          cat <<'EOF' > release/README.txt
-          ablestack-qemu-exec-tools Offline Installation ISO
-          ==================================================
-          - RPM repos:
-              rpm/rpm-rocky9
-              rpm/rpm-rocky10
-          - DEB repos:
-              deb/deb-ubuntu22.04
-              deb/deb-ubuntu24.04
-          - Windows MSI:
-              msi/
-          - Universal installer:
-              install-linux.sh
-
-          Usage:
-            mount -o loop ablestack-qemu-exec-tools-<VERSION>.iso /mnt
-            cd /mnt
-            sudo ./install-linux.sh
-          EOF
-
       - name: Generate ISO
         run: |
-          sudo apt-get update && sudo apt-get install -y genisoimage
           VERSION=${GITHUB_REF##*/}
           mkisofs -o ablestack-qemu-exec-tools-${VERSION}.iso \
             -V "ablestack-qemu-exec-tools ${VERSION}" \
@@ -327,5 +448,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body: "Auto-built offline ISO for RPM (Rocky/RHEL 9,10), DEB (Ubuntu 22.04/24.04) and Windows MSI."
+          body: "Auto-built offline ISO for RPM (Rocky/RHEL 9,10), DEB (Ubuntu 22.04/24.04) and Windows (VirtIO Guest Tools + ablestack MSI)."
           files: build/iso/*.iso
