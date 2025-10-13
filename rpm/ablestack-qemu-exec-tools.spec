@@ -28,8 +28,6 @@ Requires:       bash
 Requires:       jq
 Requires:       libvirt-client
 Requires:       cloud-init
-BuildRequires:  patch
-Requires(post): patch
 #Requires:       qemu-guest-agent   # 필요시 추가
 
 %description
