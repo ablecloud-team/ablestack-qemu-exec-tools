@@ -406,7 +406,7 @@ jobs:
           @echo off
           setlocal
           rem Always run non-silent mode by default
-          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -Silent:$false
+          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
           if errorlevel 1 (
             echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
             exit /b 1
