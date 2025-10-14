@@ -263,10 +263,60 @@ jobs:
               exit
             }
           }
+
+          # GUI message support
+          $Global:GuiReady = $false
+          try {
+            Add-Type -AssemblyName PresentationFramework -ErrorAction Stop
+            $Global:GuiReady = $true
+          } catch {
+            $Global:GuiReady = $false
+          }
+
+          function Show-Info([string]$text) {
+            if ($Global:GuiReady -and -not $Silent) {
+              [System.Windows.MessageBox]::Show($text, "ABLESTACK Installer",
+                [System.Windows.MessageBoxButton]::OK,
+                [System.Windows.MessageBoxImage]::Information,
+                [System.Windows.MessageBoxResult]::OK,
+                [System.Windows.MessageBoxOptions]::DefaultDesktopOnly
+              ) | Out-Null
+            } else {
+              Write-Host $text
+            }
+          }
+
+          function Prompt-Reboot() {
+            if (-not $Global:GuiReady -or $Silent) {
+              Write-Host "[NOTICE] A reboot is required to complete installation."
+              return
+            }
+            $msg = "Installation is complete. Some components require a system reboot to finish setup.`r`nDo you want to reboot now?"
+            $result = [System.Windows.MessageBox]::Show($msg, "ABLESTACK Installer",
+              [System.Windows.MessageBoxButton]::YesNo,
+              [System.Windows.MessageBoxImage]::Question,
+              [System.Windows.MessageBoxResult]::Yes,
+              [System.Windows.MessageBoxOptions]::DefaultDesktopOnly
+            )
+            if ($result -eq [System.Windows.MessageBoxResult]::Yes) {
+              Start-Process "shutdown.exe" -ArgumentList "/r","/t","0"
+            }
+          }
+
           Ensure-Admin
 
           $logPath = "C:\Windows\Temp\ablestack-virtio-install.log"
           Start-Transcript -Path $logPath -Append | Out-Null
+
+          $global:rebootNeeded = $false
+          function Handle-MsiExit($code, $component, $logFile) {
+            switch ($code) {
+              0     { Write-Host "[OK] $component installed."; return }
+              3010  { Write-Host "[OK] $component installed. Reboot required (3010)."
+                      $global:rebootNeeded = $true; return }
+              default { throw "$component install failed with code $code. See $logFile" }
+            }
+          }
 
           try {
             $ScriptDir = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -275,7 +325,7 @@ jobs:
 
             if (-not (Test-Path $MsiDir)) { throw "MSI folder not found: $MsiDir" }
 
-            # Prefer virtio-win-guest-tools.exe (auto install)
+            # Locate VirtIO guest tools EXE
             $candidateExe = @(
               (Join-Path $ScriptDir  "virtio-win-guest-tools.exe"),
               (Join-Path $VirtioDir  "virtio-win-guest-tools.exe")
@@ -296,8 +346,14 @@ jobs:
               foreach ($argsStr in $exeTry) {
                 Write-Host "  -> Trying args: $argsStr"
                 $p = Start-Process -FilePath $virtioExe -ArgumentList $argsStr -PassThru -Wait -NoNewWindow
-                if ($p.ExitCode -eq 0) { $installOk = $true; break }
-                Write-Warning "    ExitCode=$($p.ExitCode). Trying next switch..."
+                if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
+                  if ($p.ExitCode -eq 3010) { $global:rebootNeeded = $true }
+                  $installOk = $true
+                  Write-Host "[OK] VirtIO guest tools installed (EXE, code $($p.ExitCode))."
+                  break
+                } else {
+                  Write-Warning "    ExitCode=$($p.ExitCode). Trying next switch..."
+                }
               }
             }
 
@@ -307,14 +363,11 @@ jobs:
               $msiLog = Join-Path $env:TEMP "virtio-win-guest-tools-msi.log"
               $msiArgs = "/i `"$virtioMsi`" /qn /norestart /l*v `"$msiLog`" ADDLOCAL=ALL"
               $p = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -PassThru -Wait -NoNewWindow
-              if ($p.ExitCode -ne 0) {
-                throw "VirtIO MSI install failed with code $($p.ExitCode). See $msiLog"
-              }
+              Handle-MsiExit -code $p.ExitCode -component "VirtIO guest tools (MSI)" -logFile $msiLog
               $installOk = $true
             }
 
-            Write-Host "[OK] VirtIO installation completed."
-
+            # Install ablestack MSI
             Write-Host "[STEP] Installing ablestack-qemu-exec-tools (MSI)"
             $execMsi = Get-ChildItem -Path $MsiDir -Filter *.msi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
             if (-not $execMsi) { throw "No ablestack MSI found in $MsiDir" }
@@ -322,12 +375,14 @@ jobs:
             $execLog = Join-Path $env:TEMP "ablestack-qemu-exec-tools-msi.log"
             $execArgs = "/i `"$($execMsi.FullName)`" /qn /norestart /l*v `"$execLog`""
             $p = Start-Process -FilePath "msiexec.exe" -ArgumentList $execArgs -PassThru -Wait -NoNewWindow
-            if ($p.ExitCode -ne 0) {
-              throw "ablestack MSI install failed with code $($p.ExitCode). See $execLog"
-            }
+            Handle-MsiExit -code $p.ExitCode -component "ablestack-qemu-exec-tools" -logFile $execLog
 
-            Write-Host "[SUCCESS] All installations completed."
-            if (-not $Silent) { Write-Host "Reboot is recommended to finalize driver binding." }
+            # Completion message
+            if ($global:rebootNeeded) {
+              Prompt-Reboot
+            } else {
+              Show-Info "Installation completed successfully. No reboot is required."
+            }
           }
           catch {
             Write-Error $_
@@ -346,7 +401,7 @@ jobs:
             echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
             exit /b 1
           )
-          echo [OK] Install finished. A reboot is recommended.
+          echo [OK] Installation finished.
           endlocal
           BAT
 
