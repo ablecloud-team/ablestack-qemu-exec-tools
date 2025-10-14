@@ -250,6 +250,14 @@ jobs:
             [switch]$Silent
           )
 
+          # Force default = false if not provided
+          if (-not $PSBoundParameters.ContainsKey('Silent')) {
+            $Silent = $false
+          }
+
+          # Debug print
+          Write-Host "[DEBUG] Silent mode: $Silent"
+
           function Ensure-Admin {
             $id = [Security.Principal.WindowsIdentity]::GetCurrent()
             $p  = New-Object Security.Principal.WindowsPrincipal($id)
@@ -264,23 +272,24 @@ jobs:
             }
           }
 
-          # GUI message support
+          # WinForms GUI setup
           $Global:GuiReady = $false
           try {
-            Add-Type -AssemblyName PresentationFramework -ErrorAction Stop
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
             $Global:GuiReady = $true
           } catch {
-            $Global:GuiReady = $false
+            $Global:GuiReady = $false 
+            Write-Host "[WARN] Cannot load System.Windows.Forms. GUI dialogs will be disabled."
           }
 
           function Show-Info([string]$text) {
             if ($Global:GuiReady -and -not $Silent) {
-              [System.Windows.MessageBox]::Show($text, "ABLESTACK Installer",
-                [System.Windows.MessageBoxButton]::OK,
-                [System.Windows.MessageBoxImage]::Information,
-                [System.Windows.MessageBoxResult]::OK,
-                [System.Windows.MessageBoxOptions]::DefaultDesktopOnly
-              ) | Out-Null
+              [void][System.Windows.Forms.MessageBox]::Show(
+                $text,
+                "ABLESTACK Installer",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+              )
             } else {
               Write-Host $text
             }
@@ -292,13 +301,13 @@ jobs:
               return
             }
             $msg = "Installation is complete. Some components require a system reboot to finish setup.`r`nDo you want to reboot now?"
-            $result = [System.Windows.MessageBox]::Show($msg, "ABLESTACK Installer",
-              [System.Windows.MessageBoxButton]::YesNo,
-              [System.Windows.MessageBoxImage]::Question,
-              [System.Windows.MessageBoxResult]::Yes,
-              [System.Windows.MessageBoxOptions]::DefaultDesktopOnly
+            $result = [System.Windows.Forms.MessageBox]::Show(
+              $msg,
+              "ABLESTACK Installer",
+              [System.Windows.Forms.MessageBoxButtons]::YesNo,
+              [System.Windows.Forms.MessageBoxIcon]::Question
             )
-            if ($result -eq [System.Windows.MessageBoxResult]::Yes) {
+            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
               Start-Process "shutdown.exe" -ArgumentList "/r","/t","0"
             }
           }
@@ -396,7 +405,8 @@ jobs:
           cat > release/install.bat << 'BAT'
           @echo off
           setlocal
-          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
+          rem Always run non-silent mode by default
+          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -Silent:$false
           if errorlevel 1 (
             echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
             exit /b 1
