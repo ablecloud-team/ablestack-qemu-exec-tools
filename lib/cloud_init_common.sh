@@ -87,7 +87,15 @@ set_metadata_provider_configdrive_cloudstack() {
     sudo sed -i '/^datasource_list:/d' "$MAIN_CFG" 2>/dev/null
 
     # 99_ablestack_datasource.cfg에 datasource_list 작성 (최우선 적용)
-    echo "datasource_list: [ ConfigDrive, CloudStack, None ]" | sudo tee "$CUSTOM_CFG" >/dev/null
+    sudo tee "$CUSTOM_CFG" >/dev/null <<EOF
+datasource_list: [ CloudStack, ConfigDrive, None ]
+datasource:
+  CloudStack:
+    max_wait: 10
+    timeout: 5
+  ConfigDrive: {}
+  None: {}
+EOF
 
     # cloud-init 초기화
     sudo cloud-init clean --logs
@@ -283,7 +291,7 @@ Before=shutdown.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/cloud-init clean
+ExecStart=/usr/bin/cloud-init clean --logs
 ExecStart=/usr/bin/cloud-init init --local
 
 [Install]

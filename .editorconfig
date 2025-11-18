@@ -1,0 +1,17 @@
+root = true
+
+# 기본은 LF
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+
+# Windows 전용 스크립트는 CRLF를 원하면(선택 사항):
+[*.bat]
+end_of_line = crlf
+[*.ps1]
+end_of_line = crlf
+
+# Bash/셸 스크립트는 반드시 LF
+[*.sh]
+end_of_line = lf

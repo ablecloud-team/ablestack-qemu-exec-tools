@@ -411,6 +411,10 @@ jobs:
             echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
             exit /b 1
           )
+          
+          REM --- 설치 절차 끝 ---
+          mkdir "C:\ProgramData\AbleStack" 2>nul
+          echo ok> "C:\ProgramData\AbleStack\autoinstall.done"
           echo [OK] Installation finished.
           endlocal
           BAT
@@ -480,6 +484,8 @@ jobs:
           EOR
                   sudo dnf clean all
                   sudo dnf -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
+                  sudo rm -f /etc/yum.repos.d/ablestack-qemu-exec-tools.repo
+                  sudo dnf clean all
                   ;;
               ubuntu|debian)
                   echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"
@@ -489,6 +495,8 @@ jobs:
                   echo "deb [trusted=yes] file://$REPO_PATH stable main" | sudo tee $LIST_FILE >/dev/null
                   sudo apt-get update
                   sudo apt-get -y install ablestack-qemu-exec-tools
+                  sudo rm -f /etc/apt/sources.list.d/ablestack-qemu-exec-tools.list
+                  sudo apt-get update
                   ;;
               *)
                   echo "[ERROR] Unsupported distribution: $DISTRO"
@@ -496,6 +504,9 @@ jobs:
                   ;;
           esac
 
+          # --- 설치 절차 끝 ---
+          mkdir -p /var/lib/ablestack
+          echo ok > /var/lib/ablestack/autoinstall.done
           echo "[INFO] Installation complete."
           EOF
           chmod +x release/install-linux.sh
@@ -504,7 +515,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF##*/}
           mkisofs -o ablestack-qemu-exec-tools-${VERSION}.iso \
-            -V "ablestack-qemu-exec-tools ${VERSION}" \
+            -V "ABLESTACK-Tools" \
             -r -J release
           mkdir -p build/iso
           mv ablestack-qemu-exec-tools-${VERSION}.iso build/iso/
