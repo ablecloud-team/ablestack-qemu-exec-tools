@@ -295,21 +295,35 @@ jobs:
             }
           }
 
-          function Prompt-Reboot() {
-            if (-not $Global:GuiReady -or $Silent) {
-              Write-Host "[NOTICE] A reboot is required to complete installation."
-              return
-            }
-            $msg = "Installation is complete. Some components require a system reboot to finish setup.`r`nDo you want to reboot now?"
-            $result = [System.Windows.Forms.MessageBox]::Show(
-              $msg,
-              "ABLESTACK Installer",
-              [System.Windows.Forms.MessageBoxButtons]::YesNo,
-              [System.Windows.Forms.MessageBoxIcon]::Question
-            )
-            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-              Start-Process "shutdown.exe" -ArgumentList "/r","/t","0"
-            }
+          function Prompt_Reboot {
+              param(
+                  [string]$Message = "ABLESTACK tools installation is complete. The system needs to reboot.",
+                  [string]$Title   = "ABLESTACK",
+                  [int]   $Options = 0x0,     # 0x0: OK only / 0x4: Yes/No 등
+                  [int]   $TimeoutSeconds = 60  # 사용자 입력 최대 대기 시간 (초)
+              )
+
+              $shell = New-Object -ComObject WScript.Shell
+
+              # 두 번째 인자에 타임아웃(초)을 넣는다.
+              # 반환값:
+              #   -1 : 타임아웃
+              #    1 : OK
+              #    6 : Yes (0x4 옵션일 때)
+              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
+
+              if ($result -eq -1 -or $result -eq 1 -or $result -eq 6) {
+                  Write-Host "Prompt_Reboot: user accepted or no response within timeout. Rebooting..."
+                  # 재부팅 바로 수행 (원래 스펙대로)
+                  Restart-Computer -Force
+                  # MSI CustomAction이라면 실제로는 여기서
+                  #   msiexec /i ... /norestart + REBOOT=ReallySuppress
+                  # 를 쓰고 시스템 재부팅은 별도 관리자 스크립트에서 처리하는 식도 가능하지만,
+                  # 지금 구조에서는 Restart-Computer 써도 됨.
+              }
+              else {
+                  Write-Host "Prompt_Reboot: user canceled reboot (result = $result)."
+              }
           }
 
           Ensure-Admin
@@ -388,7 +402,8 @@ jobs:
 
             # Completion message
             if ($global:rebootNeeded) {
-              Prompt-Reboot
+              Prompt_Reboot "ABLESTACK tools installation completed. Reboot now?" "ABLESTACK" 0x0 30
+              # → 30초만 기다린 뒤 자동 재부팅
             } else {
               Show-Info "Installation completed successfully. No reboot is required."
             }
