@@ -86,41 +86,41 @@ if [ -x /usr/bin/cloud_init_auto ]; then
     /usr/bin/cloud_init_auto || echo "[WARN] cloud_init_auto failed"
 fi
 
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    if [[ "$ID" =~ (rocky|rhel) && "$VERSION_ID" =~ ^10 ]]; then
-        echo "[INFO] Detected $ID $VERSION_ID, enabling dhcpcd and replacing cloud-init dhcp.py..."
-
-        # dhcpcd enable (not start)
-        systemctl enable dhcpcd.service >/dev/null 2>&1 || true
-
-        # cloud-init dhcp.py 위치 찾기
-        PATCH_FILE=$(python3 -c "import cloudinit.net.dhcp as d; print(d.__file__)" 2>/dev/null || true)
-        if [ -z "$PATCH_FILE" ] || [ ! -f "$PATCH_FILE" ]; then
-            PATCH_FILE=$(find /usr/lib /usr/lib64 -path "*/site-packages/cloudinit/net/dhcp.py" 2>/dev/null | head -n1)
-        fi
-
-        FIXED_FILE="/usr/share/ablestack-qemu-exec-tools/dhcp.py.fixed"
-
-        if [ -n "$PATCH_FILE" ] && [ -f "$PATCH_FILE" ] && [ -f "$FIXED_FILE" ]; then
-            cp -n "$PATCH_FILE" "${PATCH_FILE}.bak"
-            cp -f "$FIXED_FILE" "$PATCH_FILE"
-            echo "[INFO] cloud-init dhcp.py replaced successfully: $PATCH_FILE"
-        else
-            echo "[WARN] dhcp.py replacement skipped (file not found)"
-        fi
-
-        # cloud-init service override
-        mkdir -p /etc/systemd/system/cloud-init.service.d
-        cat > /etc/systemd/system/cloud-init.service.d/override.conf <<'EOF'
-[Unit]
-# Re-declare Before= but without network-online.target
-Wants=cloud-init-local.service sshd-keygen.service sshd.service network-online.target
-After=cloud-init-local.service systemd-networkd-wait-online.service network-online.target
-Before=sshd-keygen.service sshd.service systemd-user-session.service
-EOF
-
-        systemctl daemon-reexec
-        systemctl daemon-reload
-    fi
-fi
+#if [ -f /etc/os-release ]; then
+#    . /etc/os-release
+#    if [[ "$ID" =~ (rocky|rhel) && "$VERSION_ID" =~ ^10 ]]; then
+#        echo "[INFO] Detected $ID $VERSION_ID, enabling dhcpcd and replacing cloud-init dhcp.py..."
+#
+#        # dhcpcd enable (not start)
+#        systemctl enable dhcpcd.service >/dev/null 2>&1 || true
+#
+#        # cloud-init dhcp.py 위치 찾기
+#        PATCH_FILE=$(python3 -c "import cloudinit.net.dhcp as d; print(d.__file__)" 2>/dev/null || true)
+#        if [ -z "$PATCH_FILE" ] || [ ! -f "$PATCH_FILE" ]; then
+#            PATCH_FILE=$(find /usr/lib /usr/lib64 -path "*/site-packages/cloudinit/net/dhcp.py" 2>/dev/null | head -n1)
+#        fi
+#
+#        FIXED_FILE="/usr/share/ablestack-qemu-exec-tools/dhcp.py.fixed"
+#
+#        if [ -n "$PATCH_FILE" ] && [ -f "$PATCH_FILE" ] && [ -f "$FIXED_FILE" ]; then
+#            cp -n "$PATCH_FILE" "${PATCH_FILE}.bak"
+#            cp -f "$FIXED_FILE" "$PATCH_FILE"
+#            echo "[INFO] cloud-init dhcp.py replaced successfully: $PATCH_FILE"
+#        else
+#            echo "[WARN] dhcp.py replacement skipped (file not found)"
+#        fi
+#
+#        # cloud-init service override
+#        mkdir -p /etc/systemd/system/cloud-init.service.d
+#        cat > /etc/systemd/system/cloud-init.service.d/override.conf <<'EOF'
+#[Unit]
+## Re-declare Before= but without network-online.target
+#Wants=cloud-init-local.service sshd-keygen.service sshd.service network-online.target
+#After=cloud-init-local.service systemd-networkd-wait-online.service network-online.target
+#Before=sshd-keygen.service sshd.service systemd-user-session.service
+#EOF
+#
+#        systemctl daemon-reexec
+#        systemctl daemon-reload
+#    fi
+#fi
