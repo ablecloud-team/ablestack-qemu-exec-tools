@@ -23,12 +23,10 @@ source "$LIBDIR/cloud_init_common.sh"
 # cloud-init이 네트워크(IP 할당) 이후에 실행되도록 Unit override 생성
 #   - /etc/systemd/system/cloud-init.service.d/ablestack-network-online.conf
 #     를 만들어서,
+#
 #       After=network-online.target
-#       Wants=network-online.target
-#       Before=
+#
 #     를 선언
-#   - Before= 를 빈 값으로 넣으면 원래 Unit의 Before=network-online.target
-#     설정이 reset 되어, 더 이상 network-online.target 이전에 실행되지 않음.
 # ----------------------------------------------------------------------
 ensure_cloud_init_after_network_online() {
     local dropin_dir="/etc/systemd/system/cloud-init.service.d"
@@ -43,9 +41,7 @@ ensure_cloud_init_after_network_online() {
 
 [Unit]
 # 기존 cloud-init.service의 Before=network-online.target 설정을 제거
-Before=
 After=network-online.target
-Wants=network-online.target
 EOF
 
     # systemd 에 설정 반영
