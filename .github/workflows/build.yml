@@ -23,7 +23,15 @@ jobs:
           fetch-depth: 0
 
       - name: Install build deps
-        run: dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
+        run: |
+          set -e
+          # 🔧 Rocky 10.1 이후 rpm-sequoia + OpenSSL 조합이 바뀌면서
+          # 컨테이너 베이스 레이어와 라이브러리 버전이 어긋나는 경우가 있어
+          # → 먼저 distro-sync 로 rpm / openssl 계열을 리포 상태와 맞춘다.
+          dnf -y distro-sync
+
+          # 빌드에 필요한 도구 설치
+          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Build RPM
         run: make rpm
