@@ -122,7 +122,7 @@ rpm:
 	# spec 파일 복사 (rpm 디렉토리에서 가져오기)
 	cp rpm/$(NAME).spec rpmbuild/SPECS/
 
-	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" \
+	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild" \
 	         --define "version $(VERSION)" \
 	         --define "release $(RELEASE)" \
 	         --define "githash $(GIT_HASH)" \
