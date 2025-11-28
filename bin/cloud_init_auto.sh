@@ -41,7 +41,7 @@ ensure_cloud_init_after_network_online() {
 
 [Unit]
 # 기존 cloud-init.service의 Before=network-online.target 설정을 제거
-After=network-online.target
+Before=sshd-keygen.service sshd.service systemd-user-session.service
 EOF
 
     # systemd 에 설정 반영
