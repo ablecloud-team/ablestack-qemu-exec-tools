@@ -37,6 +37,7 @@ ExecStart=/bin/bash -lc '\
   /usr/bin/umount /mnt/ablestack 2>/dev/null || true; \
   /usr/bin/systemctl disable ablestack-install.service || true \
 '
+ExecStartPost=/usr/bin/systemctl reboot
 RemainAfterExit=no
 
 [Install]
