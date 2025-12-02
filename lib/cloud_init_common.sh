@@ -87,7 +87,15 @@ set_metadata_provider_configdrive_cloudstack() {
     sudo sed -i '/^datasource_list:/d' "$MAIN_CFG" 2>/dev/null
 
     # 99_ablestack_datasource.cfg에 datasource_list 작성 (최우선 적용)
-    echo "datasource_list: [ ConfigDrive, CloudStack, None ]" | sudo tee "$CUSTOM_CFG" >/dev/null
+    sudo tee "$CUSTOM_CFG" >/dev/null <<EOF
+datasource_list: [ ConfigDrive, CloudStack, None ]
+datasource:
+  CloudStack:
+    max_wait: 30
+    timeout: 10
+  ConfigDrive: {}
+  None: {}
+EOF
 
     # cloud-init 초기화
     sudo cloud-init clean --logs
@@ -274,29 +282,79 @@ patch_cloud_init_and_config_modules_frequency_partial() {
 }
 
 setup_cloud_init_clean_on_shutdown() {
-    UNIT_PATH="/etc/systemd/system/cloud-init-clean-shutdown.service"
+    # 실제 동작은 "shutdown" 이 아니라 "부팅 완료 후(clean at boot)" 로 변경
+    # → 기존 이름은 유지하지만, 동작은 대안 2번 방식으로 구현
+
+    local HELPER="/usr/local/libexec/ablestack-qemu-exec-tools/cloud_init_clean_at_boot.sh"
+    local UNIT_PATH="/etc/systemd/system/ablestack-cloud-init-clean-at-boot.service"
+
+    # 헬퍼 스크립트 위치 생성
+    sudo mkdir -p "$(dirname "$HELPER")"
+
+    # 1) 부팅 시 실행될 헬퍼 스크립트 작성
+    sudo tee "$HELPER" >/dev/null <<'EOS'
+#!/bin/bash
+# cloud_init_clean_at_boot.sh
+# 1) /var/log/cloud-init*.log 를 /var/log/cloud-init/ 아래 timestamp 백업
+# 2) cloud-init clean --logs 실행
+
+set -euo pipefail
+
+SRC_DIR="/var/log"
+DST_DIR="/var/log/cloud-init"
+
+mkdir -p "$DST_DIR"
+
+ts="$(date +%Y%m%d%H%M%S)"
+
+backup_one() {
+    local src="$1"
+    local base dst
+    base="$(basename "$src")"
+
+    if [ -f "$src" ]; then
+        dst="${DST_DIR}/${base}.${ts}"
+        # 퍼미션/소유권 유지 시도, 실패하면 일반 cp
+        if ! cp -p "$src" "$dst" 2>/dev/null; then
+            cp "$src" "$dst"
+        fi
+    fi
+}
+
+# 1) 로그 백업
+backup_one "${SRC_DIR}/cloud-init.log"
+backup_one "${SRC_DIR}/cloud-init-output.log"
+
+# 2) cloud-init clean --logs 실행 (실패해도 부팅은 계속되어야 하므로 무시)
+if command -v cloud-init >/dev/null 2>&1; then
+    cloud-init clean --logs || true
+fi
+
+exit 0
+EOS
+
+    sudo chmod +x "$HELPER"
+
+    # 2) 부팅 완료 시점(multi-user.target)에서 한 번 실행되는 서비스 유닛 작성
     sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
-Description=Cloud-init clean at shutdown
-DefaultDependencies=no
-Before=shutdown.target
+Description=ABLESTACK: Backup and clean cloud-init logs at boot
+After=multi-user.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/cloud-init clean
-ExecStart=/usr/bin/cloud-init init --local
+ExecStart=$HELPER
 
 [Install]
-WantedBy=shutdown.target
+WantedBy=multi-user.target
 EOF
 
     sudo systemctl daemon-reload
-    sudo systemctl enable cloud-init-clean-shutdown.service
+    sudo systemctl enable ablestack-cloud-init-clean-at-boot.service
 
-    msg "[INFO] cloud-init clean이 가상머신 종료 시점에 자동으로 실행되도록 systemd 서비스가 설정되었습니다." \
-        "[INFO] cloud-init clean will now run automatically at VM shutdown (systemd service configured)."
+    msg "[INFO] 시스템 부팅 완료 시 cloud-init 로그 백업 및 clean이 자동으로 실행되도록 설정했습니다." \
+        "[INFO] Configured a systemd service to backup and clean cloud-init logs at boot."
 }
-
 
 print_final_message() {
     # 현재 OS 로케일 감지

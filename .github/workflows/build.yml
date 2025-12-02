@@ -23,7 +23,15 @@ jobs:
           fetch-depth: 0
 
       - name: Install build deps
-        run: dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
+        run: |
+          set -e
+          # 🔧 Rocky 10.1 이후 rpm-sequoia + OpenSSL 조합이 바뀌면서
+          # 컨테이너 베이스 레이어와 라이브러리 버전이 어긋나는 경우가 있어
+          # → 먼저 distro-sync 로 rpm / openssl 계열을 리포 상태와 맞춘다.
+          dnf -y distro-sync
+
+          # 빌드에 필요한 도구 설치
+          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Build RPM
         run: make rpm
@@ -295,21 +303,35 @@ jobs:
             }
           }
 
-          function Prompt-Reboot() {
-            if (-not $Global:GuiReady -or $Silent) {
-              Write-Host "[NOTICE] A reboot is required to complete installation."
-              return
-            }
-            $msg = "Installation is complete. Some components require a system reboot to finish setup.`r`nDo you want to reboot now?"
-            $result = [System.Windows.Forms.MessageBox]::Show(
-              $msg,
-              "ABLESTACK Installer",
-              [System.Windows.Forms.MessageBoxButtons]::YesNo,
-              [System.Windows.Forms.MessageBoxIcon]::Question
-            )
-            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-              Start-Process "shutdown.exe" -ArgumentList "/r","/t","0"
-            }
+          function Prompt_Reboot {
+              param(
+                  [string]$Message = "ABLESTACK tools installation is complete. The system needs to reboot.",
+                  [string]$Title   = "ABLESTACK",
+                  [int]   $Options = 0x0,     # 0x0: OK only / 0x4: Yes/No 등
+                  [int]   $TimeoutSeconds = 60  # 사용자 입력 최대 대기 시간 (초)
+              )
+
+              $shell = New-Object -ComObject WScript.Shell
+
+              # 두 번째 인자에 타임아웃(초)을 넣는다.
+              # 반환값:
+              #   -1 : 타임아웃
+              #    1 : OK
+              #    6 : Yes (0x4 옵션일 때)
+              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
+
+              if ($result -eq -1 -or $result -eq 1 -or $result -eq 6) {
+                  Write-Host "Prompt_Reboot: user accepted or no response within timeout. Rebooting..."
+                  # 재부팅 바로 수행 (원래 스펙대로)
+                  Restart-Computer -Force
+                  # MSI CustomAction이라면 실제로는 여기서
+                  #   msiexec /i ... /norestart + REBOOT=ReallySuppress
+                  # 를 쓰고 시스템 재부팅은 별도 관리자 스크립트에서 처리하는 식도 가능하지만,
+                  # 지금 구조에서는 Restart-Computer 써도 됨.
+              }
+              else {
+                  Write-Host "Prompt_Reboot: user canceled reboot (result = $result)."
+              }
           }
 
           Ensure-Admin
@@ -388,7 +410,8 @@ jobs:
 
             # Completion message
             if ($global:rebootNeeded) {
-              Prompt-Reboot
+              Prompt_Reboot "ABLESTACK tools installation completed. Reboot now?" "ABLESTACK" 0x0 30
+              # → 30초만 기다린 뒤 자동 재부팅
             } else {
               Show-Info "Installation completed successfully. No reboot is required."
             }
@@ -411,6 +434,10 @@ jobs:
             echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
             exit /b 1
           )
+          
+          REM --- 설치 절차 끝 ---
+          mkdir "C:\ProgramData\AbleStack" 2>nul
+          echo ok> "C:\ProgramData\AbleStack\autoinstall.done"
           echo [OK] Installation finished.
           endlocal
           BAT
@@ -480,6 +507,8 @@ jobs:
           EOR
                   sudo dnf clean all
                   sudo dnf -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
+                  sudo rm -f /etc/yum.repos.d/ablestack-qemu-exec-tools.repo
+                  sudo dnf clean all
                   ;;
               ubuntu|debian)
                   echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"
@@ -489,6 +518,8 @@ jobs:
                   echo "deb [trusted=yes] file://$REPO_PATH stable main" | sudo tee $LIST_FILE >/dev/null
                   sudo apt-get update
                   sudo apt-get -y install ablestack-qemu-exec-tools
+                  sudo rm -f /etc/apt/sources.list.d/ablestack-qemu-exec-tools.list
+                  sudo apt-get update
                   ;;
               *)
                   echo "[ERROR] Unsupported distribution: $DISTRO"
@@ -496,6 +527,9 @@ jobs:
                   ;;
           esac
 
+          # --- 설치 절차 끝 ---
+          mkdir -p /var/lib/ablestack
+          echo ok > /var/lib/ablestack/autoinstall.done
           echo "[INFO] Installation complete."
           EOF
           chmod +x release/install-linux.sh
@@ -504,7 +538,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF##*/}
           mkisofs -o ablestack-qemu-exec-tools-${VERSION}.iso \
-            -V "ablestack-qemu-exec-tools ${VERSION}" \
+            -V "ABLESTACK-Tools" \
             -r -J release
           mkdir -p build/iso
           mv ablestack-qemu-exec-tools-${VERSION}.iso build/iso/

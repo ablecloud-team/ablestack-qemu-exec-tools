@@ -50,13 +50,68 @@ install:
 	cp -a lib/* $(LIB_TARGET)/
 	@echo "✅ Installed to $(INSTALL_PREFIX)"
 
+##### ─────────────────────────────────────────────────────────────
+##### ablestack-qemu-exec-tools: uninstall targets (via uninstall.sh)
+##### ─────────────────────────────────────────────────────────────
+
+# uninstall.sh 위치 (리포지토리 루트 기준)
+UNINSTALL_SCRIPT ?= ./uninstall.sh
+
+# 플래그를 Make 변수로 제어할 수 있게 매핑
+# 예) make uninstall NO_PROMPT=1 PURGE=1 REMOVE_ISO=1
+UNINSTALL_FLAGS :=
+ifeq ($(strip $(DRY_RUN)),1)
+  UNINSTALL_FLAGS += --dry-run
+endif
+ifeq ($(strip $(NO_PROMPT)),1)
+  UNINSTALL_FLAGS += --no-prompt
+endif
+ifeq ($(strip $(PURGE)),1)
+  UNINSTALL_FLAGS += --purge
+endif
+ifeq ($(strip $(REMOVE_ISO)),1)
+  UNINSTALL_FLAGS += --remove-iso
+endif
+ifeq ($(strip $(KEEP_BINS)),1)
+  UNINSTALL_FLAGS += --keep-bins
+endif
+ifeq ($(strip $(KEEP_PROFILE)),1)
+  UNINSTALL_FLAGS += --keep-profile
+endif
+ifeq ($(strip $(KEEP_LIB)),1)
+  UNINSTALL_FLAGS += --keep-lib
+endif
+
+.PHONY: uninstall uninstall-dry-run uninstall-purge uninstall-remove-iso \
+        uninstall-keep-bins uninstall-keep-profile uninstall-keep-lib
+
+## 기본 제거(무프롬프트 권장)
 uninstall:
-	@echo "🗑 Uninstalling $(NAME)..."
-	rm -f $(BIN_DIR)/vm_exec
-	rm -f $(BIN_DIR)/agent_policy_fix
-	rm -f $(BIN_DIR)/install_ablestack_qemu_exec_tools
-	rm -rf $(LIB_TARGET)
-	@echo "✅ Uninstalled."
+	@echo ">> Running $(UNINSTALL_SCRIPT) $(UNINSTALL_FLAGS)"
+	@sudo $(UNINSTALL_SCRIPT) $(UNINSTALL_FLAGS)
+
+## 제거 계획만 출력
+uninstall-dry-run:
+	@$(MAKE) uninstall DRY_RUN=1
+
+## 라이브러리까지 완전 삭제(백업 없음), 무프롬프트
+uninstall-purge:
+	@$(MAKE) uninstall NO_PROMPT=1 PURGE=1
+
+## ISO 파일까지 삭제(무프롬프트)
+uninstall-remove-iso:
+	@$(MAKE) uninstall NO_PROMPT=1 REMOVE_ISO=1
+
+## 선택 유지 옵션들(상황별 조합 가능)
+uninstall-keep-bins:
+	@$(MAKE) uninstall KEEP_BINS=1
+
+uninstall-keep-profile:
+	@$(MAKE) uninstall KEEP_PROFILE=1
+
+uninstall-keep-lib:
+	@$(MAKE) uninstall KEEP_LIB=1
+
 
 rpm:
 	@echo "📦 Building RPM..."
@@ -67,7 +122,7 @@ rpm:
 	# spec 파일 복사 (rpm 디렉토리에서 가져오기)
 	cp rpm/$(NAME).spec rpmbuild/SPECS/
 
-	rpmbuild -ba --define "_topdir $(shell pwd)/rpmbuild" \
+	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild" \
 	         --define "version $(VERSION)" \
 	         --define "release $(RELEASE)" \
 	         --define "githash $(GIT_HASH)" \

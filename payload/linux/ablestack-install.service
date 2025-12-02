@@ -1,0 +1,44 @@
+# Filename : ablestack-install.service
+# Purpose : systemd unit template(Mount and install ISO)
+# Author  : Donghyuk Park (ablecloud.io)
+#
+# Copyright 2025 ABLECLOUD
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[Unit]
+Description=ABLESTACK agent one-shot installer (ISO root: install-linux.sh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -lc '\
+  set -e; \
+  /usr/bin/mkdir -p /mnt/ablestack; \
+  for d in /dev/cdrom /dev/sr0; do \
+    /usr/bin/mount -o ro $d /mnt/ablestack 2>/dev/null && break; \
+  done; \
+  if [ -x /mnt/ablestack/install-linux.sh ]; then \
+    /mnt/ablestack/install-linux.sh || true; \
+  else \
+    echo "[WARN] /mnt/ablestack/install-linux.sh not found or not executable"; \
+  fi; \
+  /usr/bin/umount /mnt/ablestack 2>/dev/null || true; \
+  /usr/bin/systemctl disable ablestack-install.service || true \
+'
+ExecStartPost=/usr/bin/systemctl reboot
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

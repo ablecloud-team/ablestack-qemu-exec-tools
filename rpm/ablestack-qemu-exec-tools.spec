@@ -106,21 +106,33 @@ if [ -f /etc/os-release ]; then
             cp -n "$PATCH_FILE" "${PATCH_FILE}.bak"
             cp -f "$FIXED_FILE" "$PATCH_FILE"
             echo "[INFO] cloud-init dhcp.py replaced successfully: $PATCH_FILE"
+
+            # --- 추가: 교체된 dhcp.py 관련 파이썬 캐시 삭제 ---
+            PY_DIR="$(dirname "$PATCH_FILE")"
+            PY_BASE="$(basename "$PATCH_FILE" .py)"
+
+            # __pycache__ 아래 해당 모듈 캐시 제거
+            if [ -d "${PY_DIR}/__pycache__" ]; then
+                rm -f "${PY_DIR}/__pycache__/${PY_BASE}."* 2>/dev/null || true
+            fi
+            # 같은 디렉터리에 직접 생성된 *.pyc 가 있다면 제거
+            rm -f "${PY_DIR}/${PY_BASE}.pyc" 2>/dev/null || true
+            # ------------------------------------------------
         else
             echo "[WARN] dhcp.py replacement skipped (file not found)"
         fi
-
-        # cloud-init service override
-        mkdir -p /etc/systemd/system/cloud-init.service.d
-        cat > /etc/systemd/system/cloud-init.service.d/override.conf <<'EOF'
-[Unit]
-# Re-declare Before= but without network-online.target
-Wants=cloud-init-local.service sshd-keygen.service sshd.service network-online.target
-After=cloud-init-local.service systemd-networkd-wait-online.service network-online.target
-Before=sshd-keygen.service sshd.service systemd-user-session.service
-EOF
 
         systemctl daemon-reexec
         systemctl daemon-reload
     fi
 fi
+
+#        # cloud-init service override
+#        mkdir -p /etc/systemd/system/cloud-init.service.d
+#        cat > /etc/systemd/system/cloud-init.service.d/override.conf <<'EOF'
+#[Unit]
+## Re-declare Before= but without network-online.target
+#Wants=cloud-init-local.service sshd-keygen.service sshd.service network-online.target
+#After=cloud-init-local.service systemd-networkd-wait-online.service network-online.target
+#Before=sshd-keygen.service sshd.service systemd-user-session.service
+#EOF
