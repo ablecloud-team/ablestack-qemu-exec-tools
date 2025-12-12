@@ -186,6 +186,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # dist/ 아래에 모든 아티팩트 내려받기
       - uses: actions/download-artifact@v4
@@ -534,6 +536,35 @@ jobs:
           EOF
           chmod +x release/install-linux.sh
 
+      - name: Generate release notes (changelog)
+        run: |
+          set -e
+
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          DESC="ABLESTACK VM Tools - Auto-built offline ISO for RPM (Rocky/RHEL 9,10), DEB (Ubuntu 22.04/24.04) and Windows (VirtIO Guest Tools + ablestack MSI)."
+
+          echo "# ablestack-qemu-exec-tools ${CURRENT_TAG}" > release_notes.md
+          echo >> release_notes.md
+          echo "${DESC}" >> release_notes.md
+          echo >> release_notes.md
+
+          # 태그 정보 보강 (혹시 몰라서)
+          git fetch --tags --force || true
+
+          # 직전 태그 찾기 (없으면 최초 릴리즈로 간주)
+          PREV_TAG="$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)"
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "## Changes" >> release_notes.md
+            git log --oneline "${CURRENT_TAG}" -- . | sed 's/^/- /' >> release_notes.md
+          else
+            echo "## Changes since ${PREV_TAG}" >> release_notes.md
+            git log --oneline "${PREV_TAG}..${CURRENT_TAG}" -- . | sed 's/^/- /' >> release_notes.md
+          fi
+
+          echo "===== Generated release_notes.md ====="
+          cat release_notes.md
+
       - name: Generate ISO
         run: |
           VERSION=${GITHUB_REF##*/}
@@ -547,7 +578,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body: "Auto-built offline ISO for RPM (Rocky/RHEL 9,10), DEB (Ubuntu 22.04/24.04) and Windows (VirtIO Guest Tools + ablestack MSI)."
+          body_path: release_notes.md
           files: |
             build/iso/*.iso
             release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
