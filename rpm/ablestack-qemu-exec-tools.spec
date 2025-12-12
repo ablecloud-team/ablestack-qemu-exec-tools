@@ -78,6 +78,23 @@ cp -a rpm/dhcp.py.fixed %{buildroot}/usr/share/ablestack-qemu-exec-tools/ 2>/dev
 %post
 echo "[INFO] Running post-install tasks for %{name}..."
 
+_is_ablestack_host() {
+    if [ -f /etc/os-release ]; then
+        if grep -q '^PRETTY_NAME="ABLESTACK' /etc/os-release 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+if _is_ablestack_host; then
+    echo "[INFO] ABLESTACK Host detected - skip guest cloud-init customization (agent_policy_fix, cloud_init_auto, dhcpcd, dhcp.py patch)."
+    # 여기서 바로 종료 → 아래 기존 guest용 작업은 실행 안 함
+    exit 0
+fi
+
+echo "[INFO] ablestack-qemu-exec-tools post install start (guest VM)"
+
 # agent_policy_fix / cloud_init_auto 실행
 if [ -x /usr/bin/agent_policy_fix ]; then
     /usr/bin/agent_policy_fix || echo "[WARN] agent_policy_fix failed"

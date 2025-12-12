@@ -548,4 +548,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body: "Auto-built offline ISO for RPM (Rocky/RHEL 9,10), DEB (Ubuntu 22.04/24.04) and Windows (VirtIO Guest Tools + ablestack MSI)."
-          files: build/iso/*.iso
+          files: |
+            build/iso/*.iso
+            release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
