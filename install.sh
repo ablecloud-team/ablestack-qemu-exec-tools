@@ -28,6 +28,28 @@ BIN_SRC="bin"
 ISO_DEFAULT_DIR="/usr/share/ablestack/tools"   # ISO가 존재해야 하는 디렉토리
 ISO_DEFAULT_PATH="${ISO_DEFAULT_DIR}/ablestack-qemu-exec-tools.iso"
 
+# ───────────────────────────────────────────────────────────
+# ABLESTACK Host 감지
+#   - /etc/os-release 의 PRETTY_NAME 이 "ABLESTACK" 으로 시작하면 HOST 모드
+#   - 그 외는 일반 VM 모드
+# ───────────────────────────────────────────────────────────
+is_ablestack_host() {
+  if [[ -f /etc/os-release ]]; then
+    if grep -q '^PRETTY_NAME="ABLESTACK' /etc/os-release; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+if is_ablestack_host; then
+  echo "▶ ABLESTACK Host 환경 감지됨 — 호스트 전용 모드로 설치합니다."
+  INSTALL_MODE="HOST"
+else
+  echo "▶ 일반 Linux VM 환경 감지됨 — 전체 도구 모드로 설치합니다."
+  INSTALL_MODE="VM"
+fi
+
 echo "▶ ablestack-qemu-exec-tools 설치를 시작합니다..."
 
 # ───────────────────────────────────────────────────────────
@@ -64,8 +86,16 @@ fi
 #    - vm_exec.sh / agent_policy_fix.sh / cloud_init_auto.sh (기존)
 #    - vm_autoinstall.sh (신규)
 #    링크 생성 시 .sh 확장자 제거 (vm_exec, agent_policy_fix, cloud_init_auto, vm_autoinstall)
+#    ※ ABLESTACK Host 에서는 vm_exec, vm_autoinstall 만 노출
 # ───────────────────────────────────────────────────────────
-BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh")
+
+if [[ "$INSTALL_MODE" == "HOST" ]]; then
+  # ABLESTACK Host: 최소 도구만 설치
+  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh")
+else
+  # 일반 VM: 전체 도구 설치
+  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh")
+fi
 
 for script in "${BIN_SCRIPTS[@]}"; do
   src="${BIN_SRC}/${script}"
