@@ -91,10 +91,10 @@ fi
 
 if [[ "$INSTALL_MODE" == "HOST" ]]; then
   # ABLESTACK Host: 최소 도구만 설치
-  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh")
+  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "v2k_test_install.sh")
 else
   # 일반 VM: 전체 도구 설치
-  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh")
+  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "v2k_test_install.sh")
 fi
 
 for script in "${BIN_SCRIPTS[@]}"; do

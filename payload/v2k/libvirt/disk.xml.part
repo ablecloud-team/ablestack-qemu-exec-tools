@@ -1,0 +1,6 @@
+{# payload/v2k/libvirt/disk.xml.part #}
+<disk type='file' device='disk'>
+  <driver name='qemu' type='{{ d.driver_type|default("qcow2") }}'/>
+  <source file='{{ d.path }}'/>
+  <target dev='vd{{ "abcdefghijklmnopqrstuvwxyz"[d.index|default(loop.index0)] }}' bus='virtio'/>
+</disk>
