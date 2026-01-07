@@ -21,11 +21,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/v2k/engine.sh"
+source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/engine.sh"
 # shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/v2k/logging.sh"
+source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/v2k/manifest.sh"
+source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 
 usage() {
   cat <<'EOF'
@@ -45,7 +45,8 @@ Global options:
   --force                 Force risky operations
 
 Commands:
-  init --vm <name|moref> --vcenter <host> --dst <path> [--mode govc] [--cred-file <file>]
+  init --vm <name|moref> --vcenter <host> --dst <path> [--mode govc] [--cred-file <file>] \
+       [--target-format qcow2|raw] [--target-storage file|block] [--target-map-json <json>]
   cbt enable|status
   snapshot base|incr|final [--name <snapname>]
   sync base|incr|final [--jobs N] [--coalesce-gap BYTES] [--chunk BYTES]
@@ -56,6 +57,7 @@ Commands:
 
 Notes:
   - VMware integration priority is govc. Changed areas query uses pyvmomi helper (python3 + pyvmomi).
+  - Target override options set V2K_TARGET_* internally for this run (no need to export env vars).
   - Final default: shutdown -> final snapshot -> final sync (as approved).
 EOF
 }

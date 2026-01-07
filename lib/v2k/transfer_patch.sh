@@ -4,15 +4,15 @@
 # ---------------------------------------------------------------------
 set -euo pipefail
 
-V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/logging.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/manifest.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/vmware_govc.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/nbd_utils.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/nbd_utils.sh"
 
 V2K_PY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

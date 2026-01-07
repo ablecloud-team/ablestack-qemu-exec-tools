@@ -43,53 +43,85 @@ v2k_vmware_inventory_json() {
   local vm="$1" vcenter="$2"
   v2k_require_govc_env
 
-  # govc doesn't require vcenter param if GOVC_URL is set, but we store vcenter in manifest
-  # Use govc vm.info -json to get overall config; device details via device.info -json
   local vm_info dev_info
-  vm_info="$(govc vm.info -json -vm "${vm}")"
+  vm_info="$(govc vm.info -json "${vm}")"
   dev_info="$(govc device.info -json -vm "${vm}")"
 
-  # Extract disks: VirtualDisk with controller & unit.
-  # We normalize disk_id as "scsi<bus>:<unit>" when controller is SCSI-like; otherwise "devkey:<key>".
-  # For PVSCSI/LSI this will still be scsi.
   jq -n --arg vm "${vm}" \
     --argjson vminfo "${vm_info}" \
     --argjson devinfo "${dev_info}" \
     '
-    def ctrl_type($c):
-      ($c | tostring | ascii_downcase);
+    def VMINFO0: ($vminfo.virtualMachines[0] // {});
 
-    # Map controllerKey -> {type,bus}
+    # device.info 스키마: 현재 환경은 루트가 {"devices":[...]}
+    def DEVICES:
+      ( $devinfo.devices
+        // $devinfo.virtualMachines[0].devices
+        // $devinfo.VirtualMachines[0].Devices
+        // []
+      );
+
+    # ---- helpers (jq 1.6 safe: use ? + //, no try/catch) ----
+    def lbl($o): ($o.deviceInfo?.label // "");
+    def typ($o): ($o.type // "");
+
+    # 컨트롤러 분류: deviceInfo.label 우선
+    def is_scsi_ctrl($o):
+      (lbl($o) | ascii_downcase | test("^scsi controller"));
+
+    def is_sata_ctrl($o):
+      (lbl($o) | ascii_downcase | test("^sata controller"));
+
+    def is_nvme_ctrl($o):
+      (lbl($o) | ascii_downcase | test("^nvme controller"));
+
+    # fallback: label이 비어있거나 예상과 다를 때 type 패턴으로 보조 식별
+    def is_scsi_ctrl_by_type($o):
+      (typ($o) | test("SCSIController$"))
+      or (typ($o) | test("LsiLogic"))
+      or (typ($o) | test("ParaVirtualSCSI"))
+      or (typ($o) | test("BusLogic"));
+
     def controllers:
-      ($devinfo.VirtualMachines[0].Devices
-        | map(select(.Type | test("SCSIController")))
+      (DEVICES
+        | map(select(is_scsi_ctrl(.) or is_nvme_ctrl(.) or is_sata_ctrl(.) or is_scsi_ctrl_by_type(.)))
         | map({
-            key: .Key,
-            type: .Type,
-            bus: (try (.BusNumber) catch 0)
+            key: .key,
+            type: .type,
+            label: lbl(.),
+            bus: (.busNumber // 0)
           })
       );
 
-    # Map disk list
     def disks($ctls):
-      ($devinfo.VirtualMachines[0].Devices
-        | map(select(.Type=="VirtualDisk"))
+      (DEVICES
+        | map(select(.type=="VirtualDisk"))
         | map(
             . as $d
-            | ($ctls | map(select(.key==$d.ControllerKey)) | .[0]) as $c
+            | ($ctls | map(select(.key==$d.controllerKey)) | .[0]) as $c
             | {
                 disk_id: (
-                  if $c != null then
-                    ("scsi" + ($c.bus|tostring) + ":" + ($d.UnitNumber|tostring))
+                  if $c != null and (($c.label|ascii_downcase) | test("^scsi controller")) then
+                    ("scsi" + ($c.bus|tostring) + ":" + ($d.unitNumber|tostring))
+                  elif $c != null and (($c.label|ascii_downcase) | test("^sata controller")) then
+                    ("sata" + ($c.bus|tostring) + ":" + ($d.unitNumber|tostring))
+                  elif $c != null and (($c.label|ascii_downcase) | test("^nvme controller")) then
+                    ("nvme" + ($c.bus|tostring) + ":" + ($d.unitNumber|tostring))
                   else
-                    ("devkey:" + ($d.Key|tostring))
+                    ("devkey:" + ($d.key|tostring))
                   end
                 ),
-                label: ($d.Label // "VirtualDisk"),
-                device_key: ($d.Key|tostring),
-                controller: (if $c!=null then {type:$c.type,bus:$c.bus,unit:$d.UnitNumber} else {type:"unknown",bus:0,unit:($d.UnitNumber//0)} end),
-                vmdk: { path: ($d.Backing.FileName // "") },
-                size_bytes: (try ($d.CapacityInBytes) catch 0)
+                label: ($d.deviceInfo?.label // $d.label // "VirtualDisk"),
+                device_key: ($d.key|tostring),
+                controller: (
+                  if $c!=null then
+                    {type:$c.type,bus:$c.bus,unit:$d.unitNumber,label:$c.label}
+                  else
+                    {type:"unknown",bus:0,unit:($d.unitNumber//0),label:""}
+                  end
+                ),
+                vmdk: { path: ($d.backing?.fileName // "") },
+                size_bytes: ($d.capacityInBytes // 0)
               }
           )
       );
@@ -97,12 +129,84 @@ v2k_vmware_inventory_json() {
     {
       vm: {
         name: $vm,
-        moref: ($vminfo.VirtualMachines[0].Self.Value // ""),
-        uuid: ($vminfo.VirtualMachines[0].Config.Uuid // "")
+        moref: (VMINFO0.self?.value // ""),
+        uuid: (VMINFO0.config?.uuid // "")
       },
       disks: disks(controllers)
     }'
 }
+
+v2k_assign_target_paths() {
+  local manifest="$1"
+  local dst_root format storage_type
+  dst_root="$(jq -r '.target.dst_root' "${manifest}")"
+  format="$(jq -r '.target.format // "qcow2"' "${manifest}")"
+  storage_type="$(jq -r '.target.storage.type // "file"' "${manifest}")"  # file|block
+
+  # 확장자 결정 (file 타입만)
+  local ext=""
+  if [[ "${storage_type}" == "file" ]]; then
+    case "${format}" in
+      qcow2) ext="qcow2" ;;
+      raw)   ext="raw" ;;
+      *) echo "[ERR] Unsupported target.format: ${format}" >&2; return 2 ;;
+    esac
+  fi
+
+  # per-disk override map (optional): .target.storage.map : { "scsi0:0": "/dev/sdb", "scsi0:1": "/dev/sdc" }
+  # file 타입에서도 override 가능하게 함(예: 특정 파일명 강제)
+  jq -c --arg dst_root "${dst_root}" --arg ext "${ext}" --arg st "${storage_type}" '
+    .target.storage.type = (.target.storage.type // "file")
+    | .target.format = (.target.format // "qcow2")
+    | .target.storage.map = (.target.storage.map // {})
+    | .disks = (
+        .disks
+        | to_entries
+        | map(
+            . as $e
+            | ($e.key|tostring) as $idx
+            | ($e.value.disk_id) as $disk_id
+            | (.target.storage.map[$disk_id] // empty) as $override
+            | $e.value.transfer.target_path = (
+                if ($override|length) > 0 then
+                  $override
+                else
+                  if $st == "block" then
+                    # block 타입은 반드시 map으로 지정하도록 강제 (자동 할당 위험)
+                    ("")
+                  else
+                    ($dst_root + "/disk" + $idx + "." + $ext)
+                  end
+                end
+              )
+            | $e.value
+          )
+      )
+  ' "${manifest}" > "${manifest}.tmp" && mv -f "${manifest}.tmp" "${manifest}"
+
+  # block 타입이면 반드시 override가 채워져야 함
+  if [[ "${storage_type}" == "block" ]]; then
+    local missing
+    missing="$(jq -r '.disks[] | select(.transfer.target_path=="" or .transfer.target_path=="null") | .disk_id' "${manifest}" | wc -l)"
+    if [[ "${missing}" -ne 0 ]]; then
+      echo "[ERR] target.storage.type=block requires per-disk mapping: .target.storage.map{disk_id:\"/dev/...\"}" >&2
+      echo "      Example: jq '.target.storage={type:\"block\",map:{\"scsi0:0\":\"/dev/sdb\",\"scsi0:1\":\"/dev/sdc\"}}' -c manifest.json" >&2
+      return 2
+    fi
+  fi
+
+  # 유니크 체크
+  local dup
+  dup="$(jq -r '.disks[].transfer.target_path' "${manifest}" | sort | uniq -d | wc -l)"
+  if [[ "${dup}" -ne 0 ]]; then
+    echo "[ERR] Duplicate target_path detected. Each disk must have unique transfer.target_path." >&2
+    jq -r '.disks[].transfer.target_path' "${manifest}" | sort | uniq -d >&2
+    return 2
+  fi
+
+  return 0
+}
+
 
 v2k_vmware_snapshot_create() {
   local manifest="$1" which="$2" name="$3"
@@ -119,11 +223,7 @@ v2k_vmware_snapshot_cleanup() {
   v2k_require_govc_env
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
-  # Conservative: remove snapshots starting with migr-
-  # (You can harden this with manifest snapshot refs later)
   govc snapshot.tree -vm "${vm}" >/dev/null 2>&1 || true
-  # govc snapshot.remove accepts a snapshot name, but tree parsing is non-trivial without stable IDs
-  # v1: do nothing by default (safe). Implement in v2 if needed.
   v2k_event INFO "cleanup" "" "snapshot_cleanup_skip" "{\"reason\":\"v1 does not auto-remove snapshots for safety\"}"
 }
 
@@ -133,7 +233,6 @@ v2k_vmware_cbt_enable_all() {
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
 
-  # Enable VM-level CBT (ctkEnabled)
   govc vm.change -vm "${vm}" -e "ctkEnabled=true" >/dev/null
 
   local count
@@ -142,16 +241,13 @@ v2k_vmware_cbt_enable_all() {
   for ((i=0;i<count;i++)); do
     local disk_id
     disk_id="$(jq -r ".disks[$i].disk_id" "${manifest}")"
-    # disk_id example: scsi0:0 -> key scsi0:0.ctkEnabled=true
     if [[ "${disk_id}" =~ ^scsi[0-9]+:[0-9]+$ ]]; then
       govc vm.change -vm "${vm}" -e "${disk_id}.ctkEnabled=true" >/dev/null
     else
-      # fallback: can't map to scsi param; record warning
       v2k_event INFO "cbt_enable" "${disk_id}" "cbt_enable_skip" "{\"reason\":\"non-scsi disk_id; cannot set scsiX:Y.ctkEnabled\"}"
     fi
   done
 
-  # Verify and update manifest fields (enabled flag only in v1)
   for ((i=0;i<count;i++)); do
     local d_id
     d_id="$(jq -r ".disks[$i].disk_id" "${manifest}")"
@@ -163,7 +259,6 @@ v2k_vmware_cbt_status_all() {
   local manifest="$1"
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
-  # Minimal status from manifest
   jq -c '{vm:.source.vm.name, disks:(.disks|map({disk_id:.disk_id, cbt_enabled:.cbt.enabled}))}' "${manifest}"
 }
 
@@ -180,7 +275,6 @@ v2k_vmware_snapshot_moref_by_name() {
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
 
-  # govc snapshot.tree -json includes snapshot moRef
   govc snapshot.tree -vm "${vm}" -json | jq -r --arg n "${snap_name}" '
     def walk(nodes):
       nodes[]? as $x
@@ -192,7 +286,6 @@ v2k_vmware_snapshot_moref_by_name() {
 
 v2k_vmware_get_thumbprint() {
   local esxi_host="$1"
-  # From validated sequence: openssl s_client -> x509 fingerprint -sha1 -> uppercase
   echo | openssl s_client -connect "${esxi_host}:443" 2>/dev/null \
     | openssl x509 -noout -fingerprint -sha1 \
     | cut -d= -f2 | tr '[:lower:]' '[:upper:]'

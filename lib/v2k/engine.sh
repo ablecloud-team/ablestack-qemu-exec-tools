@@ -17,24 +17,24 @@
 
 set -euo pipefail
 
-V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/logging.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/manifest.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/vmware_govc.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/transfer_base.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/transfer_base.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/transfer_patch.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/transfer_patch.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/target_libvirt.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/target_libvirt.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/verify.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/verify.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/v2k/nbd_utils.sh"
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/nbd_utils.sh"
 
 
 v2k_set_paths() {
@@ -62,6 +62,10 @@ v2k_require_manifest() {
 
 v2k_cmd_init() {
   local vm="" vcenter="" dst="" mode="govc" cred_file=""
+
+  # New: target override options (CLI -> env)
+  local target_format="" target_storage="" target_map_json=""
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --vm) vm="${2:-}"; shift 2;;
@@ -69,6 +73,12 @@ v2k_cmd_init() {
       --dst) dst="${2:-}"; shift 2;;
       --mode) mode="${2:-}"; shift 2;;
       --cred-file) cred_file="${2:-}"; shift 2;;
+
+      # --- new options ---
+      --target-format) target_format="${2:-}"; shift 2;;
+      --target-storage) target_storage="${2:-}"; shift 2;;
+      --target-map-json) target_map_json="${2:-}"; shift 2;;
+
       *) echo "Unknown option: $1" >&2; exit 2;;
     esac
   done
@@ -78,6 +88,39 @@ v2k_cmd_init() {
 
   if [[ -n "${cred_file}" ]]; then
     v2k_vmware_load_cred_file "${cred_file}"
+  fi
+
+  # Validate & apply target overrides (CLI wins for this run)
+  if [[ -n "${target_format}" ]]; then
+    case "${target_format}" in
+      qcow2|raw) export V2K_TARGET_FORMAT="${target_format}" ;;
+      *) echo "Invalid --target-format: ${target_format} (allowed: qcow2|raw)" >&2; exit 2;;
+    esac
+  fi
+
+  if [[ -n "${target_storage}" ]]; then
+    case "${target_storage}" in
+      file|block) export V2K_TARGET_STORAGE_TYPE="${target_storage}" ;;
+      *) echo "Invalid --target-storage: ${target_storage} (allowed: file|block)" >&2; exit 2;;
+    esac
+  fi
+
+  if [[ -n "${target_map_json}" ]]; then
+    # Validate + normalize JSON early (requires jq)
+    local map_compact
+    if ! map_compact="$(printf '%s' "${target_map_json}" | jq -c '.' 2>/dev/null)"; then
+      echo "Invalid --target-map-json (must be valid JSON object): ${target_map_json}" >&2
+      exit 2
+    fi
+    export V2K_TARGET_STORAGE_MAP_JSON="${map_compact}"
+  fi
+
+  # Safety: block storage requires map json
+  if [[ "${V2K_TARGET_STORAGE_TYPE:-file}" == "block" ]]; then
+    if [[ -z "${V2K_TARGET_STORAGE_MAP_JSON:-}" || "${V2K_TARGET_STORAGE_MAP_JSON}" == "{}" ]]; then
+      echo "--target-storage block requires --target-map-json '{\"scsi0:0\":\"/dev/sdb\",...}'" >&2
+      exit 2
+    fi
   fi
 
   if [[ -z "${V2K_RUN_ID:-}" ]]; then
@@ -101,16 +144,20 @@ v2k_cmd_init() {
     export V2K_EVENTS_LOG
   fi
 
-  v2k_event INFO "init" "" "phase_start" "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\"}"
+  # Log init start with target overrides for observability
+  v2k_event INFO "init" "" "phase_start" \
+    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\"}"
 
   local inv_json
   inv_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter}")"
 
+  # Build manifest using inventory json + target settings (from env)
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}"
 
   v2k_event INFO "init" "" "phase_done" "{\"manifest\":\"${V2K_MANIFEST}\",\"workdir\":\"${V2K_WORKDIR}\"}"
 
-  v2k_json_or_text_ok "init" "{\"run_id\":\"${V2K_RUN_ID}\",\"workdir\":\"${V2K_WORKDIR}\",\"manifest\":\"${V2K_MANIFEST}\"}" \
+  v2k_json_or_text_ok "init" \
+    "{\"run_id\":\"${V2K_RUN_ID}\",\"workdir\":\"${V2K_WORKDIR}\",\"manifest\":\"${V2K_MANIFEST}\"}" \
     "Initialized. run_id=${V2K_RUN_ID} workdir=${V2K_WORKDIR}"
 }
 
