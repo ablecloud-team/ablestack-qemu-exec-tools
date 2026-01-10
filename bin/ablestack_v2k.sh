@@ -26,6 +26,8 @@ source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/engine.sh"
 source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/orchestrator.sh"
 
 usage() {
   cat <<'EOF'
@@ -43,23 +45,61 @@ Global options:
   --dry-run               Do not execute destructive operations
   --resume                Resume based on manifest
   --force                 Force risky operations
+  -h, --help              Show help
 
-Commands:
+Commands (existing):
   init --vm <name|moref> --vcenter <host> --dst <path> [--mode govc] [--cred-file <file>] \
-       [--target-format qcow2|raw] [--target-storage file|block] [--target-map-json <json>]
+       [--target-format qcow2|raw] [--target-storage file|block] [--target-map-json <json>] \
+       [--force-block-device] \
+       [--vddk-cred-file <file>]
   cbt enable|status
   snapshot base|incr|final [--name <snapname>]
   sync base|incr|final [--jobs N] [--coalesce-gap BYTES] [--chunk BYTES]
   verify [--mode quick] [--samples N]
-  cutover [--shutdown guest|manual] [--define-only] [--start]
+  cutover [--shutdown manual|guest|poweroff] [--define-only] [--start] \
+          [--vcpu N] [--memory MB] [--network <name>] [--bridge <br>] [--vlan <id>] \
+          [--shutdown-timeout SEC] [--force-cleanup]
   cleanup [--keep-snapshots] [--keep-workdir]
   status
 
+Commands (product automation):
+  run  <pipeline options> <init args...>
+  auto <same as run>
+
+Pipeline options:
+  --shutdown manual|guest|poweroff    VMware VM shutdown policy for cutover (default: manual)
+  --kvm-vm-policy define-only|define-and-start
+                                     KVM VM action at cutover (default: define-only)
+  --incr-interval <sec>               Interval between incremental loops (default: 300)
+  --max-incr <N>                      Maximum number of incremental loops (default: 0 = unlimited)
+  --converge-threshold-sec <sec>      Stop incr loop early if (snapshot+sync) duration <= sec (default: 0=disabled)
+  --no-incr                           Skip incremental loops (base -> final -> cutover)
+
+  --jobs <N>                          Default jobs for sync steps
+  --chunk <BYTES>                     Default chunk size for sync steps
+  --coalesce-gap <BYTES>              Default coalesce gap for sync steps
+
+  --base-args "<...>"                 Extra args appended to base sync (quoted string)
+  --incr-args "<...>"                 Extra args appended to incr sync (quoted string)
+  --final-args "<...>"                Extra args appended to final sync (quoted string)
+  --cutover-args "<...>"              Extra args appended to cutover (quoted string)
+
 Notes:
-  - VMware integration priority is govc. Changed areas query uses pyvmomi helper (python3 + pyvmomi).
-  - Target override options set V2K_TARGET_* internally for this run (no need to export env vars).
-  - Final default: shutdown -> final snapshot -> final sync (as approved).
+  - run/auto orchestrates by calling existing v2k_cmd_* functions in engine.sh.
+  - init args are passed as-is after pipeline options.
+  - For complex quoting, prefer running discrete commands rather than arg-string.
 EOF
+}
+
+die() { echo "ERROR: $*" >&2; exit 2; }
+
+parse_arg_string() {
+  local s="${1-}"
+  local -n _out_arr="${2}"
+  _out_arr=()
+  [[ -z "${s}" ]] && return 0
+  # shellcheck disable=SC2162
+  read -r -a _out_arr <<<"${s}"
 }
 
 # ---------------------------
@@ -103,7 +143,6 @@ export V2K_DRY_RUN="${DRY_RUN}"
 export V2K_RESUME="${RESUME}"
 export V2K_FORCE="${FORCE}"
 
-# Resolve workdir/manifest/log lazily (init may generate)
 v2k_set_paths \
   "${WORKDIR}" \
   "${RUN_ID}" \
@@ -111,6 +150,9 @@ v2k_set_paths \
   "${EVENTS_LOG}"
 
 case "${CMD}" in
+  run|auto)
+    v2k_cmd_run "${shifted_args[@]}"
+    ;;
   init)
     v2k_cmd_init "${shifted_args[@]}"
     ;;

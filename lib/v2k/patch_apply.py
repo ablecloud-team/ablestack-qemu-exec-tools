@@ -81,6 +81,12 @@ def main() -> None:
         for off, ln in merged:
             copy_region(src_fd, dst_fd, off, ln, args.chunk)
 
+        # Ensure data reaches the underlying block device before disconnect
+        try:
+            dst_fd.flush()
+            os.fsync(dst_fd.fileno())
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()

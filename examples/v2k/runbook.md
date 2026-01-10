@@ -1,128 +1,190 @@
 # v2k Runbook (Operator)
 
-이 문서는 `ablestack_v2k` 기반 VMware → ABLESTACK(KVM) 최소 중단 마이그레이션을 운영 절차로 정리한 Runbook 입니다.
+이 문서는 `ablestack_v2k` 기반 VMware → ABLESTACK(KVM) 최소 중단 마이그레이션을 운영 절차로 정리한 Runbook 입니다.  
 (기본 정책: **final 단계는 shutdown 후 final snapshot 생성**)
 
 ---
 
-## 0. 사전 점검(Go/No-Go)
+## 0. 목적과 범위
 
-### VMware 측
-- [ ] VM에 CBT 활성화 가능한 상태(스냅샷/디스크 잠금 이슈 없음)
-- [ ] vCenter/ESXi 접근 계정 권한 확보
-- [ ] VM의 디스크/컨트롤러 구성(멀티디스크/컨트롤러 타입) 확인
-- [ ] Windows VM: Fast Startup/Hibernation 비활성 권고(정합성)
+본 Runbook은 `ablestack_v2k` 기반으로 **VMware → ABLESTACK(KVM)** 최소 중단 마이그레이션을 수행하기 위한 **운영 절차 문서**이다.
 
-### KVM(ABLESTACK) 측
-- [ ] 대상 스토리지 경로 준비(예: /var/lib/libvirt/images/<VM>)
-- [ ] qemu-img/virsh/jq/python3 준비
-- [ ] 전송 대역폭(기간/업무시간) 계획
+- 대상: 운영 환경 VM
+- 방식: CBT + Snapshot + NBDKit(VDDK)
+- 원칙: **final 단계는 반드시 VM shutdown 이후 수행**
 
 ---
 
-## 1. 작업 디렉토리 / 환경변수
+## 1. 사전 점검(Go / No-Go)
+
+### 1.1 VMware 측
+- [ ] VM에 CBT 활성화 가능 상태 (스냅샷/디스크 잠금 이슈 없음)
+- [ ] vCenter 접근 계정 준비 (govc 전용)
+- [ ] ESXi 접근 계정 준비 (VDDK 전용)
+- [ ] VM 디스크/컨트롤러 구성 확인 (SCSI 권장)
+- [ ] Windows VM의 경우 Fast Startup / Hibernation 비활성화 권장
+
+### 1.2 KVM(ABLESTACK) 측
+- [ ] 대상 스토리지 경로 확보 (예: `/var/lib/libvirt/images/<VM>`)
+- [ ] 필수 도구 설치: `qemu-img`, `virsh`, `jq`, `python3`
+- [ ] `nbdkit` 설치 및 실행 가능
+- [ ] VMware VDDK 라이브러리 설치
+- [ ] ESXi ↔ KVM 호스트 간 네트워크 통신 가능 (443/TCP)
+
+---
+
+## 2. 인증 구조 개요 (중요)
+
+본 파이프라인은 **인증을 명확히 분리**한다.
+
+| 구분 | 용도 | 사용 위치 |
+|---|---|---|
+| GOVC (vCenter) | Inventory, Snapshot, CBT | `govc`, `pyvmomi` |
+| VDDK (ESXi) | 디스크 데이터 전송 | `nbdkit-vddk` |
+
+> ⚠️ **GOVC 계정 ≠ VDDK 계정**  
+> VDDK 단계에서 vCenter 계정을 사용하는 것은 제품 정책상 허용하지 않는다.
+
+---
+
+## 3. 사전 환경 변수 및 인증 파일 준비
+
+### 3.1 vCenter (GOVC) 환경 변수
 
 ```bash
+# vCenter API / Snapshot / CBT 관리용
 source examples/v2k/govc.env.example
+```
+
+포함 항목:
+- `GOVC_URL`
+- `GOVC_USERNAME`
+- `GOVC_PASSWORD`
+- `GOVC_INSECURE`
+
+---
+
+### 3.2 ESXi (VDDK) 인증 파일 생성
+
+VDDK는 **ESXi 호스트에 직접 접속**하여 디스크 데이터를 읽는다.
+
+```bash
+# examples/v2k/vddk.cred
+VDDK_USER="root"
+VDDK_PASSWORD="********"
+
+# (선택) 접속 주소 override
+# 지정 시 manifest의 .source.vddk.server 로 기록됨
+# VDDK_SERVER="10.10.10.21"
+```
+
+보안 정책:
+- init 시 workdir로 복사
+- 권한: `600`
+- manifest에는 **경로만 기록** (비밀번호 저장 안 함)
+
+---
+
+### 3.3 기타 필수 환경 변수
+
+```bash
 export VMNAME="vmA"
 export DST="/var/lib/libvirt/images/${VMNAME}"
+export VDDK_LIBDIR="/opt/vmware-vix-disklib-distrib"
+export VDDK_CRED="./examples/v2k/vddk.cred"
 ```
 
 ---
 
-## 2. Init (Inventory + Manifest 생성)
+## 4. Init 단계 (Inventory + Manifest 생성)
 
 ```bash
-sudo bin/ablestack_v2k.sh init --vm "${VMNAME}" --vcenter "${GOVC_URL}" --dst "${DST}"
+sudo ablestack_v2k init   --vm "${VMNAME}"   --vcenter "${GOVC_URL}"   --dst "${DST}"   --vddk-cred-file "${VDDK_CRED}"
 ```
 
-- 출력된 `workdir` 기록
-- `manifest.json`, `events.log` 생성 확인
+Init 단계에서 자동 수행되는 작업:
+- VM inventory 수집
+- 실행 중인 ESXi host 탐색
+- ESXi management IP 자동 결정
+- manifest.json 생성
+- `vddk.cred`를 workdir로 안전하게 복사
+- `.source.vddk.*`, `.source.esxi_*` 필드 구성
 
 ---
 
-## 3. CBT Enable
+## 5. CBT Enable
 
 ```bash
-sudo bin/ablestack_v2k.sh --workdir <workdir> cbt enable
-sudo bin/ablestack_v2k.sh --workdir <workdir> cbt status --json
+sudo ablestack_v2k --workdir <workdir> cbt enable
+sudo ablestack_v2k --workdir <workdir> cbt status
 ```
 
 ---
 
-## 4. Base Snapshot & Base Sync
+## 6. Base Snapshot & Base Sync
 
 ```bash
-sudo bin/ablestack_v2k.sh --workdir <workdir> snapshot base
-sudo bin/ablestack_v2k.sh --workdir <workdir> sync base
+sudo ablestack_v2k --workdir <workdir> snapshot base
+sudo ablestack_v2k --workdir <workdir> sync base --jobs 4
 ```
 
-운영 팁
-- base는 가장 오래 걸리므로 야간/저부하 구간 권장
-- 실제 운영 파이프라인(nbdkit-vddk)을 적용한 후 사용
+- Base sync는 전체 디스크 전송
+- 가장 오래 걸리므로 야간/저부하 시간대 권장
 
 ---
 
-## 5. Incremental Loop (업무시간 반복 가능)
+## 7. Incremental Loop (업무 중 반복)
 
 ```bash
-# 반복(예: 30분~2시간 간격)
-sudo bin/ablestack_v2k.sh --workdir <workdir> snapshot incr
-sudo bin/ablestack_v2k.sh --workdir <workdir> sync incr
+sudo ablestack_v2k --workdir <workdir> snapshot incr
+sudo ablestack_v2k --workdir <workdir> sync incr --jobs 4
 ```
 
-컷오버 판단 기준(권장)
-- incr bytes(변경량)가 충분히 작아지고, 마지막 sync 소요 시간이 허용 범위에 들어오면 컷오버 창(maintenance window) 확정
+컷오버 판단 기준:
+- incr 변경량이 충분히 감소
+- 마지막 incr sync 시간이 허용 범위 이내
 
 ---
 
-## 6. Cutover (Shutdown + Final Snapshot + Final Sync)
+## 8. Cutover (Shutdown + Final Sync)
 
-1) VMware VM Shutdown (운영자 확인)
-- [ ] 애플리케이션 정지/서비스 배포 창 확보
-- [ ] VM 정상 종료 확인
+1) VMware VM 종료 (운영자 확인)
 
 2) Cutover 실행
 
 ```bash
-sudo bin/ablestack_v2k.sh --workdir <workdir> cutover --define-only --start
+sudo ablestack_v2k --workdir <workdir> cutover --define-only --start
 ```
-
-- final snapshot 생성 → final sync 실행 → libvirt define/start(옵션)
-- ABLESTACK 환경에 맞는 XML 템플릿/네트워크/CPU/메모리는 추후 정책 반영
 
 ---
 
-## 7. Verify (Quick)
+## 9. Verify
 
 ```bash
-sudo bin/ablestack_v2k.sh --workdir <workdir> verify --mode quick --samples 64
+sudo ablestack_v2k --workdir <workdir> verify --mode quick --samples 64
 ```
 
 ---
 
-## 8. 롤백 플랜(요약)
-
-- KVM VM 부팅 실패/서비스 이상:
-  - [ ] KVM VM stop/undefine
-  - [ ] VMware VM power on (원본 유지되어야 함)
-- 최종적으로 문제 원인 분석 후 재시도:
-  - [ ] workdir 유지한 채 `--resume` 기반 재실행 권장
-
----
-
-## 9. Cleanup
+## 10. Cleanup
 
 ```bash
-# 스냅샷 삭제는 정책 확인 후 진행(기본: v1은 자동 삭제 안 함)
-sudo bin/ablestack_v2k.sh --workdir <workdir> cleanup --keep-workdir
+sudo ablestack_v2k --workdir <workdir> cleanup --keep-workdir
 ```
 
 ---
 
-## 장애/트러블슈팅 체크포인트
+## 11. 트러블슈팅 (VDDK 중심)
 
-- govc 연결 오류: GOVC_URL/USERNAME/PASSWORD/INSECURE 확인
-- changedAreas 조회 실패: pyvmomi 설치/인증서/권한 확인
-- nbd 장치 문제(운영 파이프라인 적용 시): detach/lock/잔존 프로세스 확인
-- 성능 이슈: coalesce-gap/chunk/jobs 튜닝, 네트워크 병목 확인
+### VDDK 인증 실패
+- `vddk.cred`의 `VDDK_USER / VDDK_PASSWORD` 확인
+- ESXi Lockdown Mode 여부 확인
+- `.source.vddk.server` 우선 사용 여부 확인
+- fallback: `.source.esxi_host`
+
+### govc 오류
+- `GOVC_*` 환경 변수 확인
+
+### 성능 이슈
+- `--jobs` 조정
+- 네트워크 병목 확인

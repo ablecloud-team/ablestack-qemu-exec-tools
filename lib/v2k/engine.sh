@@ -35,7 +35,8 @@ source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/target_libvirt.sh"
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/verify.sh"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/nbd_utils.sh"
-
+# shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/v2k_target_device.sh"
 
 v2k_set_paths() {
   local workdir_in="${1:-}"
@@ -43,10 +44,54 @@ v2k_set_paths() {
   local manifest_in="${3:-}"
   local log_in="${4:-}"
 
+  # ------------------------------------------------------------
+  # Apply defaults as documented in ablestack_v2k usage:
+  #   --manifest default: <workdir>/manifest.json
+  #   --log      default: <workdir>/events.log
+  #
+  # Also support:
+  #   If only --manifest is given, infer workdir = dirname(manifest)
+  #
+  # IMPORTANT:
+  #   Do NOT auto-generate workdir when empty here.
+  #   init command already generates workdir/run-id/manifest/log.
+  # ------------------------------------------------------------
+
+  # Normalize empty/"null"
+  if [[ "${workdir_in}" == "null" ]]; then workdir_in=""; fi
+  if [[ "${manifest_in}" == "null" ]]; then manifest_in=""; fi
+  if [[ "${log_in}" == "null" ]]; then log_in=""; fi
+
+  # If manifest is provided but workdir is not, infer workdir.
+  if [[ -z "${workdir_in}" && -n "${manifest_in}" ]]; then
+    workdir_in="$(dirname "${manifest_in}")"
+  fi
+
+  # If workdir is provided, default manifest/log under it.
+  if [[ -n "${workdir_in}" ]]; then
+    # trim trailing slashes
+    workdir_in="${workdir_in%/}"
+    if [[ -z "${manifest_in}" ]]; then
+      manifest_in="${workdir_in}/manifest.json"
+    fi
+    if [[ -z "${log_in}" ]]; then
+      log_in="${workdir_in}/events.log"
+    fi
+  fi
+
   export V2K_WORKDIR="${workdir_in}"
   export V2K_RUN_ID="${run_id_in}"
   export V2K_MANIFEST="${manifest_in}"
   export V2K_EVENTS_LOG="${log_in}"
+}
+
+# vCenter(또는 지정 server)의 SSL SHA1 thumbprint 계산
+v2k_get_ssl_thumbprint_sha1() {
+  local host="$1"
+  [[ -n "${host}" ]] || return 1
+  echo | openssl s_client -connect "${host}:443" 2>/dev/null \
+    | openssl x509 -noout -fingerprint -sha1 \
+    | cut -d= -f2 | tr '[:lower:]' '[:upper:]'
 }
 
 v2k_require_manifest() {
@@ -60,11 +105,32 @@ v2k_require_manifest() {
   fi
 }
 
+v2k_load_runtime_flags_from_manifest() {
+  # manifest가 존재한다는 전제(v2k_require_manifest 이후 호출)
+  local force
+  force="$(jq -r '.target.storage.force_block_device // false' "${V2K_MANIFEST}" 2>/dev/null || echo "false")"
+
+  if [[ "${force}" == "true" ]]; then
+    export V2K_FORCE_BLOCK_DEVICE="1"
+  else
+    export V2K_FORCE_BLOCK_DEVICE="0"
+  fi
+
+  # Observability: force-block-device 상태를 event에 기록
+  # - command 별로 호출되므로, 해당 커맨드의 phase_start 전에 남겨도 문제 없음
+  v2k_event INFO "runtime" "" "force_block_device" \
+    "{\"enabled\":${force},\"source\":\"manifest\",\"manifest\":\"${V2K_MANIFEST}\"}"
+}
+
 v2k_cmd_init() {
   local vm="" vcenter="" dst="" mode="govc" cred_file=""
 
+  # New: VDDK(ESXi) auth (separated from GOVC/vCenter)
+  local vddk_cred_file=""
+
   # New: target override options (CLI -> env)
   local target_format="" target_storage="" target_map_json=""
+  local force_block_device=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -73,11 +139,14 @@ v2k_cmd_init() {
       --dst) dst="${2:-}"; shift 2;;
       --mode) mode="${2:-}"; shift 2;;
       --cred-file) cred_file="${2:-}"; shift 2;;
+      --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;;
 
       # --- new options ---
       --target-format) target_format="${2:-}"; shift 2;;
       --target-storage) target_storage="${2:-}"; shift 2;;
       --target-map-json) target_map_json="${2:-}"; shift 2;;
+
+      --force-block-device) force_block_device=1; shift 1;;
 
       *) echo "Unknown option: $1" >&2; exit 2;;
     esac
@@ -90,6 +159,45 @@ v2k_cmd_init() {
     v2k_vmware_load_cred_file "${cred_file}"
   fi
 
+  # Persist VDDK cred file into workdir (productization)
+  # - Do NOT store password in manifest
+  # - Keep a secure on-disk cred file referenced by manifest
+  if [[ -n "${vddk_cred_file}" ]]; then
+    local vddk_saved="${V2K_WORKDIR}/vddk.cred"
+    install -m 600 "${vddk_cred_file}" "${vddk_saved}"
+    export V2K_VDDK_CRED_FILE="${vddk_saved}"
+  else
+    export V2K_VDDK_CRED_FILE=""
+  fi
+
+  # ---- VDDK(vCenter) thumbprint 제품화 자동화 ----
+  # 1) cred_file 내부에 VDDK_THUMBPRINT가 있으면 우선 사용
+  # 2) 없으면 V2K_VDDK_SERVER(또는 vCenter host)로 openssl 계산
+  if [[ -n "${V2K_VDDK_CRED_FILE-}" && -f "${V2K_VDDK_CRED_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${V2K_VDDK_CRED_FILE}"
+    # cred 파일에 user/pass/server/thumbprint가 있다면 env로 승격
+    [[ -n "${VDDK_USER-}" ]] && export V2K_VDDK_USER="${VDDK_USER}"
+    [[ -n "${VDDK_SERVER-}" ]] && export V2K_VDDK_SERVER="${VDDK_SERVER}"
+    [[ -n "${VDDK_THUMBPRINT-}" ]] && export V2K_VDDK_THUMBPRINT="${VDDK_THUMBPRINT}"
+  fi
+
+  # thumbprint가 여전히 비어있으면 server 대상으로 자동 계산
+  if [[ -z "${V2K_VDDK_THUMBPRINT-}" ]]; then
+    local server host_from_vcenter
+    server="${V2K_VDDK_SERVER-}"
+    if [[ -z "${server}" ]]; then
+      # GOVC_URL == https://x.x.x.x/sdk 형태에서 host만 추출
+      host_from_vcenter="$(printf '%s' "${GOVC_URL-}" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##; s#^.*@##; s#:[0-9]+$##')"
+      server="${host_from_vcenter}"
+      [[ -n "${server}" ]] && export V2K_VDDK_SERVER="${server}"
+    fi
+    if [[ -n "${server}" ]]; then
+      V2K_VDDK_THUMBPRINT="$(v2k_get_ssl_thumbprint_sha1 "${server}" || true)"
+      export V2K_VDDK_THUMBPRINT
+    fi
+  fi
+
   # Validate & apply target overrides (CLI wins for this run)
   if [[ -n "${target_format}" ]]; then
     case "${target_format}" in
@@ -100,8 +208,8 @@ v2k_cmd_init() {
 
   if [[ -n "${target_storage}" ]]; then
     case "${target_storage}" in
-      file|block) export V2K_TARGET_STORAGE_TYPE="${target_storage}" ;;
-      *) echo "Invalid --target-storage: ${target_storage} (allowed: file|block)" >&2; exit 2;;
+      file|block|rbd) export V2K_TARGET_STORAGE_TYPE="${target_storage}" ;;
+      *) echo "Invalid --target-storage: ${target_storage} (allowed: file|block|rbd)" >&2; exit 2;;
     esac
   fi
 
@@ -115,13 +223,15 @@ v2k_cmd_init() {
     export V2K_TARGET_STORAGE_MAP_JSON="${map_compact}"
   fi
 
-  # Safety: block storage requires map json
-  if [[ "${V2K_TARGET_STORAGE_TYPE:-file}" == "block" ]]; then
+  # Safety: block/rbd storage requires map json
+  if [[ "${V2K_TARGET_STORAGE_TYPE:-file}" == "block" || "${V2K_TARGET_STORAGE_TYPE:-file}" == "rbd" ]]; then
     if [[ -z "${V2K_TARGET_STORAGE_MAP_JSON:-}" || "${V2K_TARGET_STORAGE_MAP_JSON}" == "{}" ]]; then
-      echo "--target-storage block requires --target-map-json '{\"scsi0:0\":\"/dev/sdb\",...}'" >&2
+      echo "--target-storage block|rbd requires --target-map-json '{\"scsi0:0\":\"/dev/sdb\",\"scsi0:1\":\"rbd:pool/image\",...}'" >&2
       exit 2
     fi
   fi
+
+  export V2K_FORCE_BLOCK_DEVICE="${force_block_device}"
 
   if [[ -z "${V2K_RUN_ID:-}" ]]; then
     V2K_RUN_ID="$(date +%Y%m%d-%H%M%S)-$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -163,6 +273,7 @@ v2k_cmd_init() {
 
 v2k_cmd_cbt() {
   v2k_require_manifest
+  v2k_load_runtime_flags_from_manifest
   local action="${1:-}"
   case "${action}" in
     enable)
@@ -186,6 +297,7 @@ v2k_cmd_cbt() {
 
 v2k_cmd_snapshot() {
   v2k_require_manifest
+  v2k_load_runtime_flags_from_manifest
   local which="${1:-}" name=""
   shift || true
   while [[ $# -gt 0 ]]; do
@@ -213,8 +325,41 @@ v2k_cmd_snapshot() {
   esac
 }
 
+v2k_prepare_cbt_change_ids_for_sync() {
+  local manifest="$1" which="$2"
+  # For incr/final we must ensure changeId fields exist for CBT-enabled disks.
+  # This prevents "empty changeId" runs and stabilizes incremental logic.
+  #
+  # NOTE: actual 'changeId advancement' is expected to be performed by the
+  # patch pipeline (vmware_changed_areas.py + transfer_patch.sh) and persisted
+  # into manifest. Here we only ensure initialization.
+  if [[ "${which}" == "incr" || "${which}" == "final" ]]; then
+    v2k_manifest_ensure_cbt_change_ids "${manifest}"
+  fi
+}
+
+v2k_prepare_cbt_change_ids_after_base() {
+  local manifest="$1"
+  # After base sync completes, initialize base/last changeId for CBT-enabled disks.
+  # This makes the next incr sync deterministic even if the patch pipeline expects
+  # non-empty last_change_id.
+  v2k_manifest_ensure_cbt_change_ids "${manifest}"
+}
+
+v2k_maybe_force_cleanup() {
+  # force cleanup ONLY this run namespace
+  if [[ "${V2K_FORCE_CLEANUP:-0}" -eq 1 ]]; then
+    v2k_event WARN "runtime" "" "force_cleanup" "{\"run_id\":\"${V2K_RUN_ID:-}\"}"
+    v2k_force_cleanup_run "${V2K_RUN_ID:-}" || true
+  fi
+}
+
 v2k_cmd_sync() {
+  local manifest="${V2K_MANIFEST}"
+  local force_cleanup=0
+
   v2k_require_manifest
+  v2k_load_runtime_flags_from_manifest
   local which="${1:-}" jobs=1 coalesce_gap=$((1024*1024)) chunk=$((4*1024*1024))
   shift || true
   while [[ $# -gt 0 ]]; do
@@ -222,14 +367,21 @@ v2k_cmd_sync() {
       --jobs) jobs="${2:-}"; shift 2;;
       --coalesce-gap) coalesce_gap="${2:-}"; shift 2;;
       --chunk) chunk="${2:-}"; shift 2;;
+      --force-cleanup) force_cleanup=1; shift 1;;
       *) echo "Unknown option: $1" >&2; exit 2;;
     esac
   done
+
+  export V2K_FORCE_CLEANUP="${force_cleanup}"
+  v2k_maybe_force_cleanup
+
+  v2k_prepare_cbt_change_ids_for_sync "${V2K_MANIFEST}" "${which}"
 
   case "${which}" in
     base)
       v2k_event INFO "sync.base" "" "phase_start" "{\"jobs\":${jobs}}"
       v2k_transfer_base_all "${V2K_MANIFEST}" "${jobs}"
+      v2k_prepare_cbt_change_ids_after_base "${V2K_MANIFEST}"
       v2k_manifest_phase_done "${V2K_MANIFEST}" "base_sync"
       v2k_event INFO "sync.base" "" "phase_done" "{}"
       v2k_json_or_text_ok "sync.base" "{}" "Base sync done."
@@ -250,6 +402,7 @@ v2k_cmd_sync() {
 
 v2k_cmd_verify() {
   v2k_require_manifest
+  v2k_load_runtime_flags_from_manifest
   local mode="quick" samples=64
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -268,25 +421,64 @@ v2k_cmd_verify() {
 
 v2k_cmd_cutover() {
   v2k_require_manifest
+  v2k_load_runtime_flags_from_manifest
   local shutdown="manual" define_only=0 start_vm=0
+  local shutdown_force=1 shutdown_timeout=300
+  local vcpu=2 memory=2048
+  local network="default" bridge="" vlan=""
+  local force_cleanup=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --shutdown) shutdown="${2:-}"; shift 2;;
+      --shutdown-force) shutdown_force=1; shift 1;;
+      --shutdown-timeout) shutdown_timeout="${2:-}"; shift 2;;
       --define-only) define_only=1; shift 1;;
       --start) start_vm=1; shift 1;;
+      --vcpu) vcpu="${2:-}"; shift 2;;
+      --memory) memory="${2:-}"; shift 2;;
+      --network) network="${2:-}"; shift 2;;
+      --bridge) bridge="${2:-}"; shift 2;;
+      --vlan) vlan="${2:-}"; shift 2;;
+      --force-cleanup) force_cleanup=1; shift 1;; 
       *) echo "Unknown option: $1" >&2; exit 2;;
     esac
   done
 
+  export V2K_FORCE_CLEANUP="${force_cleanup}"
+  v2k_maybe_force_cleanup
+
   # As approved: default flow is shutdown -> final snapshot -> final sync
   v2k_event INFO "cutover" "" "phase_start" "{\"shutdown\":\"${shutdown}\"}"
 
-  if [[ "${shutdown}" == "guest" ]]; then
-    # Placeholder hook: in v1 we do not force guest shutdown automatically.
-    v2k_event INFO "cutover" "" "shutdown_hook" "{\"note\":\"guest shutdown hook not implemented in v1; do manual shutdown or extend.\"}"
-  fi
-
-  echo "Cutover requires VM to be shutdown on VMware side. Confirm shutdown before proceeding." >&2
+  case "${shutdown}" in
+    manual)
+      echo "Cutover requires VM to be shutdown on VMware side. Confirm shutdown before proceeding." >&2
+      ;;
+    guest)
+      # Best-effort guest shutdown; fallback to hard poweroff if not supported/failed.
+      v2k_event INFO "cutover" "" "shutdown_guest_attempt" "{}"
+      if v2k_vmware_vm_shutdown_guest_best_effort "${V2K_MANIFEST}"; then
+        if ! v2k_vmware_vm_wait_poweroff "${V2K_MANIFEST}" "${shutdown_timeout}"; then
+          v2k_event WARN "cutover" "" "shutdown_guest_timeout_fallback_poweroff" "{\"timeout\":${shutdown_timeout}}"
+          v2k_vmware_vm_poweroff "${V2K_MANIFEST}" "${shutdown_force}" "${shutdown_timeout}" \
+            || { echo "Failed to power off VM via govc (guest+fallback)." >&2; exit 50; }
+        fi
+      else
+        v2k_event WARN "cutover" "" "shutdown_guest_unsupported_fallback_poweroff" "{}"
+        v2k_vmware_vm_poweroff "${V2K_MANIFEST}" "${shutdown_force}" "${shutdown_timeout}" \
+          || { echo "Failed to power off VM via govc." >&2; exit 50; }
+      fi
+      ;;
+    poweroff)
+      v2k_event INFO "cutover" "" "shutdown_poweroff" "{\"force\":${shutdown_force},\"timeout\":${shutdown_timeout}}"
+      v2k_vmware_vm_poweroff "${V2K_MANIFEST}" "${shutdown_force}" "${shutdown_timeout}" \
+        || { echo "Failed to power off VM via govc." >&2; exit 50; }
+      ;;
+    *)
+      echo "Invalid --shutdown value: ${shutdown} (allowed: manual|guest|poweroff)" >&2
+      exit 2
+      ;;
+  esac
 
   # Always create final snapshot as default
   local name="migr-final-$(date +%Y%m%d-%H%M%S)"
@@ -299,7 +491,17 @@ v2k_cmd_cutover() {
   # libvirt define
   if [[ "${define_only}" -eq 1 || "${start_vm}" -eq 1 ]]; then
     local xml_path
-    xml_path="$(v2k_target_generate_libvirt_xml "${V2K_MANIFEST}")"
+    if [[ -n "${bridge}" ]]; then
+      xml_path="$(v2k_target_generate_libvirt_xml "${V2K_MANIFEST}" \
+        --vcpu "${vcpu}" --memory "${memory}" \
+        --bridge "${bridge}" $( [[ -n "${vlan}" ]] && echo --vlan "${vlan}" ) \
+      )"
+    else
+      xml_path="$(v2k_target_generate_libvirt_xml "${V2K_MANIFEST}" \
+        --vcpu "${vcpu}" --memory "${memory}" \
+        --network "${network}" \
+      )"
+    fi
     v2k_target_define_libvirt "${xml_path}"
     if [[ "${start_vm}" -eq 1 ]]; then
       v2k_target_start_vm "${V2K_MANIFEST}"
@@ -313,6 +515,7 @@ v2k_cmd_cutover() {
 
 v2k_cmd_cleanup() {
   v2k_require_manifest
+  v2k_load_runtime_flags_from_manifest
   local keep_snapshots=0 keep_workdir=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -335,6 +538,7 @@ v2k_cmd_cleanup() {
 
 v2k_cmd_status() {
   v2k_require_manifest
+  v2k_load_runtime_flags_from_manifest
   local summary
   summary="$(v2k_manifest_status_summary "${V2K_MANIFEST}" "${V2K_EVENTS_LOG:-}")"
   v2k_json_or_text_ok "status" "${summary}" "${summary}"

@@ -24,6 +24,80 @@
 
 set -euo pipefail
 
+# NOTE:
+# - We intentionally rely on govc commands only.
+# - Hard power-off is the most reliable option in the field.
+#   govc vm.power -off -force <vm> is confirmed in multiple references. :contentReference[oaicite:1]{index=1}
+
+v2k_vmware_vm_power_state() {
+  local manifest="$1"
+  v2k_require_govc_env
+  local vm
+  vm="$(jq -r '.source.vm.name' "${manifest}")"
+  # govc vm.info -json provides runtime.powerState; fallback to empty.
+  govc vm.info -json "${vm}" 2>/dev/null \
+    | jq -r '.virtualMachines[0].runtime.powerState // empty' 2>/dev/null \
+    || true
+}
+
+v2k_vmware_vm_wait_poweroff() {
+  local manifest="$1" timeout="${2:-300}"
+  local t=0
+  while (( t < timeout )); do
+    local st
+    st="$(v2k_vmware_vm_power_state "${manifest}")"
+    if [[ "${st}" == "poweredOff" || "${st}" == "off" ]]; then
+      return 0
+    fi
+    sleep 2
+    t=$((t+2))
+  done
+  return 1
+}
+
+v2k_vmware_vm_poweroff() {
+  local manifest="$1" force="${2:-1}" timeout="${3:-300}"
+  v2k_require_govc_env
+  local vm
+  vm="$(jq -r '.source.vm.name' "${manifest}")"
+
+  # If already off, ok.
+  local st
+  st="$(v2k_vmware_vm_power_state "${manifest}")"
+  if [[ "${st}" == "poweredOff" || "${st}" == "off" ]]; then
+    return 0
+  fi
+
+  if [[ "${force}" == "1" ]]; then
+    govc vm.power -off -force "${vm}"
+  else
+    govc vm.power -off "${vm}"
+  fi
+
+  v2k_vmware_vm_wait_poweroff "${manifest}" "${timeout}"
+}
+
+# Best-effort “guest shutdown” (only if govc supports it on this build).
+# - If unsupported or fails, caller may fallback to poweroff.
+v2k_vmware_vm_shutdown_guest_best_effort() {
+  local manifest="$1"
+  v2k_require_govc_env
+  local vm
+  vm="$(jq -r '.source.vm.name' "${manifest}")"
+
+  # Detect supported flags dynamically (avoid hard dependency on exact govc version).
+  local help
+  help="$(govc vm.power -h 2>&1 || true)"
+
+  # Commonly seen flags in some builds: -shutdown / -reboot / -reset / etc.
+  if echo "${help}" | grep -q -- '-shutdown'; then
+    govc vm.power -shutdown "${vm}"
+    return 0
+  fi
+
+  return 1
+}
+
 v2k_vmware_load_cred_file() {
   local file="$1"
   [[ -f "${file}" ]] || { echo "cred-file not found: ${file}" >&2; exit 2; }
@@ -39,17 +113,85 @@ v2k_require_govc_env() {
   : "${GOVC_INSECURE:=1}"
 }
 
+v2k_is_ipv4() {
+  local s="${1:-}"
+  [[ "${s}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  # 0-255 범위는 엄격 체크 안 함(필요 시 보강)
+  return 0
+}
+
+v2k_resolve_ipv4() {
+  local host="$1"
+  # DNS/hosts 기반 IPv4 1개만 선택
+  getent ahostsv4 "${host}" 2>/dev/null | awk 'NR==1{print $1; exit}'
+}
+
+v2k_vmware_esxi_mgmt_ip_from_hostinfo_json() {
+  local hostinfo_json="$1"
+  printf '%s' "${hostinfo_json}" | jq -r '
+    (.hostSystems[0].config.virtualNicManagerInfo.netConfig // [])
+    | map(select(.nicType=="management"))[0] // {} as $m
+    | ($m.selectedVnic[0] // "") as $sel
+    | ($m.candidateVnic // []) as $c
+    | (
+        ( $c | map(select(.key==$sel)) | .[0].spec.ip.ipAddress )
+        // ( $c[0].spec.ip.ipAddress )
+        // ""
+      )
+  '
+}
+
 v2k_vmware_inventory_json() {
   local vm="$1" vcenter="$2"
   v2k_require_govc_env
 
   local vm_info dev_info
+  local host_moref host_name hostinfo_json
+  local esxi_mgmt_ip esxi_thumbprint
+
   vm_info="$(govc vm.info -json "${vm}")"
   dev_info="$(govc device.info -json -vm "${vm}")"
+
+  # 1) VM이 올라간 HostSystem MoRef 추출
+  host_moref="$(
+    printf '%s' "${vm_info}" | jq -r '
+      .virtualMachines[0] as $v
+      | ($v.runtime.host.value // $v.runtime.host.Value // $v.summary.runtime.host.value // $v.summary.runtime.host.Value // "")
+    ' 2>/dev/null || echo ""
+  )"
+
+  # 2) host.info로 management IP + thumbprint 추출 (DNS 의존 제거)
+  esxi_mgmt_ip=""
+  esxi_thumbprint=""
+  hostinfo_json=""
+
+  # 2-1) MoRef 우선 조회
+  if [[ -n "${host_moref}" && "${host_moref}" != "null" ]]; then
+    hostinfo_json="$(govc host.info -json -host "${host_moref}" 2>/dev/null || true)"
+  fi
+
+  # 2-2) 파싱
+  if [[ -n "${hostinfo_json}" ]]; then
+    host_name="$(printf '%s' "${hostinfo_json}" | jq -r '.hostSystems[0].summary.config.name // empty' 2>/dev/null || true)"
+    esxi_thumbprint="$(printf '%s' "${hostinfo_json}" | jq -r '.hostSystems[0].summary.config.sslThumbprint // empty' 2>/dev/null || true)"
+    esxi_mgmt_ip="$(v2k_vmware_esxi_mgmt_ip_from_hostinfo_json "${hostinfo_json}" 2>/dev/null | head -n1 || true)"
+  fi
+
+  # 3) fallback: management IP가 비어있으면 host_name이 IP인지/resolve 가능한지 확인
+  if [[ -z "${esxi_mgmt_ip}" && -n "${host_name}" ]]; then
+    if v2k_is_ipv4 "${host_name}"; then
+      esxi_mgmt_ip="${host_name}"
+    else
+      esxi_mgmt_ip="$(v2k_resolve_ipv4 "${host_name}")"
+    fi
+  fi
 
   jq -n --arg vm "${vm}" \
     --argjson vminfo "${vm_info}" \
     --argjson devinfo "${dev_info}" \
+    --arg esxi_host "${esxi_mgmt_ip}" \
+    --arg esxi_name "${host_name}" \
+    --arg esxi_thumbprint "${esxi_thumbprint}" \
     '
     def VMINFO0: ($vminfo.virtualMachines[0] // {});
 
@@ -132,6 +274,9 @@ v2k_vmware_inventory_json() {
         moref: (VMINFO0.self?.value // ""),
         uuid: (VMINFO0.config?.uuid // "")
       },
+      esxi_host: $esxi_host,
+      esxi_name: $esxi_name,
+      esxi_thumbprint: $esxi_thumbprint,
       disks: disks(controllers)
     }'
 }
@@ -272,16 +417,40 @@ v2k_vmware_get_vm_moref() {
 v2k_vmware_snapshot_moref_by_name() {
   local manifest="$1" snap_name="$2"
   v2k_require_govc_env
-  local vm
-  vm="$(jq -r '.source.vm.name' "${manifest}")"
+  local vm_name vm_moref
+  vm_name="$(jq -r '.source.vm.name' "${manifest}")"
+  vm_moref="$(jq -r '.source.vm.moref // empty' "${manifest}")"
 
-  govc snapshot.tree -vm "${vm}" -json | jq -r --arg n "${snap_name}" '
-    def walk(nodes):
-      nodes[]? as $x
-      | if $x.Name == $n then $x.Snapshot.Value
-        else (walk($x.ChildSnapshotList // []) )
-        end;
-    walk(.Tree.RootSnapshotList // []) | select(. != null) ' | head -n1
+  # Prefer VM MoRef for stability (avoids inventory path ambiguity)
+  # govc object.collect accepts a managed object reference like "vm-4106".
+  local vm_ref
+  if [[ -n "${vm_moref}" && "${vm_moref}" != "null" ]]; then
+    vm_ref="${vm_moref}"
+  else
+    # fallback to inventory path-style reference
+    vm_ref="vm/${vm_name}"
+  fi
+
+  # NOTE:
+  # - govc snapshot.tree -json may omit snapshot MoRef depending on version/environment.
+  # - govc object.collect <vm_ref> snapshot returns full snapshot tree WITH MoRef.
+  #
+  # Output example shape:
+  # [
+  #   { "name":"snapshot", "val": { "rootSnapshotList":[{ "name":"X", "snapshot":{ "value":"snapshot-123" }, "childSnapshotList":[...] }] } }
+  # ]
+  govc object.collect -json "${vm_ref}" snapshot 2>/dev/null \
+    | jq -r --arg n "${snap_name}" '
+        def walk(nodes):
+          nodes[]? as $x
+          | if ($x.name // "") == $n then ($x.snapshot.value // empty)
+            else (walk($x.childSnapshotList // []))
+            end;
+        .[]? 
+        | select(.name=="snapshot")
+        | (.val.rootSnapshotList // [])
+        | walk(.) 
+      ' | head -n1
 }
 
 v2k_vmware_get_thumbprint() {
@@ -301,4 +470,48 @@ v2k_vmware_require_esxi_host() {
     exit 2
   fi
   echo "${esxi}"
+}
+
+v2k_vmware_esxi_mgmt_ip_from_hostinfo_json() {
+  # input: govc host.info -json output (string)
+  # output: first IPv4 address of management vmk (one line). empty if not found.
+  local hostinfo_json="${1:-}"
+  [[ -n "${hostinfo_json}" ]] || return 0
+
+  # 1) nicType=="management" 우선
+  local ip
+  ip="$(
+    printf '%s' "${hostinfo_json}" | jq -r '
+      .hostSystems[0].config.virtualNicManagerInfo.netConfig // []
+      | map(select(.nicType=="management"))
+      | .[]
+      | (.candidateVnic // [])
+      | .[]
+      | .spec.ip.ipAddress // empty
+    ' 2>/dev/null | awk 'NF{print; exit}'
+  )"
+
+  # 2) 혹시 management가 없으면 selectedVnic가 있는 netConfig에서 후보 찾기(보수적 fallback)
+  if [[ -z "${ip}" ]]; then
+    ip="$(
+      printf '%s' "${hostinfo_json}" | jq -r '
+        .hostSystems[0].config.virtualNicManagerInfo.netConfig // []
+        | .[]
+        | select((.selectedVnic // []) | length > 0)
+        | (.candidateVnic // [])
+        | .[]
+        | .spec.ip.ipAddress // empty
+      ' 2>/dev/null | awk 'NF{print; exit}'
+    )"
+  fi
+
+  # 3) 값이 JSON 덩어리/공백 포함이면 방어적으로 IPv4만 필터링
+  if [[ -n "${ip}" ]]; then
+    # 혹시 여러 줄이 섞여 들어오면 첫 IPv4만 고정
+    ip="$(printf '%s\n' "${ip}" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
+  fi
+
+  if v2k_is_ipv4 "${ip}"; then
+    printf '%s\n' "${ip}"
+  fi
 }

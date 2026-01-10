@@ -9,7 +9,17 @@
     "type": "vmware",
     "mode": "govc",
     "vcenter": "https://vcenter.example.local/sdk",
-    "esxi_host": "esxi01.example.local",
+
+    "esxi_host": "10.10.10.21",
+    "esxi_name": "esxi01.example.local",
+    "esxi_thumbprint": "AA:BB:CC:DD:EE:FF:...",
+
+    "vddk": {
+      "server": "10.10.10.21",
+      "user": "root",
+      "cred_file": "/var/lib/ablestack-v2k/vmA/20260103-190000-deadbeef/vddk.cred"
+    },
+
     "vm": {
       "name": "vmA",
       "moref": "vm-123",
@@ -20,6 +30,11 @@
     "type": "kvm",
     "format": "qcow2",
     "dst_root": "/var/lib/libvirt/images/vmA",
+    "storage": {
+      "type": "file",
+      "map": {},
+      "force_block_device": false
+    },
     "libvirt": {
       "name": "vmA",
       "uefi": true,
@@ -31,33 +46,14 @@
       "disk_id": "scsi0:0",
       "label": "Hard disk 1",
       "device_key": "2000",
-      "controller": {
-        "type": "pvscsi",
-        "bus": 0,
-        "unit": 0
-      },
-      "vmdk": {
-        "path": "[datastore1] vmA/vmA.vmdk"
-      },
+      "controller": { "type": "pvscsi", "bus": 0, "unit": 0 },
+      "vmdk": { "path": "[datastore1] vmA/vmA.vmdk" },
       "size_bytes": 107374182400,
-      "cbt": {
-        "enabled": true,
-        "base_change_id": "",
-        "last_change_id": ""
-      },
+      "cbt": { "enabled": true, "base_change_id": "", "last_change_id": "" },
       "snapshots": {
-        "base": {
-          "name": "migr-base-20260103-190500",
-          "ref": ""
-        },
-        "incr": {
-          "name": "migr-incr-20260103-191000",
-          "ref": ""
-        },
-        "final": {
-          "name": "migr-final-20260103-200000",
-          "ref": ""
-        },
+        "base": { "name": "migr-base-20260103-190500", "ref": "" },
+        "incr": { "name": "migr-incr-20260103-191000", "ref": "" },
+        "final": { "name": "migr-final-20260103-200000", "ref": "" },
         "use_current_for_final": false
       },
       "transfer": {
@@ -66,43 +62,20 @@
         "incr_seq": 0,
         "last_synced_at": ""
       },
-      "metrics": {
-        "base_bytes_written": 0,
-        "incr_bytes_written": 0,
-        "incr_areas": 0
-      }
+      "metrics": { "base_bytes_written": 0, "incr_bytes_written": 0, "incr_areas": 0 }
     },
     {
       "disk_id": "scsi0:1",
       "label": "Hard disk 2",
       "device_key": "2001",
-      "controller": {
-        "type": "pvscsi",
-        "bus": 0,
-        "unit": 1
-      },
-      "vmdk": {
-        "path": "[datastore1] vmA/vmA_1.vmdk"
-      },
+      "controller": { "type": "pvscsi", "bus": 0, "unit": 1 },
+      "vmdk": { "path": "[datastore1] vmA/vmA_1.vmdk" },
       "size_bytes": 21474836480,
-      "cbt": {
-        "enabled": true,
-        "base_change_id": "",
-        "last_change_id": ""
-      },
+      "cbt": { "enabled": true, "base_change_id": "", "last_change_id": "" },
       "snapshots": {
-        "base": {
-          "name": "migr-base-20260103-190500",
-          "ref": ""
-        },
-        "incr": {
-          "name": "migr-incr-20260103-191000",
-          "ref": ""
-        },
-        "final": {
-          "name": "migr-final-20260103-200000",
-          "ref": ""
-        },
+        "base": { "name": "migr-base-20260103-190500", "ref": "" },
+        "incr": { "name": "migr-incr-20260103-191000", "ref": "" },
+        "final": { "name": "migr-final-20260103-200000", "ref": "" },
         "use_current_for_final": false
       },
       "transfer": {
@@ -111,37 +84,15 @@
         "incr_seq": 0,
         "last_synced_at": ""
       },
-      "metrics": {
-        "base_bytes_written": 0,
-        "incr_bytes_written": 0,
-        "incr_areas": 0
-      }
+      "metrics": { "base_bytes_written": 0, "incr_bytes_written": 0, "incr_areas": 0 }
     }
   ],
   "phases": {
-    "init": {
-      "done": true,
-      "ts": "2026-01-03T19:00:00+09:00"
-    },
-    "cbt_enable": {
-      "done": false,
-      "ts": ""
-    },
-    "base_sync": {
-      "done": false,
-      "ts": ""
-    },
-    "incr_sync": {
-      "done": false,
-      "ts": ""
-    },
-    "final_sync": {
-      "done": false,
-      "ts": ""
-    },
-    "cutover": {
-      "done": false,
-      "ts": ""
-    }
+    "init": { "done": true, "ts": "2026-01-03T19:00:00+09:00" },
+    "cbt_enable": { "done": false, "ts": "" },
+    "base_sync": { "done": false, "ts": "" },
+    "incr_sync": { "done": false, "ts": "" },
+    "final_sync": { "done": false, "ts": "" },
+    "cutover": { "done": false, "ts": "" }
   }
 }
