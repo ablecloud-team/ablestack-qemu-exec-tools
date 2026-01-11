@@ -64,6 +64,58 @@ jobs:
           path: release/rpm/**
 
   # ───────────────────────────────────────────────
+  # 1-B) V2K RPM BUILD (별도 경로, 기존 빌드 프로세스 훼손 금지)
+  # ───────────────────────────────────────────────
+  build-v2k-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux/rockylinux:9
+      options: --user 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps (v2k)
+        run: |
+          set -e
+          dnf -y distro-sync
+          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
+
+      - name: Build V2K RPM (separate path)
+        run: |
+          set -e
+          # NOTE: 기존 make rpm 경로와 분리된 V2K 전용 타겟을 사용해야 함
+          #       (예: make v2k-rpm)
+          make v2k-rpm
+
+      - name: Create V2K RPM repo (offline) for ABLESTACK (Rocky 9.6)
+        run: |
+          set -e
+          WORKDIR="repo/v2k-rpm-rocky9.6"
+          mkdir -p "$WORKDIR"
+
+          # V2K 본체 RPM 수집 (프로젝트 산출 경로에 맞춰 필요 시 조정)
+          find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack-v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
+
+          echo "[INFO] Downloading minimal runtime deps for offline install..."
+          # Air-Gap 설치를 위해 최소 의존성만 함께 동봉 (커널/가상화 호스트 패키지 설치 유도 금지)
+          dnf download --resolve --alldeps \
+            --destdir="$WORKDIR" \
+            jq openssl python3 python3-pip tar || true
+
+          echo "[INFO] Creating repo metadata..."
+          createrepo_c "$WORKDIR"
+
+          mkdir -p release/v2k
+          mv repo release/v2k/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v2k-rpm-package
+          path: release/v2k/**
+
+  # ───────────────────────────────────────────────
   # 2) DEB BUILD (Ubuntu 22.04 / 24.04)
   # ───────────────────────────────────────────────
   build-deb:
@@ -182,7 +234,7 @@ jobs:
   # 4) RELEASE + ISO CREATION (VirtIO 통합 포함)
   # ───────────────────────────────────────────────
   release:
-    needs: [build-rpm, build-deb, build-windows]
+    needs: [build-rpm, build-deb, build-windows, build-v2k-rpm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -197,12 +249,12 @@ jobs:
       - name: Install packaging tools (genisoimage, 7zip)
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y genisoimage p7zip-full
+          sudo apt-get install -y genisoimage p7zip-full python3-pip
 
       - name: Collect artifacts into structured dirs
         run: |
           set -e
-          mkdir -p release/rpm release/deb release/msi
+          mkdir -p release/rpm release/deb release/msi release/assets/v2k/wheels release/v2k
 
           echo "🔍 Collecting RPM repos..."
           for ver in 9 10; do
@@ -240,6 +292,33 @@ jobs:
 
           echo "🔍 Collecting MSI artifacts..."
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
+
+      - name: Collect V2K RPM repo (Rocky 9.6) into ISO tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC_DIR=$(find dist -type d -path "*/v2k-rpm-package/release/v2k/repo/v2k-rpm-rocky9.6" | head -n 1 || true)
+          if [[ -d "${SRC_DIR}" ]]; then
+            echo "[INFO] Found V2K repo: ${SRC_DIR}"
+            mkdir -p release/v2k/v2k-rpm-rocky9.6
+            cp -r "${SRC_DIR}"/* release/v2k/v2k-rpm-rocky9.6/
+          else
+            echo "[WARN] No V2K RPM repo found in workflow artifacts."
+          fi
+
+      - name: Stage V2K assets from repo ./assets into ISO (govc, VDDK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/assets
+          cp -v assets/govc_Linux_x86_64.tar.gz release/assets/ || true
+          cp -v assets/VMware-vix-disklib-*.tar.gz release/assets/ || true
+
+      - name: Prepare pyvmomi offline wheels (Air-Gap)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip download -d release/assets/v2k/wheels "pyvmomi==8.0.3.0.1"
 
       # VirtIO Windows Stable ISO 다운로드 및 추출 → release/virtio 에 포함
       - name: Download & expand VirtIO Windows ISO (stable)
@@ -463,6 +542,12 @@ jobs:
                 install-linux.sh
             - Windows installers:
                 install.bat / install.ps1
+            - V2K (ABLESTACK Host add-on):
+                v2k/v2k-rpm-rocky9.6 (offline RPM repo for ablestack_v2k)
+                assets/govc_Linux_x86_64.tar.gz
+                assets/VMware-vix-disklib-*.tar.gz
+                assets/v2k/wheels (pyvmomi offline wheels)
+
 
           Windows (recommended)
             1) Mount ISO in the Windows VM.
@@ -476,7 +561,7 @@ jobs:
             2) cd /mnt && sudo ./install-linux.sh
           EOF
 
-      - name: Create install-linux.sh (unchanged)
+      - name: Create install-linux.sh (V2K add-on for ABLESTACK; keep existing flows)
         run: |
           cat <<'EOF' > release/install-linux.sh
           #!/usr/bin/env bash
@@ -511,6 +596,122 @@ jobs:
                   sudo dnf -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
                   sudo rm -f /etc/yum.repos.d/ablestack-qemu-exec-tools.repo
                   sudo dnf clean all
+                  # ───────────────────────────────────────────────
+                  # V2K add-on (ABLESTACK Host only)
+                  #  - based on bin/v2k_test_install.sh
+                  #  - Air-Gap: pyvmomi installs from ISO offline wheels
+                  #  - NO ldconfig / NO global linker path modifications
+                  # ───────────────────────────────────────────────
+                  if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${VERSION_ID:-}" == 9.6* ]]; then
+                      echo "[INFO] ABLESTACK 9.6 detected. Installing V2K add-on..."
+
+                      has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+                      # 1) Install ablestack_v2k RPM from ISO local repo
+                      V2K_REPO_DIR="${ISO_MNT}/v2k/v2k-rpm-rocky9.6"
+                      if [[ -d "${V2K_REPO_DIR}" ]]; then
+                          V2K_REPO_FILE=/etc/yum.repos.d/ablestack-v2k.repo
+                          cat <<EOV | sudo tee "${V2K_REPO_FILE}" >/dev/null
+          [ablestack-v2k]
+          name=ablestack-v2k
+          baseurl=file://${V2K_REPO_DIR}
+          enabled=1
+          gpgcheck=0
+          EOV
+                          sudo dnf clean all
+                          sudo dnf -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack-v2k || \
+                            sudo dnf -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
+                            sudo dnf -y localinstall "${V2K_REPO_DIR}"/*.rpm
+                          sudo rm -f "${V2K_REPO_FILE}"
+                          sudo dnf clean all
+                      else
+                          echo "[WARN] V2K RPM repo not found in ISO: ${V2K_REPO_DIR}"
+                      fi
+
+                      # 2) govc from ISO assets
+                      GOVC_TGZ="${ISO_MNT}/assets/govc_Linux_x86_64.tar.gz"
+                      if [[ -f "${GOVC_TGZ}" ]]; then
+                          echo "[INFO] Installing govc from asset: ${GOVC_TGZ}"
+                          tmp="$(mktemp -d)"
+                          tar -xzf "${GOVC_TGZ}" -C "${tmp}"
+                          bin="${tmp}/govc"
+                          if [[ ! -f "${bin}" ]]; then
+                              bin="$(find "${tmp}" -maxdepth 3 -type f -name govc | head -n1 || true)"
+                          fi
+                          if [[ -f "${bin}" ]]; then
+                              sudo install -m 0755 "${bin}" /usr/local/bin/govc
+                              echo "[OK] govc installed to /usr/local/bin/govc"
+                          else
+                              echo "[WARN] govc binary not found inside ${GOVC_TGZ}"
+                          fi
+                          rm -rf "${tmp}"
+                      else
+                          echo "[WARN] govc asset not found: ${GOVC_TGZ}"
+                      fi
+
+                      # 3) VMware VDDK from ISO assets (NO ldconfig)
+                      VDDK_TGZ="$(ls -1 "${ISO_MNT}"/assets/VMware-vix-disklib-*.tar.gz 2>/dev/null | sort | tail -n1 || true)"
+                      if [[ -n "${VDDK_TGZ}" ]]; then
+                          echo "[INFO] Installing VMware VDDK from asset: ${VDDK_TGZ}"
+                          sudo mkdir -p /opt
+                          tmp="$(mktemp -d)"
+                          tar -xzf "${VDDK_TGZ}" -C "${tmp}"
+                          distrib="$(find "${tmp}" -maxdepth 2 -type d \( -iname 'vmware-vix-disklib-distrib' -o -iname 'VMware-vix-disklib-distrib' \) | head -n1 || true)"
+                          if [[ -z "${distrib}" ]]; then
+                              distrib="$(find "${tmp}" -maxdepth 2 -type d -iname '*disklib*distrib*' | head -n1 || true)"
+                          fi
+                          if [[ -n "${distrib}" && -d "${distrib}" ]]; then
+                              base_name="$(basename "${VDDK_TGZ}" .tar.gz)"
+                              base_name="${base_name// /_}"
+                              dest_versioned="/opt/${base_name}"
+                              sudo rm -rf "${dest_versioned}" >/dev/null 2>&1 || true
+                              sudo cp -a "${distrib}" "${dest_versioned}"
+                              sudo ln -sfn "${dest_versioned}" /opt/vmware-vix-disklib-distrib
+                              echo "[OK] VDDK installed to ${dest_versioned} (symlink: /opt/vmware-vix-disklib-distrib)"
+                              echo "[INFO] NOTE: ablestack_v2k should pass VDDK libdir to nbdkit at runtime."
+
+                              # write_profiled_env() from v2k_test_install.sh
+                              # - DO NOT run ldconfig / DO NOT touch global linker paths
+                              # - Just export default VDDK_LIBDIR for ablestack_v2k runtime
+                              VDDK_LIBDIR="/opt/vmware-vix-disklib-distrib"
+                              PROFILED_FILE="/etc/profile.d/v2k-vddk.sh"
+                              cat <<EOP | sudo tee "${PROFILED_FILE}" >/dev/null
+              # Generated by install-linux.sh (V2K add-on)
+              export VDDK_LIBDIR="${VDDK_LIBDIR}"
+              EOP
+                              sudo chmod 0644 "${PROFILED_FILE}"
+                              # best-effort source for current session (non-fatal)
+                              # shellcheck disable=SC1090
+                              source "${PROFILED_FILE}" || true
+                              echo "[OK] Wrote VDDK_LIBDIR default to ${PROFILED_FILE}"
+                          else
+                              echo "[WARN] Could not locate VDDK distrib directory in ${VDDK_TGZ}"
+                          fi
+                          rm -rf "${tmp}"
+                      else
+                          echo "[WARN] VDDK asset not found: ${ISO_MNT}/assets/VMware-vix-disklib-*.tar.gz"
+                      fi
+
+                      # 4) pyvmomi (offline wheels) -> dedicated venv
+                      WHEEL_DIR="${ISO_MNT}/assets/v2k/wheels"
+                      if [[ -d "${WHEEL_DIR}" ]]; then
+                          sudo mkdir -p /usr/share/ablestack/v2k
+                          if [[ ! -d /usr/share/ablestack/v2k/venv ]]; then
+                              if ! python3 -m venv /usr/share/ablestack/v2k/venv >/dev/null 2>&1; then
+                                  echo "[WARN] python3 venv creation failed. Ensure python3 is installed."
+                              fi
+                          fi
+                          if [[ -x /usr/share/ablestack/v2k/venv/bin/pip ]]; then
+                              sudo /usr/share/ablestack/v2k/venv/bin/pip install --no-index --find-links "${WHEEL_DIR}" pyvmomi || true
+                              echo "[OK] pyvmomi installed (offline wheels) into /usr/share/ablestack/v2k/venv"
+                          else
+                              echo "[WARN] venv pip not found; pyvmomi offline install skipped."
+                          fi
+                      else
+                          echo "[WARN] pyvmomi wheels dir not found in ISO: ${WHEEL_DIR}"
+                      fi
+                  fi
+
                   ;;
               ubuntu|debian)
                   echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"
@@ -582,3 +783,4 @@ jobs:
           files: |
             build/iso/*.iso
             release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
+            release/v2k/v2k-rpm-rocky9.6/*.rpm
