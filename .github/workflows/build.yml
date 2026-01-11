@@ -69,7 +69,7 @@ jobs:
   build-v2k-rpm:
     runs-on: ubuntu-latest
     container:
-      image: rockylinux/rockylinux:9
+      image: rockylinux/rockylinux:9.6
       options: --user 0
     steps:
       - uses: actions/checkout@v4
@@ -98,12 +98,48 @@ jobs:
           # V2K 본체 RPM 수집 (프로젝트 산출 경로에 맞춰 필요 시 조정)
           find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack-v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
 
-          echo "[INFO] Downloading runtime deps for offline install (resolved from V2K RPM Requires)..."
-          dnf download --resolve --alldeps --destdir="$WORKDIR" "$WORKDIR"/*.rpm || true
-          # venv 부트스트랩용(선택)
-          dnf download --resolve --alldeps --destdir="$WORKDIR" python3-pip || true
+          echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
+          # --- 9.6 고정 (중요: 9.7 혼입 차단) ---
+          DNF_COMMON_OPTS="--releasever=9.6"
 
+          # ablestack-v2k.spec의 Requires와 동일하게 유지 (8개)
+          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
+
+          # baseline 파일(ABLestack 9.6 호스트에서 rpm -qa 기반으로 생성해 커밋)
+          BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
+          if [[ ! -f "${BASELINE_FILE}" ]]; then
+            echo "[ERR] Missing baseline file: ${BASELINE_FILE}" >&2
+            echo "      Generate on ABLESTACK 9.6 host:" >&2
+            echo "        rpm -qa --qf '%{NAME}\\n' | sort -u > ${BASELINE_FILE}" >&2
+            exit 2
+          fi
+
+          # Requires 의존성 클로저 산출 (패키지명만, 중복 제거)
+          # dnf-plugins-core의 repoquery 사용
+          dnf -y ${DNF_COMMON_OPTS} install dnf-plugins-core >/dev/null
+          dnf -q ${DNF_COMMON_OPTS} repoquery \
+            --requires --resolve --recursive \
+            --qf '%{name}' \
+            ${REQ_PKGS} | sort -u > /tmp/v2k_dep_closure.txt
+
+          # baseline에 이미 있는 패키지 제외 (없는 것만 다운로드)
+          sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
+          comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download.txt
+
+          echo "[INFO] Dep closure count: $(wc -l < /tmp/v2k_dep_closure.txt)"
+          echo "[INFO] Baseline count:    $(wc -l < /tmp/v2k_baseline.txt)"
+          echo "[INFO] To-download count:$(wc -l < /tmp/v2k_to_download.txt)"
+          echo "[INFO] To-download sample (first 50):"
+          head -n 50 /tmp/v2k_to_download.txt || true
+
+          if [[ -s /tmp/v2k_to_download.txt ]]; then
+            # 패키지명 리스트를 인자로 다운로드 (9.6 강제)
+            xargs -r dnf ${DNF_COMMON_OPTS} download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt || true
+          else
+            echo "[INFO] Nothing to download (all deps satisfied by baseline)."
+          fi
+          
           echo "[INFO] Creating repo metadata..."
           createrepo_c "$WORKDIR"
 
@@ -295,7 +331,7 @@ jobs:
         run: |
           set -euo pipefail
           # build-v2k-rpm outputs: release/v2k/v2k-rpm-rocky9.6
-          SRC_DIR=$(find dist -type d -path "*/v2k-rpm-package/release/v2k/v2k-rpm-rocky9.6" | head -n 1 || true)
+          SRC_DIR=$(find dist -type d -path "*/v2k-rpm-package/v2k-rpm-rocky9.6" -o -path "*/v2k-rpm-package/release/v2k/v2k-rpm-rocky9.6" | head -n 1 || true)
           if [[ -z "${SRC_DIR}" || ! -d "${SRC_DIR}" ]]; then
             echo "[ERR] No V2K RPM repo found in workflow artifacts." >&2
             echo "[ERR] Debug: listing dist/v2k-rpm-package tree (maxdepth=6)" >&2
