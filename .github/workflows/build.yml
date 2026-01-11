@@ -92,23 +92,20 @@ jobs:
       - name: Create V2K RPM repo (offline) for ABLESTACK (Rocky 9.6)
         run: |
           set -e
-          WORKDIR="repo/v2k-rpm-rocky9.6"
+          WORKDIR="release/v2k/v2k-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
 
           # V2K 본체 RPM 수집 (프로젝트 산출 경로에 맞춰 필요 시 조정)
           find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack-v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
 
-          echo "[INFO] Downloading minimal runtime deps for offline install..."
-          # Air-Gap 설치를 위해 최소 의존성만 함께 동봉 (커널/가상화 호스트 패키지 설치 유도 금지)
-          dnf download --resolve --alldeps \
-            --destdir="$WORKDIR" \
-            jq openssl python3 python3-pip tar || true
+          echo "[INFO] Downloading runtime deps for offline install (resolved from V2K RPM Requires)..."
+          dnf download --resolve --alldeps --destdir="$WORKDIR" "$WORKDIR"/*.rpm || true
+          # venv 부트스트랩용(선택)
+          dnf download --resolve --alldeps --destdir="$WORKDIR" python3-pip || true
+
 
           echo "[INFO] Creating repo metadata..."
           createrepo_c "$WORKDIR"
-
-          mkdir -p release/v2k
-          mv repo release/v2k/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -297,14 +294,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SRC_DIR=$(find dist -type d -path "*/v2k-rpm-package/release/v2k/repo/v2k-rpm-rocky9.6" | head -n 1 || true)
-          if [[ -d "${SRC_DIR}" ]]; then
-            echo "[INFO] Found V2K repo: ${SRC_DIR}"
-            mkdir -p release/v2k/v2k-rpm-rocky9.6
-            cp -r "${SRC_DIR}"/* release/v2k/v2k-rpm-rocky9.6/
-          else
-            echo "[WARN] No V2K RPM repo found in workflow artifacts."
+          # build-v2k-rpm outputs: release/v2k/v2k-rpm-rocky9.6
+          SRC_DIR=$(find dist -type d -path "*/v2k-rpm-package/release/v2k/v2k-rpm-rocky9.6" | head -n 1 || true)
+          if [[ -z "${SRC_DIR}" || ! -d "${SRC_DIR}" ]]; then
+            echo "[ERR] No V2K RPM repo found in workflow artifacts." >&2
+            echo "[ERR] Debug: listing dist/v2k-rpm-package tree (maxdepth=6)" >&2
+            find dist -maxdepth 6 -path "*v2k-rpm-package*" -print >&2 || true
+            exit 2
           fi
+
+          echo "[INFO] Found V2K repo: ${SRC_DIR}"
+          mkdir -p release/v2k/v2k-rpm-rocky9.6
+          # Preserve repodata/ and all rpm files
+          cp -a "${SRC_DIR}/." release/v2k/v2k-rpm-rocky9.6/
 
       - name: Stage V2K assets from repo ./assets into ISO (govc, VDDK)
         shell: bash
@@ -783,4 +785,4 @@ jobs:
           files: |
             build/iso/*.iso
             release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
-            release/v2k/v2k-rpm-rocky9.6/*.rpm
+            release/v2k/v2k-rpm-rocky9.6/ablestack-v2k-*.rpm
