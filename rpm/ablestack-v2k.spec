@@ -25,6 +25,14 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 Requires:       bash
+Requires:       jq
+Requires:       python3
+Requires:       openssl
+Requires:       nbd
+Requires:       nbdkit
+Requires:       nbdkit-vddk-plugin
+Requires:       qemu-img
+Requires:       libvirt-client
 
 %description
 ablestack-v2k provides ABLESTACK VMware-to-KVM (V2K) migration scripts and libraries.
@@ -36,13 +44,16 @@ Assets such as VDDK and govc are handled by the offline ISO installer.
 %install
 # Binaries (explicit path: /usr/local/bin)
 mkdir -p %{buildroot}/usr/local/bin
-install -m 0755 bin/ablestack-v2k.sh %{buildroot}/usr/local/bin/ablestack-v2k
+install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack-v2k
 
 # Libraries (explicit path: /usr/local/lib/ablestack-qemu-exec-tools/v2k)
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k
 cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev/null || :
 
 %files
+
+
+
 %license LICENSE
 /usr/local/bin/ablestack-v2k
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
