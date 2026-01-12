@@ -69,7 +69,7 @@ jobs:
   build-v2k-rpm:
     runs-on: ubuntu-latest
     container:
-      image: rockylinux/rockylinux:9.6
+      image: rockylinux/rockylinux:9
       options: --user 0
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +80,31 @@ jobs:
         run: |
           set -e
           dnf -y distro-sync
-          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
+          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c curl ca-certificates
+
+      - name: Configure Rocky 9.6 vault repos + enable EPEL (build-time only)
+        run: |
+          set -euo pipefail
+
+          # 1) Rocky BaseOS/AppStream/CRB를 9.6 Vault로 강제 고정
+          #    (9.7/9.latest 혼입 차단: 커널/openssl 등 업데이트 유발 방지)
+          sed -i \
+            -e 's|^mirrorlist=|#mirrorlist=|g' \
+            -e 's|^#baseurl=http://dl.rockylinux.org/\$contentdir|baseurl=http://dl.rockylinux.org/vault/rocky|g' \
+            /etc/yum.repos.d/Rocky-*.repo
+
+          # releasever 강제(중요)
+          echo 'releasever=9.6' >> /etc/dnf/dnf.conf
+
+          # CRB 활성화(EPEL 의존성 해결에 필요)
+          dnf -y config-manager --set-enabled crb || true
+
+          # 2) EPEL bootstrap (CI/빌드 컨테이너에서만 사용; 타깃 Air-Gap에서는 사용하지 않음)
+          dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+
+          # 메타데이터 갱신
+          dnf clean all
+          dnf -y makecache
 
       - name: Build V2K RPM (separate path)
         run: |
@@ -101,10 +125,11 @@ jobs:
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
           # --- 9.6 고정 (중요: 9.7 혼입 차단) ---
-          DNF_COMMON_OPTS="--releasever=9.6"
+          DNF_COMMON_OPTS="--releasever=9.6 --disablerepo='*' --enablerepo=baseos,appstream,crb,epel"
 
           # ablestack-v2k.spec의 Requires와 동일하게 유지 (8개)
-          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
+          # ceph-common: rbd CLI 사용(생성/존재확인) 목적
+          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client ceph-common"
 
           # baseline 파일(ABLestack 9.6 호스트에서 rpm -qa 기반으로 생성해 커밋)
           BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
