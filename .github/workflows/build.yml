@@ -358,15 +358,57 @@ jobs:
           set -euo pipefail
           python3 -m pip download -d release/assets/v2k/wheels "pyvmomi==8.0.3.0.1"
 
-      # VirtIO Windows Stable ISO 다운로드 및 추출 → release/virtio 에 포함
-      - name: Download & expand VirtIO Windows ISO (stable)
+      # VirtIO Windows Stable ISO 다운로드 후 "amd64 드라이버 + guest tools(qemu-ga 포함)"만 추출
+      # - 중첩 ISO 금지
+      # - DISM/WinPE에서 바로 INF 경로 지정 가능
+      # - 용량 절감(amd64 only)
+      - name: Download & extract VirtIO (amd64-only + guest tools)
         run: |
           set -e
           mkdir -p dist/virtio-src release/virtio
           curl -fL -o dist/virtio-win.iso \
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
-          7z x -y -o"dist/virtio-src" dist/virtio-win.iso
-          cp -rv dist/virtio-src/* release/virtio/ || true
+
+          # 1) DISM용: 핵심 드라이버 디렉토리의 amd64만 추출
+          #    (VirtIO ISO 버전에 따라 w11/2k22/2k19 등 하위 폴더명이 달라도, amd64 경로만 살리면 된다)
+          #    7z는 와일드카드 패턴을 허용하므로, */amd64/* 패턴으로 추출한다.
+          7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
+            "viostor/*/amd64/*" \
+            "vioscsi/*/amd64/*" \
+            "NetKVM/*/amd64/*" \
+            "Balloon/*/amd64/*" \
+            "qemupciserial/*/amd64/*" \
+            "viorng/*/amd64/*" \
+            "pvpanic/*/amd64/*" \
+            "vioinput/*/amd64/*" \
+            "vioser/*/amd64/*" || true
+
+          # 2) Guest tools(qemu-ga 포함): exe/msi는 루트 또는 특정 위치에 있을 수 있으므로 '찾아서' 포함
+          #    - 둘 다 있으면 둘 다 포함(현장 선택 가능)
+          7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-guest-tools.exe" || true
+          7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-gt-*.msi" || true
+
+          # 3) release/virtio로 복사 (존재하는 것만)
+          for d in viostor vioscsi NetKVM Balloon qemupciserial viorng pvpanic vioinput vioser; do
+            if [[ -d "dist/virtio-src/${d}" ]]; then
+              mkdir -p "release/virtio/${d}"
+              cp -a "dist/virtio-src/${d}/." "release/virtio/${d}/"
+            fi
+          done
+          if [[ -f "dist/virtio-src/virtio-win-guest-tools.exe" ]]; then
+            cp -a "dist/virtio-src/virtio-win-guest-tools.exe" "release/virtio/"
+          fi
+          # MSI는 버전별 파일명이 달라질 수 있어 glob 복사
+          shopt -s nullglob
+          for m in dist/virtio-src/virtio-win-gt-*.msi; do
+            cp -a "$m" "release/virtio/"
+          done
+          shopt -u nullglob
+
+          echo "[INFO] virtio payload size:"
+          du -sh release/virtio || true
+          echo "[INFO] sample INF files:"
+          find release/virtio -type f -name '*.inf' | head -n 30 || true
 
       # Windows 설치 스크립트 생성 (루트: install.ps1/install.bat)
       - name: Create Windows installer scripts
