@@ -121,65 +121,42 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Rocky 컨테이너의 repo 파일명은 고정이 아님. 다만 baseos/appstream/crb는 보통 rocky.repo에 존재.
-          ROCKY_REPO="/etc/yum.repos.d/rocky.repo"
-          if [[ ! -f "${ROCKY_REPO}" ]]; then
-            echo "[ERR] ${ROCKY_REPO} not found. Available:" >&2
-            ls -l /etc/yum.repos.d/ >&2 || true
-            exit 2
-          fi
+          # ❗ 핵심: rocky.repo를 "rewrite"하지 않는다.
+          # rocky.repo는 mirrorlist만 있고 baseurl이 없는 케이스가 있어
+          # mirrorlist를 주석 처리하면 "baseurl 없음"으로 dnf가 즉시 실패한다.
+          # 따라서 9.6 vault baseurl을 가진 repo 파일을 별도로 생성해서 사용한다.
 
-          echo "[INFO] Rewriting ${ROCKY_REPO} to Rocky 9.6 vault (NO /9 suffix issue)"
-          cp -a "${ROCKY_REPO}" "${ROCKY_REPO}.bak"
+          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
+          [rocky-vault-9.6-baseos]
+          name=Rocky Linux 9.6 - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
 
-          # 섹션별로 baseurl을 "완전 치환"해서 /9가 다시 붙을 여지를 제거
-          awk '
-            BEGIN {
-              baseos="http://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/"
-              appstream="http://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/"
-              crb="http://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/"
-              sec=""
-            }
-            /^\[/ {
-              sec=$0
-              print
-              next
-            }
-            # mirror/metalink는 무조건 비활성화
-            /^mirrorlist=/ { print "#mirrorlist=" substr($0,12); next }
-            /^metalink=/  { print "#metalink="  substr($0,10); next }
+          [rocky-vault-9.6-appstream]
+          name=Rocky Linux 9.6 - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
 
-            # baseurl은 섹션별로 고정값으로 치환 (핵심)
-            /^baseurl=/ {
-              if (sec ~ /^\[baseos\]/)      { print "baseurl=" baseos; next }
-              if (sec ~ /^\[appstream\]/)   { print "baseurl=" appstream; next }
-              if (sec ~ /^\[crb\]/)         { print "baseurl=" crb; next }
-              # 다른 섹션은 건드리지 않음
-              print
-              next
-            }
-            { print }
-          ' "${ROCKY_REPO}.bak" > "${ROCKY_REPO}"
+          [rocky-vault-9.6-crb]
+          name=Rocky Linux 9.6 - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
 
-          # 중요: releasever도 9.6으로 고정(혹시 다른 repo가 $releasever를 쓰는 경우 대비)
-          grep -q '^releasever=9.6$' /etc/dnf/dnf.conf 2>/dev/null || echo 'releasever=9.6' >> /etc/dnf/dnf.conf
+          echo "[INFO] Enabled repos (vault 9.6):"
+          grep -nE '^\[|^baseurl=' /etc/yum.repos.d/rocky-vault-9.6.repo
 
-          echo "[INFO] Sanity check: baseurl lines"
-          grep -nE '^\[|^baseurl=|^#mirrorlist=|^#metalink=' "${ROCKY_REPO}" | sed -n '1,200p'
+          # vault repo만으로 캐시 생성
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
 
-          dnf clean all
-          dnf -y makecache
-
-          # CRB 활성화(EPEL 의존성 해결에 필요)
-          dnf -y config-manager --set-enabled crb || true
-
-          # 2) EPEL bootstrap (CI/빌드 컨테이너에서만 사용; 타깃 Air-Gap에서는 사용하지 않음)
-          dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
-
-          # 메타데이터 갱신
-          dnf clean all
-          dnf -y makecache
-
+          # EPEL은 build-time only (nbd 등 수집 목적) → 여기서 활성화 가능
+          # curl 충돌 회피를 위해 allowerasing 사용
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install --allowerasing epel-release curl || true
+          dnf -y makecache || true
+          
       - name: Build V2K RPM (separate path)
         run: |
           set -e
