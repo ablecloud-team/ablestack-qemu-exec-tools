@@ -98,18 +98,21 @@ jobs:
           echo "${repo_files}"
 
           # baseos/appstream/crb 관련 repo만 vault로 전환 (다른 repo는 건드리지 않음)
+          VLT="http://dl.rockylinux.org/vault/rocky/9.6"
           for f in ${repo_files}; do
             if grep -qiE 'name=.*(BaseOS|AppStream|CRB)|\[baseos\]|\[appstream\]|\[crb\]' "$f"; then
               echo "[INFO] Patching repo file: $f"
               sed -i \
                 -e 's|^mirrorlist=|#mirrorlist=|g' \
                 -e 's|^metalink=|#metalink=|g' \
-                -e 's|^#baseurl=http://dl.rockylinux.org/\$contentdir|baseurl=http://dl.rockylinux.org/vault/rocky|g' \
+                -e "s|^#baseurl=http://dl.rockylinux.org/\\\$contentdir|baseurl=${VLT}|g" \
+                -e "s|^baseurl=http://dl.rockylinux.org/\\\$contentdir|baseurl=${VLT}|g" \
+                -e "s|^baseurl=http://dl.rockylinux.org/vault/rocky/[0-9.]*|baseurl=${VLT}|g" \
                 "$f"
             fi
           done
 
-          # releasever 강제(중요)
+          # releasever 강제(중요) - $releasever를 쓰는 repo도 안전하게 9.6으로 고정
           echo 'releasever=9.6' >> /etc/dnf/dnf.conf
 
           # CRB 활성화(EPEL 의존성 해결에 필요)
