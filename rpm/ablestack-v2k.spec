@@ -33,9 +33,6 @@ Requires:       nbdkit
 Requires:       nbdkit-vddk-plugin
 Requires:       qemu-img
 Requires:       libvirt-client
-Requires:       librados
-Requires:       librbd
-Requires:       ceph-common
 
 %description
 ablestack-v2k provides ABLESTACK VMware-to-KVM (V2K) migration scripts and libraries.
