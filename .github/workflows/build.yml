@@ -235,6 +235,24 @@ jobs:
           sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
           comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
 
+          echo "[INFO] Filtering to-download list by repo availability..."
+          # repo에서 실제로 보이는 패키지만 남긴다 (없는 건 제거)
+          dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
+            $(cat /tmp/v2k_to_download.txt) 2>/dev/null | sort -u > /tmp/v2k_to_download_avail.txt
+
+          # 혹시 repoquery 호출이 너무 길어질 수 있으니(인자 길이) xargs로도 안전하게 가능:
+          # cat /tmp/v2k_to_download.txt | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' | sort -u > /tmp/v2k_to_download_avail.txt
+
+          # 제거된(미존재) 패키지 로깅
+          comm -23 <(sort -u /tmp/v2k_to_download.txt) <(sort -u /tmp/v2k_to_download_avail.txt) > /tmp/v2k_missing_in_repo.txt
+          if [[ -s /tmp/v2k_missing_in_repo.txt ]]; then
+            echo "[WARN] These packages are in list but not available in enabled repos (will be skipped):"
+            head -n 50 /tmp/v2k_missing_in_repo.txt || true
+          fi
+
+          mv /tmp/v2k_to_download_avail.txt /tmp/v2k_to_download.txt
+          echo "[INFO] To-download(after filter) count: $(wc -l < /tmp/v2k_to_download.txt)"
+
           # must-have + (closure-baseline) 합집합 = 최종 다운로드 목록
           cat /tmp/v2k_must_have.txt /tmp/v2k_to_download_closure.txt | sort -u > /tmp/v2k_to_download.txt
 
