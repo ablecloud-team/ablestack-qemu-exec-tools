@@ -154,8 +154,22 @@ jobs:
 
           # EPEL은 build-time only (nbd 등 수집 목적) → 여기서 활성화 가능
           # curl 충돌 회피를 위해 allowerasing 사용
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install --allowerasing epel-release curl || true
-          dnf -y makecache || true
+          # ❗ 실패를 숨기면 다음 step에서 'Unknown repo: epel'로 터짐 → 실패는 실패로 처리
+          # curl 설치는 필수가 아니므로 제거(충돌 가능성 낮춤)
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install epel-release
+
+          # EPEL repo id 자동 탐지(epel/epel-9/epel-next 등 케이스 대응)
+          EPEL_REPO_ID="$(dnf repolist all 2>/dev/null | awk 'tolower($1) ~ /^epel/ {print $1; exit}')"
+          if [[ -z "${EPEL_REPO_ID}" ]]; then
+            echo "[ERR] EPEL repo id not found after installing epel-release." >&2
+            dnf repolist all || true
+            exit 2
+          fi
+          echo "[INFO] Detected EPEL repo id: ${EPEL_REPO_ID}"
+          echo "EPEL_REPO_ID=${EPEL_REPO_ID}" >> "$GITHUB_ENV"
+
+          # vault + epel 캐시 생성(딱 필요한 repo만)
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*","${EPEL_REPO_ID}" makecache          
           
       - name: Build V2K RPM (separate path)
         run: |
