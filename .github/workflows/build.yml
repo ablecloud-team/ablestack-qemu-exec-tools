@@ -235,48 +235,57 @@ jobs:
           sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
           comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
 
-          echo "[INFO] Filtering to-download list by repo availability..."
-          # repo에서 실제로 보이는 패키지만 남긴다 (없는 건 제거)
-          dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
-            $(cat /tmp/v2k_to_download.txt) 2>/dev/null | sort -u > /tmp/v2k_to_download_avail.txt
+          # (중요) Direct requires는 baseline subtract와 무관하게 반드시 포함
+          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
 
-          # 혹시 repoquery 호출이 너무 길어질 수 있으니(인자 길이) xargs로도 안전하게 가능:
-          # cat /tmp/v2k_to_download.txt | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' | sort -u > /tmp/v2k_to_download_avail.txt
+          # baseline subtract (closure - baseline)
+          sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
+          comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
 
-          # 제거된(미존재) 패키지 로깅
-          comm -23 <(sort -u /tmp/v2k_to_download.txt) <(sort -u /tmp/v2k_to_download_avail.txt) > /tmp/v2k_missing_in_repo.txt
+          # must-have + (closure-baseline) = candidate list
+          cat /tmp/v2k_must_have.txt /tmp/v2k_to_download_closure.txt | sort -u > /tmp/v2k_to_download_candidate.txt
+
+          echo "[INFO] Candidate(to-download) count: $(wc -l < /tmp/v2k_to_download_candidate.txt)"
+          echo "[INFO] Candidate sample (first 50):"
+          head -n 50 /tmp/v2k_to_download_candidate.txt || true
+
+          echo "[INFO] Filtering candidate list by repo availability (STRICT)..."
+          # ⚠️ 절대 $(cat ...) 쓰지 말 것. 인자 길이/에러/빈값으로 repo 전체가 나오는 사고가 난다.
+          # xargs로 "실제 repo에 존재하는 패키지명"만 남긴다.
+          : > /tmp/v2k_to_download_avail.txt
+          cat /tmp/v2k_to_download_candidate.txt \
+            | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
+            | sort -u > /tmp/v2k_to_download_avail.txt
+
+          # langpack 폭발 방지(선제 제거) - 필요 없으면 과감히 제외
+          grep -vE '^glibc-all-langpacks$|^glibc-langpack-' /tmp/v2k_to_download_avail.txt \
+            | sort -u > /tmp/v2k_to_download.txt
+
+          # missing(후보엔 있었는데 repo엔 없는 것) 로깅
+          comm -23 /tmp/v2k_to_download_candidate.txt /tmp/v2k_to_download_avail.txt > /tmp/v2k_missing_in_repo.txt
           if [[ -s /tmp/v2k_missing_in_repo.txt ]]; then
-            echo "[WARN] These packages are in list but not available in enabled repos (will be skipped):"
+            echo "[WARN] Missing in enabled repos (skipped):"
             head -n 50 /tmp/v2k_missing_in_repo.txt || true
           fi
 
-          mv /tmp/v2k_to_download_avail.txt /tmp/v2k_to_download.txt
-          echo "[INFO] To-download(after filter) count: $(wc -l < /tmp/v2k_to_download.txt)"
-
-          # must-have + (closure-baseline) 합집합 = 최종 다운로드 목록
-          cat /tmp/v2k_must_have.txt /tmp/v2k_to_download_closure.txt | sort -u > /tmp/v2k_to_download.txt
-
-          echo "[INFO] Dep closure count: $(wc -l < /tmp/v2k_dep_closure.txt)"
-          echo "[INFO] Baseline count:    $(wc -l < /tmp/v2k_baseline.txt)"
-          echo "[INFO] To-download count:$(wc -l < /tmp/v2k_to_download.txt)"
-          echo "[INFO] To-download sample (first 50):"
+          echo "[INFO] Final to-download count(after avail+langpack filter): $(wc -l < /tmp/v2k_to_download.txt)"
+          echo "[INFO] Final to-download sample (first 50):"
           head -n 50 /tmp/v2k_to_download.txt || true
 
-          grep -n '^nbd$' /tmp/v2k_to_download.txt || true
-          grep -n '^nbd$' /tmp/v2k_baseline.txt || true
+          # 최종 방어: nbd/nbdkit/qemu-img는 반드시 있어야 한다
+          for p in nbd nbdkit qemu-img; do
+            if ! grep -qx "$p" /tmp/v2k_to_download.txt && ! grep -qx "$p" /tmp/v2k_baseline.txt; then
+              echo "[ERR] Required package '$p' is neither in baseline nor in final download list." >&2
+              exit 2
+            fi
+          done
 
+          # download (여기서는 exclude를 걸어도 되지만, 위에서 이미 제거했으니 없어도 됨)
           if [[ -s /tmp/v2k_to_download.txt ]]; then
-            # 실패를 숨기지 않는다. (nbd 미포함인데도 성공 처리되는 것을 방지)
-            xargs -r dnf "${DNF_COMMON_OPTS[@]}" --exclude=glibc-langpack-\* --exclude=glibc-all-langpacks download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
+            xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
           else
             echo "[INFO] Nothing to download (all deps satisfied by baseline)."
           fi
-
-          # 최종 검증: nbd/nbdkit/qemu-img rpm이 실제로 들어왔는지 확인
-          ls -1 "$WORKDIR"/nbd-*.rpm "$WORKDIR"/nbdkit-*.rpm "$WORKDIR"/qemu-img-*.rpm >/dev/null
-          
-          echo "[INFO] Creating repo metadata..."
-          createrepo_c "$WORKDIR"
 
       - uses: actions/upload-artifact@v4
         with:
