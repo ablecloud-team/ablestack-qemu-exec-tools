@@ -204,7 +204,7 @@ jobs:
 
           # ablestack-v2k.spec의 Requires와 동일하게 유지 (8개)
           # ceph-common: rbd CLI 사용(생성/존재확인) 목적
-          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client ceph-common"
+          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
 
           # baseline 파일(ABLestack 9.6 호스트에서 rpm -qa 기반으로 생성해 커밋)
           BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
