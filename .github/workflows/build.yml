@@ -80,7 +80,8 @@ jobs:
         run: |
           set -e
           dnf -y distro-sync
-          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c curl ca-certificates
+          # curl-minimal is default in Rocky container; installing curl conflicts.
+          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c ca-certificates curl-minimal
 
       - name: Configure Rocky 9.6 vault repos + enable EPEL (build-time only)
         run: |
