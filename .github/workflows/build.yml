@@ -153,11 +153,14 @@ jobs:
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
 
           # EPEL은 build-time only (nbd 등 수집 목적) → 여기서 활성화 가능
-          # curl 충돌 회피를 위해 allowerasing 사용
-          # ❗ 실패를 숨기면 다음 step에서 'Unknown repo: epel'로 터짐 → 실패는 실패로 처리
-          # curl 설치는 필수가 아니므로 제거(충돌 가능성 낮춤)
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install epel-release
-
+          # ❗ vault repo만 켠 상태에서는 epel-release 패키지를 'dnf install'로 찾을 수 없음(No match).
+          #     → EPEL bootstrap rpm을 URL로 직접 설치한다.
+          #     (빌드/릴리즈 단계에서만 외부 접근 허용하고, 결과 rpm은 ISO에 포함)
+          EPEL_RPM_URL="https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+          echo "[INFO] Installing EPEL release RPM: ${EPEL_RPM_URL}"
+          curl -fL -o /tmp/epel-release.rpm "${EPEL_RPM_URL}"
+          rpm -Uvh --nosignature /tmp/epel-release.rpm
+          
           # EPEL repo id 자동 탐지(epel/epel-9/epel-next 등 케이스 대응)
           EPEL_REPO_ID="$(dnf repolist all 2>/dev/null | awk 'tolower($1) ~ /^epel/ {print $1; exit}')"
           if [[ -z "${EPEL_REPO_ID}" ]]; then
@@ -170,7 +173,7 @@ jobs:
 
           # vault + epel 캐시 생성(딱 필요한 repo만)
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*","${EPEL_REPO_ID}" makecache          
-          
+
       - name: Build V2K RPM (separate path)
         run: |
           set -e
