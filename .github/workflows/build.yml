@@ -89,10 +89,25 @@ jobs:
 
           # 1) Rocky BaseOS/AppStream/CRB를 9.6 Vault로 강제 고정
           #    (9.7/9.latest 혼입 차단: 커널/openssl 등 업데이트 유발 방지)
-          sed -i \
-            -e 's|^mirrorlist=|#mirrorlist=|g' \
-            -e 's|^#baseurl=http://dl.rockylinux.org/\$contentdir|baseurl=http://dl.rockylinux.org/vault/rocky|g' \
-            /etc/yum.repos.d/Rocky-*.repo
+          repo_files="$(ls -1 /etc/yum.repos.d/*.repo 2>/dev/null || true)"
+          if [[ -z "${repo_files}" ]]; then
+            echo "[ERR] No .repo files found under /etc/yum.repos.d" >&2
+            exit 2
+          fi
+          echo "[INFO] repo files:"
+          echo "${repo_files}"
+
+          # baseos/appstream/crb 관련 repo만 vault로 전환 (다른 repo는 건드리지 않음)
+          for f in ${repo_files}; do
+            if grep -qiE 'name=.*(BaseOS|AppStream|CRB)|\[baseos\]|\[appstream\]|\[crb\]' "$f"; then
+              echo "[INFO] Patching repo file: $f"
+              sed -i \
+                -e 's|^mirrorlist=|#mirrorlist=|g' \
+                -e 's|^metalink=|#metalink=|g' \
+                -e 's|^#baseurl=http://dl.rockylinux.org/\$contentdir|baseurl=http://dl.rockylinux.org/vault/rocky|g' \
+                "$f"
+            fi
+          done
 
           # releasever 강제(중요)
           echo 'releasever=9.6' >> /etc/dnf/dnf.conf
