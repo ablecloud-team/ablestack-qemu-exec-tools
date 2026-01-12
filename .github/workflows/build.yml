@@ -160,7 +160,7 @@ jobs:
           echo "[INFO] Installing EPEL release RPM: ${EPEL_RPM_URL}"
           curl -fL -o /tmp/epel-release.rpm "${EPEL_RPM_URL}"
           rpm -Uvh --nosignature /tmp/epel-release.rpm
-          
+
           # EPEL repo id 자동 탐지(epel/epel-9/epel-next 등 케이스 대응)
           EPEL_REPO_ID="$(dnf repolist all 2>/dev/null | awk 'tolower($1) ~ /^epel/ {print $1; exit}')"
           if [[ -z "${EPEL_REPO_ID}" ]]; then
@@ -193,7 +193,14 @@ jobs:
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
           # --- 9.6 고정 (중요: 9.7 혼입 차단) ---
-          DNF_COMMON_OPTS="--releasever=9.6 --disablerepo='*' --enablerepo=baseos,appstream,crb,epel"
+          : "${EPEL_REPO_ID:?EPEL_REPO_ID is not set. Configure step must export it to GITHUB_ENV}"
+          # 옵션 문자열에 따옴표를 넣지 말고, 배열로 전달(파싱 안정성)
+          DNF_COMMON_OPTS=(
+            --releasever=9.6
+            --disablerepo=*
+            --enablerepo="rocky-vault-9.6-*","${EPEL_REPO_ID}"
+            --setopt=install_weak_deps=False
+          )
 
           # ablestack-v2k.spec의 Requires와 동일하게 유지 (8개)
           # ceph-common: rbd CLI 사용(생성/존재확인) 목적
@@ -208,10 +215,14 @@ jobs:
             exit 2
           fi
 
+          echo "[INFO] Sanity check: required pkgs availability (repo view)"
+          # nbd/nbdkit/qemu-img가 repo에서 안 보이면 여기서 즉시 실패해야 함(지금 문제 조기 차단)
+          dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available ${REQ_PKGS} >/dev/null
+
           # Requires 의존성 클로저 산출 (패키지명만, 중복 제거)
           # dnf-plugins-core의 repoquery 사용
-          dnf -y ${DNF_COMMON_OPTS} install dnf-plugins-core >/dev/null
-          dnf -q ${DNF_COMMON_OPTS} repoquery \
+          dnf -y "${DNF_COMMON_OPTS[@]}" install dnf-plugins-core >/dev/null
+          dnf -q "${DNF_COMMON_OPTS[@]}" repoquery \
             --requires --resolve --recursive \
             --qf '%{name}' \
             ${REQ_PKGS} | sort -u > /tmp/v2k_dep_closure.txt
@@ -227,8 +238,8 @@ jobs:
           head -n 50 /tmp/v2k_to_download.txt || true
 
           if [[ -s /tmp/v2k_to_download.txt ]]; then
-            # 패키지명 리스트를 인자로 다운로드 (9.6 강제)
-            xargs -r dnf ${DNF_COMMON_OPTS} download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt || true
+            # 실패를 숨기지 않는다. (nbd 미포함인데도 성공 처리되는 것을 방지)
+            xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
           else
             echo "[INFO] Nothing to download (all deps satisfied by baseline)."
           fi
