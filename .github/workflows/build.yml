@@ -78,10 +78,44 @@ jobs:
 
       - name: Install build deps (v2k)
         run: |
-          set -e
-          dnf -y distro-sync
-          # curl-minimal is default in Rocky container; installing curl conflicts.
-          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c ca-certificates curl-minimal
+          set -euo pipefail
+
+          # ─────────────────────────────────────────────
+          # Rocky 9.6 vault 고정 (AirGap 수집용)
+          # - 기존 rocky.repo는 mirrorlist만 있고 baseurl이 없을 수 있음
+          # - releasever=9.6만으로는 해결 안됨 (baseurl이 없어서)
+          # - 따라서 9.6 vault baseurl을 가진 repo를 "직접" 생성
+          # ─────────────────────────────────────────────
+          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
+          [rocky-vault-9.6-baseos]
+          name=Rocky Linux 9.6 - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-appstream]
+          name=Rocky Linux 9.6 - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-crb]
+          name=Rocky Linux 9.6 - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
+
+          dnf clean all
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+
+          # curl 충돌 회피: curl-minimal ↔ curl
+          # - 컨테이너 베이스에 curl-minimal이 깔린 경우, 필요 시 allowerasing으로 정리
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
+            --allowerasing ca-certificates curl-minimal || true
+
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
+            make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Configure Rocky 9.6 vault repos + enable EPEL (build-time only)
         run: |
