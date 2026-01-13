@@ -70,7 +70,6 @@ v2k_build_govc_url_from_vcenter_host() {
 v2k_generate_run_id() {
   # engine.sh init과 동일한 형식(호환성 유지)
   date +%Y%m%d-%H%M%S
-  printf -- "-%s" "$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 }
 
 v2k_output_run_id() {
@@ -91,6 +90,16 @@ v2k_keep_govc_env_in_workdir() {
       install -m 600 "${govc_env_path}" "${dst}" 2>/dev/null || true
     fi
   fi
+}
+
+v2k_source_kv_env() {
+  local path="$1"
+  [[ -f "${path}" ]] || return 0
+  # key=value 파일을 현재 쉘에 로드 + export
+  set -a
+  # shellcheck disable=SC1090
+  source "${path}"
+  set +a
 }
 
 # -----------------------------------------------------------------------------
@@ -203,6 +212,13 @@ v2k_cmd_run_foreground() {
     "VDDK_USER=${username}" \
     "VDDK_PASSWORD=${password}" \
     "VDDK_SERVER=${vcenter_host}"
+
+    # ✅ 중요: govc 단계들이 env 기반으로 동작할 수 있으므로 즉시 환경에 반영
+    v2k_source_kv_env "${tmp_govc_env}"
+
+    # ✅ manifest에 vddk cred 경로를 남기고, 후속 단계에서 참조 가능하도록 env에도 설정
+    export V2K_VDDK_SERVER="${vcenter_host}"
+    export V2K_VDDK_CRED_FILE="${tmp_vddk_cred}"
 
   init_args+=( --cred-file "${tmp_govc_env}" --vddk-cred-file "${tmp_vddk_cred}" )
 
@@ -341,7 +357,15 @@ export V2K_EVENTS_LOG="${V2K_EVENTS_LOG}"
 
 # NOTE: This worker runs in a fresh shell, so engine+orchestrator must already be loaded by main CLI.
 # We invoke ablestack_v2k itself in foreground mode.
-exec "\$(command -v ablestack_v2k)" --workdir "${V2K_WORKDIR}" --run-id "${V2K_RUN_ID}" --manifest "${V2K_MANIFEST}" --log "${V2K_EVENTS_LOG}" run --foreground ${args[*]}
+
+# args를 bash-safe하게 직렬화 (%q)
+local args_q=""
+local a
+for a in "${args[@]}"; do
+  args_q+=" $(printf '%q' "${a}")"
+done
+
+exec "\$(command -v ablestack_v2k)" --workdir "${V2K_WORKDIR}" --run-id "${V2K_RUN_ID}" --manifest "${V2K_MANIFEST}" --log "${V2K_EVENTS_LOG}" run --foreground${args_q}
 EOF
   chmod 700 "${worker}"
 

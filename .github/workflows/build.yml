@@ -923,20 +923,62 @@ jobs:
                           echo "[WARN] VDDK asset not found: ${ISO_MNT}/assets/VMware-vix-disklib-*.tar.gz"
                       fi
 
-                      # 4) pyvmomi (offline wheels) -> dedicated venv
+                      # 4) pyvmomi (offline wheels)
                       WHEEL_DIR="${ISO_MNT}/assets/v2k/wheels"
                       if [[ -d "${WHEEL_DIR}" ]]; then
-                          sudo mkdir -p /usr/share/ablestack/v2k
-                          if [[ ! -d /usr/share/ablestack/v2k/venv ]]; then
-                              if ! python3 -m venv /usr/share/ablestack/v2k/venv >/dev/null 2>&1; then
-                                  echo "[WARN] python3 venv creation failed. Ensure python3 is installed."
+                          echo "[INFO] Installing pyvmomi from offline wheels: ${WHEEL_DIR}"
+
+                          # 4-A) Try system-wide install first (best for sys.path compatibility)
+                          if python3 -m pip --version >/dev/null 2>&1; then
+                              if sudo python3 -m pip install --no-index --find-links "${WHEEL_DIR}" pyvmomi; then
+                                  echo "[OK] pyvmomi installed into system site-packages (python3 -m pip)."
+                              else
+                                  echo "[WARN] System-wide pip install failed. Falling back to venv + .pth link."
+                              fi
+                          else
+                              echo "[WARN] System pip not available. Falling back to venv + .pth link."
+                          fi
+
+                          # 4-B) If still not importable, install into dedicated venv and link into system via .pth
+                          if ! python3 -c 'import pyVmomi' >/dev/null 2>&1; then
+                              sudo mkdir -p /usr/share/ablestack/v2k
+                              if [[ ! -d /usr/share/ablestack/v2k/venv ]]; then
+                                  if ! sudo python3 -m venv /usr/share/ablestack/v2k/venv >/dev/null 2>&1; then
+                                      echo "[WARN] python3 venv creation failed. Ensure python3 is installed."
+                                  fi
+                              fi
+
+                              if [[ -x /usr/share/ablestack/v2k/venv/bin/pip ]]; then
+                                  sudo /usr/share/ablestack/v2k/venv/bin/pip install --no-index --find-links "${WHEEL_DIR}" pyvmomi || true
+                                  echo "[INFO] pyvmomi installed into venv: /usr/share/ablestack/v2k/venv"
+                              else
+                                  echo "[WARN] venv pip not found; pyvmomi venv install skipped."
+                              fi
+
+                              # Create .pth file to add venv site-packages to system python sys.path
+                              if python3 -c 'import sys,sysconfig; print(sysconfig.get_paths()["purelib"])' >/dev/null 2>&1; then
+                                  SYS_PURELIB="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+                                  PYVER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+                                  VENV_SITE="/usr/share/ablestack/v2k/venv/lib/python${PYVER}/site-packages"
+                                  if [[ -d "${SYS_PURELIB}" && -d "${VENV_SITE}" ]]; then
+                                      PTH_FILE="${SYS_PURELIB}/ablestack-v2k.pth"
+                                      echo "${VENV_SITE}" | sudo tee "${PTH_FILE}" >/dev/null
+                                      sudo chmod 0644 "${PTH_FILE}"
+                                      echo "[OK] Linked venv site-packages into system python via: ${PTH_FILE}"
+                                  else
+                                      echo "[WARN] Cannot create .pth link (missing dirs): SYS_PURELIB=${SYS_PURELIB}, VENV_SITE=${VENV_SITE}"
+                                  fi
+                              else
+                                  echo "[WARN] sysconfig purelib detection failed; .pth link skipped."
                               fi
                           fi
-                          if [[ -x /usr/share/ablestack/v2k/venv/bin/pip ]]; then
-                              sudo /usr/share/ablestack/v2k/venv/bin/pip install --no-index --find-links "${WHEEL_DIR}" pyvmomi || true
-                              echo "[OK] pyvmomi installed (offline wheels) into /usr/share/ablestack/v2k/venv"
+
+                          # Final verification
+                          if python3 -c 'import pyVmomi; import pyVim' >/dev/null 2>&1; then
+                              echo "[OK] pyvmomi import check passed (system python3)."
                           else
-                              echo "[WARN] venv pip not found; pyvmomi offline install skipped."
+                              echo "[WARN] pyvmomi still not importable by system python3."
+                              echo "       You can run: python3 -c 'import sys; print(sys.path)' for diagnostics."
                           fi
                       else
                           echo "[WARN] pyvmomi wheels dir not found in ISO: ${WHEEL_DIR}"

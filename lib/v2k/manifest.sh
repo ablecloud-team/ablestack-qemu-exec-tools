@@ -131,6 +131,18 @@ v2k_manifest_init() {
     # 확장자(파일 타입에서만 사용)
     | ($fmt) as $ext
 
+    # 원본 VM 이름
+    | ($inv.vm.name|tostring) as $vmname_raw
+
+    # ASCII-safe prefix (공백/슬래시 등만 치환, 한글은 유지)
+    | ($vmname_raw | gsub("[/[:space:]]"; "_")) as $vmname_safe
+
+    # UTF-8 기반 짧은 해시 (식별용)
+    | ($vmname_raw | @base64 | gsub("[^A-Za-z0-9]"; "") | .[0:8]) as $vmname_hash
+
+    # 최종 파일용 VM 식별자
+    | ($vmname_safe + "__" + $vmname_hash) as $vmname_file
+
     # 디스크 변환: to_entries는 {key,value} 이므로 key를 인덱스로 사용
     | ($inv.disks
         | to_entries
@@ -150,7 +162,7 @@ v2k_manifest_init() {
                       $ov
                     else
                       if $st=="file" then
-                        ($dst + "/disk" + $idx + "." + $ext)
+                        ($dst + "/" + $vmname + "-disk" + $idx + "." + $ext)
                       else
                         ""
                       end
