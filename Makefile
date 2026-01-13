@@ -15,7 +15,7 @@
 # limitations under the License.
 
 NAME = ablestack-qemu-exec-tools
-V2K_NAME = ablestack_v2k
+V2K_NAME = ablestack-v2k
 V2K_SPEC = rpm/$(V2K_NAME).spec
 
 # Read VERSION file
