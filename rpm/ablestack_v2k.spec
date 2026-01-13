@@ -16,7 +16,7 @@
 
 Name:           ablestack_v2k
 Version:        %{version}
-Release:        %{release}
+Release:        %{release}%{?dist}
 Summary:        ABLESTACK VMware-to-KVM migration tool (V2K add-on)
 
 License:        Apache-2.0

@@ -1061,4 +1061,4 @@ jobs:
           files: |
             build/iso/*.iso
             release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
-            release/v2k/v2k-rpm-rocky9.6/ablestack-v2k-*.rpm
+            release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
