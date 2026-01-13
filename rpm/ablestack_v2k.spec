@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-Name:           ablestack-v2k
+Name:           ablestack_v2k
 Version:        %{version}
 Release:        %{release}
 Summary:        ABLESTACK VMware-to-KVM migration tool (V2K add-on)
