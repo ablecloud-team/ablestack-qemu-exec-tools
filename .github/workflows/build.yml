@@ -1047,11 +1047,11 @@ jobs:
       - name: Generate ISO
         run: |
           VERSION=${GITHUB_REF##*/}
-          mkisofs -o ablestack-qemu-exec-tools-${VERSION}.iso \
+          mkisofs -o ABLESTACK-Tools-${VERSION}.iso \
             -V "ABLESTACK-Tools" \
             -r -J release
           mkdir -p build/iso
-          mv ablestack-qemu-exec-tools-${VERSION}.iso build/iso/
+          mv ABLESTACK-Tools-${VERSION}.iso build/iso/
           ls -lh build/iso
 
       - name: Create GitHub Release
