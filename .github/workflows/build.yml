@@ -287,6 +287,13 @@ jobs:
             echo "[INFO] Nothing to download (all deps satisfied by baseline)."
           fi
 
+          echo "[INFO] Creating repo metadata (createrepo_c)..."
+          createrepo_c "$WORKDIR"
+
+          echo "[INFO] Repo metadata sanity check:"
+          test -f "$WORKDIR/repodata/repomd.xml"
+          ls -al "$WORKDIR/repodata" | head -n 50 || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: v2k-rpm-package
