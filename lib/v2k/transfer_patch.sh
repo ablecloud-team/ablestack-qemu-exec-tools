@@ -266,7 +266,7 @@ v2k_transfer_patch_one() {
       vm="moref=${vm_moref}" \
       snapshot="${snap_moref}" \
       transports=nbd:nbdssl \
-      file="${snap_vmdk_path}" >"$nbdlog" 2>&1
+      file="${snap_vmdk_path}" >>"$nbdlog" 2>&1
 
     # Ensure nbdkit actually started (pidfile must exist and process must be alive)
     if [[ ! -s "${pidfile}" ]]; then

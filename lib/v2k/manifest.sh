@@ -97,6 +97,10 @@ v2k_manifest_init() {
     return 2
   fi
 
+  local vmhash
+  vmhash="$(jq -r '.vm.name // ""' <<<"${inv_compact}" | sha256sum | awk '{print substr($1,1,8)}')"
+  [[ -n "${vmhash}" ]] || vmhash="00000000"
+
   # ✅ inv_json을 stdin으로 jq에 전달 (검증된 패턴)
   printf '%s' "${inv_compact}" | jq -c \
     --arg schema "ablestack-v2k/manifest-v1" \
@@ -114,6 +118,7 @@ v2k_manifest_init() {
     --arg vddk_thumbprint "${vddk_thumbprint}" \
     --arg vddk_user "${vddk_user}" \
     --arg vddk_cred_file "${vddk_cred_file}" \
+    --arg vmhash "${vmhash}" \
     --argjson storage_map "${map_compact}" \
     '
     def strip_vim_url($u):
@@ -131,17 +136,18 @@ v2k_manifest_init() {
     # 확장자(파일 타입에서만 사용)
     | ($fmt) as $ext
 
-    # 원본 VM 이름
+    # VM 이름 정규화 + 해시
     | ($inv.vm.name|tostring) as $vmname_raw
-
-    # ASCII-safe prefix (공백/슬래시 등만 치환, 한글은 유지)
-    | ($vmname_raw | gsub("[/[:space:]]"; "_")) as $vmname_safe
-
-    # UTF-8 기반 짧은 해시 (식별용)
-    | ($vmname_raw | @base64 | gsub("[^A-Za-z0-9]"; "") | .[0:8]) as $vmname_hash
-
-    # 최종 파일용 VM 식별자
-    | ($vmname_safe + "__" + $vmname_hash) as $vmname_file
+    | ($vmname_raw
+        | gsub("[/\\\\]"; "_")
+        | gsub("[[:cntrl:]]"; "_")
+        | gsub("[[:space:]]+"; "_")
+        | gsub("^[.]+$"; "_")
+        | gsub("^[.]"; "_")
+        | gsub("_+"; "_")
+      ) as $vmname_norm
+    | (if ($vmname_norm|length) > 0 then $vmname_norm else "vm" end) as $vmname
+    | ($vmname + "-" + $vmhash) as $vmname_file
 
     # 디스크 변환: to_entries는 {key,value} 이므로 key를 인덱스로 사용
     | ($inv.disks
@@ -162,7 +168,7 @@ v2k_manifest_init() {
                       $ov
                     else
                       if $st=="file" then
-                        ($dst + "/" + $vmname + "-disk" + $idx + "." + $ext)
+                        ($dst + "/" + $vmname_file + "-disk" + $idx + "." + $ext)
                       else
                         ""
                       end

@@ -51,6 +51,7 @@ v2k_load_vddk_cred_from_manifest() {
 
 v2k_transfer_base_all() {
   local manifest="$1" jobs="$2"
+  : "${jobs:?}"
   local count
   count="$(jq -r '.disks|length' "${manifest}")"
 
@@ -83,7 +84,6 @@ v2k_transfer_base_all() {
     thumbprint="$(jq -r '.source.vddk.thumbprint // empty' "${manifest}" 2>/dev/null || true)"
   fi
   if [[ -z "${thumbprint}" ]]; then
-    thumbprint="$(v2k_vmware_get_thumbprint "${esxi}")"
     thumbprint="$(v2k_vmware_get_thumbprint "${server}")"
   fi
 
@@ -196,9 +196,43 @@ v2k_transfer_base_one() {
     # IMPORTANT: per-disk cleanup (avoid qemu-nbd leak across disks)
     trap cleanup RETURN
 
+    # - V2K_BASE_METHOD=convert : qemu-img convert
+    # - V2K_BASE_METHOD=nbdcopy : nbdcopy
+    base_method="${V2K_BASE_METHOD:-nbdcopy}"
+
+    # normalize: trim + lowercase (whitespace/newline 방지)
+    base_method="$(echo -n "${base_method}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+
+    run_str=""
+
+    # resolve absolute paths to avoid PATH issues (systemd/sudo/nbdkit --run)
+    qemu_img_path="$(command -v qemu-img)"
+    nbdcopy_path="$(command -v nbdcopy 2>/dev/null || true)"
+
+    case "${base_method}" in
+      convert|qemu-img)
+        run_str="${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
+        ;;
+      nbdcopy)
+        if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
+           # qcow2 destination: use qemu-nbd as destination NBD server (subprocess mode)
+           # nbdcopy SOURCE -- [ qemu-nbd -f qcow2 DEST.qcow2 ]
+           run_str="${nbdcopy_path} --progress \"\$uri\" -- \"[\" qemu-nbd -f qcow2 \"${out_target}\" \"]\""
+         else
+           run_str="${nbdcopy_path} --progress \"\$uri\" \"${out_target}\""
+        fi
+        ;;
+      *)
+        run_str="${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
+        ;;
+    esac
+
+    echo "[INFO] Base transfer method: ${base_method}" >> "${nbdlog}"
+    echo "[INFO] Run string: ${run_str}" >> "${nbdlog}"
+
     # Validated pattern:
-    # nbdkit -r -U - vddk libdir=... server=... user=... password=+file thumbprint=... vm="moref=..." snapshot="..." transports=nbd:nbdssl file="..." \
-    #   --run 'qemu-img convert -p -f raw -O <raw|qcow2> $nbd <target>'
+    # nbdkit -r -U - vddk libdir=... server=... user=... password=... thumbprint=... vm="moref=..." snapshot="..." \
+    #   --run 'qemu-img convert nbd://?socket=$unixsocket ...'
     LD_LIBRARY_PATH="${VDDK_LIBDIR}" \
     nbdkit -r -U - vddk \
       libdir="${VDDK_LIBDIR}" \
@@ -210,7 +244,7 @@ v2k_transfer_base_one() {
       snapshot="${snap_moref}" \
       transports=nbd:nbdssl \
       file="${vmdk_path}" \
-      --run "qemu-img convert -p -f raw -O \"${out_fmt}\" \$nbd \"${out_target}\"" >"${nbdlog}" 2>&1
+      --run "${run_str}" >>"${nbdlog}" 2>&1
 
     v2k_manifest_mark_base_done "${manifest}" "${idx}"
     v2k_event INFO "sync.base" "${disk_id}" "disk_done" "{\"target\":\"${target_path}\"}"

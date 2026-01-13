@@ -358,14 +358,7 @@ export V2K_EVENTS_LOG="${V2K_EVENTS_LOG}"
 # NOTE: This worker runs in a fresh shell, so engine+orchestrator must already be loaded by main CLI.
 # We invoke ablestack_v2k itself in foreground mode.
 
-# args를 bash-safe하게 직렬화 (%q)
-local args_q=""
-local a
-for a in "${args[@]}"; do
-  args_q+=" $(printf '%q' "${a}")"
-done
-
-exec "\$(command -v ablestack_v2k)" --workdir "${V2K_WORKDIR}" --run-id "${V2K_RUN_ID}" --manifest "${V2K_MANIFEST}" --log "${V2K_EVENTS_LOG}" run --foreground${args_q}
+exec "\$(command -v ablestack_v2k)" --workdir "${V2K_WORKDIR}" --run-id "${V2K_RUN_ID}" --manifest "${V2K_MANIFEST}" --log "${V2K_EVENTS_LOG}" run --foreground ${args[*]}
 EOF
   chmod 700 "${worker}"
 

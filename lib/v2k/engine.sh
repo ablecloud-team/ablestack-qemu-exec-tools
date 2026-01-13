@@ -357,6 +357,7 @@ v2k_maybe_force_cleanup() {
 v2k_cmd_sync() {
   local manifest="${V2K_MANIFEST}"
   local force_cleanup=0
+  : "${V2K_BASE_METHOD:=nbdcopy}"
 
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
