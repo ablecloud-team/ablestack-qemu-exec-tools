@@ -29,6 +29,37 @@ source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/orchestrator.sh"
 
+v2k_resolve_vddk_libdir() {
+  # Do NOT modify the path (no auto appending like /lib64).
+  # VDDK plugin behavior is expected to work with distrib root.
+  if [[ -n "${VDDK_LIBDIR-}" ]]; then
+    export VDDK_LIBDIR
+    return 0
+  fi
+
+  # 1) Load from /etc/profile.d (written by installer)
+  if [[ -f /etc/profile.d/v2k-vddk.sh ]]; then
+    # shellcheck disable=SC1091
+    . /etc/profile.d/v2k-vddk.sh >/dev/null 2>&1 || true
+  fi
+
+  # 2) If still empty, try the well-known symlink path
+  if [[ -z "${VDDK_LIBDIR-}" && -d /opt/vmware-vix-disklib-distrib ]]; then
+    VDDK_LIBDIR="/opt/vmware-vix-disklib-distrib"
+  fi
+
+  if [[ -n "${VDDK_LIBDIR-}" ]]; then
+    export VDDK_LIBDIR
+  fi
+}
+
+v2k_resolve_vddk_libdir
+
+# Optional diagnostics
+if [[ "${V2K_DEBUG_ENV:-0}" -eq 1 ]]; then
+  echo "[DEBUG] VDDK_LIBDIR='${VDDK_LIBDIR-}'" >&2
+fi
+
 usage() {
   cat <<'EOF'
 ablestack_v2k - VMware -> ABLESTACK(KVM) minimal downtime migration tool (v1)

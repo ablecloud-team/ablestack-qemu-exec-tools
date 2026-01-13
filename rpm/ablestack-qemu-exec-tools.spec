@@ -16,7 +16,7 @@
 
 Name:           ablestack-qemu-exec-tools
 Version:        %{version}
-Release:        %{release}%{?dist}
+Release:        %{release}
 Summary:        QEMU guest-agent based VM command execution and parsing utilities
 
 License:        Apache-2.0
