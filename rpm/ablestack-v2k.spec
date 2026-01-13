@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-Name:           ablestack-v2k
+Name:           ablestack_v2k
 Version:        %{version}
 Release:        %{release}%{?dist}
 Summary:        ABLESTACK VMware-to-KVM migration tool (V2K add-on)
@@ -44,7 +44,7 @@ Assets such as VDDK and govc are handled by the offline ISO installer.
 %install
 # Binaries (explicit path: /usr/local/bin)
 mkdir -p %{buildroot}/usr/local/bin
-install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack-v2k
+install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
 
 # Libraries (explicit path: /usr/local/lib/ablestack-qemu-exec-tools/v2k)
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k
@@ -55,7 +55,7 @@ cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev
 
 
 %license LICENSE
-/usr/local/bin/ablestack-v2k
+/usr/local/bin/ablestack_v2k
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
 
 %changelog
