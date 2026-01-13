@@ -790,7 +790,7 @@ jobs:
           cat <<'EOF' > release/install-linux.sh
           #!/usr/bin/env bash
           set -e
-          ISO_MNT=$(dirname "$0")
+          ISO_MNT="$(cd "$(dirname "$0")" && pwd -P)"
 
           echo "[INFO] ABLESTACK QEMU Exec Tools Installer"
           echo "[INFO] Detecting distribution..."
