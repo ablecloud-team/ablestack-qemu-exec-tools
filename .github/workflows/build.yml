@@ -188,7 +188,7 @@ jobs:
           mkdir -p "$WORKDIR"
 
           # V2K 본체 RPM 수집 (프로젝트 산출 경로에 맞춰 필요 시 조정)
-          find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack-v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
+          find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack_v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
 
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
