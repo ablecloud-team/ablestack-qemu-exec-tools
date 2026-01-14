@@ -116,7 +116,7 @@ v2k_cmd_run_foreground() {
   local insecure="${V2K_RUN_DEFAULT_INSECURE}"
   local no_incr="0"
 
-  local do_cleanup="1" keep_snapshots="0" keep_workdir="0"
+  local do_cleanup="1" keep_snapshots="0" keep_workdir="1"
   local default_jobs="" default_chunk="" default_coalesce_gap=""
   local base_args_str="" incr_args_str="" cutover_args_str=""
 

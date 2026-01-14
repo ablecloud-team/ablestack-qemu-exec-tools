@@ -564,7 +564,7 @@ v2k_vmware_snapshot_remove_migr() {
     # Extract all snapshot names from json (robust: scan all objects with Name field).
     # Filter by pattern and uniq.
     names="$(printf '%s' "${tree_json}" \
-      | jq -r '.. | objects | .Name? // empty' 2>/dev/null \
+      | jq -r '.. | objects | .name? // empty' 2>/dev/null \
       | grep -F "${pattern}" \
       | sort -u || true)"
 
@@ -584,7 +584,7 @@ v2k_vmware_snapshot_remove_migr() {
   # Print remaining names for diagnostics.
   {
     govc snapshot.tree -vm "${vm}" -json 2>/dev/null \
-      | jq -r '.. | objects | .Name? // empty' 2>/dev/null \
+      | jq -r '.. | objects | .name? // empty' 2>/dev/null \
       | grep -F "${pattern}" \
       | sort -u || true
   } | sed 's/^/[v2k] remaining migr snapshot: /' >&2
