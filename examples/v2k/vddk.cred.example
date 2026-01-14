@@ -1,0 +1,15 @@
+# VDDK(ESXi) 자격증명 예시
+# - nbdkit-vddk가 ESXi에 직접 접속할 때 사용하는 계정/비밀번호입니다.
+# - vCenter(GOVC_*) 계정과 분리됩니다.
+
+# ESXi 로그인 계정 (예: root 또는 권한 있는 계정)
+VDDK_USER="root"
+
+# ESXi 로그인 비밀번호
+VDDK_PASSWORD="***"
+
+# (선택) VDDK 서버 override
+# - 네트워크/방화벽/포트포워딩 등으로 인해, inventory에서 얻은 esxi_host 대신
+#   특정 주소로 붙어야 하는 경우에만 설정하세요.
+# - 설정 시 manifest: .source.vddk.server 로 반영됩니다.
+# VDDK_SERVER="10.10.10.10"

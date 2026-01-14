@@ -15,6 +15,8 @@
 # limitations under the License.
 
 NAME = ablestack-qemu-exec-tools
+V2K_NAME = ablestack_v2k
+V2K_SPEC = rpm/$(V2K_NAME).spec
 
 # Read VERSION file
 VERSION := $(shell . ./VERSION; printf "%s" "$$VERSION" | tr -d '\r\n[:space:]')
@@ -34,7 +36,7 @@ DEB_BIN_DIR = $(DEB_BUILD_DIR)/usr/bin
 DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 
-.PHONY: all install uninstall rpm deb windows clean
+.PHONY: all install uninstall rpm v2k-rpm deb windows clean
 
 all:
 	@echo "Available targets: install, uninstall, rpm, deb, windows, clean"
@@ -133,6 +135,28 @@ rpm:
 	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
 	@echo "✅ RPM package created: build/rpm/"
 
+v2k-rpm:
+	@echo "📦 Building V2K RPM (isolated)..."
+	@test -f "$(V2K_SPEC)" || (echo "[ERR] Missing spec: $(V2K_SPEC)" >&2; exit 2)
+
+	# Fully isolated rpmbuild tree for V2K (keeps existing 'rpmbuild/' untouched)
+	mkdir -p rpmbuild_v2k/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+	tar czf rpmbuild_v2k/SOURCES/$(V2K_NAME)-$(VERSION).tar.gz \
+		--transform="s,^,$(V2K_NAME)-$(VERSION)/," .
+
+	cp $(V2K_SPEC) rpmbuild_v2k/SPECS/
+
+	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild_v2k" \
+	         --define "version $(VERSION)" \
+	         --define "release $(RELEASE)" \
+	         --define "githash $(GIT_HASH)" \
+	         rpmbuild_v2k/SPECS/$(V2K_NAME).spec
+
+	mkdir -p build/rpm-v2k
+	cp rpmbuild_v2k/RPMS/noarch/*.rpm build/rpm-v2k/ 2>/dev/null || true
+	cp rpmbuild_v2k/RPMS/*/*.rpm build/rpm-v2k/ 2>/dev/null || true
+	@echo "✅ V2K RPM package created: build/rpm-v2k/"
+
 deb:
 	@echo "📦 Building DEB..."
 	rm -rf $(DEB_BUILD_DIR)
@@ -182,6 +206,7 @@ windows:
 
 clean:
 	rm -rf rpmbuild
+	rm -rf rpmbuild_v2k
 	rm -rf $(DEB_BUILD_DIR)
 	rm -f *.deb
 	rm -rf build/*

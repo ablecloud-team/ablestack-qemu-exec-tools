@@ -1,0 +1,33 @@
+{# payload/v2k/libvirt/domain.xml.j2 #}
+<domain type='kvm'>
+  <name>{{ name }}</name>
+
+  <memory unit='MiB'>{{ memory_mib|default(2048) }}</memory>
+  <vcpu>{{ vcpu|default(2) }}</vcpu>
+
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    {% if uefi|default(true) %}
+    <loader readonly='yes' type='pflash'>/usr/share/edk2/ovmf/OVMF_CODE.fd</loader>
+    <nvram>{{ nvram_path|default('/var/lib/libvirt/qemu/nvram/' ~ name ~ '_VARS.fd') }}</nvram>
+    {% endif %}
+    <boot dev='hd'/>
+  </os>
+
+  <features><acpi/><apic/></features>
+  <cpu mode='host-passthrough'/>
+
+  <devices>
+    {# disks: list of dicts: {path, index, driver_type} #}
+    {% for d in disks %}
+    {% include 'disk.xml.part' %}
+    {% endfor %}
+
+    <interface type='network'>
+      <source network='{{ network|default("default") }}'/>
+      <model type='virtio'/>
+    </interface>
+
+    <graphics type='vnc' port='-1' autoport='yes'/>
+  </devices>
+</domain>
