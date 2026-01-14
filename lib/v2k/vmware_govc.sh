@@ -515,3 +515,78 @@ v2k_vmware_esxi_mgmt_ip_from_hostinfo_json() {
     printf '%s\n' "${ip}"
   fi
 }
+
+v2k_vmware_snapshot_remove_all() {
+  local manifest="$1"
+  local vm
+  vm="$(jq -r '.source.vm.name // empty' "${manifest}" 2>/dev/null || true)"
+  [[ -n "${vm}" && "${vm}" != "null" ]] || {
+    echo "Cannot purge snapshots: missing .source.vm.name in manifest" >&2
+    return 2
+  }
+
+  # Delete ALL snapshots of the source VM.
+  # govc usage: snapshot.remove NAME (NAME can be '*' to remove all snapshots)
+  # Ref: govc USAGE.md
+  if govc snapshot.remove -vm "${vm}" '*' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # If it failed, surface stderr for diagnostics.
+  # (Caller decides whether to treat as fatal.)
+  govc snapshot.remove -vm "${vm}" '*' 2>&1 | sed 's/^/[govc] /' >&2
+  return 1
+}
+
+v2k_vmware_snapshot_remove_migr() {
+  local manifest="$1"
+  local pattern="${2:-migr-}"
+
+  local vm
+  vm="$(jq -r '.source.vm.name // empty' "${manifest}" 2>/dev/null || true)"
+  [[ -n "${vm}" && "${vm}" != "null" ]] || {
+    echo "Cannot remove migr snapshots: missing .source.vm.name in manifest" >&2
+    return 2
+  }
+
+  # We may need multiple passes because snapshot trees can change as parents are removed.
+  # Try up to N rounds until no matching snapshots remain.
+  local round max_round
+  max_round=10
+  for ((round=1; round<=max_round; round++)); do
+    local tree_json names
+    tree_json="$(govc snapshot.tree -vm "${vm}" -json 2>/dev/null || true)"
+    if [[ -z "${tree_json}" ]]; then
+      # If there is no snapshot, govc may return empty/err. Treat as nothing to do.
+      return 0
+    fi
+
+    # Extract all snapshot names from json (robust: scan all objects with Name field).
+    # Filter by pattern and uniq.
+    names="$(printf '%s' "${tree_json}" \
+      | jq -r '.. | objects | .Name? // empty' 2>/dev/null \
+      | grep -F "${pattern}" \
+      | sort -u || true)"
+
+    if [[ -z "${names}" ]]; then
+      return 0
+    fi
+
+    # Best-effort delete each matching snapshot name.
+    # NOTE: if duplicate names exist, govc may fail/act ambiguously; we keep best-effort.
+    while IFS= read -r snap_name; do
+      [[ -n "${snap_name}" ]] || continue
+      govc snapshot.remove -vm "${vm}" "${snap_name}" >/dev/null 2>&1 || true
+    done <<< "${names}"
+  done
+
+  # If we still have matching snapshots after max rounds, return non-zero for observability.
+  # Print remaining names for diagnostics.
+  {
+    govc snapshot.tree -vm "${vm}" -json 2>/dev/null \
+      | jq -r '.. | objects | .Name? // empty' 2>/dev/null \
+      | grep -F "${pattern}" \
+      | sort -u || true
+  } | sed 's/^/[v2k] remaining migr snapshot: /' >&2
+  return 1
+}

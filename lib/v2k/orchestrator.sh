@@ -116,6 +116,7 @@ v2k_cmd_run_foreground() {
   local insecure="${V2K_RUN_DEFAULT_INSECURE}"
   local no_incr="0"
 
+  local do_cleanup="1" keep_snapshots="0" keep_workdir="0"
   local default_jobs="" default_chunk="" default_coalesce_gap=""
   local base_args_str="" incr_args_str="" cutover_args_str=""
 
@@ -145,6 +146,11 @@ v2k_cmd_run_foreground() {
       --max-incr) max_incr="${2:-}"; shift 2;;
       --converge-threshold-sec) converge_threshold_sec="${2:-}"; shift 2;;
       --no-incr) no_incr="1"; shift 1;;
+
+      # cleanup controls
+      --no-cleanup) do_cleanup="0"; shift 1;;
+      --keep-snapshots) keep_snapshots="1"; shift 1;;
+      --keep-workdir) keep_workdir="1"; shift 1;;
 
       # sync defaults
       --jobs) default_jobs="${2:-}"; shift 2;;
@@ -284,6 +290,14 @@ v2k_cmd_run_foreground() {
   cutover_args+=("${cutover_extra[@]}")
 
   v2k_cmd_cutover "${cutover_args[@]}"
+
+  # Cleanup (after successful cutover)
+  if [[ "${do_cleanup}" == "1" ]]; then
+    local -a cleanup_args=()
+    [[ "${keep_snapshots}" == "1" ]] && cleanup_args+=(--keep-snapshots)
+    [[ "${keep_workdir}" == "1" ]] && cleanup_args+=(--keep-workdir)
+    v2k_cmd_cleanup "${cleanup_args[@]}"
+  fi
 }
 
 # -----------------------------------------------------------------------------

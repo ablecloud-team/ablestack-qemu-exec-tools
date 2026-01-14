@@ -528,6 +528,17 @@ v2k_cmd_cleanup() {
   v2k_event INFO "cleanup" "" "phase_start" "{\"keep_snapshots\":${keep_snapshots},\"keep_workdir\":${keep_workdir}}"
   v2k_transfer_cleanup
   if [[ "${keep_snapshots}" -eq 0 ]]; then
+    # After final cutover: remove ONLY migration snapshots (name contains "migr-").
+    # Default: enabled. To disable: export V2K_PURGE_MIGR_SNAPSHOTS=0
+    : "${V2K_PURGE_MIGR_SNAPSHOTS:=1}"
+    if [[ "${V2K_PURGE_MIGR_SNAPSHOTS}" == "1" ]]; then
+      v2k_event INFO "cleanup" "" "vmware_snapshot_remove_migr_start" "{\"pattern\":\"migr-\"}"
+      if v2k_vmware_snapshot_remove_migr "${V2K_MANIFEST}" "migr-"; then
+        v2k_event INFO "cleanup" "" "vmware_snapshot_remove_migr_done" "{\"pattern\":\"migr-\"}"
+      else
+        v2k_event WARN "cleanup" "" "vmware_snapshot_remove_migr_failed" "{\"pattern\":\"migr-\"}"
+      fi
+    fi
     v2k_vmware_snapshot_cleanup "${V2K_MANIFEST}"
   fi
   if [[ "${keep_workdir}" -eq 0 ]]; then

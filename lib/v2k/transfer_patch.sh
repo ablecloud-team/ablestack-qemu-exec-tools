@@ -186,10 +186,10 @@ v2k_transfer_patch_one() {
       dst_dev="$(v2k_nbd_alloc)"
     fi
 
-    # Prepare unique socket/pidfile
-    sock="/tmp/v2k_src_${V2K_RUN_ID:-run}_${idx}.sock"
-    pidfile="/tmp/v2k_nbdkit_${V2K_RUN_ID:-run}_${idx}.pid"
-    rm -f "${sock}" "${pidfile}" || true
+    # Prepare unique socket/pidfile (avoid collisions across parallel runs)
+    sock="$(mktemp -u /tmp/v2k_src.XXXXXX.sock)"
+    pidfile="$(mktemp /tmp/v2k_nbdkit.XXXXXX.pid)"
+    rm -f "${sock}" >/dev/null 2>&1 || true
 
     # Explicit cleanup (do not rely on trap). Safe to call multiple times.
     local cleaned=0
@@ -256,6 +256,7 @@ v2k_transfer_patch_one() {
     v2k_event INFO "sync.${which}" "${disk_id}" "changed_areas_fetched" "{\"areas\":${areas_count},\"bytes\":${bytes_total}}"
 
     # Start nbdkit (read-only) for snapshot view (do NOT swallow failures)
+    # IMPORTANT: run in background and wait for pidfile/socket readiness.
     LD_LIBRARY_PATH="${VDDK_LIBDIR}" \
     nbdkit -r -U "${sock}" -P "${pidfile}" vddk \
       libdir="${VDDK_LIBDIR}" \
@@ -266,19 +267,27 @@ v2k_transfer_patch_one() {
       vm="moref=${vm_moref}" \
       snapshot="${snap_moref}" \
       transports=nbd:nbdssl \
-      file="${snap_vmdk_path}" >>"$nbdlog" 2>&1
+      file="${snap_vmdk_path}" >>"$nbdlog" 2>&1 &
+    nbdkit_bg_pid=$!
 
-    # Ensure nbdkit actually started (pidfile must exist and process must be alive)
+    # Wait for pidfile creation (race-safe) and ensure process is alive
+    for _ in {1..50}; do
+      [[ -s "${pidfile}" ]] && break
+      kill -0 "${nbdkit_bg_pid}" >/dev/null 2>&1 || break
+      sleep 0.1
+    done
     if [[ ! -s "${pidfile}" ]]; then
       echo "nbdkit did not create pidfile: ${pidfile}" >&2
-      tail -n 50 "${nbdlog}" >&2 || true
+      tail -n 80 "${nbdlog}" >&2 || true
+      cleanup_patch
       exit 42
     fi
     local nbdkit_pid
     nbdkit_pid="$(cat "${pidfile}" 2>/dev/null || true)"
     if [[ -z "${nbdkit_pid}" || ! -d "/proc/${nbdkit_pid}" ]]; then
       echo "nbdkit process not running (pid=${nbdkit_pid})" >&2
-      tail -n 50 "${nbdlog}" >&2 || true
+      tail -n 80 "${nbdlog}" >&2 || true
+      cleanup_patch
       exit 43
     fi
 
