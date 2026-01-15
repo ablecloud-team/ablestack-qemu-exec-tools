@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build:
-    uses: ./.github/workflows/winpe-build-core.yml
+    uses: ./.github/workflows/build-winpe-core.yml
     with:
       architecture: "amd64"
       iso_base_name: "winpe-ablestack-v2k"
