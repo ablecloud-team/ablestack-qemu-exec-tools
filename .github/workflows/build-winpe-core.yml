@@ -26,8 +26,8 @@ on:
       retention_days:
         description: "Artifact retention days"
         required: false
-        default: 14
-        type: number
+        default: "14"
+        type: string
 
     outputs:
       iso_filename:
