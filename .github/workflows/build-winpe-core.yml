@@ -50,7 +50,6 @@ jobs:
       sha_filename: ${{ steps.meta.outputs.sha_filename }}
 
     env:
-      ADK_INSTALL_PATH: C:\ADK
       WORKDIR: C:\winpe_work
       OUTDIR: C:\out
 
@@ -109,12 +108,15 @@ jobs:
             "/quiet",
             "/norestart",
             "/ceip", "off",
-            "/installpath", "$env:ADK_INSTALL_PATH",
             "/features", "OptionId.DeploymentTools",
             "/log", $log
           )
           $p = Start-Process -FilePath $adk -ArgumentList $args -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "ADK install failed with exit code $($p.ExitCode). See $log" }
+          if ($p.ExitCode -ne 0) {
+            Write-Host "ADK install failed with exit code $($p.ExitCode). Dumping log tail: $log"
+            if (Test-Path $log) { Get-Content $log -Tail 200 | ForEach-Object { Write-Host $_ } }
+            throw "ADK install failed with exit code $($p.ExitCode). See $log"
+          }
 
       - name: Create WinPE Add-on offline layout (download payloads)
         shell: pwsh
@@ -147,12 +149,15 @@ jobs:
             "/quiet",
             "/norestart",
             "/ceip", "off",
-            "/installpath", "$env:ADK_INSTALL_PATH",
             "/features", "OptionId.WindowsPreinstallationEnvironment",
             "/log", $log
           )
           $p = Start-Process -FilePath $pe -ArgumentList $args -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "WinPE add-on install failed with exit code $($p.ExitCode). See $log" }
+          if ($p.ExitCode -ne 0) {
+            Write-Host "WinPE Add-on install failed with exit code $($p.ExitCode). Dumping log tail: $log"
+            if (Test-Path $log) { Get-Content $log -Tail 200 | ForEach-Object { Write-Host $_ } }
+            throw "WinPE add-on install failed with exit code $($p.ExitCode). See $log"
+          }
 
       - name: Upload ADK logs on failure
         if: failure()
@@ -169,7 +174,7 @@ jobs:
           $arch = "${{ inputs.architecture }}"
           $work = "$env:WORKDIR\WinPE_$arch"
 
-          $dandit = Join-Path $env:ADK_INSTALL_PATH "Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
+          $dandit = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
           if (!(Test-Path $dandit)) { throw "DandISetEnv.bat not found: $dandit" }
 
           cmd /c "`"$dandit`" && copype $arch `"$work`""
@@ -227,7 +232,7 @@ jobs:
 
           $iso = Join-Path $env:OUTDIR $file
 
-          $dandit = Join-Path $env:ADK_INSTALL_PATH "Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
+          $dandit = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
           cmd /c "`"$dandit`" && MakeWinPEMedia /ISO `"$work`" `"$iso`""
 
           if (!(Test-Path $iso)) { throw "ISO not created: $iso" }
