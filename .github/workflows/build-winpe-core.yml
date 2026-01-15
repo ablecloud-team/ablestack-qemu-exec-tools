@@ -192,22 +192,35 @@ jobs:
 
           dism /Mount-Image /ImageFile:"$wim" /Index:1 /MountDir:"$mnt"
           try {
+            # startnet.cmd is optional during early pipeline verification.
             $srcStartnet = Join-Path $env:GITHUB_WORKSPACE "winpe\startnet.cmd"
-            if (!(Test-Path $srcStartnet)) { throw "Missing repo file: winpe/startnet.cmd" }
-            Copy-Item -Force $srcStartnet (Join-Path $mnt "Windows\System32\startnet.cmd")
+            if (Test-Path $srcStartnet) {
+              Write-Host "Injecting startnet.cmd from repo: $srcStartnet"
+              Copy-Item -Force $srcStartnet (Join-Path $mnt "Windows\System32\startnet.cmd")
+            } else {
+              Write-Warning "winpe/startnet.cmd not found. Keeping default WinPE startnet.cmd."
+            }
 
+            # scripts folder is optional during early pipeline verification.
             $srcScripts = Join-Path $env:GITHUB_WORKSPACE "winpe\scripts"
-            if (!(Test-Path $srcScripts)) { throw "Missing repo folder: winpe/scripts/" }
-            $dstScripts = Join-Path $mnt "ablestack\scripts"
-            New-Item -ItemType Directory -Force -Path $dstScripts | Out-Null
-            Copy-Item -Recurse -Force (Join-Path $srcScripts "*") $dstScripts
+            if (Test-Path $srcScripts) {
+              Write-Host "Injecting scripts folder from repo: $srcScripts"
+              $dstScripts = Join-Path $mnt "ablestack\scripts"
+              New-Item -ItemType Directory -Force -Path $dstScripts | Out-Null
+              Copy-Item -Recurse -Force (Join-Path $srcScripts "*") $dstScripts
+            } else {
+              Write-Warning "winpe/scripts/ not found. Skipping script injection."
+            }
 
             $stamp = @()
             $stamp += "BuiltBy=GitHubActions"
             $stamp += "BuildTimeUtc=$(Get-Date -AsUTC -Format o)"
             $stamp += "GitSha=$env:GITHUB_SHA"
             $stamp += "Ref=$env:GITHUB_REF"
-            $dstMeta = Join-Path $mnt "ablestack\scripts\BUILDINFO.txt"
+            # Ensure destination exists even if scripts were not injected
+            $dstMetaDir = Join-Path $mnt "ablestack\scripts"
+            New-Item -ItemType Directory -Force -Path $dstMetaDir | Out-Null
+            $dstMeta = Join-Path $dstMetaDir "BUILDINFO.txt"
             $stamp -join "`n" | Out-File -Encoding ascii -Force $dstMeta
           }
           finally {
