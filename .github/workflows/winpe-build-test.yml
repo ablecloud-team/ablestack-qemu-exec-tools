@@ -1,0 +1,34 @@
+name: WinPE Test Build (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: "WinPE architecture"
+        required: true
+        default: "amd64"
+        type: choice
+        options: ["amd64"]
+      iso_suffix:
+        description: "Suffix for test ISO (e.g. test-20260116 or pr-123)"
+        required: true
+        default: "test"
+        type: string
+      retention_days:
+        description: "Artifact retention days"
+        required: true
+        default: 14
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/winpe-build-core.yml
+    with:
+      architecture: ${{ inputs.architecture }}
+      iso_base_name: "winpe-ablestack-v2k"
+      iso_suffix: ${{ inputs.iso_suffix }}
+      artifact_name: "winpe-iso-test"
+      retention_days: ${{ inputs.retention_days }}

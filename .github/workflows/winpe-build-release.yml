@@ -1,0 +1,40 @@
+name: WinPE Release Build (attach assets)
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/winpe-build-core.yml
+    with:
+      architecture: "amd64"
+      iso_base_name: "winpe-ablestack-v2k"
+      iso_suffix: ""                # 릴리즈는 suffix 없이 고정
+      artifact_name: "winpe-iso-release"
+      retention_days: 30
+
+  attach:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: dist
+
+      - name: List files
+        shell: bash
+        run: |
+          ls -al dist
+
+      - name: Attach assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.iso
+            dist/SHA256SUMS
