@@ -78,33 +78,90 @@ jobs:
           Invoke-WebRequest -Uri "${env:WINPE_ADDON_URL}" -OutFile "$env:RUNNER_TEMP\adk\adkwinpesetup.exe"
           Get-ChildItem "$env:RUNNER_TEMP\adk" | Format-Table Name,Length
 
-      - name: Install Windows ADK (Deployment Tools only)
+      - name: Create ADK offline layout (download payloads)
         shell: pwsh
         run: |
+          $layout = "$env:RUNNER_TEMP\adk\layout-adk"
+          New-Item -ItemType Directory -Force -Path $layout | Out-Null
+          $log = "$env:RUNNER_TEMP\adk\adk-layout.log"
+
           $adk = "$env:RUNNER_TEMP\adk\adksetup.exe"
+          if (!(Test-Path $adk)) { throw "Missing ADK setup: $adk" }
+
           $args = @(
             "/quiet",
-            "/norestart",
-            "/ceip", "off",
-            "/installpath", "$env:ADK_INSTALL_PATH",
-            "/features", "OptionId.DeploymentTools"
+            "/layout", $layout,
+            "/log", $log
           )
           $p = Start-Process -FilePath $adk -ArgumentList $args -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "ADK install failed with exit code $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) { throw "ADK layout failed with exit code $($p.ExitCode). See $log" }
 
-      - name: Install WinPE Add-on
+      - name: Install Windows ADK (Deployment Tools only) from layout
         shell: pwsh
         run: |
-          $pe = "$env:RUNNER_TEMP\adk\adkwinpesetup.exe"
+          $layout = "$env:RUNNER_TEMP\adk\layout-adk"
+          $log = "$env:RUNNER_TEMP\adk\adk-install.log"
+
+          $adk = Join-Path $layout "adksetup.exe"
+          if (!(Test-Path $adk)) { throw "adksetup.exe not found in layout: $adk" }
+
           $args = @(
             "/quiet",
             "/norestart",
             "/ceip", "off",
             "/installpath", "$env:ADK_INSTALL_PATH",
-            "/features", "OptionId.WindowsPreinstallationEnvironment"
+            "/features", "OptionId.DeploymentTools",
+            "/log", $log
+          )
+          $p = Start-Process -FilePath $adk -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "ADK install failed with exit code $($p.ExitCode). See $log" }
+
+      - name: Create WinPE Add-on offline layout (download payloads)
+        shell: pwsh
+        run: |
+          $layout = "$env:RUNNER_TEMP\adk\layout-winpe"
+          New-Item -ItemType Directory -Force -Path $layout | Out-Null
+          $log = "$env:RUNNER_TEMP\adk\winpe-layout.log"
+
+          $pe = "$env:RUNNER_TEMP\adk\adkwinpesetup.exe"
+          if (!(Test-Path $pe)) { throw "Missing WinPE Add-on setup: $pe" }
+
+          $args = @(
+            "/quiet",
+            "/layout", $layout,
+            "/log", $log
           )
           $p = Start-Process -FilePath $pe -ArgumentList $args -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "WinPE add-on install failed with exit code $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) { throw "WinPE Add-on layout failed with exit code $($p.ExitCode). See $log" }
+
+      - name: Install WinPE Add-on from layout
+        shell: pwsh
+        run: |
+          $layout = "$env:RUNNER_TEMP\adk\layout-winpe"
+          $log = "$env:RUNNER_TEMP\adk\winpe-install.log"
+
+          $pe = Join-Path $layout "adkwinpesetup.exe"
+          if (!(Test-Path $pe)) { throw "adkwinpesetup.exe not found in layout: $pe" }
+
+          $args = @(
+            "/quiet",
+            "/norestart",
+            "/ceip", "off",
+            "/installpath", "$env:ADK_INSTALL_PATH",
+            "/features", "OptionId.WindowsPreinstallationEnvironment",
+            "/log", $log
+          )
+          $p = Start-Process -FilePath $pe -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinPE add-on install failed with exit code $($p.ExitCode). See $log" }
+
+      - name: Upload ADK logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adk-logs
+          path: |
+            ${{ runner.temp }}\adk\*.log
+          retention-days: 7
 
       - name: Create WinPE working set (copype)
         shell: pwsh
