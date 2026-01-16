@@ -1,9 +1,13 @@
 name: Build and Release ablestack-qemu-exec-tools
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["WinPE Release Build"]
+    types:
+      - completed
+
+permissions:
+  contents: write
 
 # NOTE (WinPE ISO)
 # - WinPE ISO는 별도 워크플로우(WinPE Core/Test/Release)에서 생성/관리되는 것이 기본이다.
@@ -426,15 +430,57 @@ jobs:
   release:
     needs: [build-rpm, build-deb, build-windows, build-v2k-rpm]
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # workflow_run에서는 기본 브랜치가 checkout될 수 있으므로,
+          # WinPE Release Build가 빌드한 동일 커밋으로 고정
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Resolve tag from workflow_run
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.workflow_run.head_branch }}"
+          if [[ -z "$TAG" ]]; then
+            echo "[ERR] workflow_run.head_branch is empty (cannot determine tag)" >&2
+            exit 2
+          fi
+          if [[ "$TAG" != v* ]]; then
+            echo "[ERR] head_branch is not a v* tag: $TAG" >&2
+            exit 2
+          fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       # dist/ 아래에 모든 아티팩트 내려받기
       - uses: actions/download-artifact@v4
         with:
           path: dist
+
+      - name: Download WinPE ISO from GitHub Release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/winpe
+
+          echo "[INFO] Downloading WinPE ISO assets for tag: ${RELEASE_TAG}"
+          # WinPE workflow가 dist/*.iso 와 SHA256SUMS를 릴리즈에 붙였으므로, 여기서 가져온다.
+          # 파일명이 고정이 아닐 수 있어 패턴으로 수집
+          gh release download "${RELEASE_TAG}" \
+            -p "*winpe*.iso" \
+            -p "SHA256SUMS" \
+            -D release/winpe || true
+
+          if ls -1 release/winpe/*.iso >/dev/null 2>&1; then
+            echo "[OK] WinPE ISO staged:"
+            ls -lah release/winpe
+          else
+            echo "[WARN] WinPE ISO not found in release assets for ${RELEASE_TAG}. Continuing without it."
+          fi
 
       - name: Install packaging tools (genisoimage, 7zip)
         run: |
@@ -1075,8 +1121,8 @@ jobs:
         run: |
           set -e
 
-          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
-          DESC="ABLESTACK QEMU Exec Tools is an automation toolkit for libvirt/KVM environments, providing guest command execution, VM lifecycle orchestration, and VMware-to-KVM (V2K) migration pipelines. This release includes ablestack_v2k with fully automated Windows cutover support using WinPE-based offline driver injection."
+          CURRENT_TAG="${RELEASE_TAG}"
+          DESC="ABLESTACK QEMU Exec Tools is an automation toolkit for libvirt/KVM environments, providing guest command execution, VM lifecycle orchestration, and VMware-to-KVM (V2K) migration pipelines. This release includes ablestack_v2k with fully automated Windows cutover support using WinPE-based offline VirtIO driver injection."
 
           echo "# ablestack-qemu-exec-tools ${CURRENT_TAG}" > release_notes.md
           echo >> release_notes.md
@@ -1102,7 +1148,7 @@ jobs:
 
       - name: Generate ISO
         run: |
-          VERSION=${GITHUB_REF##*/}
+          VERSION="${RELEASE_TAG}"
           mkisofs -o ABLESTACK-Tools-${VERSION}.iso \
             -V "ABLESTACK-Tools" \
             -r -J release
@@ -1113,6 +1159,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # workflow_run 트리거에서는 tag_name을 명시해야 릴리즈 대상이 정확해짐
+          tag_name: ${RELEASE_TAG}
           body_path: release_notes.md
           files: |
             build/iso/*.iso

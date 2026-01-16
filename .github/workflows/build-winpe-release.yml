@@ -1,8 +1,9 @@
-name: WinPE Release Build (attach assets)
+name: WinPE Release Build
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -35,6 +36,12 @@ jobs:
       - name: Attach assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # 어떤 태그 릴리즈에 붙일지 명시 (tag push 이벤트 기준)
+          tag_name: ${{ github.ref_name }}
+          # 릴리즈 본문/노트는 build.yml이 통합 생성(권장) → 여기서는 건드리지 않음
+          generate_release_notes: false
           files: |
             dist/*.iso
             dist/SHA256SUMS
+          # 산출물 누락 시 조기 실패(릴리즈 누락 방지)
+          fail_on_unmatched_files: true
