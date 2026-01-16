@@ -1076,7 +1076,7 @@ jobs:
           set -e
 
           CURRENT_TAG="${GITHUB_REF#refs/tags/}"
-          DESC="ABLESTACK VM Tools - Auto-built offline ISO for RPM (Rocky/RHEL 9,10), DEB (Ubuntu 22.04/24.04) and Windows (VirtIO Guest Tools + ablestack MSI)."
+          DESC="ABLESTACK QEMU Exec Tools is an automation toolkit for libvirt/KVM environments, providing guest command execution, VM lifecycle orchestration, and VMware-to-KVM (V2K) migration pipelines. This release includes ablestack_v2k with fully automated Windows cutover support using WinPE-based offline driver injection."
 
           echo "# ablestack-qemu-exec-tools ${CURRENT_TAG}" > release_notes.md
           echo >> release_notes.md
