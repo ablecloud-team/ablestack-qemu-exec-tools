@@ -83,6 +83,73 @@ v2k_set_paths() {
   export V2K_RUN_ID="${run_id_in}"
   export V2K_MANIFEST="${manifest_in}"
   export V2K_EVENTS_LOG="${log_in}"
+
+}
+
+# ------------------------------------------------------------
+# ABLESTACK Host defaults (fixed paths)
+# - VirtIO ISO is already installed on ABLESTACK hosts.
+# - WinPE ISO is shipped/installed with ablestack_v2k package.
+#   (Both can be overridden by CLI options or env.)
+# ------------------------------------------------------------
+
+v2k_resolve_virtio_iso() {
+  # Echo resolved path or empty.
+  local p="${1-}"
+  if [[ -n "${p}" ]]; then
+    [[ -f "${p}" ]] && { echo "${p}"; return 0; }
+    return 1
+  fi
+
+  if [[ -n "${V2K_VIRTIO_ISO-}" ]]; then
+    [[ -f "${V2K_VIRTIO_ISO}" ]] && { echo "${V2K_VIRTIO_ISO}"; return 0; }
+  fi
+
+  local candidates=(
+    "/usr/share/virtio-win/virtio-win.iso"
+    "/usr/share/virtio-win/virtio-win-*.iso"
+    "/usr/share/virtio-win/*.iso"
+    "/usr/share/virtio-win.iso"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    # shellcheck disable=SC2086
+    for f in ${c}; do
+      [[ -f "${f}" ]] || continue
+      echo "${f}"
+      return 0
+    done
+  done
+  return 1
+}
+
+v2k_resolve_winpe_iso() {
+  # Echo resolved path or empty.
+  local p="${1-}"
+  if [[ -n "${p}" ]]; then
+    [[ -f "${p}" ]] && { echo "${p}"; return 0; }
+    return 1
+  fi
+
+  if [[ -n "${V2K_WINPE_ISO-}" ]]; then
+    [[ -f "${V2K_WINPE_ISO}" ]] && { echo "${V2K_WINPE_ISO}"; return 0; }
+  fi
+
+  local candidates=(
+    "/usr/share/ablestack-v2k/winpe-ablestack-v2k-amd64.iso"
+    "/usr/share/ablestack-v2k/winpe-ablestack-v2k-*.iso"
+    "/usr/share/ablestack-v2k/*.iso"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    # shellcheck disable=SC2086
+    for f in ${c}; do
+      [[ -f "${f}" ]] || continue
+      echo "${f}"
+      return 0
+    done
+  done
+  return 1
 }
 
 # vCenter(또는 지정 server)의 SSL SHA1 thumbprint 계산
@@ -424,6 +491,8 @@ v2k_cmd_cutover() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
   local shutdown="manual" define_only=0 start_vm=0
+  local winpe_bootstrap=0
+  local winpe_iso="" virtio_iso="" winpe_timeout=600
   local shutdown_force=1 shutdown_timeout=300
   local vcpu=2 memory=2048
   local network="default" bridge="" vlan=""
@@ -440,6 +509,11 @@ v2k_cmd_cutover() {
       --network) network="${2:-}"; shift 2;;
       --bridge) bridge="${2:-}"; shift 2;;
       --vlan) vlan="${2:-}"; shift 2;;
+      --winpe-bootstrap) winpe_bootstrap=1; shift 1;;
+      --winpe-iso) winpe_iso="${2:-}"; shift 2;;
+      --virtio-iso) virtio_iso="${2:-}"; shift 2;;
+      --winpe-timeout) winpe_timeout="${2:-}"; shift 2;;
+
       --force-cleanup) force_cleanup=1; shift 1;; 
       *) echo "Unknown option: $1" >&2; exit 2;;
     esac
@@ -490,7 +564,7 @@ v2k_cmd_cutover() {
   v2k_transfer_patch_all "${V2K_MANIFEST}" "final" 1 $((1024*1024)) $((4*1024*1024))
 
   # libvirt define
-  if [[ "${define_only}" -eq 1 || "${start_vm}" -eq 1 ]]; then
+  if [[ "${define_only}" -eq 1 || "${start_vm}" -eq 1 || "${winpe_bootstrap}" -eq 1 ]]; then
     local xml_path
     if [[ -n "${bridge}" ]]; then
       xml_path="$(v2k_target_generate_libvirt_xml "${V2K_MANIFEST}" \
@@ -504,6 +578,59 @@ v2k_cmd_cutover() {
       )"
     fi
     v2k_target_define_libvirt "${xml_path}"
+    # Optional: WinPE bootstrap phase (driver injection) before first Windows boot
+    if [[ "${winpe_bootstrap}" -eq 1 ]]; then
+      local vm winpe_iso_resolved virtio_iso_resolved cdrom0 cdrom1
+      vm="$(jq -r '.target.libvirt.name' "${V2K_MANIFEST}")"
+
+      winpe_iso_resolved="$(v2k_resolve_winpe_iso "${winpe_iso}" || true)"
+      virtio_iso_resolved="$(v2k_resolve_virtio_iso "${virtio_iso}" || true)"
+
+      if [[ -z "${winpe_iso_resolved}" || ! -f "${winpe_iso_resolved}" ]]; then
+        echo "WinPE ISO not found (resolved). Set --winpe-iso or install it under /usr/share/ablestack-v2k/." >&2
+        exit 61
+      fi
+      if [[ -z "${virtio_iso_resolved}" || ! -f "${virtio_iso_resolved}" ]]; then
+        echo "VirtIO ISO not found (resolved). Set --virtio-iso or install it under /usr/share/virtio-win/." >&2
+        exit 62
+      fi
+
+      v2k_event INFO "winpe" "" "phase_start" \
+        "{\"winpe_iso\":\"${winpe_iso_resolved}\",\"virtio_iso\":\"${virtio_iso_resolved}\",\"timeout\":${winpe_timeout}}"
+
+      # boot order: cdrom only (hd is not listed)
+      v2k_target_set_boot_cdrom_only "${vm}"
+
+      cdrom0="$(v2k_target_attach_cdrom "${vm}" "${winpe_iso_resolved}")"
+
+      # Start VM (WinPE)
+      virsh start "${vm}" >/dev/null 2>&1 || true
+
+      # Press-any-key handling: send SPACE 1/sec for 15 sec
+      v2k_target_send_key_space "${vm}" 15
+
+      # Delay 15 sec then attach VirtIO ISO
+      sleep 15
+      cdrom1="$(v2k_target_attach_cdrom "${vm}" "${virtio_iso_resolved}")"
+
+      if v2k_target_wait_shutdown "${vm}" "${winpe_timeout}"; then
+        v2k_event INFO "winpe" "" "phase_done" "{}"
+      else
+        v2k_event ERROR "winpe" "" "phase_timeout" "{\"timeout\":${winpe_timeout}}"
+        # best-effort cleanup
+        v2k_target_detach_disk "${vm}" "${cdrom1}" || true
+        v2k_target_detach_disk "${vm}" "${cdrom0}" || true
+        v2k_target_set_boot_hd "${vm}" || true
+        exit 63
+      fi
+
+      # Detach ISOs and restore normal boot
+      v2k_target_detach_disk "${vm}" "${cdrom1}" || true
+      v2k_target_detach_disk "${vm}" "${cdrom0}" || true
+      v2k_target_set_boot_hd "${vm}"
+    fi
+
+    # Start Windows VM only after WinPE bootstrap (if requested)
     if [[ "${start_vm}" -eq 1 ]]; then
       v2k_target_start_vm "${V2K_MANIFEST}"
     fi

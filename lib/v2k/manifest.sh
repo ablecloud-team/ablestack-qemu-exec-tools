@@ -272,6 +272,37 @@ v2k_manifest_snapshot_set() {
 v2k_manifest_get_vm_name() { jq -r '.source.vm.name' "$1"; }
 v2k_manifest_get_vcenter() { jq -r '.source.vcenter' "$1"; }
 
+
+# Return 0 if the manifest indicates a Windows guest, else 1.
+#
+# We intentionally keep this heuristic broad because inventory fields can vary by govc/vCenter versions.
+# Typical signals include guestId/guest_id containing "windows" or guest family/name containing "Windows".
+v2k_manifest_is_windows() {
+  local manifest="$1"
+  [[ -f "${manifest}" ]] || return 1
+  jq -re '
+    def s($v): ($v // "") | tostring | ascii_downcase;
+    (
+      [
+        s(.source.vm.guestId),
+        s(.source.vm.guest_id),
+        s(.source.vm.config.guestId),
+        s(.source.vm.config.guest_id),
+        s(.source.vm.guest.guestId),
+        s(.source.vm.guest.guest_id),
+        s(.source.vm.guest.guestFamily),
+        s(.source.vm.guest.guest_full_name),
+        s(.source.vm.guest.guestFullName),
+        s(.source.vm.guest.fullName),
+        s(.source.vm.guest.osFullName)
+      ]
+      | map(select(length>0))
+      | join(" ")
+    ) as $h
+    | ($h | contains("windows") or test("(^|[^a-z])win"))
+  ' "${manifest}" >/dev/null 2>&1
+}
+
 v2k_manifest_get_disk_count() { jq -r '.disks|length' "$1"; }
 
 v2k_manifest_get_disk_field() {

@@ -89,7 +89,8 @@ Commands (existing):
   verify [--mode quick] [--samples N]
   cutover [--shutdown manual|guest|poweroff] [--define-only] [--start] \
           [--vcpu N] [--memory MB] [--network <name>] [--bridge <br>] [--vlan <id>] \
-          [--shutdown-timeout SEC] [--force-cleanup]
+          [--shutdown-timeout SEC] [--force-cleanup] \
+          [--winpe-bootstrap] [--winpe-iso <path>] [--virtio-iso <path>] [--winpe-timeout SEC]
   cleanup [--keep-snapshots] [--keep-workdir]
   status
 
@@ -116,6 +117,7 @@ Pipeline options:
   --cutover-args "<...>"              Extra args appended to cutover (quoted string)
 
 Notes:
+  - For Windows guests, run/auto will automatically add --winpe-bootstrap to cutover unless V2K_RUN_WINPE_BOOTSTRAP_AUTO=0.
   - run/auto orchestrates by calling existing v2k_cmd_* functions in engine.sh.
   - init args are passed as-is after pipeline options.
   - For complex quoting, prefer running discrete commands rather than arg-string.

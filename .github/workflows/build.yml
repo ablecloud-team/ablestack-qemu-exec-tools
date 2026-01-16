@@ -5,6 +5,12 @@ on:
     tags:
       - "v*"
 
+# NOTE (WinPE ISO)
+# - WinPE ISO는 별도 워크플로우(WinPE Core/Test/Release)에서 생성/관리되는 것이 기본이다.
+# - 본 build.yml에서는 "사전 준비된 WinPE ISO"가 리포지토리 내에 존재하거나,
+#   또는 동일 워크플로우 산출물로 준비된 경우에만 통합 ISO에 포함한다.
+# - 파일이 없으면 통합 ISO 빌드는 실패시키지 않고 "미포함"으로 진행한다.
+
 jobs:
   # ───────────────────────────────────────────────
   # 1) RPM BUILD (Rocky 9 + 10 병행)
@@ -561,6 +567,37 @@ jobs:
           echo "[INFO] sample INF files:"
           find release/virtio -type f -name '*.inf' | head -n 30 || true
 
+      - name: Stage WinPE ISO into ISO tree (optional)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/winpe
+
+          # 우선순위
+          #  1) 동일 워크플로우 아티팩트(dist) 내 winpe*.iso
+          #  2) 리포지토리 내 사전 준비 파일(assets/winpe/*.iso 또는 winpe/*.iso)
+          WINPE_ISO=""
+          WINPE_ISO="$(find dist -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
+          if [[ -z "$WINPE_ISO" ]]; then
+            WINPE_ISO="$(find assets -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
+          fi
+          if [[ -z "$WINPE_ISO" ]]; then
+            WINPE_ISO="$(find winpe -maxdepth 2 -type f -iname '*.iso' 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -n "$WINPE_ISO" && -f "$WINPE_ISO" ]]; then
+            echo "[INFO] Found WinPE ISO: $WINPE_ISO"
+            cp -a "$WINPE_ISO" release/winpe/
+            echo "[OK] Staged WinPE ISO(s):"
+            ls -lah release/winpe/*.iso || true
+          else
+            echo "[WARN] WinPE ISO not found. (release/winpe will be empty)"
+            echo "       - If you want WinPE ISO included in ABLESTACK-Tools ISO, place it at one of:"
+            echo "         * dist/**/winpe*.iso (artifact)"
+            echo "         * assets/**/winpe*.iso"
+            echo "         * winpe/*.iso"
+          fi
+
       # Windows 설치 스크립트 생성 (루트: install.ps1/install.bat)
       - name: Create Windows installer scripts
         shell: bash
@@ -983,8 +1020,27 @@ jobs:
                       else
                           echo "[WARN] pyvmomi wheels dir not found in ISO: ${WHEEL_DIR}"
                       fi
-                  fi
 
+                      # 5) WinPE ISO 배치 (오프라인 드라이버 주입/복구용)
+                      # - 통합 ISO에 winpe/*.iso 가 포함된 경우에만 설치
+                      WINPE_SRC_DIR="${ISO_MNT}/winpe"
+                      WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
+                      WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
+                      if [[ -d "${WINPE_SRC_DIR}" ]]; then
+                          WINPE_ISO_FILE="$(ls -1 "${WINPE_SRC_DIR}"/*.iso 2>/dev/null | head -n 1 || true)"
+                          if [[ -n "${WINPE_ISO_FILE}" && -f "${WINPE_ISO_FILE}" ]]; then
+                              echo "[INFO] Installing WinPE ISO from: ${WINPE_ISO_FILE}"
+                              sudo mkdir -p "${WINPE_DST_DIR}"
+                              sudo cp -a "${WINPE_ISO_FILE}" "${WINPE_DST_DIR}/"
+                              sudo ln -sfn "${WINPE_DST_DIR}/$(basename "${WINPE_ISO_FILE}")" "${WINPE_LINK}"
+                              echo "[OK] WinPE ISO installed: ${WINPE_LINK}"
+                          else
+                              echo "[WARN] WinPE ISO not found under ${WINPE_SRC_DIR}"
+                          fi
+                      else
+                          echo "[WARN] WinPE dir not found in ISO: ${WINPE_SRC_DIR} (skip)"
+                      fi
+                  fi
                   ;;
               ubuntu|debian)
                   echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"

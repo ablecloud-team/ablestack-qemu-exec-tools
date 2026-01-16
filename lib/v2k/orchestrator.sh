@@ -239,6 +239,11 @@ v2k_cmd_run_foreground() {
   v2k_parse_arg_string "${incr_args_str}" incr_extra
   v2k_parse_arg_string "${cutover_args_str}" cutover_extra
 
+  # Windows auto driver injection (WinPE bootstrap)
+  # - Enabled by default for run/auto.
+  # - Disable by setting V2K_RUN_WINPE_BOOTSTRAP_AUTO=0.
+  local winpe_bootstrap_auto="${V2K_RUN_WINPE_BOOTSTRAP_AUTO:-1}"
+
   # Pipeline
   v2k_cmd_init "${init_args[@]}"
   v2k_keep_govc_env_in_workdir "${tmp_govc_env}" || true
@@ -287,6 +292,25 @@ v2k_cmd_run_foreground() {
     define-only) cutover_args+=(--define-only) ;;
     define-and-start) cutover_args+=(--start) ;;
   esac
+
+  # Auto-add WinPE bootstrap for Windows guests unless the user explicitly passed WinPE-related cutover args.
+  if [[ "${winpe_bootstrap_auto}" == "1" ]]; then
+    if declare -F v2k_manifest_is_windows >/dev/null 2>&1 && v2k_manifest_is_windows "${V2K_MANIFEST}"; then
+      local winpe_explicit=0
+      local a
+      for a in "${cutover_extra[@]}"; do
+        case "${a}" in
+          --winpe-bootstrap|--winpe-iso|--virtio-iso|--winpe-timeout)
+            winpe_explicit=1
+            ;;
+        esac
+      done
+      if [[ "${winpe_explicit}" -eq 0 ]]; then
+        cutover_args+=(--winpe-bootstrap)
+      fi
+    fi
+  fi
+
   cutover_args+=("${cutover_extra[@]}")
 
   v2k_cmd_cutover "${cutover_args[@]}"

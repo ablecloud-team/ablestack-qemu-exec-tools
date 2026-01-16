@@ -86,7 +86,7 @@ v2k_target_generate_libvirt_xml() {
   count="$(jq -r '.disks|length' "${manifest}")"
 
   # controller blocks (policy: scsi/sata only; no virtio-scsi)
-  local have_scsi=0 have_sata=0
+  local have_scsi=0 have_sata=1
   local i
   for ((i=0;i<count;i++)); do
     local ctype bus
@@ -198,4 +198,113 @@ v2k_target_start_vm() {
   local vm
   vm="$(jq -r '.target.libvirt.name' "${manifest}")"
   virsh start "${vm}" >/dev/null
+}
+
+# ---------------------------------------------------------------------
+# WinPE bootstrap helpers (libvirt)
+# - boot order: cdrom only / hd
+# - attach/detach cdrom
+# - send-key SPACE loop
+# - wait for shutdown
+# ---------------------------------------------------------------------
+
+v2k_target_domstate() {
+  local vm="$1"
+  virsh domstate "${vm}" 2>/dev/null | head -n1 | tr -d '
+' || true
+}
+
+v2k_target_wait_shutdown() {
+  local vm="$1"
+  local timeout_sec="${2:-600}"
+  local start now elapsed
+  start=$(date +%s)
+  while true; do
+    local st
+    st="$(v2k_target_domstate "${vm}")"
+    case "${st}" in
+      "shut off"|"shutdown"|"crashed")
+        return 0
+        ;;
+    esac
+    now=$(date +%s)
+    elapsed=$((now - start))
+    if (( elapsed >= timeout_sec )); then
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+v2k_target_send_key_space() {
+  local vm="$1"
+  local seconds="${2:-15}"
+  local i
+  for ((i=0; i<seconds; i++)); do
+    virsh send-key "${vm}" KEY_SPACE >/dev/null 2>&1 || true
+    sleep 1
+  done
+}
+
+v2k_target_pick_cdrom_target_dev() {
+  # Pick an unused target dev name (sd[c-z])
+  local vm="$1"
+  local used
+  used="$(virsh domblklist "${vm}" 2>/dev/null | awk 'NR>2 && $1!="" {print $1}' | tr -d '
+')"
+  local l
+  for l in c d e f g h i j k l m n o p q r s t u v w x y z; do
+    local dev="sd${l}"
+    if ! grep -qx "${dev}" <<<"${used}"; then
+      echo "${dev}"
+      return 0
+    fi
+  done
+  echo "sdz"
+}
+
+v2k_target_attach_cdrom() {
+  local vm="$1"
+  local iso="$2"
+  local target_dev="${3:-}"
+  [[ -n "${target_dev}" ]] || target_dev="$(v2k_target_pick_cdrom_target_dev "${vm}")"
+
+  virsh attach-disk "${vm}" "${iso}" "${target_dev}"     --type cdrom --mode readonly --config >/dev/null
+
+  echo "${target_dev}"
+}
+
+v2k_target_detach_disk() {
+  local vm="$1"
+  local target_dev="$2"
+  virsh detach-disk "${vm}" "${target_dev}" --config >/dev/null 2>&1 || true
+}
+
+_v2k_target_redefine_os_boot() {
+  local vm="$1"
+  local bootdev="$2"  # cdrom|hd
+  local tmp
+  tmp="${V2K_WORKDIR:-/tmp}/artifacts/${vm}.boot.xml"
+  mkdir -p "$(dirname "${tmp}")"
+  virsh dumpxml "${vm}" > "${tmp}.in"
+
+  # Remove existing <boot dev='...'/>
+  perl -0777 -pe "s#<boot\s+dev='[^']+'\s*/>\s*##g" "${tmp}.in" > "${tmp}.mid"
+
+  # Inject single boot line inside <os> .. </os>
+  perl -0777 -pe "s#(<os>\s*
+\s*<type[^>]*>[^<]*</type>\s*)#${1}    <boot dev='${bootdev}'/>
+#s" "${tmp}.mid" > "${tmp}"
+
+  virsh define "${tmp}" >/dev/null
+}
+
+v2k_target_set_boot_cdrom_only() {
+  local vm="$1"
+  _v2k_target_redefine_os_boot "${vm}" "cdrom"
+}
+
+v2k_target_set_boot_hd() {
+  local vm="$1"
+  _v2k_target_redefine_os_boot "${vm}" "hd"
 }
