@@ -17,6 +17,47 @@
 
 set -euo pipefail
 
+_v2k_trace_on() {
+  [[ "${V2K_LIBVIRT_TRACE:-0}" == "1" ]]
+}
+
+_v2k_trace() {
+  # Print to stdout so it appears in run.out (caller captures stdout)
+  # Enable with: V2K_LIBVIRT_TRACE=1
+  _v2k_trace_on || return 0
+  echo "[v2k-libvirt] $*"
+}
+
+_v2k_trace_cmd() {
+  # Usage: _v2k_trace_cmd <tag> <cmd...>
+  local tag="$1"; shift || true
+  _v2k_trace "CMD(${tag}): $*"
+  "$@"
+  local rc=$?
+  _v2k_trace "RC(${tag})=${rc}"
+  return "${rc}"
+}
+
+_v2k_trace_env_once() {
+  # Print useful diagnostics once per process when tracing is enabled.
+  _v2k_trace_on || return 0
+  [[ "${V2K_LIBVIRT_TRACE_ENV_DUMPED:-0}" == "1" ]] && return 0
+  export V2K_LIBVIRT_TRACE_ENV_DUMPED=1
+
+  _v2k_trace "---- TRACE ENV START ----"
+  _v2k_trace "whoami=$(whoami 2>/dev/null || echo '?') uid=$(id -u 2>/dev/null || echo '?')"
+  _v2k_trace "groups=$(id -nG 2>/dev/null || echo '?')"
+  _v2k_trace "pwd=$(pwd 2>/dev/null || echo '?')"
+  _v2k_trace "V2K_WORKDIR=${V2K_WORKDIR:-<unset>}"
+  _v2k_trace "PATH=${PATH}"
+  _v2k_trace_cmd "virsh-version" virsh --version >/dev/null 2>&1 || true
+  _v2k_trace "virsh.version=$(virsh --version 2>/dev/null || echo 'unknown')"
+  _v2k_trace "virsh.default-uri=$(virsh uri 2>/dev/null || echo 'unknown')"
+  _v2k_trace "virsh.qemu-system-uri=$(virsh -c qemu:///system uri 2>/dev/null || echo 'unknown')"
+  _v2k_trace_cmd "virsh-list-all" virsh list --all >/dev/null 2>&1 || true
+  _v2k_trace "---- TRACE ENV END ----"
+}
+
 _v2k_letter() {
   # 0->a, 1->b ...
   local n="$1"
@@ -44,17 +85,62 @@ _v2k_escape_xml() {
   echo "$s"
 }
 
+_v2k_detect_main_bridge() {
+  # ABLESTACK policy:
+  # - Master bridge is strictly one of: bridge0, br0
+  # - Do NOT auto-detect anything else
+
+  local br=""
+
+  # 1) brctl 기반 우선 확인
+  if command -v brctl >/dev/null 2>&1; then
+    # bridge name  bridge id  STP enabled  interfaces
+    # bridge0     ...
+    # br0         ...
+    br="$(brctl show 2>/dev/null | awk 'NR>1 {print $1}')"
+
+    for c in bridge0 br0; do
+      if grep -qx "${c}" <<<"${br}"; then
+        echo "${c}"
+        return 0
+      fi
+    done
+  fi
+
+  # 2) fallback: bridge(8)
+  if command -v bridge >/dev/null 2>&1; then
+    # bridge link ... master bridge0 ...
+    for c in bridge0 br0; do
+      if bridge link 2>/dev/null | grep -qw "master ${c}"; then
+        echo "${c}"
+        return 0
+      fi
+    done
+  fi
+
+  # Not found
+  return 1
+}
+
 v2k_target_generate_libvirt_xml() {
   local manifest="$1"
   local manifest="$1"
   shift || true
 
+  _v2k_trace_env_once
+  _v2k_trace "ENTER generate_libvirt_xml manifest=${manifest}"
+
   # Defaults (per requirement)
   local vcpu=2
   local mem_mib=2048
-  local net_name="default"
+
+  # ABLESTACK default: use bridge (auto-detected), not libvirt network 'default'
+  local net_name=""
   local bridge_name=""
   local vlan_id=""
+
+  bridge_name="$(_v2k_detect_main_bridge 2>/dev/null || true)"
+  _v2k_trace "default bridge(auto-detected)=${bridge_name:-<none>}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -69,6 +155,7 @@ v2k_target_generate_libvirt_xml() {
 
   local vm
   vm="$(jq -r '.target.libvirt.name' "${manifest}")"
+  _v2k_trace "VM name=${vm}"
 
   local xml="${V2K_WORKDIR}/artifacts/${vm}.xml"
   mkdir -p "$(dirname "${xml}")"
@@ -76,6 +163,8 @@ v2k_target_generate_libvirt_xml() {
   local fmt st
   fmt="$(jq -r '.target.format // "qcow2"' "${manifest}")"
   st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
+
+  _v2k_trace "target.format=${fmt} target.storage.type=${st} vcpu=${vcpu} mem_mib=${mem_mib}"
 
   # driver attributes (policy)
   local driver_type
@@ -185,19 +274,30 @@ v2k_target_generate_libvirt_xml() {
 </domain>
 EOF
 
+  _v2k_trace "Generated XML path=${xml}"
   echo "${xml}"
 }
 
 v2k_target_define_libvirt() {
   local xml="$1"
-  virsh define "${xml}" >/dev/null
+  _v2k_trace_env_once
+  _v2k_trace "ENTER define_libvirt xml=${xml}"
+
+  if _v2k_trace_on; then
+    _v2k_trace "XML head (first 60 lines):"
+    sed -n '1,60p' "${xml}" | while IFS= read -r line; do _v2k_trace "  ${line}"; done
+  fi
+
+  _v2k_trace_cmd "virsh-define" virsh define "${xml}" >/dev/null
 }
 
 v2k_target_start_vm() {
   local manifest="$1"
   local vm
   vm="$(jq -r '.target.libvirt.name' "${manifest}")"
-  virsh start "${vm}" >/dev/null
+  _v2k_trace_env_once
+  _v2k_trace "ENTER start_vm vm=${vm}"
+  _v2k_trace_cmd "virsh-start" virsh start "${vm}" >/dev/null
 }
 
 # ---------------------------------------------------------------------
@@ -210,6 +310,8 @@ v2k_target_start_vm() {
 
 v2k_target_domstate() {
   local vm="$1"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER domstate vm=${vm}"
   virsh domstate "${vm}" 2>/dev/null | head -n1 | tr -d '
 ' || true
 }
@@ -217,6 +319,8 @@ v2k_target_domstate() {
 v2k_target_wait_shutdown() {
   local vm="$1"
   local timeout_sec="${2:-600}"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER wait_shutdown vm=${vm} timeout_sec=${timeout_sec}"
   local start now elapsed
   start=$(date +%s)
   while true; do
@@ -224,12 +328,14 @@ v2k_target_wait_shutdown() {
     st="$(v2k_target_domstate "${vm}")"
     case "${st}" in
       "shut off"|"shutdown"|"crashed")
+        _v2k_trace "wait_shutdown: state=${st} -> DONE"
         return 0
         ;;
     esac
     now=$(date +%s)
     elapsed=$((now - start))
     if (( elapsed >= timeout_sec )); then
+      _v2k_trace "wait_shutdown: TIMEOUT elapsed=${elapsed}"
       return 1
     fi
     sleep 2
@@ -239,27 +345,45 @@ v2k_target_wait_shutdown() {
 v2k_target_send_key_space() {
   local vm="$1"
   local seconds="${2:-15}"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER send_key_space vm=${vm} seconds=${seconds}"
   local i
   for ((i=0; i<seconds; i++)); do
-    virsh send-key "${vm}" KEY_SPACE >/dev/null 2>&1 || true
+    _v2k_trace_cmd "virsh-send-key" virsh send-key "${vm}" KEY_SPACE >/dev/null 2>&1 || true
     sleep 1
   done
 }
 
 v2k_target_pick_cdrom_target_dev() {
-  # Pick an unused target dev name (sd[c-z])
+  # Pick an unused target dev name for CDROM.
+  # Policy: start far from OS disks (default from 'l' => sdl)
+  # Override start letter with: V2K_CDROM_DEV_START=l (single lowercase letter)
   local vm="$1"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER pick_cdrom_target_dev vm=${vm}"
+
+  local start="${V2K_CDROM_DEV_START:-l}"
+
+  # Collect used target dev names (one per line)
   local used
-  used="$(virsh domblklist "${vm}" 2>/dev/null | awk 'NR>2 && $1!="" {print $1}' | tr -d '
-')"
+  used="$(virsh domblklist "${vm}" 2>/dev/null | awk 'NR>2 && $1!="" {print $1}')"
+
+  _v2k_trace "domblklist.used=$(echo "${used}" | tr '\n' ' ')"
+
+  # Iterate from start..z
   local l
-  for l in c d e f g h i j k l m n o p q r s t u v w x y z; do
+  for l in {a..z}; do
+    # skip letters before start
+    [[ "${l}" < "${start}" ]] && continue
+
     local dev="sd${l}"
     if ! grep -qx "${dev}" <<<"${used}"; then
       echo "${dev}"
       return 0
     fi
   done
+
+  # Fallback
   echo "sdz"
 }
 
@@ -267,44 +391,59 @@ v2k_target_attach_cdrom() {
   local vm="$1"
   local iso="$2"
   local target_dev="${3:-}"
+  _v2k_trace_env_once
   [[ -n "${target_dev}" ]] || target_dev="$(v2k_target_pick_cdrom_target_dev "${vm}")"
-
-  virsh attach-disk "${vm}" "${iso}" "${target_dev}"     --type cdrom --mode readonly --config >/dev/null
-
+  _v2k_trace "ENTER attach_cdrom vm=${vm} iso=${iso} target_dev=${target_dev}"
+  _v2k_trace_cmd "virsh-attach-disk" virsh attach-disk "${vm}" "${iso}" "${target_dev}" \
+    --type cdrom --mode readonly --targetbus sata --live --config >/dev/null
   echo "${target_dev}"
+  _v2k_trace "attach_cdrom: picked target_dev=${target_dev}"
 }
 
 v2k_target_detach_disk() {
   local vm="$1"
   local target_dev="$2"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER detach_disk vm=${vm} target_dev=${target_dev}"
   virsh detach-disk "${vm}" "${target_dev}" --config >/dev/null 2>&1 || true
 }
 
 _v2k_target_redefine_os_boot() {
   local vm="$1"
   local bootdev="$2"  # cdrom|hd
+  _v2k_trace_env_once
+  _v2k_trace "ENTER redefine_os_boot vm=${vm} bootdev=${bootdev}"
   local tmp
   tmp="${V2K_WORKDIR:-/tmp}/artifacts/${vm}.boot.xml"
   mkdir -p "$(dirname "${tmp}")"
-  virsh dumpxml "${vm}" > "${tmp}.in"
+
+  # Dump current domain XML
+  _v2k_trace_cmd "virsh-dumpxml" virsh dumpxml "${vm}" > "${tmp}.in"
 
   # Remove existing <boot dev='...'/>
   perl -0777 -pe "s#<boot\s+dev='[^']+'\s*/>\s*##g" "${tmp}.in" > "${tmp}.mid"
 
-  # Inject single boot line inside <os> .. </os>
-  perl -0777 -pe "s#(<os>\s*
-\s*<type[^>]*>[^<]*</type>\s*)#${1}    <boot dev='${bootdev}'/>
-#s" "${tmp}.mid" > "${tmp}"
+  # Inject exactly one <boot dev='...'/>
+  # IMPORTANT:
+  # - Use Perl backreference \1 (NOT bash ${1})
+  # - Avoid relying too much on specific newlines
+  perl -0777 -pe "s#(<os>\s*<type[^>]*>[^<]*</type>\s*)#\\1    <boot dev='${bootdev}'/>\n#s" \
+    "${tmp}.mid" > "${tmp}"
 
-  virsh define "${tmp}" >/dev/null
+  # Define updated XML
+  _v2k_trace_cmd "virsh-define-bootxml" virsh define "${tmp}" >/dev/null
 }
 
 v2k_target_set_boot_cdrom_only() {
   local vm="$1"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER set_boot_cdrom_only vm=${vm}"
   _v2k_target_redefine_os_boot "${vm}" "cdrom"
 }
 
 v2k_target_set_boot_hd() {
   local vm="$1"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER set_boot_hd vm=${vm}"
   _v2k_target_redefine_os_boot "${vm}" "hd"
 }

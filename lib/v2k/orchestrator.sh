@@ -17,6 +17,16 @@
 
 set -euo pipefail
 
+v2k_run_defaults() {
+  V2K_RUN_DEFAULT_SHUTDOWN="${V2K_RUN_DEFAULT_SHUTDOWN:-manual}"
+  V2K_RUN_DEFAULT_KVM_POLICY="${V2K_RUN_DEFAULT_KVM_POLICY:-none}"
+  V2K_RUN_DEFAULT_INCR_INTERVAL="${V2K_RUN_DEFAULT_INCR_INTERVAL:-10}"
+  V2K_RUN_DEFAULT_MAX_INCR="${V2K_RUN_DEFAULT_MAX_INCR:-6}"
+  V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC="${V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC:-120}"
+  V2K_RUN_DEFAULT_INSECURE="${V2K_RUN_DEFAULT_INSECURE:-1}"
+  V2K_RUN_WINPE_BOOTSTRAP_AUTO="${V2K_RUN_WINPE_BOOTSTRAP_AUTO:-1}"
+}
+
 v2k_die() { echo "ERROR: $*" >&2; exit 2; }
 
 v2k_parse_arg_string() {
@@ -28,13 +38,21 @@ v2k_parse_arg_string() {
   read -r -a _out_arr <<<"${s}"
 }
 
-v2k_run_defaults() {
-  V2K_RUN_DEFAULT_SHUTDOWN="${V2K_RUN_DEFAULT_SHUTDOWN:-manual}"
-  V2K_RUN_DEFAULT_KVM_POLICY="${V2K_RUN_DEFAULT_KVM_POLICY:-none}"
-  V2K_RUN_DEFAULT_INCR_INTERVAL="${V2K_RUN_DEFAULT_INCR_INTERVAL:-10}"
-  V2K_RUN_DEFAULT_MAX_INCR="${V2K_RUN_DEFAULT_MAX_INCR:-6}"
-  V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC="${V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC:-120}"
-  V2K_RUN_DEFAULT_INSECURE="${V2K_RUN_DEFAULT_INSECURE:-1}"
+v2k_manifest_is_windows() {
+  local manifest="$1"
+  local s=""
+  s="$(jq -r '
+    [
+      (.source.vm.guest_id // ""),
+      (.source.vm.guestId // ""),
+      (.source.vm.guestFullName // ""),
+      (.source.vm.guest_full_name // ""),
+      (.source.vm.guest // ""),
+      (.source.vm.os // ""),
+      (.source.vm.os_name // "")
+    ] | join(" ") | ascii_downcase
+  ' "${manifest}" 2>/dev/null || true)"
+  [[ "${s}" == *"windows"* ]] || [[ "${s}" == *"win"* ]]
 }
 
 v2k_mktemp_file() {
@@ -286,7 +304,22 @@ v2k_cmd_run_foreground() {
     fi
   fi
 
+  # Auto WinPE bootstrap for Windows VMs (policy)
+  local is_windows=0
+  if v2k_manifest_is_windows "${V2K_MANIFEST}"; then
+    is_windows=1
+  fi
+
   local -a cutover_args=(--shutdown "${shutdown}")
+
+  if [[ "${is_windows}" -eq 1 && "${V2K_RUN_WINPE_BOOTSTRAP_AUTO}" == "1" ]]; then
+    # Ensure KVM actions occur for Windows: at least define+start + winpe bootstrap.
+    if [[ "${kvm_vm_policy}" == "none" ]]; then
+      kvm_vm_policy="define-and-start"
+    fi
+    cutover_args+=(--winpe-bootstrap)
+  fi
+
   case "${kvm_vm_policy}" in
     none) ;;
     define-only) cutover_args+=(--define-only) ;;

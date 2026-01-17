@@ -156,7 +156,7 @@ REM Force rescan to pick up newly attached CDROM/volumes
   echo exit
 ) | diskpart >> "%LOG_FILE%" 2>>&1
 
-timeout /t %WAIT_INTERVAL_SEC% /nobreak >nul
+ping -n %WAIT_INTERVAL_SEC% >nul
 set /a "ELAPSED+=WAIT_INTERVAL_SEC"
 goto :wait_loop
 
