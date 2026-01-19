@@ -69,8 +69,17 @@ jobs:
           xorriso -indev "$ISO_IN" -outdev "$ISO_OUT" -boot_image any keep \
             -map add/ablestack/TEST_MODE /ablestack/TEST_MODE
 
-          # quick boot info check (fails step if boot record is missing)
+          # NOTE: WinPE ISO from oscimg may contain hidden El-Torito/EFI images which
+          #       are not ISO data files. In that case, -report_el_torito returns SORRY(32)
+          #       even though the ISO is bootable. Do not fail the workflow on this.
+          set +e
           xorriso -indev "$ISO_OUT" -report_el_torito as_mkisofs
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 32 ]; then
+            echo "ERROR: xorriso report_el_torito failed with rc=$rc"
+            exit "$rc"
+          fi
           ls -l "$ISO_OUT"
 
       - name: Upload final ISO artifact
