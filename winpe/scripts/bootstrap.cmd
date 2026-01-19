@@ -365,14 +365,19 @@ del /f /q "%DP_LIST%" "%DP_ASSIGN%" "%DP_OUT%" >nul 2>&1
 type nul > "%DP_ASSIGN%"
 
 diskpart /s "%DP_LIST%" > "%DP_OUT%" 2>>&1
-REM Parse "list volume" table.
-REM Columns include: Volume ###  Ltr  Label  Fs  Type  Size  Status  Info
-REM Key rule:
-REM   - If Ltr exists, token3 is a single letter (C/D/E/...)
-REM   - If Ltr is blank, token3 shifts to Label (e.g., "New", "DVD_ROM", etc.)
-REM So: token3 being a single A-Z means "has letter"; otherwise "no letter".
 for /f "usebackq tokens=1,2,3,*" %%A in (`type "%DP_OUT%" ^| find /I "Volume "`) do (
   set "VOLNUM=%%B"
+
+  REM Skip header line: "Volume ###  Ltr  Label ..."
+  REM Only proceed if VOLNUM starts with a digit (0-9)
+  set "IS_NUM=0"
+  for %%n in (0 1 2 3 4 5 6 7 8 9) do (
+    if "!VOLNUM:~0,1!"=="%%n" set "IS_NUM=1"
+  )
+  if "!IS_NUM!"=="0" (
+    REM Not a real volume number (e.g., ###). Ignore.
+    goto :_next_vol_line
+  )
   set "T3=%%C"
   set "REST=%%D"
 
@@ -391,6 +396,8 @@ for /f "usebackq tokens=1,2,3,*" %%A in (`type "%DP_OUT%" ^| find /I "Volume "`)
       )
     )
   )
+
+  :_next_vol_line
 )
 
 REM Run only if DP_ASSIGN has meaningful commands (more than 0 bytes)
