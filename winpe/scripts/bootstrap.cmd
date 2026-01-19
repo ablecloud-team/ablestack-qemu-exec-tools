@@ -353,42 +353,42 @@ REM ------------------------------------------------------------------
 set "FREE_LETTERS=R S T U V W Y Z"
 set "DP_LIST=%TEMP%\dp_listvol.txt"
 set "DP_ASSIGN=%TEMP%\dp_assign.txt"
-set "DP_ONE=%TEMP%\dp_onevol.txt"
 set "DP_OUT=%TEMP%\dp_out.txt"
 
-del /f /q "%DP_LIST%" "%DP_ASSIGN%" "%DP_ONE%" "%DP_OUT%" >nul 2>&1
+del /f /q "%DP_LIST%" "%DP_ASSIGN%" "%DP_OUT%" >nul 2>&1
 
 (
   echo list volume
   echo exit
 ) > "%DP_LIST%"
 
-REM Always create DP_ASSIGN so later logic can reason about it
 type nul > "%DP_ASSIGN%"
 
-REM Extract volume numbers first
 diskpart /s "%DP_LIST%" > "%DP_OUT%" 2>>&1
-for /f "usebackq tokens=1,2,3" %%A in (`type "%DP_OUT%" ^| find /I "Volume "`) do (
-  REM Expected: "Volume 0 ..." => token2 is volume number
+REM Parse "list volume" table.
+REM Columns include: Volume ###  Ltr  Label  Fs  Type  Size  Status  Info
+REM Key rule:
+REM   - If Ltr exists, token3 is a single letter (C/D/E/...)
+REM   - If Ltr is blank, token3 shifts to Label (e.g., "New", "DVD_ROM", etc.)
+REM So: token3 being a single A-Z means "has letter"; otherwise "no letter".
+for /f "usebackq tokens=1,2,3,*" %%A in (`type "%DP_OUT%" ^| find /I "Volume "`) do (
   set "VOLNUM=%%B"
+  set "T3=%%C"
+  set "REST=%%D"
 
-  REM Ask diskpart for detail volume to see if a drive letter exists
-  (
-    echo select volume !VOLNUM!
-    echo detail volume
-    echo exit
-  ) > "%DP_ONE%"
-
-  diskpart /s "%DP_ONE%" > "%DP_OUT%" 2>>&1
-
-  REM detail volume includes a line like "Drive Letter : C" when present
-  REM If not present, treat as no-letter volume and assign next available letter
-  type "%DP_OUT%" | find /I "Drive Letter" >nul
-  if not "!ERRORLEVEL!"=="0" (
-    call :_next_letter LTR
-    if not "!LTR!"=="" (
-      >> "%DP_ASSIGN%" echo select volume !VOLNUM!
-      >> "%DP_ASSIGN%" echo assign letter=!LTR!
+  REM Skip CD-ROM volumes (no need to assign)
+  echo !T3! !REST! | find /I "CD-ROM" >nul
+  if "!ERRORLEVEL!"=="0" (
+    REM skip
+  ) else (
+    set "HAS_LETTER=0"
+    call :_is_letter "!T3!" HAS_LETTER
+    if "!HAS_LETTER!"=="0" (
+      call :_next_letter LTR
+      if not "!LTR!"=="" (
+        >> "%DP_ASSIGN%" echo select volume !VOLNUM!
+        >> "%DP_ASSIGN%" echo assign letter=!LTR!
+      )
     )
   )
 )
