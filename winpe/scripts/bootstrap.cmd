@@ -17,9 +17,9 @@ REM ================================================================
 
 call X:\ablestack\scripts\lib_find.cmd
 
-set "NOW_UTC="
-for /f "usebackq delims=" %%t in (`powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')"` 2^>nul) do set "NOW_UTC=%%t"
-if "%NOW_UTC%"=="" set "NOW_UTC=unknown-utc"
+REM WinPE minimal often has no powershell/wmic. Use a plain local timestamp.
+set "NOW_UTC=%DATE% %TIME%"
+if "%NOW_UTC%"=="" set "NOW_UTC=unknown-time"
 
 REM Wait policy for VirtIO ISO attach (host will attach after WinPE boot)
 set "WAIT_TIMEOUT_SEC=300"
@@ -528,27 +528,42 @@ call :log_file "[bootstrap] end action (failure)."
 call :maybe_shutdown 1 "%REASON%"
 exit /b %ERRORLEVEL%
 
+REM ------------------------------------------------------------------
+REM detect_no_shutdown_policy
+REM - No wmic/powershell dependency.
+REM - Uses diskpart "list volume" output and checks CDROM volume label contains "test".
+REM ------------------------------------------------------------------
 :detect_no_shutdown_policy
-REM Explicit override (useful for local debugging)
+REM Explicit override (local debug)
 if /I "%ABLESTACK_WINPE_NO_SHUTDOWN%"=="1" (
   set "NO_SHUTDOWN=1"
   call :log_file "[policy] ABLESTACK_WINPE_NO_SHUTDOWN=1 -> NO_SHUTDOWN=1"
   exit /b 0
 )
 
-REM Infer test/debug ISO from CDROM volume label
-for /f "usebackq tokens=2 delims==" %%V in (`wmic logicaldisk where "DriveType=5" get VolumeName /value ^| find "=" 2^>nul`) do (
-  set "CDROM_VOL=%%V"
-  if not "!CDROM_VOL!"=="" (
-    echo !CDROM_VOL! | find /I "test" >nul && set "NO_SHUTDOWN=1"
-  )
-)
+set "DP_LIST=%TEMP%\dp_listvol_policy.txt"
+set "DP_OUT=%TEMP%\dp_out_policy.txt"
+del /f /q "%DP_LIST%" "%DP_OUT%" >nul 2>&1
+
+(
+  echo list volume
+  echo exit
+) > "%DP_LIST%"
+
+diskpart /s "%DP_LIST%" > "%DP_OUT%" 2>>&1
+
+REM WinPE diskpart output typically shows Type as "DVD_ROM" or "CD-ROM".
+REM If any CDROM line contains "test" in Label, treat as debug build.
+type "%DP_OUT%" | findstr /I "DVD_ROM CD-ROM" | findstr /I "test" >nul
+if "%ERRORLEVEL%"=="0" set "NO_SHUTDOWN=1"
 
 call :log_file "[policy] NO_SHUTDOWN=%NO_SHUTDOWN% (0=shutdown,1=interactive)"
 exit /b 0
 
+REM ------------------------------------------------------------------
+REM maybe_shutdown <exitcode> <reason>
+REM ------------------------------------------------------------------
 :maybe_shutdown
-REM Args: %1=exitcode %2=reason
 set "EXITCODE=%~1"
 set "END_REASON=%~2"
 
@@ -556,7 +571,6 @@ if "%NO_SHUTDOWN%"=="1" (
   call :log_file "[policy] NO_SHUTDOWN=1 -> keeping WinPE running. reason=%END_REASON%"
   call :log_console "[bootstrap] NO_SHUTDOWN=1 - dropping to interactive shell (cmd.exe)."
   cmd.exe
-  REM Operator may exit cmd.exe manually; after that, keep release behavior for safety.
 )
 
 call :log_file "[policy] shutting down WinPE. reason=%END_REASON% exitcode=%EXITCODE%"
