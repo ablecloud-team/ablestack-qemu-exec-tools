@@ -28,7 +28,9 @@ jobs:
     uses: ./.github/workflows/build-winpe-core.yml
     with:
       architecture: ${{ inputs.architecture }}
-      iso_base_name: "winpe-ablestack-v2k"
+      # NOTE: WinPE bootstrap detects "test" builds via ISO volume label.
+      # Keep "-test" in the base name so debug ISOs do NOT shutdown the VM on exit.
+      iso_base_name: "winpe-ablestack-v2k-test"
       iso_suffix: ${{ inputs.iso_suffix }}
       artifact_name: "winpe-iso-test"
       retention_days: ${{ inputs.retention_days }}

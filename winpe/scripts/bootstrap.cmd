@@ -25,6 +25,15 @@ REM Wait policy for VirtIO ISO attach (host will attach after WinPE boot)
 set "WAIT_TIMEOUT_SEC=300"
 set "WAIT_INTERVAL_SEC=5"
 
+REM Shutdown policy:
+REM - Default: shutdown (release behavior)
+REM - Test/debug: do NOT shutdown so operator can inspect WinPE interactively
+REM   Detection order:
+REM     1) ABLESTACK_WINPE_NO_SHUTDOWN=1
+REM     2) Any CDROM volume label contains "test" (case-insensitive)
+set "NO_SHUTDOWN=0"
+call :detect_no_shutdown_policy
+
 REM Temp log on WinPE ramdisk until OS volume is discoverable.
 REM (Migrated Windows disk may not be visible before drvload of VirtIO storage drivers.)
 set "LOG_FILE=X:\ablestack-bootstrap.log"
@@ -125,8 +134,8 @@ if "%ALL_OK%"=="1" (
 
 call :log_file "[bootstrap] End: shutting down WinPE."
 call :log_console "[bootstrap] Done. Shutting down."
-wpeutil shutdown
-exit /b 0
+call :maybe_shutdown 0 "normal"
+exit /b %ERRORLEVEL%
 
 REM ------------------------
 REM Wait for VirtIO ISO (attach happens on host side)
@@ -515,5 +524,41 @@ echo %NOW_UTC% OSID=%OSID% RESULT=FAILED REASON=%REASON% > "%FAIL_FILE%"
 call :log_file "[bootstrap] FAIL: %REASON%"
 call :log_console "[bootstrap] FAIL: %REASON%"
 call :log_file "[bootstrap] shutting down WinPE."
+call :log_file "[bootstrap] end action (failure)."
+call :maybe_shutdown 1 "%REASON%"
+exit /b %ERRORLEVEL%
+
+:detect_no_shutdown_policy
+REM Explicit override (useful for local debugging)
+if /I "%ABLESTACK_WINPE_NO_SHUTDOWN%"=="1" (
+  set "NO_SHUTDOWN=1"
+  call :log_file "[policy] ABLESTACK_WINPE_NO_SHUTDOWN=1 -> NO_SHUTDOWN=1"
+  exit /b 0
+)
+
+REM Infer test/debug ISO from CDROM volume label
+for /f "usebackq tokens=2 delims==" %%V in (`wmic logicaldisk where "DriveType=5" get VolumeName /value ^| find "=" 2^>nul`) do (
+  set "CDROM_VOL=%%V"
+  if not "!CDROM_VOL!"=="" (
+    echo !CDROM_VOL! | find /I "test" >nul && set "NO_SHUTDOWN=1"
+  )
+)
+
+call :log_file "[policy] NO_SHUTDOWN=%NO_SHUTDOWN% (0=shutdown,1=interactive)"
+exit /b 0
+
+:maybe_shutdown
+REM Args: %1=exitcode %2=reason
+set "EXITCODE=%~1"
+set "END_REASON=%~2"
+
+if "%NO_SHUTDOWN%"=="1" (
+  call :log_file "[policy] NO_SHUTDOWN=1 -> keeping WinPE running. reason=%END_REASON%"
+  call :log_console "[bootstrap] NO_SHUTDOWN=1 - dropping to interactive shell (cmd.exe)."
+  cmd.exe
+  REM Operator may exit cmd.exe manually; after that, keep release behavior for safety.
+)
+
+call :log_file "[policy] shutting down WinPE. reason=%END_REASON% exitcode=%EXITCODE%"
 wpeutil shutdown
-exit /b 1
+exit /b %EXITCODE%
