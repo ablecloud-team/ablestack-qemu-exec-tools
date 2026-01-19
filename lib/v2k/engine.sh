@@ -609,15 +609,13 @@ v2k_cmd_cutover() {
 
     cdrom0="$(v2k_target_attach_cdrom "${vm}" "${winpe_iso_resolved}")"
 
+    cdrom1="$(v2k_target_attach_cdrom "${vm}" "${virtio_iso_resolved}")"
+
     # Start VM (WinPE)
     virsh start "${vm}" >/dev/null 2>&1 || true
 
     # Press-any-key handling: send SPACE 1/sec for 15 sec
     v2k_target_send_key_space "${vm}" 15
-
-    # Delay 15 sec then attach VirtIO ISO
-    sleep 15
-    cdrom1="$(v2k_target_attach_cdrom "${vm}" "${virtio_iso_resolved}")"
 
     if v2k_target_wait_shutdown "${vm}" "${winpe_timeout}"; then
       v2k_event INFO "winpe" "" "phase_done" "{}"

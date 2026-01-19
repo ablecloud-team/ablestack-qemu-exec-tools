@@ -392,12 +392,18 @@ v2k_target_attach_cdrom() {
   local iso="$2"
   local target_dev="${3:-}"
   _v2k_trace_env_once
+
   [[ -n "${target_dev}" ]] || target_dev="$(v2k_target_pick_cdrom_target_dev "${vm}")"
   _v2k_trace "ENTER attach_cdrom vm=${vm} iso=${iso} target_dev=${target_dev}"
-  _v2k_trace_cmd "virsh-attach-disk" virsh attach-disk "${vm}" "${iso}" "${target_dev}" \
-    --type cdrom --mode readonly --targetbus sata --live --config >/dev/null
+
+  # POLICY:
+  # - Attach before VM boot (config only). Do NOT use --live.
+  # - Use IDE bus for maximum WinPE compatibility.
+  _v2k_trace_cmd "virsh-attach-cdrom-config" virsh attach-disk "${vm}" "${iso}" "${target_dev}" \
+    --type cdrom --mode readonly --targetbus sata --config >/dev/null
+
+  _v2k_trace "attach_cdrom: attached target_dev=${target_dev} targetbus=ide (config-only)"
   echo "${target_dev}"
-  _v2k_trace "attach_cdrom: picked target_dev=${target_dev}"
 }
 
 v2k_target_detach_disk() {

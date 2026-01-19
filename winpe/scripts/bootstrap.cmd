@@ -352,7 +352,7 @@ del /f /q "%DP_LIST%" "%DP_ASSIGN%" >nul 2>&1
   echo exit
 ) > "%DP_LIST%"
 
-for /f "usebackq tokens=1,2,3" %%A in (`diskpart /s "%DP_LIST%" ^| findstr /R /C:"^ *Volume [0-9]"`) do (
+for /f "usebackq tokens=1,2,3" %%A in (`diskpart /s "%DP_LIST%" ^| find /I "Volume "`) do (
   set "VOLNUM=%%B"
   set "COL3=%%C"
   call :_is_letter "!COL3!" HASLTR
@@ -415,11 +415,11 @@ if not "%ERRORLEVEL%"=="0" (
   exit /b 0
 )
 
-for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v ProductName 2^>nul ^| findstr /I "ProductName"') do set "OS_PRODUCT=%%c"
-for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v CurrentBuild 2^>nul ^| findstr /I "CurrentBuild"') do set "OS_BUILD=%%c"
-for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v DisplayVersion 2^>nul ^| findstr /I "DisplayVersion"') do set "OS_DISPLAYVER=%%c"
+for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v ProductName 2^>nul ^| find /I "ProductName"') do set "OS_PRODUCT=%%c"
+for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v CurrentBuild 2^>nul ^| find /I "CurrentBuild"') do set "OS_BUILD=%%c"
+for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v DisplayVersion 2^>nul ^| find /I "DisplayVersion"') do set "OS_DISPLAYVER=%%c"
 if "%OS_DISPLAYVER%"=="" (
-  for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v ReleaseId 2^>nul ^| findstr /I "ReleaseId"') do set "OS_DISPLAYVER=%%c"
+  for /f "tokens=1,2,*" %%a in ('reg query "HKLM\OFFSOFT\Microsoft\Windows NT\CurrentVersion" /v ReleaseId 2^>nul ^| find /I "ReleaseId"') do set "OS_DISPLAYVER=%%c"
 )
 
 call :log_file "[bootstrap] Offline OS ProductName=%OS_PRODUCT%"
@@ -436,19 +436,19 @@ REM ------------------------------------------------------------------
 set "OSID_HINT="
 if "%OS_PRODUCT%"=="" exit /b 0
 
-echo %OS_PRODUCT% | findstr /I "Server" >nul && (
-  echo %OS_PRODUCT% | findstr /I "2025" >nul && set "OSID_HINT=2k25"
-  echo %OS_PRODUCT% | findstr /I "2022" >nul && set "OSID_HINT=2k22"
-  echo %OS_PRODUCT% | findstr /I "2019" >nul && set "OSID_HINT=2k19"
-  echo %OS_PRODUCT% | findstr /I "2016" >nul && set "OSID_HINT=2k16"
-  echo %OS_PRODUCT% | findstr /I "2012 R2" >nul && set "OSID_HINT=2k12r2"
+echo %OS_PRODUCT% | find /I "Server" >nul && (
+  echo %OS_PRODUCT% | find /I "2025" >nul && set "OSID_HINT=2k25"
+  echo %OS_PRODUCT% | find /I "2022" >nul && set "OSID_HINT=2k22"
+  echo %OS_PRODUCT% | find /I "2019" >nul && set "OSID_HINT=2k19"
+  echo %OS_PRODUCT% | find /I "2016" >nul && set "OSID_HINT=2k16"
+  echo %OS_PRODUCT% | find /I "2012 R2" >nul && set "OSID_HINT=2k12r2"
   if "%OSID_HINT%"=="" (
-    echo %OS_PRODUCT% | findstr /I "2012" >nul && set "OSID_HINT=2k12"
+    echo %OS_PRODUCT% | find /I "2012" >nul && set "OSID_HINT=2k12"
   )
 ) || (
-  echo %OS_PRODUCT% | findstr /I "Windows 11" >nul && set "OSID_HINT=w11"
+  echo %OS_PRODUCT% | find /I "Windows 11" >nul && set "OSID_HINT=w11"
   if "%OSID_HINT%"=="" (
-    echo %OS_PRODUCT% | findstr /I "Windows 10" >nul && set "OSID_HINT=w10"
+    echo %OS_PRODUCT% | find /I "Windows 10" >nul && set "OSID_HINT=w10"
   )
 )
 
