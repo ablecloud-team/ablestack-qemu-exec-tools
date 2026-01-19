@@ -30,7 +30,7 @@ jobs:
       architecture: ${{ inputs.architecture }}
       # NOTE: WinPE bootstrap detects "test" builds via ISO volume label.
       # Keep "-test" in the base name so debug ISOs do NOT shutdown the VM on exit.
-      iso_base_name: "winpe-ablestack-v2k-test"
+      iso_base_name: "winpe-ablestack-v2k"
       iso_suffix: ${{ inputs.iso_suffix }}
       # Build raw ISO first, then inject TEST_MODE marker in this workflow.
       artifact_name: "winpe-iso-test"
