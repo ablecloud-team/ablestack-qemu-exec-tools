@@ -32,5 +32,44 @@ jobs:
       # Keep "-test" in the base name so debug ISOs do NOT shutdown the VM on exit.
       iso_base_name: "winpe-ablestack-v2k-test"
       iso_suffix: ${{ inputs.iso_suffix }}
-      artifact_name: "winpe-iso-test"
+      # Build raw ISO first, then inject TEST_MODE marker in this workflow.
+      artifact_name: "winpe-iso-test-raw"
       retention_days: ${{ inputs.retention_days }}
+
+  mark_test_mode:
+    name: Add TEST_MODE marker to ISO
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download raw ISO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: winpe-iso-test-raw
+          path: raw
+
+      - name: Ensure xorriso is available
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y xorriso
+
+      - name: Create TEST_MODE marker
+        run: |
+          set -euo pipefail
+          mkdir -p add/ablestack
+          echo "TEST_MODE=1" > add/ablestack/TEST_MODE
+
+      - name: Inject marker into ISO (preserve boot)
+        run: |
+          set -euo pipefail
+          ISO_IN="$(ls -1 raw/*.iso | head -n 1)"
+          ISO_OUT="winpe-ablestack-v2k-test-${{ inputs.iso_suffix }}.iso"
+          xorriso -indev "$ISO_IN" -outdev "$ISO_OUT" -boot_image any replay \
+            -map add/ablestack/TEST_MODE /ablestack/TEST_MODE
+          ls -l "$ISO_OUT"
+
+      - name: Upload final ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winpe-iso-test
+          path: winpe-ablestack-v2k-test-${{ inputs.iso_suffix }}.iso
+          retention-days: ${{ inputs.retention_days }}

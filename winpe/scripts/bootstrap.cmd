@@ -530,10 +530,12 @@ exit /b %ERRORLEVEL%
 
 REM ------------------------------------------------------------------
 REM detect_no_shutdown_policy
-REM - No wmic/powershell dependency.
-REM - Uses diskpart "list volume" output and checks CDROM volume label contains "test".
+REM - NO powershell / NO wmic / NO findstr dependency.
+REM - Detect debug build via marker file on ISO: \ablestack\TEST_MODE
 REM ------------------------------------------------------------------
 :detect_no_shutdown_policy
+set "NO_SHUTDOWN=0"
+
 REM Explicit override (local debug)
 if /I "%ABLESTACK_WINPE_NO_SHUTDOWN%"=="1" (
   set "NO_SHUTDOWN=1"
@@ -544,7 +546,6 @@ if /I "%ABLESTACK_WINPE_NO_SHUTDOWN%"=="1" (
 set "DP_LIST=%TEMP%\dp_listvol_policy.txt"
 set "DP_OUT=%TEMP%\dp_out_policy.txt"
 del /f /q "%DP_LIST%" "%DP_OUT%" >nul 2>&1
-
 (
   echo list volume
   echo exit
@@ -552,12 +553,20 @@ del /f /q "%DP_LIST%" "%DP_OUT%" >nul 2>&1
 
 diskpart /s "%DP_LIST%" > "%DP_OUT%" 2>>&1
 
-REM WinPE diskpart output typically shows Type as "DVD_ROM" or "CD-ROM".
-REM If any CDROM line contains "test" in Label, treat as debug build.
-type "%DP_OUT%" | findstr /I "DVD_ROM CD-ROM" | findstr /I "test" >nul
-if "%ERRORLEVEL%"=="0" set "NO_SHUTDOWN=1"
+REM Parse CD-ROM volume lines and extract drive letter (token 3).
+set "DEBUG_CDROM="
+for /f "tokens=3" %%L in ('type "%DP_OUT%" ^| find /I "CD-ROM"') do (
+  if exist "%%L:\ablestack\TEST_MODE" (
+    set "NO_SHUTDOWN=1"
+    set "DEBUG_CDROM=%%L:"
+  )
+)
 
-call :log_file "[policy] NO_SHUTDOWN=%NO_SHUTDOWN% (0=shutdown,1=interactive)"
+if "%NO_SHUTDOWN%"=="1" (
+  call :log_file "[policy] TEST_MODE marker found on %DEBUG_CDROM% -> NO_SHUTDOWN=1"
+) else (
+  call :log_file "[policy] TEST_MODE marker not found -> NO_SHUTDOWN=0"
+)
 exit /b 0
 
 REM ------------------------------------------------------------------
