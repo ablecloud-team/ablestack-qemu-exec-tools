@@ -3,6 +3,11 @@ name: WinPE Build Core
 on:
   workflow_call:
     inputs:
+      test_mode:
+        description: "If true, put /ablestack/TEST_MODE into ISO (do not shutdown in WinPE)"
+        required: false
+        type: boolean
+        default: false
       architecture:
         description: "WinPE architecture"
         required: false
@@ -180,6 +185,30 @@ jobs:
           cmd /c "`"$dandit`" && copype $arch `"$work`""
           if (!(Test-Path "$work\media\sources\boot.wim")) { throw "boot.wim not found after copype" }
 
+      - name: Add TEST_MODE marker (test builds only)
+        if: ${{ inputs.test_mode }}
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $work = "$env:WORKDIR\WinPE_$arch"
+
+          # Place marker into ISO root (media) BEFORE MakeWinPEMedia builds the ISO.
+          # This avoids post-processing the ISO (xorriso), which can break WinPE's hidden boot layout.
+          $markerDir = Join-Path $work "media\ablestack"
+          New-Item -ItemType Directory -Force -Path $markerDir | Out-Null
+
+          $marker = Join-Path $markerDir "TEST_MODE"
+          @(
+            "TEST_MODE=1",
+            "BuiltBy=GitHubActions",
+            ("BuildTimeUtc=" + (Get-Date -AsUTC -Format o)),
+            ("GitSha=" + $env:GITHUB_SHA),
+            ("Ref=" + $env:GITHUB_REF)
+          ) -join "`n" | Out-File -Encoding ascii -Force $marker
+
+          Write-Host "Injected TEST_MODE marker: $marker"
+          Get-Item $marker | Format-List FullName,Length
+
       - name: Customize boot.wim (inject startnet.cmd + scripts)
         shell: pwsh
         run: |
@@ -254,6 +283,37 @@ jobs:
           "sha_filename=SHA256SUMS" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
           Get-Item $iso | Format-List FullName,Length
+
+      - name: Verify TEST_MODE marker in ISO (test builds only)
+        if: ${{ inputs.test_mode }}
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $base = "${{ inputs.iso_base_name }}"
+          $suffix = "${{ inputs.iso_suffix }}"
+
+          if ([string]::IsNullOrWhiteSpace($suffix)) {
+            $file = "$base-$arch.iso"
+          } else {
+            $file = "$base-$suffix-$arch.iso"
+          }
+          $iso = Join-Path $env:OUTDIR $file
+          if (!(Test-Path $iso)) { throw "ISO not found for verification: $iso" }
+
+          # Windows can inspect ISO contents without modifying it.
+          $m = Mount-DiskImage -ImagePath $iso -PassThru
+          try {
+            $vol = ($m | Get-Volume | Select-Object -First 1)
+            if (-not $vol) { throw "Failed to get mounted volume for ISO: $iso" }
+            $drive = $vol.DriveLetter + ":\"
+            $markerPath = Join-Path $drive "ablestack\TEST_MODE"
+            if (!(Test-Path $markerPath)) { throw "TEST_MODE marker missing in ISO: $markerPath" }
+            Write-Host "OK: TEST_MODE marker exists in ISO: $markerPath"
+            Get-Content $markerPath | ForEach-Object { Write-Host $_ }
+          }
+          finally {
+            Dismount-DiskImage -ImagePath $iso | Out-Null
+          }
 
       - name: Generate SHA256SUMS
         shell: pwsh
