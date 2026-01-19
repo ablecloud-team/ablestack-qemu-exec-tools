@@ -344,19 +344,38 @@ REM ------------------------------------------------------------------
 set "FREE_LETTERS=R S T U V W Y Z"
 set "DP_LIST=%TEMP%\dp_listvol.txt"
 set "DP_ASSIGN=%TEMP%\dp_assign.txt"
+set "DP_ONE=%TEMP%\dp_onevol.txt"
+set "DP_OUT=%TEMP%\dp_out.txt"
 
-del /f /q "%DP_LIST%" "%DP_ASSIGN%" >nul 2>&1
+del /f /q "%DP_LIST%" "%DP_ASSIGN%" "%DP_ONE%" "%DP_OUT%" >nul 2>&1
 
 (
   echo list volume
   echo exit
 ) > "%DP_LIST%"
 
-for /f "usebackq tokens=1,2,3" %%A in (`diskpart /s "%DP_LIST%" ^| find /I "Volume "`) do (
+REM Always create DP_ASSIGN so later logic can reason about it
+type nul > "%DP_ASSIGN%"
+
+REM Extract volume numbers first
+diskpart /s "%DP_LIST%" > "%DP_OUT%" 2>>&1
+for /f "usebackq tokens=1,2,3" %%A in (`type "%DP_OUT%" ^| find /I "Volume "`) do (
+  REM Expected: "Volume 0 ..." => token2 is volume number
   set "VOLNUM=%%B"
-  set "COL3=%%C"
-  call :_is_letter "!COL3!" HASLTR
-  if "!HASLTR!"=="0" (
+
+  REM Ask diskpart for detail volume to see if a drive letter exists
+  (
+    echo select volume !VOLNUM!
+    echo detail volume
+    echo exit
+  ) > "%DP_ONE%"
+
+  diskpart /s "%DP_ONE%" > "%DP_OUT%" 2>>&1
+
+  REM detail volume includes a line like "Drive Letter : C" when present
+  REM If not present, treat as no-letter volume and assign next available letter
+  type "%DP_OUT%" | find /I "Drive Letter" >nul
+  if not "!ERRORLEVEL!"=="0" (
     call :_next_letter LTR
     if not "!LTR!"=="" (
       >> "%DP_ASSIGN%" echo select volume !VOLNUM!
@@ -365,9 +384,13 @@ for /f "usebackq tokens=1,2,3" %%A in (`diskpart /s "%DP_LIST%" ^| find /I "Volu
   )
 )
 
-if exist "%DP_ASSIGN%" (
+REM Run only if DP_ASSIGN has meaningful commands (more than 0 bytes)
+for %%S in ("%DP_ASSIGN%") do set "DP_ASSIGN_SIZE=%%~zS"
+if not "%DP_ASSIGN_SIZE%"=="0" (
   call :log_file "[bootstrap] diskpart assigning letters (best-effort)"
   diskpart /s "%DP_ASSIGN%" >> "%LOG_FILE%" 2>>&1
+) else (
+  call :log_file "[bootstrap] diskpart assigning letters: nothing to do"
 )
 
 (
