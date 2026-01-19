@@ -63,8 +63,14 @@ jobs:
           set -euo pipefail
           ISO_IN="$(ls -1 raw/*.iso | head -n 1)"
           ISO_OUT="winpe-ablestack-v2k-test-${{ inputs.iso_suffix }}.iso"
-          xorriso -indev "$ISO_IN" -outdev "$ISO_OUT" -boot_image any replay \
+          # WinPE ISO often has hidden El-Torito/EFI boot images not stored as ISO data files.
+          # Using "replay" tries to re-enable them as files and triggers SORRY(32).
+          # Use "keep" to preserve original boot record as-is, while only adding the marker file.
+          xorriso -indev "$ISO_IN" -outdev "$ISO_OUT" -boot_image any keep \
             -map add/ablestack/TEST_MODE /ablestack/TEST_MODE
+
+          # quick boot info check (fails step if boot record is missing)
+          xorriso -indev "$ISO_OUT" -report_el_torito as_mkisofs
           ls -l "$ISO_OUT"
 
       - name: Upload final ISO artifact
