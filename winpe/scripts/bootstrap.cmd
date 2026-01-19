@@ -367,37 +367,30 @@ type nul > "%DP_ASSIGN%"
 diskpart /s "%DP_LIST%" > "%DP_OUT%" 2>>&1
 for /f "usebackq tokens=1,2,3,*" %%A in (`type "%DP_OUT%" ^| find /I "Volume "`) do (
   set "VOLNUM=%%B"
-
-  REM Skip header line: "Volume ###  Ltr  Label ..."
-  REM Only proceed if VOLNUM starts with a digit (0-9)
-  set "IS_NUM=0"
-  for %%n in (0 1 2 3 4 5 6 7 8 9) do (
-    if "!VOLNUM:~0,1!"=="%%n" set "IS_NUM=1"
-  )
-  if "!IS_NUM!"=="0" (
-    REM Not a real volume number (e.g., ###). Ignore.
-    goto :_next_vol_line
-  )
   set "T3=%%C"
   set "REST=%%D"
 
-  REM Skip CD-ROM volumes (no need to assign)
-  echo !T3! !REST! | find /I "CD-ROM" >nul
-  if "!ERRORLEVEL!"=="0" (
-    REM skip
-  ) else (
-    set "HAS_LETTER=0"
-    call :_is_letter "!T3!" HAS_LETTER
-    if "!HAS_LETTER!"=="0" (
-      call :_next_letter LTR
-      if not "!LTR!"=="" (
-        >> "%DP_ASSIGN%" echo select volume !VOLNUM!
-        >> "%DP_ASSIGN%" echo assign letter=!LTR!
+  REM Header line is: "Volume ###  Ltr  Label ..."
+  REM We must ignore it. Only proceed if VOLNUM begins with a digit.
+  set "IS_NUM=0"
+  for %%n in (0 1 2 3 4 5 6 7 8 9) do if "!VOLNUM:~0,1!"=="%%n" set "IS_NUM=1"
+
+  if "!IS_NUM!"=="1" (
+    REM Skip CD-ROM volumes (no need to assign letters)
+    echo !T3! !REST! | find /I "CD-ROM" >nul
+    if not "!ERRORLEVEL!"=="0" (
+      REM If token3 is NOT a single letter, Ltr column is blank -> needs assignment
+      set "HAS_LETTER=0"
+      call :_is_letter "!T3!" HAS_LETTER
+      if "!HAS_LETTER!"=="0" (
+        call :_next_letter LTR
+        if not "!LTR!"=="" (
+          >> "%DP_ASSIGN%" echo select volume !VOLNUM!
+          >> "%DP_ASSIGN%" echo assign letter=!LTR!
+        )
       )
     )
   )
-
-  :_next_vol_line
 )
 
 REM Run only if DP_ASSIGN has meaningful commands (more than 0 bytes)
