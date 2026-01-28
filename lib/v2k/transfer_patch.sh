@@ -162,7 +162,18 @@ v2k_transfer_patch_one() {
       fi
 
       # Detach source
-      [[ -n "${src_dev}" ]] && v2k_nbd_disconnect "${src_dev}" >/dev/null 2>&1 || true
+      # NOTE:
+      #   src_dev is connected by nbd-client (unix socket export).
+      #   If v2k_nbd_disconnect is implemented with qemu-nbd -d only,
+      #   src_dev will leak and remain connected (e.g., /dev/nbd0).
+      if [[ -n "${src_dev}" ]]; then
+        # try nbd-client detach first (safe even if not connected)
+        nbd-client -d "${src_dev}" >/dev/null 2>&1 || true
+        # then try qemu-nbd detach as fallback (safe even if not connected)
+        qemu-nbd -d "${src_dev}" >/dev/null 2>&1 || true
+        # keep legacy helper as well (in case it has extra logic)
+        v2k_nbd_disconnect "${src_dev}" >/dev/null 2>&1 || true
+      fi
 
       # Stop nbdkit safely (PID ONLY; verify cmdline contains sock token)
       v2k_nbdkit_stop "${pidfile}" "${sock}" >/dev/null 2>&1 || true
@@ -227,18 +238,12 @@ v2k_transfer_patch_one() {
     last_change_id="$(jq -r ".disks[$idx].cbt.last_change_id // empty" "${manifest}" 2>/dev/null || true)"
 
     local areas_json
-    if [[ -n "${last_change_id}" && "${last_change_id}" != "null" ]]; then
-      areas_json="$(python3 "${V2K_PY_DIR}/vmware_changed_areas.py" \
-          --vm "$(jq -r '.source.vm.name' "${manifest}")" \
-          --snapshot "${snap_name}" \
-          --disk-id "${disk_id}" \
-          --change-id "${last_change_id}")"
-    else
-      areas_json="$(python3 "${V2K_PY_DIR}/vmware_changed_areas.py" \
-          --vm "$(jq -r '.source.vm.name' "${manifest}")" \
-          --snapshot "${snap_name}" \
-          --disk-id "${disk_id}")"
-    fi
+
+    areas_json="$(python3 "${V2K_PY_DIR}/vmware_changed_areas.py" \
+        --vm "$(jq -r '.source.vm.name' "${manifest}")" \
+        --snapshot "${snap_name}" \
+        --disk-id "${disk_id}" \
+        --change-id "${last_change_id}")"
 
     # IMPORTANT: snapshot view must read from snapshot disk backing (delta chain top).
     local snap_vmdk_path
@@ -252,6 +257,18 @@ v2k_transfer_patch_one() {
     areas_count="$(echo "${areas_json}" | jq -r '.areas|length')"
     bytes_total="$(echo "${areas_json}" | jq -r '[.areas[].length] | add // 0')"
     new_change_id="$(echo "${areas_json}" | jq -r '.new_change_id // empty')"
+
+    # No changed areas is a valid no-op incremental/final sync.
+    if [[ "${areas_count}" -eq 0 ]]; then
+      v2k_event INFO "sync.${which}" "${disk_id}" "no_changes" "{}"
+      if [[ -n "${new_change_id}" && "${new_change_id}" != "null" ]]; then
+        v2k_manifest_advance_cbt_change_ids "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}"
+      fi
+      v2k_manifest_inc_incr_seq "${manifest}" "${idx}"
+      v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" "{\"bytes_written\":0,\"areas\":0}"
+      cleanup_patch
+      return 0
+    fi
 
     v2k_event INFO "sync.${which}" "${disk_id}" "changed_areas_fetched" "{\"areas\":${areas_count},\"bytes\":${bytes_total}}"
 

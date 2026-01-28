@@ -20,6 +20,52 @@ set -euo pipefail
 v2k_now_rfc3339() {
   date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 }
+ 
+v2k_has_jq() {
+  command -v jq >/dev/null 2>&1
+}
+
+# Read stdin and output a JSON string (including quotes).
+# Prefers jq -Rs for correctness; falls back to python json.dumps.
+v2k_json_string() {
+  if v2k_has_jq; then
+    jq -Rs '.' 2>/dev/null || echo '""'
+    return 0
+  fi
+  python3 - <<'PY' 2>/dev/null || echo '""'
+import json,sys
+print(json.dumps(sys.stdin.read()))
+PY
+}
+
+# Run a command and emit {"cmd": "...", "rc": N, "out": "..."} as JSON.
+v2k_event_cmd_json() {
+  local cmd="$1"; shift || true
+  local out rc
+  out="$("$@" 2>&1)"; rc=$?
+  local out_json cmd_json
+  out_json="$(printf '%s' "${out}" | v2k_json_string)"
+  cmd_json="$(printf '%s' "${cmd}" | v2k_json_string)"
+  printf '{"cmd":%s,"rc":%d,"out":%s}' "${cmd_json}" "${rc}" "${out_json}"
+  return 0
+}
+
+# Snapshot host storage state to events log (best-effort).
+v2k_event_storage_snapshot() {
+  local tag="${1:-snapshot}"
+  declare -F v2k_event >/dev/null 2>&1 || return 0
+
+  local lsblk_json lvs_json vgs_json
+  lsblk_json="$(v2k_event_cmd_json "lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,UUID -J" \
+    lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,UUID -J)"
+  lvs_json="$(v2k_event_cmd_json "lvs -a -o vg_name,lv_name,lv_attr,lv_size,origin,data_percent,metadata_percent,devices --reportformat json" \
+    lvs -a -o vg_name,lv_name,lv_attr,lv_size,origin,data_percent,metadata_percent,devices --reportformat json)"
+  vgs_json="$(v2k_event_cmd_json "vgs -o vg_name,vg_attr,vg_size,vg_free,pv_count,lv_count --reportformat json" \
+    vgs -o vg_name,vg_attr,vg_size,vg_free,pv_count,lv_count --reportformat json)"
+
+  v2k_event INFO "observability" "" "storage_snapshot" \
+    "{\"tag\":$(printf '%s' "${tag}" | v2k_json_string),\"lsblk\":${lsblk_json},\"lvs\":${lvs_json},\"vgs\":${vgs_json}}"
+}
 
 v2k_event() {
   local level="$1" phase="$2" disk_id="$3" event="$4" detail_json="$5"

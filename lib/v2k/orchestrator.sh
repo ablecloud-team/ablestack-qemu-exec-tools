@@ -38,26 +38,21 @@ v2k_parse_arg_string() {
   read -r -a _out_arr <<<"${s}"
 }
 
-v2k_manifest_is_windows() {
-  local manifest="$1"
-  local s=""
-  s="$(jq -r '
-    [
-      (.source.vm.guest_id // ""),
-      (.source.vm.guestId // ""),
-      (.source.vm.guestFullName // ""),
-      (.source.vm.guest_full_name // ""),
-      (.source.vm.guest // ""),
-      (.source.vm.os // ""),
-      (.source.vm.os_name // "")
-    ] | join(" ") | ascii_downcase
-  ' "${manifest}" 2>/dev/null || true)"
-  [[ "${s}" == *"windows"* ]] || [[ "${s}" == *"win"* ]]
-}
-
 v2k_mktemp_file() {
   local prefix="${1:-v2k}"
   mktemp "/tmp/${prefix}.XXXXXX"
+}
+
+v2k_trap_append() {
+  local sig="$1"; shift
+  local cmd="$*"
+  local prev
+  prev="$(trap -p "${sig}" 2>/dev/null | sed -E "s/^trap -- '(.*)' ${sig}$/\1/")"
+  if [[ -n "${prev}" && "${prev}" != "''" ]]; then
+    trap "${prev}; ${cmd}" "${sig}"
+  else
+    trap "${cmd}" "${sig}"
+  fi
 }
 
 v2k_write_kv_file() {
@@ -69,6 +64,17 @@ v2k_write_kv_file() {
     [[ -n "${line}" ]] && echo "${line}" >> "${path}"
   done
   chmod 600 "${path}" 2>/dev/null || true
+}
+ 
+v2k_keep_file_in_workdir() {
+  local src="$1" dst_basename="$2"
+  [[ -n "${V2K_WORKDIR:-}" && -d "${V2K_WORKDIR}" ]] || return 0
+  [[ -f "${src}" ]] || return 0
+  local dst="${V2K_WORKDIR}/${dst_basename}"
+  if [[ ! -e "${dst}" ]]; then
+    install -m 600 "${src}" "${dst}" 2>/dev/null || true
+  fi
+  printf '%s' "${dst}"
 }
 
 v2k_validate_vcenter_host() {
@@ -87,7 +93,10 @@ v2k_build_govc_url_from_vcenter_host() {
 
 v2k_generate_run_id() {
   # engine.sh init과 동일한 형식(호환성 유지)
-  date +%Y%m%d-%H%M%S
+  # YYYYMMDD-HHMMSS-<4bytes hex>
+  printf '%s-%s\n' \
+    "$(date +%Y%m%d-%H%M%S)" \
+    "$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 }
 
 v2k_output_run_id() {
@@ -109,6 +118,15 @@ v2k_keep_govc_env_in_workdir() {
     fi
   fi
 }
+ 
+v2k_keep_vddk_cred_in_workdir() {
+  local cred_path="$1"
+  local kept
+  kept="$(v2k_keep_file_in_workdir "${cred_path}" "vddk.cred")"
+  if [[ -n "${kept}" ]]; then
+    export V2K_VDDK_CRED_FILE="${kept}"
+  fi
+}
 
 v2k_source_kv_env() {
   local path="$1"
@@ -118,6 +136,21 @@ v2k_source_kv_env() {
   # shellcheck disable=SC1090
   source "${path}"
   set +a
+}
+ 
+v2k_shell_quote_args() {
+  # Join args into a shell-escaped single string (preserve spaces/special chars)
+  # Usage: v2k_shell_quote_args out_var_name "${args[@]}"
+  local -n _out="${1}"
+  shift || true
+  local a
+  local -a q=()
+  for a in "$@"; do
+    # %q: shell-escape
+    q+=( "$(printf '%q' "${a}")" )
+  done
+  # space-joined
+  _out="${q[*]-}"
 }
 
 # -----------------------------------------------------------------------------
@@ -224,7 +257,7 @@ v2k_cmd_run_foreground() {
   tmp_govc_env="$(v2k_mktemp_file "govc.env")"
   tmp_vddk_cred="$(v2k_mktemp_file "vddk.cred")"
   local -a cleanup_tmp=( "${tmp_govc_env}" "${tmp_vddk_cred}" )
-  trap 'for f in "${cleanup_tmp[@]:-}"; do [[ -n "${f}" && -f "${f}" ]] && rm -f "${f}" || true; done' EXIT
+  v2k_trap_append EXIT 'for f in "${cleanup_tmp[@]:-}"; do [[ -n "${f}" && -f "${f}" ]] && rm -f "${f}" || true; done'
 
   v2k_write_kv_file "${tmp_govc_env}" \
     "GOVC_URL=${govc_url}" \
@@ -237,14 +270,42 @@ v2k_cmd_run_foreground() {
     "VDDK_PASSWORD=${password}" \
     "VDDK_SERVER=${vcenter_host}"
 
-    # ✅ 중요: govc 단계들이 env 기반으로 동작할 수 있으므로 즉시 환경에 반영
-    v2k_source_kv_env "${tmp_govc_env}"
+  # ✅ 중요: govc 단계들이 env 기반으로 동작할 수 있으므로 즉시 환경에 반영
+  v2k_source_kv_env "${tmp_govc_env}"
 
-    # ✅ manifest에 vddk cred 경로를 남기고, 후속 단계에서 참조 가능하도록 env에도 설정
-    export V2K_VDDK_SERVER="${vcenter_host}"
-    export V2K_VDDK_CRED_FILE="${tmp_vddk_cred}"
+  # ✅ manifest에 vddk cred 경로를 남기고, 후속 단계에서 참조 가능하도록 env에도 설정
+  export V2K_VDDK_SERVER="${vcenter_host}"
+  export V2K_VDDK_CRED_FILE="${tmp_vddk_cred}"
 
-  init_args+=( --cred-file "${tmp_govc_env}" --vddk-cred-file "${tmp_vddk_cred}" )
+  init_args+=( --cred-file "${tmp_govc_env}" --vddk-cred-file "${V2K_VDDK_CRED_FILE}" )
+
+  # -----------------------------------------------------------------------------
+  # Failure handling (productization)
+  # -----------------------------------------------------------------------------
+  local __v2k_cleanup_done=0
+  local __v2k_failed=0
+  v2k_trap_append ERR '
+    __v2k_failed=1
+    if declare -F v2k_event >/dev/null 2>&1; then
+      v2k_event ERROR "orchestrator" "" "run_failed" "{\"where\":\"v2k_cmd_run_foreground\",\"line\":${LINENO}}"
+    fi
+    if declare -F v2k_event_storage_snapshot >/dev/null 2>&1; then
+      v2k_event_storage_snapshot "on_error_pre_cleanup" || true
+    fi
+    if [[ "${do_cleanup}" == "1" && "${__v2k_cleanup_done}" -eq 0 ]]; then
+      __v2k_cleanup_done=1
+      local -a __cleanup_args=()
+      [[ "${keep_snapshots}" == "1" ]] && __cleanup_args+=(--keep-snapshots)
+      [[ "${keep_workdir}" == "1" ]] && __cleanup_args+=(--keep-workdir)
+      v2k_cmd_cleanup "${__cleanup_args[@]}" || true
+      if declare -F v2k_event_storage_snapshot >/dev/null 2>&1; then
+        v2k_event_storage_snapshot "on_error_post_cleanup" || true
+      fi
+      if declare -F v2k_event >/dev/null 2>&1; then
+        v2k_event WARN "orchestrator" "" "cleanup_attempted_on_error" "{\"keep_snapshots\":${keep_snapshots},\"keep_workdir\":${keep_workdir}}"
+      fi
+    fi
+  '
 
   # sync defaults + extras
   local -a sync_defaults=()
@@ -273,6 +334,7 @@ v2k_cmd_run_foreground() {
 
   if [[ "${no_incr}" == "0" ]]; then
     local iter=0 converged=0
+    local incr_failed=0
     while :; do
       iter=$((iter + 1))
       if [[ "${max_incr}" != "0" ]] && (( iter > max_incr )); then break; fi
@@ -280,7 +342,22 @@ v2k_cmd_run_foreground() {
       local t0 t1 elapsed
       t0="$(date +%s)"
       v2k_cmd_snapshot incr
-      v2k_cmd_sync incr "${sync_defaults[@]}" "${incr_extra[@]}"
+
+      # ------------------------------------------------------------
+      # IMPORTANT:
+      # incr sync failure MUST NOT abort the run pipeline.
+      # If incr fails (e.g. CBT changeId missing), stop incr loop
+      # and continue to cutover.
+      # ------------------------------------------------------------
+      if ! v2k_cmd_sync incr "${sync_defaults[@]}" "${incr_extra[@]}"; then
+        incr_failed=1
+        if declare -F v2k_event >/dev/null 2>&1; then
+          v2k_event WARN "orchestrator" "" "incr_failed_continue_to_cutover" \
+            "{\"iter\":${iter}}"
+        fi
+        break
+      fi
+
       t1="$(date +%s)"
       elapsed=$((t1 - t0))
 
@@ -296,6 +373,13 @@ v2k_cmd_run_foreground() {
       if [[ "${max_incr}" != "0" ]] && (( iter >= max_incr )); then break; fi
       sleep "${incr_interval}"
     done
+ 
+    if [[ "${incr_failed}" -eq 1 ]]; then
+      if declare -F v2k_event >/dev/null 2>&1; then
+        v2k_event INFO "orchestrator" "" "incr_aborted_proceed_cutover" \
+          "{\"iter\":${iter}}"
+      fi
+    fi
 
     if declare -F v2k_event >/dev/null 2>&1; then
       if [[ "${converged}" -eq 0 ]]; then
@@ -353,7 +437,14 @@ v2k_cmd_run_foreground() {
     local -a cleanup_args=()
     [[ "${keep_snapshots}" == "1" ]] && cleanup_args+=(--keep-snapshots)
     [[ "${keep_workdir}" == "1" ]] && cleanup_args+=(--keep-workdir)
+    if declare -F v2k_event_storage_snapshot >/dev/null 2>&1; then
+      v2k_event_storage_snapshot "pre_cleanup" || true
+    fi
+    __v2k_cleanup_done=1
     v2k_cmd_cleanup "${cleanup_args[@]}"
+    if declare -F v2k_event_storage_snapshot >/dev/null 2>&1; then
+      v2k_event_storage_snapshot "post_cleanup" || true
+    fi
   fi
 }
 
@@ -409,6 +500,10 @@ v2k_cmd_run() {
   # Worker script
   local worker="${V2K_WORKDIR}/run.worker.sh"
   local outlog="${V2K_WORKDIR}/run.out"
+ 
+  # Preserve original args safely (avoid word-splitting/globbing in worker heredoc)
+  local args_quoted=""
+  v2k_shell_quote_args args_quoted "${args[@]}"
 
   cat > "${worker}" <<EOF
 #!/usr/bin/env bash
@@ -429,7 +524,7 @@ export V2K_EVENTS_LOG="${V2K_EVENTS_LOG}"
 # NOTE: This worker runs in a fresh shell, so engine+orchestrator must already be loaded by main CLI.
 # We invoke ablestack_v2k itself in foreground mode.
 
-exec "\$(command -v ablestack_v2k)" --workdir "${V2K_WORKDIR}" --run-id "${V2K_RUN_ID}" --manifest "${V2K_MANIFEST}" --log "${V2K_EVENTS_LOG}" run --foreground ${args[*]}
+exec "\$(command -v ablestack_v2k)" --workdir "${V2K_WORKDIR}" --run-id "${V2K_RUN_ID}" --manifest "${V2K_MANIFEST}" --log "${V2K_EVENTS_LOG}" run --foreground ${args_quoted}
 EOF
   chmod 700 "${worker}"
 

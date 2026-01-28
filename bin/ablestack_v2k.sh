@@ -101,11 +101,11 @@ Commands (product automation):
 Pipeline options:
   --shutdown manual|guest|poweroff    VMware VM shutdown policy for cutover (default: manual)
   --kvm-vm-policy define-only|define-and-start
-                                     KVM VM action at cutover (default: define-only)
-  --incr-interval <sec>               Interval between incremental loops (default: 300)
-  --max-incr <N>                      Maximum number of incremental loops (default: 0 = unlimited)
-  --converge-threshold-sec <sec>      Stop incr loop early if (snapshot+sync) duration <= sec (default: 0=disabled)
-  --no-incr                           Skip incremental loops (base -> final -> cutover)
+                                     KVM VM action at cutover (default: none)
+  --incr-interval <sec>               Interval between incremental loops (default: 10)
+  --max-incr <N>                      Maximum number of incremental loops (default: 6)
+  --converge-threshold-sec <sec>      Stop incr loop early if (snapshot+sync) duration <= sec (default: 120)
+  --no-incr                           Skip incremental loops (base -> cutover)
 
   --jobs <N>                          Default jobs for sync steps
   --chunk <BYTES>                     Default chunk size for sync steps
@@ -113,7 +113,6 @@ Pipeline options:
 
   --base-args "<...>"                 Extra args appended to base sync (quoted string)
   --incr-args "<...>"                 Extra args appended to incr sync (quoted string)
-  --final-args "<...>"                Extra args appended to final sync (quoted string)
   --cutover-args "<...>"              Extra args appended to cutover (quoted string)
 
 Notes:

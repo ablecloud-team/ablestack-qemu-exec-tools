@@ -38,6 +38,7 @@ import json
 import os
 import ssl
 import re
+import sys
 from urllib.parse import urlparse
 from typing import Any, Dict, List, Tuple, Optional
 
@@ -214,7 +215,7 @@ def _query_changed_areas(
     snap: vim.vm.Snapshot,
     disk: vim.vm.device.VirtualDisk,
     change_id: str,
-) -> List[Dict[str, int]]:
+) -> Tuple[List[Dict[str, int]], str]:
     """
     QueryChangedDiskAreas for a given snapshot and disk.
 
@@ -235,13 +236,32 @@ def _query_changed_areas(
     # Attach changeId if present (vim.vm.DiskChangeInfo.changeId)
     return out, getattr(areas, "changeId", "") or ""
 
+ 
+def _disk_backing_vmdk_path(disk: vim.vm.device.VirtualDisk) -> str:
+    try:
+        return str(getattr(getattr(disk, "backing", None), "fileName", "") or "")
+    except Exception:
+        return ""
+
+
+def _disk_backing_change_id(disk: vim.vm.device.VirtualDisk) -> str:
+    try:
+        return str(getattr(getattr(disk, "backing", None), "changeId", "") or "")
+    except Exception:
+        return ""
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vm", required=True)
     ap.add_argument("--snapshot", required=True)
     ap.add_argument("--disk-id", required=True, help="Disk identifier like scsi0:0")
-    ap.add_argument("--change-id", default="*", help="Previous CBT changeId for this disk (default: *)")
+    # NOTE:
+    # - transfer_patch.sh will now enforce that incremental/final patch must have a valid change-id.
+    # - We still keep this tool defensive: if change-id is "*" or empty, return empty areas to avoid
+    #   accidental full-disk diffs.
+    ap.add_argument("--change-id", default="", help="Previous CBT changeId for this disk (empty means unset)")
+
     args = ap.parse_args()
 
     si = _connect()
@@ -251,26 +271,45 @@ def main() -> None:
         snap = _find_snapshot_ref(vm, args.snapshot)
         devs = _devices_from_snapshot_or_vm(vm, snap)
         _, disk = _disk_for_scsi_in_devices(devs, args.disk_id)
-        areas, areas_change_id = _query_changed_areas(vm, snap, disk, args.change_id)
+
+        # IMPORTANT SAFETY:
+        # - "*" (and empty) are often used as placeholders when we couldn't persist a
+        #   real CBT changeId yet.
+        # - Passing "*" into QueryChangedDiskAreas can be interpreted as "from the beginning"
+        #   on some vSphere builds, returning a full-disk diff (=> incremental becomes full read).
+        #
+        # Policy:
+        # - If change_id is "*" or empty, DO NOT query changed areas.
+        # - Just report empty areas and advance new_change_id to the current one.
+        effective_change_id = (args.change_id or "").strip()
+        if effective_change_id in ("", "null", "*"):
+            vmdk_path = _disk_backing_vmdk_path(disk)
+            cur = _disk_backing_change_id(disk) or ""
+            result = {
+                "disk_id": args.disk_id,
+                "snapshot": args.snapshot,
+                "start_change_id": effective_change_id,
+                "change_id": effective_change_id,
+                "new_change_id": cur,
+                "vmdk_path": vmdk_path,
+                "areas": [],
+            }
+            print(json.dumps(result, ensure_ascii=False))
+            return
+
+        areas, areas_change_id = _query_changed_areas(vm, snap, disk, effective_change_id)
 
         # Snapshot disk backing fileName (delta chain top like *_000002.vmdk)
-        vmdk_path = ""
-        try:
-            vmdk_path = str(getattr(getattr(disk, "backing", None), "fileName", "") or "")
-        except Exception:
-            vmdk_path = ""
+        vmdk_path = _disk_backing_vmdk_path(disk)
 
         # Prefer DiskChangeInfo.changeId; fallback to disk.backing.changeId
         new_change_id = str(areas_change_id or "") if areas_change_id else ""
         if not new_change_id:
-            try:
-                new_change_id = str(getattr(getattr(disk, "backing", None), "changeId", "") or "")
-            except Exception:
-                new_change_id = ""
+            new_change_id = _disk_backing_change_id(disk) or ""
 
         print(json.dumps({
             "disk_id": args.disk_id,
-            "change_id": args.change_id,
+            "change_id": effective_change_id,
             "new_change_id": new_change_id,
             "vmdk_path": vmdk_path,
             "areas": areas
