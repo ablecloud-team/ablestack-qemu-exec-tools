@@ -1,0 +1,344 @@
+name: WinPE Build Core
+
+on:
+  workflow_call:
+    inputs:
+      test_mode:
+        description: "If true, put /ablestack/TEST_MODE into ISO (do not shutdown in WinPE)"
+        required: false
+        type: boolean
+        default: false
+      architecture:
+        description: "WinPE architecture"
+        required: false
+        default: "amd64"
+        type: string
+      iso_base_name:
+        description: "Base name of output ISO"
+        required: false
+        default: "winpe-ablestack-v2k"
+        type: string
+      iso_suffix:
+        description: "Optional suffix (e.g. test-20260116)"
+        required: false
+        default: ""
+        type: string
+      artifact_name:
+        description: "Artifact name to upload"
+        required: false
+        default: "winpe-iso"
+        type: string
+      retention_days:
+        description: "Artifact retention days"
+        required: false
+        default: "14"
+        type: string
+
+    outputs:
+      iso_filename:
+        description: "Generated ISO filename"
+        value: ${{ jobs.build.outputs.iso_filename }}
+      sha_filename:
+        description: "SHA256SUMS filename"
+        value: ${{ jobs.build.outputs.sha_filename }}
+      artifact_name:
+        description: "Artifact name"
+        value: ${{ inputs.artifact_name }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    outputs:
+      iso_filename: ${{ steps.meta.outputs.iso_filename }}
+      sha_filename: ${{ steps.meta.outputs.sha_filename }}
+
+    env:
+      WORKDIR: C:\winpe_work
+      OUTDIR: C:\out
+
+      # Microsoft Learn(ADK/WinPE Add-on)에서 안내되는 fwlink를 사용.
+      # 향후 linkid 변경 가능성이 있으니, 실패 시 이 2개 URL만 갱신하면 됩니다.
+      ADK_SETUP_URL: "https://go.microsoft.com/fwlink/?linkid=2289980"
+      WINPE_ADDON_URL: "https://go.microsoft.com/fwlink/?linkid=2289981"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare folders
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "${env:WORKDIR}" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${env:OUTDIR}" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\adk" | Out-Null
+
+      - name: Download ADK + WinPE Add-on installers
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "${env:ADK_SETUP_URL}" -OutFile "$env:RUNNER_TEMP\adk\adksetup.exe"
+          Invoke-WebRequest -Uri "${env:WINPE_ADDON_URL}" -OutFile "$env:RUNNER_TEMP\adk\adkwinpesetup.exe"
+          Get-ChildItem "$env:RUNNER_TEMP\adk" | Format-Table Name,Length
+
+      - name: Create ADK offline layout (download payloads)
+        shell: pwsh
+        run: |
+          $layout = "$env:RUNNER_TEMP\adk\layout-adk"
+          New-Item -ItemType Directory -Force -Path $layout | Out-Null
+          $log = "$env:RUNNER_TEMP\adk\adk-layout.log"
+
+          $adk = "$env:RUNNER_TEMP\adk\adksetup.exe"
+          if (!(Test-Path $adk)) { throw "Missing ADK setup: $adk" }
+
+          $args = @(
+            "/quiet",
+            "/layout", $layout,
+            "/log", $log
+          )
+          $p = Start-Process -FilePath $adk -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "ADK layout failed with exit code $($p.ExitCode). See $log" }
+
+      - name: Install Windows ADK (Deployment Tools only) from layout
+        shell: pwsh
+        run: |
+          $layout = "$env:RUNNER_TEMP\adk\layout-adk"
+          $log = "$env:RUNNER_TEMP\adk\adk-install.log"
+
+          $adk = Join-Path $layout "adksetup.exe"
+          if (!(Test-Path $adk)) { throw "adksetup.exe not found in layout: $adk" }
+
+          $args = @(
+            "/quiet",
+            "/norestart",
+            "/ceip", "off",
+            "/features", "OptionId.DeploymentTools",
+            "/log", $log
+          )
+          $p = Start-Process -FilePath $adk -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Write-Host "ADK install failed with exit code $($p.ExitCode). Dumping log tail: $log"
+            if (Test-Path $log) { Get-Content $log -Tail 200 | ForEach-Object { Write-Host $_ } }
+            throw "ADK install failed with exit code $($p.ExitCode). See $log"
+          }
+
+      - name: Create WinPE Add-on offline layout (download payloads)
+        shell: pwsh
+        run: |
+          $layout = "$env:RUNNER_TEMP\adk\layout-winpe"
+          New-Item -ItemType Directory -Force -Path $layout | Out-Null
+          $log = "$env:RUNNER_TEMP\adk\winpe-layout.log"
+
+          $pe = "$env:RUNNER_TEMP\adk\adkwinpesetup.exe"
+          if (!(Test-Path $pe)) { throw "Missing WinPE Add-on setup: $pe" }
+
+          $args = @(
+            "/quiet",
+            "/layout", $layout,
+            "/log", $log
+          )
+          $p = Start-Process -FilePath $pe -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WinPE Add-on layout failed with exit code $($p.ExitCode). See $log" }
+
+      - name: Install WinPE Add-on from layout
+        shell: pwsh
+        run: |
+          $layout = "$env:RUNNER_TEMP\adk\layout-winpe"
+          $log = "$env:RUNNER_TEMP\adk\winpe-install.log"
+
+          $pe = Join-Path $layout "adkwinpesetup.exe"
+          if (!(Test-Path $pe)) { throw "adkwinpesetup.exe not found in layout: $pe" }
+
+          $args = @(
+            "/quiet",
+            "/norestart",
+            "/ceip", "off",
+            "/features", "OptionId.WindowsPreinstallationEnvironment",
+            "/log", $log
+          )
+          $p = Start-Process -FilePath $pe -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Write-Host "WinPE Add-on install failed with exit code $($p.ExitCode). Dumping log tail: $log"
+            if (Test-Path $log) { Get-Content $log -Tail 200 | ForEach-Object { Write-Host $_ } }
+            throw "WinPE add-on install failed with exit code $($p.ExitCode). See $log"
+          }
+
+      - name: Upload ADK logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adk-logs
+          path: |
+            ${{ runner.temp }}\adk\*.log
+          retention-days: 7
+
+      - name: Create WinPE working set (copype)
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $work = "$env:WORKDIR\WinPE_$arch"
+
+          $dandit = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
+          if (!(Test-Path $dandit)) { throw "DandISetEnv.bat not found: $dandit" }
+
+          cmd /c "`"$dandit`" && copype $arch `"$work`""
+          if (!(Test-Path "$work\media\sources\boot.wim")) { throw "boot.wim not found after copype" }
+
+      - name: Add TEST_MODE marker (test builds only)
+        if: ${{ inputs.test_mode }}
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $work = "$env:WORKDIR\WinPE_$arch"
+
+          # Place marker into ISO root (media) BEFORE MakeWinPEMedia builds the ISO.
+          # This avoids post-processing the ISO (xorriso), which can break WinPE's hidden boot layout.
+          $markerDir = Join-Path $work "media\ablestack"
+          New-Item -ItemType Directory -Force -Path $markerDir | Out-Null
+
+          $marker = Join-Path $markerDir "TEST_MODE"
+          @(
+            "TEST_MODE=1",
+            "BuiltBy=GitHubActions",
+            ("BuildTimeUtc=" + (Get-Date -AsUTC -Format o)),
+            ("GitSha=" + $env:GITHUB_SHA),
+            ("Ref=" + $env:GITHUB_REF)
+          ) -join "`n" | Out-File -Encoding ascii -Force $marker
+
+          Write-Host "Injected TEST_MODE marker: $marker"
+          Get-Item $marker | Format-List FullName,Length
+
+      - name: Customize boot.wim (inject startnet.cmd + scripts)
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $work = "$env:WORKDIR\WinPE_$arch"
+          $wim  = "$work\media\sources\boot.wim"
+          $mnt  = "$work\mount"
+
+          New-Item -ItemType Directory -Force -Path $mnt | Out-Null
+
+          dism /Mount-Image /ImageFile:"$wim" /Index:1 /MountDir:"$mnt"
+          try {
+            # startnet.cmd is optional during early pipeline verification.
+            $srcStartnet = Join-Path $env:GITHUB_WORKSPACE "winpe\startnet.cmd"
+            if (Test-Path $srcStartnet) {
+              Write-Host "Injecting startnet.cmd from repo: $srcStartnet"
+              Copy-Item -Force $srcStartnet (Join-Path $mnt "Windows\System32\startnet.cmd")
+            } else {
+              Write-Warning "winpe/startnet.cmd not found. Keeping default WinPE startnet.cmd."
+            }
+
+            # scripts folder is optional during early pipeline verification.
+            $srcScripts = Join-Path $env:GITHUB_WORKSPACE "winpe\scripts"
+            if (Test-Path $srcScripts) {
+              Write-Host "Injecting scripts folder from repo: $srcScripts"
+              $dstScripts = Join-Path $mnt "ablestack\scripts"
+              New-Item -ItemType Directory -Force -Path $dstScripts | Out-Null
+              Copy-Item -Recurse -Force (Join-Path $srcScripts "*") $dstScripts
+            } else {
+              Write-Warning "winpe/scripts/ not found. Skipping script injection."
+            }
+
+            $stamp = @()
+            $stamp += "BuiltBy=GitHubActions"
+            $stamp += "BuildTimeUtc=$(Get-Date -AsUTC -Format o)"
+            $stamp += "GitSha=$env:GITHUB_SHA"
+            $stamp += "Ref=$env:GITHUB_REF"
+            # Ensure destination exists even if scripts were not injected
+            $dstMetaDir = Join-Path $mnt "ablestack\scripts"
+            New-Item -ItemType Directory -Force -Path $dstMetaDir | Out-Null
+            $dstMeta = Join-Path $dstMetaDir "BUILDINFO.txt"
+            $stamp -join "`n" | Out-File -Encoding ascii -Force $dstMeta
+          }
+          finally {
+            dism /Unmount-Image /MountDir:"$mnt" /Commit
+          }
+
+      - name: Build WinPE ISO (MakeWinPEMedia)
+        id: meta
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $work = "$env:WORKDIR\WinPE_$arch"
+
+          $base = "${{ inputs.iso_base_name }}"
+          $suffix = "${{ inputs.iso_suffix }}"
+
+          if ([string]::IsNullOrWhiteSpace($suffix)) {
+            $file = "$base-$arch.iso"
+          } else {
+            $file = "$base-$suffix-$arch.iso"
+          }
+
+          $iso = Join-Path $env:OUTDIR $file
+
+          $dandit = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
+          cmd /c "`"$dandit`" && MakeWinPEMedia /ISO `"$work`" `"$iso`""
+
+          if (!(Test-Path $iso)) { throw "ISO not created: $iso" }
+
+          "iso_filename=$file" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha_filename=SHA256SUMS" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          Get-Item $iso | Format-List FullName,Length
+
+      - name: Verify TEST_MODE marker in ISO (test builds only)
+        if: ${{ inputs.test_mode }}
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $base = "${{ inputs.iso_base_name }}"
+          $suffix = "${{ inputs.iso_suffix }}"
+
+          if ([string]::IsNullOrWhiteSpace($suffix)) {
+            $file = "$base-$arch.iso"
+          } else {
+            $file = "$base-$suffix-$arch.iso"
+          }
+          $iso = Join-Path $env:OUTDIR $file
+          if (!(Test-Path $iso)) { throw "ISO not found for verification: $iso" }
+
+          # Windows can inspect ISO contents without modifying it.
+          $m = Mount-DiskImage -ImagePath $iso -PassThru
+          try {
+            $vol = ($m | Get-Volume | Select-Object -First 1)
+            if (-not $vol) { throw "Failed to get mounted volume for ISO: $iso" }
+            $drive = $vol.DriveLetter + ":\"
+            $markerPath = Join-Path $drive "ablestack\TEST_MODE"
+            if (!(Test-Path $markerPath)) { throw "TEST_MODE marker missing in ISO: $markerPath" }
+            Write-Host "OK: TEST_MODE marker exists in ISO: $markerPath"
+            Get-Content $markerPath | ForEach-Object { Write-Host $_ }
+          }
+          finally {
+            Dismount-DiskImage -ImagePath $iso | Out-Null
+          }
+
+      - name: Generate SHA256SUMS
+        shell: pwsh
+        run: |
+          $arch = "${{ inputs.architecture }}"
+          $base = "${{ inputs.iso_base_name }}"
+          $suffix = "${{ inputs.iso_suffix }}"
+          if ([string]::IsNullOrWhiteSpace($suffix)) {
+            $file = "$base-$arch.iso"
+          } else {
+            $file = "$base-$suffix-$arch.iso"
+          }
+
+          $iso = Join-Path $env:OUTDIR $file
+          $sum = Join-Path $env:OUTDIR "SHA256SUMS"
+
+          $hash = (Get-FileHash -Algorithm SHA256 $iso).Hash.ToLower()
+          "$hash  $file" | Out-File -Encoding ascii -Force $sum
+          Get-Content $sum
+
+      - name: Upload artifact (ISO + SHA256SUMS)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            C:\out\*.iso
+            C:\out\SHA256SUMS
+          retention-days: ${{ inputs.retention_days }}

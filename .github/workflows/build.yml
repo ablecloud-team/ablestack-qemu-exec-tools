@@ -1,9 +1,19 @@
 name: Build and Release ablestack-qemu-exec-tools
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["WinPE Release Build"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+# NOTE (WinPE ISO)
+# - WinPE ISO는 별도 워크플로우(WinPE Core/Test/Release)에서 생성/관리되는 것이 기본이다.
+# - 본 build.yml에서는 "사전 준비된 WinPE ISO"가 리포지토리 내에 존재하거나,
+#   또는 동일 워크플로우 산출물로 준비된 경우에만 통합 ISO에 포함한다.
+# - 파일이 없으면 통합 ISO 빌드는 실패시키지 않고 "미포함"으로 진행한다.
 
 jobs:
   # ───────────────────────────────────────────────
@@ -420,15 +430,57 @@ jobs:
   release:
     needs: [build-rpm, build-deb, build-windows, build-v2k-rpm]
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # workflow_run에서는 기본 브랜치가 checkout될 수 있으므로,
+          # WinPE Release Build가 빌드한 동일 커밋으로 고정
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Resolve tag from workflow_run
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.workflow_run.head_branch }}"
+          if [[ -z "$TAG" ]]; then
+            echo "[ERR] workflow_run.head_branch is empty (cannot determine tag)" >&2
+            exit 2
+          fi
+          if [[ "$TAG" != v* ]]; then
+            echo "[ERR] head_branch is not a v* tag: $TAG" >&2
+            exit 2
+          fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       # dist/ 아래에 모든 아티팩트 내려받기
       - uses: actions/download-artifact@v4
         with:
           path: dist
+
+      - name: Download WinPE ISO from GitHub Release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/winpe
+
+          echo "[INFO] Downloading WinPE ISO assets for tag: ${RELEASE_TAG}"
+          # WinPE workflow가 dist/*.iso 와 SHA256SUMS를 릴리즈에 붙였으므로, 여기서 가져온다.
+          # 파일명이 고정이 아닐 수 있어 패턴으로 수집
+          gh release download "${RELEASE_TAG}" \
+            -p "*winpe*.iso" \
+            -p "SHA256SUMS" \
+            -D release/winpe || true
+
+          if ls -1 release/winpe/*.iso >/dev/null 2>&1; then
+            echo "[OK] WinPE ISO staged:"
+            ls -lah release/winpe
+          else
+            echo "[WARN] WinPE ISO not found in release assets for ${RELEASE_TAG}. Continuing without it."
+          fi
 
       - name: Install packaging tools (genisoimage, 7zip)
         run: |
@@ -560,6 +612,37 @@ jobs:
           du -sh release/virtio || true
           echo "[INFO] sample INF files:"
           find release/virtio -type f -name '*.inf' | head -n 30 || true
+
+      - name: Stage WinPE ISO into ISO tree (optional)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/winpe
+
+          # 우선순위
+          #  1) 동일 워크플로우 아티팩트(dist) 내 winpe*.iso
+          #  2) 리포지토리 내 사전 준비 파일(assets/winpe/*.iso 또는 winpe/*.iso)
+          WINPE_ISO=""
+          WINPE_ISO="$(find dist -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
+          if [[ -z "$WINPE_ISO" ]]; then
+            WINPE_ISO="$(find assets -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
+          fi
+          if [[ -z "$WINPE_ISO" ]]; then
+            WINPE_ISO="$(find winpe -maxdepth 2 -type f -iname '*.iso' 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -n "$WINPE_ISO" && -f "$WINPE_ISO" ]]; then
+            echo "[INFO] Found WinPE ISO: $WINPE_ISO"
+            cp -a "$WINPE_ISO" release/winpe/
+            echo "[OK] Staged WinPE ISO(s):"
+            ls -lah release/winpe/*.iso || true
+          else
+            echo "[WARN] WinPE ISO not found. (release/winpe will be empty)"
+            echo "       - If you want WinPE ISO included in ABLESTACK-Tools ISO, place it at one of:"
+            echo "         * dist/**/winpe*.iso (artifact)"
+            echo "         * assets/**/winpe*.iso"
+            echo "         * winpe/*.iso"
+          fi
 
       # Windows 설치 스크립트 생성 (루트: install.ps1/install.bat)
       - name: Create Windows installer scripts
@@ -983,8 +1066,27 @@ jobs:
                       else
                           echo "[WARN] pyvmomi wheels dir not found in ISO: ${WHEEL_DIR}"
                       fi
-                  fi
 
+                      # 5) WinPE ISO 배치 (오프라인 드라이버 주입/복구용)
+                      # - 통합 ISO에 winpe/*.iso 가 포함된 경우에만 설치
+                      WINPE_SRC_DIR="${ISO_MNT}/winpe"
+                      WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
+                      WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
+                      if [[ -d "${WINPE_SRC_DIR}" ]]; then
+                          WINPE_ISO_FILE="$(ls -1 "${WINPE_SRC_DIR}"/*.iso 2>/dev/null | head -n 1 || true)"
+                          if [[ -n "${WINPE_ISO_FILE}" && -f "${WINPE_ISO_FILE}" ]]; then
+                              echo "[INFO] Installing WinPE ISO from: ${WINPE_ISO_FILE}"
+                              sudo mkdir -p "${WINPE_DST_DIR}"
+                              sudo cp -a "${WINPE_ISO_FILE}" "${WINPE_DST_DIR}/"
+                              sudo ln -sfn "${WINPE_DST_DIR}/$(basename "${WINPE_ISO_FILE}")" "${WINPE_LINK}"
+                              echo "[OK] WinPE ISO installed: ${WINPE_LINK}"
+                          else
+                              echo "[WARN] WinPE ISO not found under ${WINPE_SRC_DIR}"
+                          fi
+                      else
+                          echo "[WARN] WinPE dir not found in ISO: ${WINPE_SRC_DIR} (skip)"
+                      fi
+                  fi
                   ;;
               ubuntu|debian)
                   echo "[INFO] Detected DEB-based system ($DISTRO $MAJOR_VERSION)"
@@ -1019,8 +1121,8 @@ jobs:
         run: |
           set -e
 
-          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
-          DESC="ABLESTACK VM Tools - Auto-built offline ISO for RPM (Rocky/RHEL 9,10), DEB (Ubuntu 22.04/24.04) and Windows (VirtIO Guest Tools + ablestack MSI)."
+          CURRENT_TAG="${RELEASE_TAG}"
+          DESC="ABLESTACK QEMU Exec Tools is an automation toolkit for libvirt/KVM environments, providing guest command execution, VM lifecycle orchestration, and VMware-to-KVM (V2K) migration pipelines. This release includes ablestack_v2k with fully automated Windows cutover support using WinPE-based offline VirtIO driver injection."
 
           echo "# ablestack-qemu-exec-tools ${CURRENT_TAG}" > release_notes.md
           echo >> release_notes.md
@@ -1046,7 +1148,7 @@ jobs:
 
       - name: Generate ISO
         run: |
-          VERSION=${GITHUB_REF##*/}
+          VERSION="${RELEASE_TAG}"
           mkisofs -o ABLESTACK-Tools-${VERSION}.iso \
             -V "ABLESTACK-Tools" \
             -r -J release
@@ -1057,6 +1159,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # workflow_run 트리거에서는 tag_name을 명시해야 릴리즈 대상이 정확해짐
+          tag_name: ${{ env.RELEASE_TAG }}
           body_path: release_notes.md
           files: |
             build/iso/*.iso

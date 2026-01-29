@@ -61,14 +61,7 @@ v2k_manifest_init() {
   local force_block_device
   force_block_device="${V2K_FORCE_BLOCK_DEVICE:-0}"
 
-  # Optional VDDK settings (productized)
-  # - V2K_VDDK_SERVER: default to vCenter host if omitted
-  # - V2K_VDDK_USER: required if vddk cred-file is used
-  # - V2K_VDDK_CRED_FILE: secure path under workdir; contains VDDK_USER/VDDK_PASSWORD[/VDDK_SERVER]
-  local vddk_server vddk_user vddk_cred_file
-  vddk_server="${V2K_VDDK_SERVER-}"
-  vddk_user="${V2K_VDDK_USER-}"
-  vddk_cred_file="${V2K_VDDK_CRED_FILE-}"
+  # NOTE: vddk_* locals are already declared above. (remove duplicate locals)
 
   case "${target_format}" in
     qcow2|raw) ;;
@@ -255,6 +248,7 @@ v2k_manifest_phase_done() {
   local manifest="$1" key="$2"
   local ts
   ts="$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')"
+  local tmp
   tmp="$(mktemp)"
   jq --arg key "${key}" --arg ts "${ts}" \
     '.phases[$key].done=true | .phases[$key].ts=$ts' "${manifest}" > "${tmp}"
@@ -263,6 +257,7 @@ v2k_manifest_phase_done() {
 
 v2k_manifest_snapshot_set() {
   local manifest="$1" which="$2" name="$3"
+  local tmp
   tmp="$(mktemp)"
   jq --arg which "${which}" --arg name "${name}" \
     '.disks |= map(.snapshots[$which].name=$name)' "${manifest}" > "${tmp}"
@@ -271,6 +266,37 @@ v2k_manifest_snapshot_set() {
 
 v2k_manifest_get_vm_name() { jq -r '.source.vm.name' "$1"; }
 v2k_manifest_get_vcenter() { jq -r '.source.vcenter' "$1"; }
+
+
+# Return 0 if the manifest indicates a Windows guest, else 1.
+#
+# We intentionally keep this heuristic broad because inventory fields can vary by govc/vCenter versions.
+# Typical signals include guestId/guest_id containing "windows" or guest family/name containing "Windows".
+v2k_manifest_is_windows() {
+  local manifest="$1"
+  [[ -f "${manifest}" ]] || return 1
+  jq -re '
+    def s($v): ($v // "") | tostring | ascii_downcase;
+    (
+      [
+        s(.source.vm.guestId),
+        s(.source.vm.guest_id),
+        s(.source.vm.config.guestId),
+        s(.source.vm.config.guest_id),
+        s(.source.vm.guest.guestId),
+        s(.source.vm.guest.guest_id),
+        s(.source.vm.guest.guestFamily),
+        s(.source.vm.guest.guest_full_name),
+        s(.source.vm.guest.guestFullName),
+        s(.source.vm.guest.fullName),
+        s(.source.vm.guest.osFullName)
+      ]
+      | map(select(length>0))
+      | join(" ")
+    ) as $h
+    | ($h | contains("windows") or test("(^|[^a-z])win"))
+  ' "${manifest}" >/dev/null 2>&1
+}
 
 v2k_manifest_get_disk_count() { jq -r '.disks|length' "$1"; }
 
@@ -281,6 +307,7 @@ v2k_manifest_get_disk_field() {
 
 v2k_manifest_set_disk_cbt() {
   local manifest="$1" idx="$2" enabled="$3" base_change_id="$4" last_change_id="$5"
+  local tmp
   tmp="$(mktemp)"
   jq --argjson idx "${idx}" --argjson enabled "${enabled}" --arg base "${base_change_id}" --arg last "${last_change_id}" \
     '.disks[$idx].cbt.enabled=$enabled
@@ -301,6 +328,7 @@ v2k_manifest_get_disk_last_change_id() {
 
 v2k_manifest_set_disk_base_change_id() {
   local manifest="$1" idx="$2" base_change_id="$3"
+  local tmp
   tmp="$(mktemp)"
   jq --argjson idx "${idx}" --arg base "${base_change_id}" \
     '.disks[$idx].cbt.base_change_id=$base' "${manifest}" > "${tmp}"
@@ -309,6 +337,7 @@ v2k_manifest_set_disk_base_change_id() {
 
 v2k_manifest_set_disk_last_change_id() {
   local manifest="$1" idx="$2" last_change_id="$3"
+  local tmp
   tmp="$(mktemp)"
   jq --argjson idx "${idx}" --arg last "${last_change_id}" \
     '.disks[$idx].cbt.last_change_id=$last' "${manifest}" > "${tmp}"
@@ -335,9 +364,11 @@ v2k_manifest_advance_cbt_change_ids() {
   v2k_manifest_set_disk_last_change_id "${manifest}" "${idx}" "${new_last_change_id}"
 }
 
-# Ensure CBT changeId fields are initialized for all CBT-enabled disks.
-# If last_change_id is empty, it will be set to base_change_id if present; otherwise "*".
-# If base_change_id is empty, it will be set to "*".
+# Ensure CBT changeId fields are normalized for all CBT-enabled disks.
+# IMPORTANT:
+# - Never auto-initialize changeId to "*".
+# - If one side exists, mirror it.
+# - If both are empty, keep them empty (baseline not established yet).
 v2k_manifest_ensure_cbt_change_ids() {
   local manifest="$1"
   local count i enabled base last
@@ -349,18 +380,26 @@ v2k_manifest_ensure_cbt_change_ids() {
     base="$(v2k_manifest_get_disk_base_change_id "${manifest}" "${i}")"
     last="$(v2k_manifest_get_disk_last_change_id "${manifest}" "${i}")"
 
+    # If base is empty but last exists, mirror last -> base
     if [[ -z "${base}" || "${base}" == "null" ]]; then
-      v2k_manifest_set_disk_base_change_id "${manifest}" "${i}" "*"
-      base="*"
+      if [[ -n "${last}" && "${last}" != "null" ]]; then
+        v2k_manifest_set_disk_base_change_id "${manifest}" "${i}" "${last}"
+        base="${last}"
+      fi
     fi
+
+    # If last is empty but base exists, mirror base -> last
     if [[ -z "${last}" || "${last}" == "null" ]]; then
-      v2k_manifest_set_disk_last_change_id "${manifest}" "${i}" "${base}"
+      if [[ -n "${base}" && "${base}" != "null" ]]; then
+        v2k_manifest_set_disk_last_change_id "${manifest}" "${i}" "${base}"
+      fi
     fi
   done
 }
 
 v2k_manifest_inc_incr_seq() {
   local manifest="$1" idx="$2"
+  local tmp
   tmp="$(mktemp)"
   jq --argjson idx "${idx}" \
     '.disks[$idx].transfer.incr_seq += 1' "${manifest}" > "${tmp}"
@@ -369,6 +408,7 @@ v2k_manifest_inc_incr_seq() {
 
 v2k_manifest_set_disk_metric_incr() {
   local manifest="$1" idx="$2" bytes="$3" areas="$4"
+  local tmp
   tmp="$(mktemp)"
   jq --argjson idx "${idx}" --argjson bytes "${bytes}" --argjson areas "${areas}" \
     '.disks[$idx].metrics.incr_bytes_written += $bytes
@@ -380,6 +420,7 @@ v2k_manifest_mark_base_done() {
   local manifest="$1" idx="$2"
   local ts
   ts="$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')"
+  local tmp
   tmp="$(mktemp)"
   jq --argjson idx "${idx}" --arg ts "${ts}" \
     '.disks[$idx].transfer.base_done=true | .disks[$idx].transfer.last_synced_at=$ts' "${manifest}" > "${tmp}"
@@ -389,20 +430,38 @@ v2k_manifest_mark_base_done() {
 v2k_manifest_status_summary() {
   local manifest="$1" events="${2:-}"
   local msum
-  msum="$(jq -c '{
-    run:.run,
-    vm:.source.vm,
-    phases:.phases,
-    disks:(.disks|map({
-      disk_id:.disk_id,
-      target:.transfer.target_path,
-      base_done:.transfer.base_done,
-      incr_seq:.transfer.incr_seq,
-      cbt_enabled:.cbt.enabled,
-      base_change_id:(.cbt.base_change_id // ""),
-      last_change_id:(.cbt.last_change_id // "")
-    }))
-  }' "${manifest}")"
+  msum="$(jq -c '
+    # runtime.sync_issues는 engine.sh가 incr/final guard에서 기록(제품화 관측용)
+    (.runtime // {}) as $rt
+    | ($rt.sync_issues // []) as $issues
+    | {
+        run:.run,
+        vm:.source.vm,
+        phases:.phases,
+        disks:(.disks|map({
+          disk_id:.disk_id,
+          target:.transfer.target_path,
+          base_done:.transfer.base_done,
+          incr_seq:.transfer.incr_seq,
+          cbt_enabled:.cbt.enabled,
+          base_change_id:(.cbt.base_change_id // ""),
+          last_change_id:(.cbt.last_change_id // "")
+        })),
+
+        # ---- Status observability additions ----
+        runtime:{
+          sync_issues:$issues,
+          last_sync_issue:(if ($issues|length) > 0 then $issues[-1] else null end)
+        },
+
+        # 사람이 보기 쉬운 "상태 요약 힌트" (UI/CLI 공통 활용)
+        hints:{
+          has_sync_issues:(($issues|length) > 0),
+          last_issue_code:(if ($issues|length) > 0 then ($issues[-1].code // null) else null end),
+          last_issue_reason:(if ($issues|length) > 0 then ($issues[-1].reason // "") else "" end)
+        }
+      }
+  ' "${manifest}")"
   if [[ -n "${events}" && -f "${events}" ]]; then
     local tail
     tail="$(tail -n 20 "${events}" | jq -s '.' 2>/dev/null || echo '[]')"

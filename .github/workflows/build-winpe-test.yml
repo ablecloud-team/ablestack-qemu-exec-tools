@@ -1,0 +1,38 @@
+name: WinPE Test Build (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: "WinPE architecture"
+        required: true
+        default: "amd64"
+        type: choice
+        options: ["amd64"]
+      iso_suffix:
+        description: "Suffix for test ISO (e.g. test-20260116 or pr-123)"
+        required: true
+        default: "test"
+        type: string
+      retention_days:
+        description: "Artifact retention days"
+        required: true
+        default: "14"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-winpe-core.yml
+    with:
+      architecture: ${{ inputs.architecture }}
+      # NOTE: WinPE bootstrap detects "test" builds via ISO volume label.
+      # Keep "-test" in the base name so debug ISOs do NOT shutdown the VM on exit.
+      iso_base_name: "winpe-ablestack-v2k"
+      iso_suffix: ${{ inputs.iso_suffix }}
+      # Build raw ISO first, then inject TEST_MODE marker in this workflow.
+      artifact_name: "winpe-iso-test"
+      retention_days: ${{ inputs.retention_days }}
+      test_mode: true

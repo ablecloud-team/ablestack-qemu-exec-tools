@@ -27,7 +27,24 @@ set -euo pipefail
 # NOTE:
 # - We intentionally rely on govc commands only.
 # - Hard power-off is the most reliable option in the field.
-#   govc vm.power -off -force <vm> is confirmed in multiple references. :contentReference[oaicite:1]{index=1}
+#   govc vm.power -off -force <vm>
+ 
+v2k_json_s() {
+  # best-effort JSON string builder for event detail
+  local s="${1-}"
+  if declare -F v2k_json_string >/dev/null 2>&1; then
+    printf '%s' "${s}" | v2k_json_string
+    return 0
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "${s}" | jq -Rs '.'
+    return 0
+  fi
+  python3 - <<'PY' 2>/dev/null || echo '""'
+import json,sys
+print(json.dumps(sys.argv[1]))
+PY
+}
 
 v2k_vmware_vm_power_state() {
   local manifest="$1"
@@ -126,21 +143,6 @@ v2k_resolve_ipv4() {
   getent ahostsv4 "${host}" 2>/dev/null | awk 'NR==1{print $1; exit}'
 }
 
-v2k_vmware_esxi_mgmt_ip_from_hostinfo_json() {
-  local hostinfo_json="$1"
-  printf '%s' "${hostinfo_json}" | jq -r '
-    (.hostSystems[0].config.virtualNicManagerInfo.netConfig // [])
-    | map(select(.nicType=="management"))[0] // {} as $m
-    | ($m.selectedVnic[0] // "") as $sel
-    | ($m.candidateVnic // []) as $c
-    | (
-        ( $c | map(select(.key==$sel)) | .[0].spec.ip.ipAddress )
-        // ( $c[0].spec.ip.ipAddress )
-        // ""
-      )
-  '
-}
-
 v2k_vmware_inventory_json() {
   local vm="$1" vcenter="$2"
   v2k_require_govc_env
@@ -194,6 +196,10 @@ v2k_vmware_inventory_json() {
     --arg esxi_thumbprint "${esxi_thumbprint}" \
     '
     def VMINFO0: ($vminfo.virtualMachines[0] // {});
+    def CFG: (VMINFO0.config // {});
+    def HW: (CFG.hardware // {});
+    def BOOT: (CFG.bootOptions // {});
+    def HWDEVS: (HW.device // []);    
 
     # device.info 스키마: 현재 환경은 루트가 {"devices":[...]}
     def DEVICES:
@@ -206,6 +212,55 @@ v2k_vmware_inventory_json() {
     # ---- helpers (jq 1.6 safe: use ? + //, no try/catch) ----
     def lbl($o): ($o.deviceInfo?.label // "");
     def typ($o): ($o.type // "");
+
+    # --- VMware -> libvirt carry-over fields (confirmed by vm.info samples) ---
+    # firmware: "efi" or "bios"
+    def vm_firmware: (CFG.firmware // "");
+
+    # efiSecureBootEnabled exists even for non-efi in some outputs; treat meaningful only if firmware=="efi"
+    def vm_secure_boot: (BOOT.efiSecureBootEnabled // false);
+
+    # vCPU / MemoryMB are in config.hardware
+    def vm_cpu: (HW.numCPU // 0);
+    def vm_mem_mb: (HW.memoryMB // 0);
+
+    # TPM detection:
+    # In your efi+secure+tpm sample, TPM device entry has no ".type".
+    # It is identified by:
+    # - deviceInfo.label == "Virtual TPM"
+    # - deviceInfo.summary contains "Trusted Platform"
+    # - endorsementKeyCertificate* keys exist
+    def vm_has_tpm:
+      (HWDEVS
+        | any(.[]?;
+            (type=="object") and (
+              ((.deviceInfo?.label // "") | test("TPM"; "i"))
+              or ((.deviceInfo?.summary // "") | test("TPM|Trusted Platform"; "i"))
+              or (has("endorsementKeyCertificate"))
+              or (has("endorsementKeyCertificateSigningRequest"))
+            )
+          )
+      );
+
+    # NIC list (MAC must be preserved).
+    # NOTE: In some govc vm.info -json outputs, config.hardware.device entries do NOT have ".type".
+    #       Reliable signals are: has("macAddress") and deviceInfo.label like "Network adapter N".
+    def vm_nics:
+      (HWDEVS
+        | map(
+            select(
+              (has("macAddress"))
+              and ((.macAddress // "") != "")
+              and (((.deviceInfo?.label // "") | test("^Network adapter"; "i")))
+            )
+          )
+        | map({
+            key: (.key // 0),
+            type: (.type? // (.deviceInfo?.label // "nic")),
+            mac: (.macAddress // "")
+          })
+        | sort_by(.key)
+      );
 
     # 컨트롤러 분류: deviceInfo.label 우선
     def is_scsi_ctrl($o):
@@ -272,7 +327,35 @@ v2k_vmware_inventory_json() {
       vm: {
         name: $vm,
         moref: (VMINFO0.self?.value // ""),
-        uuid: (VMINFO0.config?.uuid // "")
+        uuid: (VMINFO0.config?.uuid // ""),
+ 
+        # --- carry-over hardware profile (for libvirt definition) ---
+        firmware: vm_firmware,
+        secure_boot: vm_secure_boot,
+        tpm: vm_has_tpm,
+        cpu: vm_cpu,
+        memory_mb: vm_mem_mb,
+        nics: vm_nics,
+
+        # --- guest metadata (for Windows detection / WinPE automation) ---
+        # govc -json fields are lowerCamel:
+        #   .virtualMachines[0].config.guestId
+        #   .virtualMachines[0].guest.guestFullName
+        #   .virtualMachines[0].guest.osFullName
+        guestId: (VMINFO0.config?.guestId // ""),
+        guest_id: (VMINFO0.config?.guestId // ""),
+        guestFullName: (VMINFO0.guest?.guestFullName // ""),
+        guest_full_name: (VMINFO0.guest?.guestFullName // ""),
+        osFullName: (VMINFO0.guest?.osFullName // ""),
+        os_full_name: (VMINFO0.guest?.osFullName // ""),
+        guestFamily: (VMINFO0.guest?.guestFamily // ""),
+
+        # keep subtrees for heuristic readers that look into vm.guest.* or vm.config.*
+        config: {
+          guestId: (VMINFO0.config?.guestId // ""),
+          guest_id: (VMINFO0.config?.guestId // "")
+        },
+        guest: (VMINFO0.guest // {})
       },
       esxi_host: $esxi_host,
       esxi_name: $esxi_name,
@@ -358,9 +441,9 @@ v2k_vmware_snapshot_create() {
   v2k_require_govc_env
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
-  v2k_event INFO "snapshot.${which}" "" "snapshot_create_start" "{\"name\":\"${name}\"}"
+  v2k_event INFO "snapshot.${which}" "" "snapshot_create_start" "{\"name\":$(v2k_json_s "${name}")}"
   govc snapshot.create -vm "${vm}" -m=false -q=false "${name}" >/dev/null
-  v2k_event INFO "snapshot.${which}" "" "snapshot_create_done" "{\"name\":\"${name}\"}"
+  v2k_event INFO "snapshot.${which}" "" "snapshot_create_done" "{\"name\":$(v2k_json_s "${name}")}"
 }
 
 v2k_vmware_snapshot_cleanup() {
@@ -389,7 +472,7 @@ v2k_vmware_cbt_enable_all() {
     if [[ "${disk_id}" =~ ^scsi[0-9]+:[0-9]+$ ]]; then
       govc vm.change -vm "${vm}" -e "${disk_id}.ctkEnabled=true" >/dev/null
     else
-      v2k_event INFO "cbt_enable" "${disk_id}" "cbt_enable_skip" "{\"reason\":\"non-scsi disk_id; cannot set scsiX:Y.ctkEnabled\"}"
+      v2k_event INFO "cbt_enable" "${disk_id}" "cbt_enable_skip" "{\"reason\":$(v2k_json_s "non-scsi disk_id; cannot set scsiX:Y.ctkEnabled")}"
     fi
   done
 
@@ -478,36 +561,47 @@ v2k_vmware_esxi_mgmt_ip_from_hostinfo_json() {
   local hostinfo_json="${1:-}"
   [[ -n "${hostinfo_json}" ]] || return 0
 
-  # 1) nicType=="management" 우선
   local ip
   ip="$(
     printf '%s' "${hostinfo_json}" | jq -r '
-      .hostSystems[0].config.virtualNicManagerInfo.netConfig // []
-      | map(select(.nicType=="management"))
-      | .[]
-      | (.candidateVnic // [])
-      | .[]
-      | .spec.ip.ipAddress // empty
-    ' 2>/dev/null | awk 'NF{print; exit}'
+      def first_ipv4($s):
+        ($s // "") | tostring;
+
+      # netConfig 배열
+      (.hostSystems[0].config.virtualNicManagerInfo.netConfig // []) as $nc
+
+      # 1) nicType=="management" 블록에서 selectedVnic 우선
+      | ( $nc | map(select(.nicType=="management"))[0] // {} ) as $m
+      | ( ($m.selectedVnic[0] // "") | tostring ) as $sel
+      | ( $m.candidateVnic // [] ) as $c
+      | (
+          ( if ($sel|length) > 0 then
+              ( $c | map(select(.key==$sel)) | .[0].spec.ip.ipAddress )
+            else
+              empty
+            end
+          )
+          // ( $c[0].spec.ip.ipAddress )
+          // empty
+        )
+    ' 2>/dev/null
   )"
 
-  # 2) 혹시 management가 없으면 selectedVnic가 있는 netConfig에서 후보 찾기(보수적 fallback)
+  # 2) fallback: 위에서 못 찾으면 selectedVnic가 있는 netConfig에서 후보 중 첫 IP
   if [[ -z "${ip}" ]]; then
     ip="$(
       printf '%s' "${hostinfo_json}" | jq -r '
-        .hostSystems[0].config.virtualNicManagerInfo.netConfig // []
-        | .[]
-        | select((.selectedVnic // []) | length > 0)
-        | (.candidateVnic // [])
-        | .[]
-        | .spec.ip.ipAddress // empty
-      ' 2>/dev/null | awk 'NF{print; exit}'
+        (.hostSystems[0].config.virtualNicManagerInfo.netConfig // [])
+        | map(select((.selectedVnic // []) | length > 0))
+        | .[0] // {} as $m
+        | ($m.candidateVnic // [])
+        | .[0].spec.ip.ipAddress // empty
+      ' 2>/dev/null
     )"
   fi
 
-  # 3) 값이 JSON 덩어리/공백 포함이면 방어적으로 IPv4만 필터링
+  # 3) 방어적으로 IPv4만 필터링(여러 줄/잡음 섞임 제거)
   if [[ -n "${ip}" ]]; then
-    # 혹시 여러 줄이 섞여 들어오면 첫 IPv4만 고정
     ip="$(printf '%s\n' "${ip}" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
   fi
 

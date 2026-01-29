@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------
-# TODO: Copy the exact author/license header from bin/vm_exec.sh here.
+# Copyright 2026 ABLECLOUD
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ---------------------------------------------------------------------
 set -euo pipefail
 
@@ -10,6 +22,37 @@ set -euo pipefail
 # - in-use detection via /sys/block/nbdX/pid
 # - disconnect waits until kernel releases nbd
 # ---------------------------
+ 
+v2k_nbd_has_dm_children() {
+  # Return 0 if dev has device-mapper children (e.g., LVM LVs) visible to lsblk.
+  # This is used to avoid allocating an nbd dev that is "pid-free" but still has dm remnants.
+  local dev="$1"
+  command -v lsblk >/dev/null 2>&1 || return 1
+  # if any child exists under this dev, it's not safe to reuse immediately
+  lsblk -rn -o NAME,TYPE "${dev}" 2>/dev/null | awk '$2=="lvm" || $2=="crypt"{found=1} END{exit(found?0:1)}'
+}
+
+v2k_nbd_lvm_deactivate_best_effort() {
+  # Best-effort: deactivate any LVs/VGs that appear on this nbd device.
+  # This prevents cases where LVM auto-activation causes "ghost" rl-root on stale nbd.
+  local dev="$1"
+  command -v pvs >/dev/null 2>&1 || return 0
+  command -v vgchange >/dev/null 2>&1 || return 0
+
+  # Collect VGs that have PVs on this dev or its partitions.
+  # Example pvs output "vgname /dev/nbd0p3"
+  local vgs vg
+  vgs="$(pvs --noheadings -o vg_name,pv_name 2>/dev/null \
+    | awk -v d="${dev}" '$2 ~ ("^"d"p") || $2==d {print $1}' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    | sort -u \
+    || true)"
+
+  for vg in ${vgs}; do
+    [[ -n "${vg}" ]] || continue
+    vgchange -an "${vg}" >/dev/null 2>&1 || true
+  done
+}
 
 v2k_nbd_sys_pid() {
   local dev="$1" base pidf
@@ -91,6 +134,11 @@ v2k_nbd_alloc() {
         v2k_nbd_lock_release "${lock_dir}" "${dev}"
         continue
       fi
+      # Extra guard: avoid devices that still have dm/LVM children lingering.
+      if v2k_nbd_has_dm_children "${dev}"; then
+        v2k_nbd_lock_release "${lock_dir}" "${dev}"
+        continue
+      fi
       echo "${dev}"
       return 0
     fi
@@ -108,7 +156,12 @@ v2k_nbd_free() {
 
 v2k_nbd_disconnect() {
   local dev="$1"
-  # best-effort detach (nbd-client, then qemu-nbd) + wait for kernel release
+  # Best-effort:
+  # 1) deactivate any LVM remnants on this dev (prevents auto-activation ghosts)
+  # 2) detach (nbd-client, then qemu-nbd)
+  # 3) wait for kernel release (/sys/block/nbdX/pid == 0)
+  v2k_nbd_lvm_deactivate_best_effort "${dev}" >/dev/null 2>&1 || true
+
   command -v nbd-client >/dev/null 2>&1 && nbd-client -d "${dev}" >/dev/null 2>&1 || true
   command -v qemu-nbd   >/dev/null 2>&1 && qemu-nbd -d "${dev}"   >/dev/null 2>&1 || true
 
@@ -244,68 +297,6 @@ v2k_kill_pidfile() {
   v2k_kill_pidfile_safe "${pidfile}" ""
 }
 
-# ---- nbdkit safe stop (PID ONLY; never kill process group) ----
-v2k_is_pid_alive() {
-  local pid="$1"
-  [[ -n "${pid}" ]] || return 1
-  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
-  [[ -d "/proc/${pid}" ]]
-}
-
-v2k_is_nbdkit_pid_for_sock() {
-  local pid="$1" sock="$2"
-  v2k_is_pid_alive "${pid}" || return 1
-  [[ -n "${sock}" ]] || return 1
-  local cmd
-  cmd="$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null || true)"
-  # Must be nbdkit and must reference the socket path we generated for this run.
-  [[ "${cmd}" == *"nbdkit"* ]] || return 1
-  [[ "${cmd}" == *"${sock}"* ]] || return 1
-  return 0
-}
-
-# Stop nbdkit safely using pidfile + (optional) socket token verification.
-v2k_nbdkit_stop() {
-  local pidfile="$1" sock="${2:-}"
-  [[ -f "${pidfile}" ]] || return 0
-  local pid
-  pid="$(cat "${pidfile}" 2>/dev/null || true)"
-  [[ -n "${pid}" ]] || { rm -f "${pidfile}" || true; return 0; }
-
-  # If sock is given, verify pid belongs to our nbdkit instance.
-  if [[ -n "${sock}" ]]; then
-    v2k_is_nbdkit_pid_for_sock "${pid}" "${sock}" || {
-      # Do not kill unknown PID (prevents killing unrelated processes)
-      return 0
-    }
-  fi
-
-  # PID-only termination (NO negative pid, NO pkill -f)
-  kill -TERM "${pid}" >/dev/null 2>&1 || true
-  # Wait briefly
-  local i
-  for i in $(seq 1 20); do
-    v2k_is_pid_alive "${pid}" || break
-    sleep 0.2
-  done
-  v2k_is_pid_alive "${pid}" && kill -KILL "${pid}" >/dev/null 2>&1 || true
-  rm -f "${pidfile}" >/dev/null 2>&1 || true
-}
-
-# Force cleanup ONLY for this run_id: kill nbdkit instances whose pidfile matches the run pattern
-# AND whose cmdline references the run socket token.
-v2k_force_cleanup_run() {
-  local run_id="$1"
-  [[ -n "${run_id}" ]] || return 0
-  local pidfile pid sock idx
-  for pidfile in /tmp/v2k_nbdkit_"${run_id}"_*.pid; do
-    [[ -f "${pidfile}" ]] || continue
-    idx="$(basename "${pidfile}" | sed -E "s/^v2k_nbdkit_${run_id}_([0-9]+)\\.pid$/\\1/")"
-    [[ "${idx}" =~ ^[0-9]+$ ]] || continue
-    sock="/tmp/v2k_src_${run_id}_${idx}.sock"
-    pid="$(cat "${pidfile}" 2>/dev/null || true)"
-    [[ -n "${pid}" ]] || { rm -f "${pidfile}" || true; continue; }
-    v2k_nbdkit_stop "${pidfile}" "${sock}" || true
-    rm -f "${sock}" >/dev/null 2>&1 || true
-  done
-}
+## NOTE:
+## v2k_force_cleanup_run() and nbdkit stop helpers are already implemented above.
+## Do not redefine them here (bash will override earlier definitions).
