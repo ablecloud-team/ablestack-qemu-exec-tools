@@ -25,9 +25,43 @@ v2k_run_defaults() {
   V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC="${V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC:-120}"
   V2K_RUN_DEFAULT_INSECURE="${V2K_RUN_DEFAULT_INSECURE:-1}"
   V2K_RUN_WINPE_BOOTSTRAP_AUTO="${V2K_RUN_WINPE_BOOTSTRAP_AUTO:-1}"
+
+  # Split-run defaults
+  : "${V2K_RUN_DEFAULT_SPLIT:=full}"             # full|phase1|phase2
+  : "${V2K_RUN_DEFAULT_DEADLINE_SEC:=120}"      # phase2 deadline window for incrN->cutover
+  : "${V2K_RUN_DEFAULT_MAX_INCR_PHASE2:=20}"    # safety cap for phase2 incr loops
 }
 
 v2k_die() { echo "ERROR: $*" >&2; exit 2; }
+
+# ---------------------------------------------------------------------
+# Compatibility wrappers
+# - Keep orchestrator's phase code readable while delegating to engine.sh
+# - DO NOT change core migration logic (engine/transfer scripts stay intact)
+# ---------------------------------------------------------------------
+if ! declare -F v2k_cmd_incr_sync >/dev/null 2>&1; then
+  v2k_cmd_incr_sync() { v2k_cmd_sync incr "$@"; }
+fi
+
+if ! declare -F v2k_cmd_final_sync >/dev/null 2>&1; then
+  v2k_cmd_final_sync() { v2k_cmd_sync final "$@"; }
+fi
+
+if ! declare -F v2k_cmd_base_sync >/dev/null 2>&1; then
+  v2k_cmd_base_sync() { v2k_cmd_sync base "$@"; }
+fi
+
+if ! declare -F v2k_cmd_incr_snapshot >/dev/null 2>&1; then
+  v2k_cmd_incr_snapshot() { v2k_cmd_snapshot incr "$@"; }
+fi
+
+if ! declare -F v2k_cmd_final_snapshot >/dev/null 2>&1; then
+  v2k_cmd_final_snapshot() { v2k_cmd_snapshot final "$@"; }
+fi
+
+if ! declare -F v2k_cmd_base_snapshot >/dev/null 2>&1; then
+  v2k_cmd_base_snapshot() { v2k_cmd_snapshot base "$@"; }
+fi
 
 v2k_parse_arg_string() {
   local s="${1-}"
@@ -167,6 +201,10 @@ v2k_cmd_run_foreground() {
   local insecure="${V2K_RUN_DEFAULT_INSECURE}"
   local no_incr="0"
 
+  local split="${V2K_RUN_DEFAULT_SPLIT}"
+  local deadline_sec="${V2K_RUN_DEFAULT_DEADLINE_SEC}"
+  local max_incr_phase2="${V2K_RUN_DEFAULT_MAX_INCR_PHASE2}"
+
   local do_cleanup="1" keep_snapshots="0" keep_workdir="1"
   local default_jobs="" default_chunk="" default_coalesce_gap=""
   local base_args_str="" incr_args_str="" cutover_args_str=""
@@ -197,6 +235,11 @@ v2k_cmd_run_foreground() {
       --max-incr) max_incr="${2:-}"; shift 2;;
       --converge-threshold-sec) converge_threshold_sec="${2:-}"; shift 2;;
       --no-incr) no_incr="1"; shift 1;;
+
+      # split-run options
+      --split) split="${2-}"; shift 2;;
+      --deadline-sec) deadline_sec="${2-}"; shift 2;;
+      --max-incr-phase2) max_incr_phase2="${2-}"; shift 2;;
 
       # cleanup controls
       --no-cleanup) do_cleanup="0"; shift 1;;
@@ -232,6 +275,18 @@ v2k_cmd_run_foreground() {
   [[ "${max_incr}" =~ ^[0-9]+$ ]] || v2k_die "--max-incr must be integer (0 means unlimited)"
   [[ "${converge_threshold_sec}" =~ ^[0-9]+$ ]] || v2k_die "--converge-threshold-sec must be integer seconds"
   [[ "${insecure}" =~ ^[01]$ ]] || v2k_die "--insecure must be 0 or 1"
+
+  case "${split}" in
+    full|phase1|phase2) ;;
+    *) v2k_die "Invalid --split: ${split} (allowed: full|phase1|phase2)" ;;
+  esac
+  [[ "${deadline_sec}" =~ ^[0-9]+$ ]] || v2k_die "--deadline-sec must be integer seconds"
+  [[ "${max_incr_phase2}" =~ ^[0-9]+$ ]] || v2k_die "--max-incr-phase2 must be integer"
+
+  # Split-run safety: for phase1/phase2 we default to keeping workdir/resources for resume
+  if [[ "${split}" == "phase1" && "${do_cleanup}" == "1" ]]; then
+    do_cleanup=0
+  fi
 
   if [[ "${no_incr}" == "0" && "${max_incr}" == "0" ]]; then
     [[ "${V2K_FORCE:-0}" == "1" ]] || v2k_die "--max-incr 0 requires --force"
@@ -324,13 +379,61 @@ v2k_cmd_run_foreground() {
   local winpe_bootstrap_auto="${V2K_RUN_WINPE_BOOTSTRAP_AUTO:-1}"
 
   # Pipeline
-  v2k_cmd_init "${init_args[@]}"
-  v2k_keep_govc_env_in_workdir "${tmp_govc_env}" || true
 
-  v2k_cmd_cbt enable
+  local skip_init=0
+  local skip_cbt=0
+  local skip_base=0
+  local have_manifest=0
+  [[ -f "${V2K_MANIFEST}" ]] && have_manifest=1
 
-  v2k_cmd_snapshot base
-  v2k_cmd_sync base "${sync_defaults[@]}" "${base_extra[@]}"
+  # split=phase2: phase1에서 생성된 manifest/progress를 재사용해야 하므로 init/cbt/base를 재실행하지 않는다.
+  if [[ "${split}" == "phase2" ]]; then
+    if [[ "${have_manifest}" -ne 1 ]]; then
+      v2k_die "split=phase2 requires existing manifest at ${V2K_MANIFEST}"
+    fi
+    if ! v2k_manifest_split_is_done "${V2K_MANIFEST}" "phase1"; then
+      v2k_die "split=phase2 requires split=phase1 completion marker in manifest"
+    fi
+    skip_init=1
+    skip_cbt=1
+    skip_base=1
+    v2k_event INFO run "" skip_base_phase2 "{\"manifest\":\"${V2K_MANIFEST}\"}"
+  fi
+
+  if [[ "${skip_init}" -eq 0 ]]; then
+    v2k_cmd_init "${init_args[@]}"
+    v2k_keep_govc_env_in_workdir "${tmp_govc_env}" || true
+  fi
+
+  if [[ "${skip_cbt}" -eq 0 ]]; then
+    v2k_cmd_cbt enable
+  fi
+
+  if [[ "${skip_base}" -eq 0 ]]; then
+    v2k_cmd_snapshot base
+    v2k_cmd_sync base "${sync_defaults[@]}" "${base_extra[@]}" 
+    v2k_manifest_phase_done "${V2K_MANIFEST}" "base"
+  fi
+
+  # -------------------------------------------------------------------
+  # Split-run: Phase1 boundary
+  # - Phase1 is fixed to: base snapshot/sync + incr1 snapshot/sync
+  # - Keep same run_id/workdir and exit without cutover for day-time runs.
+  # -------------------------------------------------------------------
+  if [[ "${split}" == "phase1" ]]; then
+    v2k_event INFO "run" "" "phase" "{\"which\":\"phase1\",\"action\":\"enter\"}"
+    v2k_emit_progress_event "run" "phase1:incr1_snapshot"
+    v2k_cmd_snapshot "incr"
+    v2k_emit_progress_event "run" "phase1:incr1_sync"
+    v2k_cmd_incr_sync
+    v2k_manifest_phase_done "${V2K_MANIFEST}" "incr_sync"
+    v2k_manifest_mark_split_done "${V2K_MANIFEST}" "phase1"
+    v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.progress" "{\"percent\":$(v2k_progress_percent_from_manifest "${V2K_MANIFEST}"),\"last_step\":\"phase1_done\"}"
+    v2k_emit_progress_event "run" "phase1:done"
+    v2k_event INFO "run" "" "phase" "{\"which\":\"phase1\",\"action\":\"exit\"}"
+    echo "[run] split=phase1 completed (run_id=${V2K_RUN_ID}). Re-run with --split=phase2 to continue."
+    return 0
+  fi
 
   if [[ "${no_incr}" == "0" ]]; then
     local iter=0 converged=0
@@ -361,13 +464,32 @@ v2k_cmd_run_foreground() {
       t1="$(date +%s)"
       elapsed=$((t1 - t0))
 
-      if [[ "${converge_threshold_sec}" != "0" ]] && (( elapsed <= converge_threshold_sec )); then
-        converged=1
-        if declare -F v2k_event >/dev/null 2>&1; then
-          v2k_event INFO "orchestrator" "" "incr_converged_stop" \
-            "{\"iter\":${iter},\"elapsed_sec\":${elapsed},\"threshold_sec\":${converge_threshold_sec}}"
+      # Stop condition
+      if [[ "${split}" == "phase2" ]]; then
+        # Deadline-driven: if last incr sync finished within deadline_sec -> cutover
+        if [[ "${elapsed}" -le "${deadline_sec}" ]]; then
+          v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.sync_within_deadline" "true"
+          converged=1
+          break
+        else
+          v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.sync_within_deadline" "false"
         fi
-        break
+
+        # Safety cap (avoid infinite loop in ops mistakes)
+        if [[ "${iter}" -ge "${max_incr_phase2}" ]]; then
+          v2k_event WARN "run" "" "deadline" "{\"reason\":\"max_incr_phase2_reached\",\"iter\":${iter},\"deadline_sec\":${deadline_sec}}"
+          break
+        fi
+      else
+        # Legacy converge-threshold driven
+        if [[ "${converge_threshold_sec}" != "0" ]] && (( elapsed <= converge_threshold_sec )); then
+          converged=1
+          if declare -F v2k_event >/dev/null 2>&1; then
+            v2k_event INFO "orchestrator" "" "incr_converged_stop" \
+              "{\"iter\":${iter},\"elapsed_sec\":${elapsed},\"threshold_sec\":${converge_threshold_sec}}"
+          fi
+          break
+        fi
       fi
 
       if [[ "${max_incr}" != "0" ]] && (( iter >= max_incr )); then break; fi
@@ -385,6 +507,17 @@ v2k_cmd_run_foreground() {
       if [[ "${converged}" -eq 0 ]]; then
         v2k_event INFO "orchestrator" "" "incr_loop_end" "{\"iter\":${iter}}"
       fi
+    fi
+  fi
+
+  # Split-run: Phase2 safety gate
+  if [[ "${split}" == "phase2" ]]; then
+    local within_deadline
+    within_deadline="$(jq -r '.runtime.sync_within_deadline // false' "${V2K_MANIFEST}" 2>/dev/null || echo false)"
+    if [[ "${within_deadline}" != "true" ]]; then
+      v2k_event WARN "run" "" "cutover_gate" "{\"reason\":\"deadline_not_met\"}"
+      echo "[run] split=phase2 stopped without cutover (deadline not met). Re-run phase2."
+      return 3
     fi
   fi
 

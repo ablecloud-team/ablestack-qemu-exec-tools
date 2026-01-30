@@ -17,6 +17,53 @@
 
 set -euo pipefail
 
+# ---------------------------------------------------------------------
+# Progress helpers (state machine observability)
+# ---------------------------------------------------------------------
+
+v2k_progress_percent_from_manifest() {
+  local manifest="${1:-}"
+  [[ -n "${manifest}" && -f "${manifest}" ]] || { echo 0; return 0; }
+
+  local pct
+  pct="$(jq -r '
+    def b($x): (if ($x==true) then 1 else 0 end);
+    (
+      (b(.phases.init.done) +
+       b(.phases.cbt_enable.done) +
+       b(.phases.base_sync.done) +
+       b(.phases.incr_sync.done) +
+       b(.phases.final_sync.done) +
+       b(.phases.cutover.done)
+      ) / 6.0 * 100
+    ) | floor
+  ' "${manifest}" 2>/dev/null || echo 0)"
+  [[ "${pct}" =~ ^[0-9]+$ ]] || pct=0
+  (( pct < 0 )) && pct=0
+  (( pct > 100 )) && pct=100
+  echo "${pct}"
+}
+
+v2k_emit_progress_event() {
+  # Usage: v2k_emit_progress_event <phase> <step> [<extra_json_obj>]
+  local phase="${1:-runtime}"
+  local step="${2:-}"
+  local extra="${3:-{}}"
+
+  local pct="0"
+  if [[ -n "${V2K_MANIFEST:-}" && -f "${V2K_MANIFEST}" ]]; then
+    pct="$(v2k_progress_percent_from_manifest "${V2K_MANIFEST}")"
+  fi
+
+  if ! printf '%s' "${extra}" | jq -e 'type=="object"' >/dev/null 2>&1; then
+    extra="{}"
+  fi
+
+  v2k_event INFO "${phase}" "" "progress" \
+    "$(jq -nc --arg step "${step}" --argjson percent "${pct}" --argjson extra "${extra}" \
+      '$extra + {step:$step,percent:$percent,run_id:("'"${V2K_RUN_ID:-}"'")}')"
+}
+
 v2k_now_rfc3339() {
   date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 }

@@ -20,6 +20,7 @@
 set -euo pipefail
 
 V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+V2K_NBD_LOCK_ROOT="/var/lock/ablestack-v2k/reservations"
 
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
@@ -75,93 +76,59 @@ v2k_nbd_is_connected() {
 }
 
 v2k_linux_bootstrap_pick_nbd() {
-  # Prefer higher range to avoid collision with transfer_* which often uses low nbd numbers.
-  # Override via env: V2K_LINUX_BOOTSTRAP_NBD_RANGE="8-15" (default) or "0-15"
+  mkdir -p "${V2K_NBD_LOCK_ROOT}"
   local range="${V2K_LINUX_BOOTSTRAP_NBD_RANGE:-8-15}"
   local start end
-  start="${range%-*}"
-  end="${range#*-}"
+  start="${range%-*}"; end="${range#*-}"
   [[ "${start}" =~ ^[0-9]+$ && "${end}" =~ ^[0-9]+$ ]] || { start=8; end=15; }
 
-  local i dev
-  local rejected=0
-  local reasons=""
-
-  # helper: record rejection reasons (for observability)
-  _rej() {
-    local d="$1" r="$2"
-    rejected=$((rejected+1))
-    reasons+="${d}:${r},"
-  }
+  local i dev lock_dir pid_file owner_pid
 
   for ((i=start; i<=end; i++)); do
     dev="/dev/nbd${i}"
     [[ -b "${dev}" ]] || continue
-    # must be disconnected and not mounted anywhere and must not have dm/lvm children
-    if v2k_nbd_is_connected "${dev}"; then
-      _rej "${dev}" "connected"
-      continue
-    fi
-    if v2k_nbd_has_any_mountpoints "${dev}"; then
-      _rej "${dev}" "mounted"
-      continue
-    fi
-    if v2k_nbd_has_children_types "${dev}"; then
-      _rej "${dev}" "dm_children"
-      continue
-    fi
-    # Additional guard: if nbd-utils exposes pid file, use it as authoritative "clean".
-    # (Some kernels export pid file even when device is logically still busy.)
-    local pid
-    pid="$(v2k_nbd_sys_pid "${dev}" 2>/dev/null || true)"
-    if [[ -n "${pid}" && "${pid}" != "0" ]]; then
-      _rej "${dev}" "pid_nonzero"
-      continue
-    fi
+    
+    lock_dir="${V2K_NBD_LOCK_ROOT}/nbd${i}.lock.d"
+    pid_file="${lock_dir}/pid"
 
-    # ok
-    v2k_event INFO "linux_bootstrap" "" "pick_nbd_selected" \
-      "{\"range\":\"${start}-${end}\",\"dev\":\"${dev}\",\"rejected\":${rejected}}"
-    echo "${dev}"
-    return 0
+    # 1. 원자적 예약 시도 (nbd_utils.sh와 동일 메커니즘)
+    if mkdir "${lock_dir}" 2>/dev/null; then
+      echo "$$" > "${pid_file}"
+      
+      # 2. 커널 상태 체크 (기존 함수들 활용)
+      if v2k_nbd_is_connected "${dev}" || \
+         v2k_nbd_has_any_mountpoints "${dev}" || \
+         v2k_nbd_has_children_types "${dev}"; then
+         
+         rm -rf "${lock_dir}"
+         continue
+      fi
+      
+      # 추가: pid 파일 체크
+      local kpid
+      kpid="$(v2k_nbd_sys_pid "${dev}" 2>/dev/null || true)"
+      if [[ -n "${kpid}" && "${kpid}" != "0" ]]; then
+         rm -rf "${lock_dir}"
+         continue
+      fi
+
+      # 성공! [장치명] [락 디렉토리] 반환 (cleanup을 위해)
+      # 락 디렉토리 경로를 호출자가 알면 나중에 지울 수 있음
+      echo "${dev}"
+      return 0
+    else
+      # 예약 실패 시 좀비 락 체크 (선택 사항이나 권장)
+      if [[ -f "${pid_file}" ]]; then
+        owner_pid="$(cat "${pid_file}" 2>/dev/null || true)"
+        if [[ -n "${owner_pid}" ]] && ! kill -0 "${owner_pid}" 2>/dev/null; then
+           # 주인이 죽었고 장치가 free하다면 락 제거
+           if ! v2k_nbd_is_connected "${dev}"; then
+             rm -rf "${lock_dir}"
+           fi
+        fi
+      fi
+    fi
   done
-
-  # fallback: scan all known devices
-  for dev in /dev/nbd{0..15}; do
-    [[ -b "${dev}" ]] || continue
-    if v2k_nbd_is_connected "${dev}"; then
-      _rej "${dev}" "connected"
-      continue
-    fi
-    if v2k_nbd_has_any_mountpoints "${dev}"; then
-      _rej "${dev}" "mounted"
-      continue
-    fi
-    if v2k_nbd_has_children_types "${dev}"; then
-      _rej "${dev}" "dm_children"
-      continue
-    fi
-    local pid
-    pid="$(v2k_nbd_sys_pid "${dev}" 2>/dev/null || true)"
-    if [[ -n "${pid}" && "${pid}" != "0" ]]; then
-      _rej "${dev}" "pid_nonzero"
-      continue
-    fi
-    v2k_event INFO "linux_bootstrap" "" "pick_nbd_selected_fallback" \
-      "{\"range\":\"${start}-${end}\",\"dev\":\"${dev}\",\"rejected\":${rejected}}"
-    echo "${dev}"
-    return 0
-  done
-
-  # emit diagnostics if nothing found
-  # reasons string can be large; keep it compact.
-  if [[ -n "${reasons}" ]]; then
-    reasons="${reasons%,}"
-  else
-    reasons="none"
-  fi
-  v2k_event WARN "linux_bootstrap" "" "pick_nbd_failed" \
-    "{\"range\":\"${start}-${end}\",\"rejected\":${rejected},\"reasons\":\"${reasons}\"}"
   return 1
 }
  
@@ -298,12 +265,12 @@ v2k_is_safe_mode() {
 v2k_should_skip_incr_phase() {
   # Policy:
   # - safe-mode => skip incr regardless of OS
-  # - linuxGuest => skip incr by default
+  # - (Modified) Linux guest also performs incr sync (same as Windows)
   if v2k_is_safe_mode; then
     return 0
   fi
   if v2k_is_linux_guest; then
-    return 0
+    return 1
   fi
   return 1
 }
@@ -908,6 +875,14 @@ v2k_linux_bootstrap_one() {
         v2k_event WARN "linux_bootstrap" "" "lvm_deactivate_failed" \
           "{\"nbd\":\"${nbd_dev}\",\"rc\":${lvm_rc}}"
       fi
+    fi
+
+    # [추가] 전역 예약 락 해제
+    if [[ -n "${nbd_dev:-}" ]]; then
+        local base lock_dir
+        base="$(basename "${nbd_dev}")"
+        lock_dir="/var/lock/ablestack-v2k/reservations/${base}.lock.d"
+        rm -rf "${lock_dir}" >/dev/null 2>&1 || true
     fi
 
     # Disconnect nbd (robust + observable)
@@ -1746,13 +1721,20 @@ v2k_force_cleanup_run() {
     done
   fi
 
-  # 2) Defensive process kill by commandline (run-id/workdir bound)
-  if [[ -n "${run_id}" ]]; then
-    pkill -TERM -f "ablestack_v2k.*${run_id}" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "${workdir}" ]]; then
-    pkill -TERM -f "${workdir}" >/dev/null 2>&1 || true
-  fi
+  # ==============================================================================
+  # [삭제됨] 2) Defensive process kill (RunID/Workdir)
+  # 원인: RunID는 유니크하므로 좀비가 존재할 수 없으며, 오히려 부모 프로세스(sudo 등)를 죽여
+  #       스크립트가 중단되거나 세션이 종료되는 원인이 됨.
+  # ==============================================================================
+  # [FIX] Do not kill myself (current PID $$) via pkill -f pattern match
+  #if [[ -n "${run_id}" ]]; then
+    # 자기 자신($$)을 제외한 나머지 프로세스만 종료
+  #  pgrep -f "ablestack_v2k.*${run_id}" | grep -v "^$$\$" | xargs -r kill -TERM >/dev/null 2>&1 || true
+  #fi
+  # [FIX 2] workdir 기반 종료 시 자기 자신($$) 제외 (지적해주신 부분)
+  #if [[ -n "${workdir}" ]]; then
+  #  pgrep -f "${workdir}" | grep -v "^$$\$" | xargs -r kill -TERM >/dev/null 2>&1 || true
+  #fi
 
   # 3) Detach loop devices bound to files under workdir (best-effort)
   if command -v losetup >/dev/null 2>&1 && [[ -n "${workdir}" ]]; then
@@ -1853,6 +1835,11 @@ v2k_cmd_sync() {
     base)
       v2k_event INFO "sync.base" "" "phase_start" "{\"jobs\":${jobs}}"
       v2k_transfer_base_all "${V2K_MANIFEST}" "${jobs}"
+
+      # [Fix] Base Sync 직후, 현재 Change ID를 조회하여 기준점 확보 (데이터 누락 방지)
+      local py_script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vmware_changed_areas.py"
+      v2k_manifest_fetch_and_save_base_change_ids "${V2K_MANIFEST}" "${py_script_path}"
+
       v2k_prepare_cbt_change_ids_after_base "${V2K_MANIFEST}"
       v2k_manifest_phase_done "${V2K_MANIFEST}" "base_sync"
       v2k_event INFO "sync.base" "" "phase_done" "{}"
@@ -2249,6 +2236,9 @@ v2k_cmd_cutover() {
   v2k_manifest_phase_done "${V2K_MANIFEST}" "cutover"
   v2k_event INFO "cutover" "" "phase_done" "{}"
   v2k_json_or_text_ok "cutover" "{}" "Cutover done (final snapshot + final sync)."
+
+  # Cleanup 진입 전 vCenter 상태 안정화 대기
+  sleep 3
 }
 
 # cleanup policy (engine-level contract):
