@@ -643,44 +643,64 @@ v2k_vmware_snapshot_remove_migr() {
     return 2
   }
 
-  # We may need multiple passes because snapshot trees can change as parents are removed.
-  # Try up to N rounds until no matching snapshots remain.
   local round max_round
   max_round=10
   for ((round=1; round<=max_round; round++)); do
     local tree_json names
-    tree_json="$(govc snapshot.tree -vm "${vm}" -json 2>/dev/null || true)"
+    
+    # [수정 1] 에러 메시지를 stderr로 출력하도록 2>/dev/null 제거, 실패 시 loop continue 대신 에러 체크 강화
+    if ! tree_json="$(govc snapshot.tree -vm "${vm}" -json 2>&1)"; then
+       # govc 명령 자체가 실패한 경우 (예: 연결 끊김, VM Busy)
+       echo "[WARN] Failed to list snapshots (round ${round}): ${tree_json}" >&2
+       sleep 2
+       continue
+    fi
+
     if [[ -z "${tree_json}" ]]; then
-      # If there is no snapshot, govc may return empty/err. Treat as nothing to do.
+      # 스냅샷이 정말 없는 경우
       return 0
     fi
 
-    # Extract all snapshot names from json (robust: scan all objects with Name field).
-    # Filter by pattern and uniq.
     names="$(printf '%s' "${tree_json}" \
-      | jq -r '.. | objects | .name? // empty' 2>/dev/null \
+      | jq -r '.. | objects | (.name? // .Name? // empty)' 2>/dev/null \
       | grep -F "${pattern}" \
       | sort -u || true)"
 
     if [[ -z "${names}" ]]; then
+      # 패턴 매칭되는 스냅샷이 없으면 완료
       return 0
     fi
 
-    # Best-effort delete each matching snapshot name.
-    # NOTE: if duplicate names exist, govc may fail/act ambiguously; we keep best-effort.
+    # [수정 2] 삭제 수행 및 에러 로깅
+    local delete_failed=0
     while IFS= read -r snap_name; do
       [[ -n "${snap_name}" ]] || continue
-      govc snapshot.remove -vm "${vm}" "${snap_name}" >/dev/null 2>&1 || true
+      
+      local out
+      if ! out="$(govc snapshot.remove -vm "${vm}" "${snap_name}" 2>&1)"; then
+        echo "[WARN] Failed to remove snapshot '${snap_name}': ${out}" >&2
+        delete_failed=1
+      else
+        echo "[INFO] Removed snapshot: ${snap_name}" >&2
+      fi
     done <<< "${names}"
+
+    # 삭제 실패 건이 있었다면 잠시 대기 후 재시도 (vCenter Task Busy 완화)
+    if [[ "${delete_failed}" -eq 1 ]]; then
+      sleep 3
+    fi
   done
 
-  # If we still have matching snapshots after max rounds, return non-zero for observability.
-  # Print remaining names for diagnostics.
-  {
-    govc snapshot.tree -vm "${vm}" -json 2>/dev/null \
-      | jq -r '.. | objects | .name? // empty' 2>/dev/null \
-      | grep -F "${pattern}" \
-      | sort -u || true
-  } | sed 's/^/[v2k] remaining migr snapshot: /' >&2
-  return 1
+  # [수정 3] 루프 종료 후에도 남아있는지 확인
+  local remain
+  remain="$(govc snapshot.tree -vm "${vm}" -json 2>/dev/null \
+      | jq -r '.. | objects | (.name? // .Name? // empty)' 2>/dev/null \
+      | grep -F "${pattern}" || true)"
+      
+  if [[ -n "${remain}" ]]; then
+    echo "[ERR] Failed to purge all migr snapshots. Remaining: ${remain}" >&2
+    return 1
+  fi
+  
+  return 0
 }

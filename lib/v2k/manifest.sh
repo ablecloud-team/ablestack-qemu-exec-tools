@@ -27,6 +27,42 @@ v2k_manifest_path() {
   echo "${V2K_MANIFEST:?Manifest path not set}"
 }
 
+# ---------------------------------------------------------------------
+# Runtime helpers (split-run/state machine)
+# [추가됨] 이 섹션이 새로 들어갑니다.
+# ---------------------------------------------------------------------
+
+v2k_manifest_runtime_set() {
+  # Usage: v2k_manifest_runtime_set <manifest> <jq_path> <json_value>
+  local manifest="$1" path="$2" value_json="${3:-null}"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg path "${path}" --argjson v "${value_json}" '
+    .runtime = (.runtime // {}) |
+    (setpath(($path|ltrimstr(".")|split(".")); $v))
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+v2k_manifest_mark_split_done() {
+  # Usage: v2k_manifest_mark_split_done <manifest> <phase1|phase2>
+  local manifest="$1" which="$2"
+  local ts
+  ts="$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg which "${which}" --arg ts "${ts}" '
+    .runtime = (.runtime // {}) |
+    .runtime.split = (.runtime.split // {phase1:{done:false,ts:""},phase2:{done:false,ts:""}}) |
+    .runtime.split[$which].done = true |
+    .runtime.split[$which].ts = $ts
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+v2k_manifest_split_done() {
+  local manifest="$1" which="$2"
+  jq -r --arg which "${which}" '.runtime.split[$which].done // false' "${manifest}" 2>/dev/null
+}
+
 v2k_manifest_init() {
   local manifest="$1" run_id="$2" workdir="$3" vm="$4" vcenter="$5" mode="$6" dst="$7" inv_json="$8"
 
@@ -232,6 +268,7 @@ v2k_manifest_init() {
           libvirt:{ name:$inv.vm.name, uefi:true, tpm:false }
         },
         disks: $disks,
+        policy:{purge_snapshots_on_success:true},
         phases:{
           init:{done:true, ts:$created_at},
           cbt_enable:{done:false, ts:""},
@@ -239,6 +276,13 @@ v2k_manifest_init() {
           incr_sync:{done:false, ts:""},
           final_sync:{done:false, ts:""},
           cutover:{done:false, ts:""}
+        },
+        runtime:{
+          split:{phase1:{done:false,ts:""},phase2:{done:false,ts:""}},
+          progress:{percent:0,last_step:""},
+          sync_within_deadline:null,
+          sync_issues:[],
+          last_error:{code:0,reason:"",ts:""}
         }
       }
     ' > "${manifest}"
@@ -253,6 +297,44 @@ v2k_manifest_phase_done() {
   jq --arg key "${key}" --arg ts "${ts}" \
     '.phases[$key].done=true | .phases[$key].ts=$ts' "${manifest}" > "${tmp}"
   mv "${tmp}" "${manifest}"
+}
+
+# Return 0 if phases[KEY].done==true, else 1
+v2k_manifest_phase_is_done() {
+  local manifest="$1" key="$2"
+  [[ -f "${manifest}" ]] || return 1
+  jq -e --arg key "${key}" '.phases[$key].done == true' "${manifest}" >/dev/null 2>&1
+}
+ 
+# ---------------------------------------------------------------------
+# Policy / state helpers
+# ---------------------------------------------------------------------
+
+# Return 0 (true) if migration is considered successfully completed.
+# We treat "cutover done" as the success marker.
+v2k_manifest_migration_success() {
+  local manifest="${1:?manifest.json}"
+  v2k_manifest_bool "${manifest}" '.phases.cutover.done == true'
+}
+
+# Return 0 (true) if snapshot purge on success is enabled by manifest policy.
+# Missing key defaults to true.
+v2k_manifest_policy_purge_snapshots_on_success() {
+  local manifest="${1:?manifest.json}"
+  local v
+  v="$(jq -r '.policy.purge_snapshots_on_success // "true"' "${manifest}" 2>/dev/null || echo "true")"
+  [[ "${v}" == "true" ]]
+}
+
+# split execution completion markers (used by orchestrator split=phase2 gating)
+v2k_manifest_mark_split_done() {
+  local manifest="$1" which="$2"
+  v2k_manifest_phase_done "${manifest}" "split.${which}"
+}
+
+v2k_manifest_split_is_done() {
+  local manifest="$1" which="$2"
+  v2k_manifest_phase_is_done "${manifest}" "split.${which}"
 }
 
 v2k_manifest_snapshot_set() {
@@ -469,4 +551,34 @@ v2k_manifest_status_summary() {
   else
     printf '{"manifest":%s,"events_tail":[]}\n' "${msum}"
   fi
+}
+
+v2k_manifest_fetch_and_save_base_change_ids() {
+  local manifest="$1" py_script="$2"
+  local count i disk_id vm_name snap_name json_out new_id
+
+  # Python 스크립트 실행을 위한 환경변수 설정 (Govc 환경변수 활용)
+  export VCENTER_HOST="${GOVC_URL:?missing GOVC_URL}"
+  export VCENTER_USER="${GOVC_USERNAME:?missing GOVC_USERNAME}"
+  export VCENTER_PASS="${GOVC_PASSWORD:?missing GOVC_PASSWORD}"
+  export VCENTER_INSECURE="${GOVC_INSECURE:-1}"
+
+  vm_name="$(v2k_manifest_get_vm_name "${manifest}")"
+  count="$(jq -r '.disks|length' "${manifest}")"
+
+  # Base 스냅샷 이름 조회
+  snap_name="$(jq -r ".disks[0].snapshots.base.name" "${manifest}")"
+
+  for ((i=0;i<count;i++)); do
+    disk_id="$(jq -r ".disks[$i].disk_id" "${manifest}")"
+    
+    # --change-id "*"를 넘겨서 현재 시점의 Change ID (new_change_id)만 받아온다.
+    json_out="$(python3 "${py_script}" --vm "${vm_name}" --snapshot "${snap_name}" --disk-id "${disk_id}" --change-id "*" 2>/dev/null || true)"
+    new_id="$(echo "${json_out}" | jq -r '.new_change_id // empty')"
+
+    if [[ -n "${new_id}" && "${new_id}" != "null" ]]; then
+      # 조회된 ID를 last_change_id로 저장 (다음 Incr의 기준점이 됨)
+      v2k_manifest_set_disk_last_change_id "${manifest}" "${i}" "${new_id}"
+    fi
+  done
 }

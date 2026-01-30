@@ -107,6 +107,12 @@ Pipeline options:
   --converge-threshold-sec <sec>      Stop incr loop early if (snapshot+sync) duration <= sec (default: 120)
   --no-incr                           Skip incremental loops (base -> cutover)
 
+  --split <full|phase1|phase2>        Split-run mode (default: full)
+    - phase1: base snap/sync + incr1 snap/sync then exit (no cutover)
+    - phase2: incr2..N loop until a sync completes within --deadline-sec, then cutover
+  --deadline-sec <sec>                Phase2 deadline window seconds (default: 120)
+  --max-incr-phase2 <n>               Phase2 safety cap for incr loops (default: 20)
+
   --jobs <N>                          Default jobs for sync steps
   --chunk <BYTES>                     Default chunk size for sync steps
   --coalesce-gap <BYTES>              Default coalesce gap for sync steps

@@ -16,6 +16,9 @@
 # ---------------------------------------------------------------------
 set -euo pipefail
 
+# [전역 설정] 모든 VM이 공유하는 예약 디렉토리
+V2K_NBD_LOCK_ROOT="/var/lock/ablestack-v2k/reservations"
+
 # ---------------------------
 # NBD allocator utilities (productized)
 # - robust lock (atomic mkdir)
@@ -118,29 +121,47 @@ v2k_nbd_lock_release() {
 
 # Find a free /dev/nbdX and lock it.
 v2k_nbd_alloc() {
-  local lock_dir="${V2K_WORKDIR:-/tmp}/nbd-lock"
-  mkdir -p "${lock_dir}"
+  mkdir -p "${V2K_NBD_LOCK_ROOT}"
   modprobe nbd max_part=16 >/dev/null 2>&1 || true
 
-  local x dev lock
-  for x in $(seq 0 63); do
-    dev="/dev/nbd${x}"
+  local i dev lock_dir pid_file owner_pid
+
+  for i in $(seq 0 63); do
+    dev="/dev/nbd${i}"
     [[ -b "${dev}" ]] || continue
 
-    # Try to acquire per-dev lock
-    if v2k_nbd_lock_try "${lock_dir}" "${dev}"; then
-      # Check if in use (kernel pid is authoritative)
-      if v2k_nbd_is_in_use "${dev}"; then
-        v2k_nbd_lock_release "${lock_dir}" "${dev}"
+    lock_dir="${V2K_NBD_LOCK_ROOT}/nbd${i}.lock.d"
+    pid_file="${lock_dir}/pid"
+
+    # 1. 원자적(Atomic) 예약 시도: mkdir
+    if mkdir "${lock_dir}" 2>/dev/null; then
+      # 예약 성공! 내 PID 기록
+      echo "$$" > "${pid_file}"
+      
+      # 2. 커널 상태 이중 체크 (이미 사용 중인지)
+      if v2k_nbd_is_in_use "${dev}" || v2k_nbd_has_dm_children "${dev}"; then
+        # 사용 중이면 예약 취소하고 다음으로
+        rm -rf "${lock_dir}"
         continue
       fi
-      # Extra guard: avoid devices that still have dm/LVM children lingering.
-      if v2k_nbd_has_dm_children "${dev}"; then
-        v2k_nbd_lock_release "${lock_dir}" "${dev}"
-        continue
-      fi
+      
+      # 최종 할당 성공
       echo "${dev}"
       return 0
+    else
+      # 예약 실패 (이미 락이 존재함). 좀비 락인지 확인
+      if [[ -f "${pid_file}" ]]; then
+        owner_pid="$(cat "${pid_file}" 2>/dev/null || true)"
+        # 프로세스가 죽었고($owner_pid 없음) + 커널에서도 사용 안 함 -> 좀비 락
+        if [[ -n "${owner_pid}" ]] && ! kill -0 "${owner_pid}" 2>/dev/null; then
+           if ! v2k_nbd_is_in_use "${dev}"; then
+             # 좀비 락 청소 후 재시도
+             rm -rf "${lock_dir}"
+             # 이번 루프(i)를 다시 시도하기 위해 i를 하나 줄이거나, 그냥 다음으로 넘어감.
+             # 안전하게 다음 디바이스 탐색 (다음 실행 시엔 청소되어 있을 것임)
+           fi
+        fi
+      fi
     fi
   done
 
@@ -150,8 +171,20 @@ v2k_nbd_alloc() {
 
 v2k_nbd_free() {
   local dev="$1"
-  local lock_dir="${V2K_WORKDIR:-/tmp}/nbd-lock"
-  v2k_nbd_lock_release "${lock_dir}" "${dev}"
+  local base lock_dir
+  [[ -z "${dev}" ]] && return 0
+  
+  # 연결 해제 (기존 로직 수행)
+  v2k_nbd_disconnect "${dev}"
+
+  # 전역 예약 해제
+  base="$(basename "${dev}")"
+  lock_dir="${V2K_NBD_LOCK_ROOT}/${base}.lock.d"
+  if [[ -d "${lock_dir}" ]]; then
+     # 내 락인지 확인하고 지우는 것이 가장 안전하지만, 
+     # 보통 free를 호출하는 건 주인이므로 강제 삭제
+     rm -rf "${lock_dir}"
+  fi
 }
 
 v2k_nbd_disconnect() {
@@ -223,6 +256,61 @@ v2k_kill_pidfile_safe() {
   done
   kill -9 "${pid}" >/dev/null 2>&1 || true
   rm -f "${pidfile}" >/dev/null 2>&1 || true
+}
+
+#
+# Stop an nbdkit process started by V2K patch/base sync helpers.
+# - transfer_patch.sh calls: v2k_nbdkit_stop <pidfile> <sock>
+# - This function was referenced but missing, which caused cleanup to no-op.
+#
+v2k_nbdkit_stop() {
+  local pidfile="${1-}"
+  local sock="${2-}"
+
+  # If pidfile is missing, best-effort cleanup only
+  if [[ -n "${pidfile}" && -f "${pidfile}" ]]; then
+    local pid
+    pid="$(cat "${pidfile}" 2>/dev/null || true)"
+    if [[ -n "${pid}" && "${pid}" =~ ^[0-9]+$ && -d "/proc/${pid}" ]]; then
+      # Safety check: ensure it's really nbdkit and (if provided) matches our sock path.
+      local cmdline
+      cmdline="$(tr '\0' ' ' </proc/${pid}/cmdline 2>/dev/null || true)"
+
+      if [[ "${cmdline}" == *"nbdkit"* ]]; then
+        if [[ -n "${sock}" ]]; then
+          # Only kill if cmdline contains the sock path we expect.
+          if [[ "${cmdline}" == *"${sock}"* ]]; then
+            kill -TERM "${pid}" 2>/dev/null || true
+          fi
+        else
+          kill -TERM "${pid}" 2>/dev/null || true
+        fi
+
+        # Wait a short time for graceful exit
+        local i
+        for i in 1 2 3 4 5; do
+          [[ -d "/proc/${pid}" ]] || break
+          sleep 0.2
+        done
+
+        # Force kill if still alive
+        if [[ -d "/proc/${pid}" ]]; then
+          if [[ -n "${sock}" ]]; then
+            [[ "${cmdline}" == *"${sock}"* ]] && kill -KILL "${pid}" 2>/dev/null || true
+          else
+            kill -KILL "${pid}" 2>/dev/null || true
+          fi
+        fi
+      fi
+    fi
+
+    rm -f "${pidfile}" 2>/dev/null || true
+  fi
+
+  # Remove stale unix socket file if present
+  if [[ -n "${sock}" && -S "${sock}" ]]; then
+    rm -f "${sock}" 2>/dev/null || true
+  fi
 }
 
 v2k_nbdkit_kill_by_token() {

@@ -300,7 +300,7 @@ prepare_target_device() {
         dev="${nbd_dev}"
       else
         v2k_lock_nbd
-        dev="$(v2k_find_free_nbd)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
+        dev="$(v2k_nbd_alloc)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
       fi
 
       v2k_qemu_nbd_disconnect "$dev"
@@ -323,7 +323,7 @@ prepare_target_device() {
         dev="${nbd_dev}"
       else
         v2k_lock_nbd
-        dev="$(v2k_find_free_nbd)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
+        dev="$(v2k_nbd_alloc)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
       fi
       v2k_qemu_nbd_disconnect "$dev"
       v2k_qemu_nbd_connect "raw" "$path" "$dev"
@@ -352,7 +352,7 @@ prepare_target_device() {
         dev="${nbd_dev}"
       else
         v2k_lock_nbd
-        dev="$(v2k_find_free_nbd)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
+        dev="$(v2k_nbc_alloc)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
       fi
 
       # If host can talk to ceph, proactively prepare the image (create/resize).
