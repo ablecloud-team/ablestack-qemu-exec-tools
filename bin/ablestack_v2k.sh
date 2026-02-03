@@ -189,6 +189,13 @@ v2k_set_paths \
   "${MANIFEST}" \
   "${EVENTS_LOG}"
 
+# [NEW] Ensure NBD module is loaded (Auto-recovery after reboot)
+if ! lsmod | grep -q "^nbd"; then
+    v2k_event INFO "linux_bootstrap" "" "loading_nbd_module" "{}"
+    modprobe nbd max_part=16
+    udevadm settle
+fi
+
 case "${CMD}" in
   run|auto)
     if v2k_fleet_should_handle_run "${shifted_args[@]}"; then
