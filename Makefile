@@ -142,6 +142,7 @@ rpm:
 v2k-rpm:
 	@echo "📦 Building V2K RPM (isolated)..."
 	@test -f "$(V2K_SPEC)" || (echo "[ERR] Missing spec: $(V2K_SPEC)" >&2; exit 2)
+	@test -f "$(COMPLETIONS_FILE)" || (echo "[ERR] Missing completion file: $(COMPLETIONS_FILE)" >&2; exit 2)
 
 	@# Sanity check for new assets (does not fail build; spec may still package lib/v2k/*)
 	@if [ -f "lib/v2k/fleet.sh" ]; then \
@@ -149,11 +150,7 @@ v2k-rpm:
 	else \
 		echo "[WARN] Missing: lib/v2k/fleet.sh"; \
 	fi
-	@if [ -f "$(V2K_COMPLETIONS_SRC)" ]; then \
-		echo "OK: $(V2K_COMPLETIONS_SRC) detected"; \
-	else \
-		echo "[WARN] Missing: $(V2K_COMPLETIONS_SRC)"; \
-	fi
+	echo "OK: $(COMPLETIONS_FILE) detected"
 
 	# Fully isolated rpmbuild tree for V2K (keeps existing 'rpmbuild/' untouched)
 	mkdir -p rpmbuild_v2k/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
@@ -171,6 +168,15 @@ v2k-rpm:
 	mkdir -p build/rpm-v2k
 	cp rpmbuild_v2k/RPMS/noarch/*.rpm build/rpm-v2k/ 2>/dev/null || true
 	cp rpmbuild_v2k/RPMS/*/*.rpm build/rpm-v2k/ 2>/dev/null || true
+
+	@echo "🔎 Verifying completion file is included in ablestack_v2k RPM..."
+	@RPM_FILE="$$(ls -1 build/rpm-v2k/$(V2K_NAME)-*.rpm 2>/dev/null | head -n 1)"; \
+	if [ -z "$$RPM_FILE" ]; then \
+	  echo "[ERR] Built RPM not found under build/rpm-v2k" >&2; exit 2; \
+	fi; \
+	rpm -qlp "$$RPM_FILE" | grep -qE "bash-completion/completions/$(V2K_NAME)$$" || \
+	  (echo "[ERR] completion file missing in RPM: $$RPM_FILE" >&2; exit 2)
+
 	@echo "✅ V2K RPM package created: build/rpm-v2k/"
 
 deb:
