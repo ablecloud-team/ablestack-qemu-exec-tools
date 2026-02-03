@@ -1,0 +1,154 @@
+# ---------------------------------------------------------------------
+# Copyright 2026 ABLECLOUD
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# 
+# bash completion for ablestack_v2k
+# Install (RPM/DEB): /usr/share/bash-completion/completions/ablestack_v2k
+# ---------------------------------------------------------------------
+
+_ablestack_v2k_trim() {
+  local s="$1"
+  s="${s#${s%%[![:space:]]*}}"
+  s="${s%${s##*[![:space:]]}}"
+  printf '%s' "$s"
+}
+
+_ablestack_v2k_list_vms_all() {
+  ls -1 /var/lib/ablestack-v2k 2>/dev/null || true
+}
+
+_ablestack_v2k_vm_has_phase1_done() {
+  local vm="$1"
+  local root="/var/lib/ablestack-v2k/${vm}"
+  [[ -d "$root" ]] || return 1
+  local m
+  for m in "$root"/*/manifest.json; do
+    [[ -f "$m" ]] || continue
+    if command -v jq >/dev/null 2>&1; then
+      local p1
+      p1="$(jq -r '.runtime.split.phase1.done // false' "$m" 2>/dev/null)"
+      [[ "$p1" == "true" ]] && return 0
+    fi
+  done
+  return 1
+}
+
+_ablestack_v2k_list_vms_phase2_candidates() {
+  local vm
+  for vm in $(_ablestack_v2k_list_vms_all); do
+    _ablestack_v2k_vm_has_phase1_done "$vm" && echo "$vm"
+  done
+}
+
+_ablestack_v2k_comp_vm_csv() {
+  # Support --vm "a,b,c" completion.
+  local candidates_fn="$1"
+  local cur="$2"
+
+  local prefix=""
+  local last="$cur"
+  if [[ "$cur" == *,* ]]; then
+    prefix="${cur%,*},"
+    last="${cur##*,}"
+    last="$(_ablestack_v2k_trim "$last")"
+  fi
+
+  local list
+  list="$($candidates_fn)"
+  COMPREPLY=( $(compgen -W "$list" -- "$last") )
+
+  local i
+  for i in "${!COMPREPLY[@]}"; do
+    COMPREPLY[$i]="${prefix}${COMPREPLY[$i]}"
+  done
+}
+
+_ablestack_v2k() {
+  local cur prev words cword
+  _init_completion -n : || return
+
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+  local cmd=""
+  if (( COMP_CWORD >= 1 )); then
+    cmd="${COMP_WORDS[1]}"
+  fi
+
+  local commands="init cbt snapshot sync verify cutover cleanup status run auto"
+
+  if (( COMP_CWORD == 1 )); then
+    COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+    return
+  fi
+
+  local split=""
+  local i
+  for ((i=0; i<${#COMP_WORDS[@]}; i++)); do
+    if [[ "${COMP_WORDS[$i]}" == "--split" ]]; then
+      split="${COMP_WORDS[$((i+1))]}"
+      break
+    fi
+  done
+
+  case "$cmd" in
+    run|auto)
+      if [[ "$prev" == "--split" ]]; then
+        COMPREPLY=( $(compgen -W "full phase1 phase2" -- "$cur") )
+        return
+      fi
+
+      if [[ "$prev" == "--vm" ]]; then
+        if [[ "$split" == "phase2" ]]; then
+          _ablestack_v2k_comp_vm_csv _ablestack_v2k_list_vms_phase2_candidates "$cur"
+        else
+          _ablestack_v2k_comp_vm_csv _ablestack_v2k_list_vms_all "$cur"
+        fi
+        return
+      fi
+
+      if [[ "$split" == "phase2" ]]; then
+        # phase2 does NOT accept --workdir (fleet discovers workdir)
+        local opts="--vm --split --json --dry-run --resume --force -h --help"
+        COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+        return
+      fi
+
+      # [수정됨] phase1 및 full 모드용 옵션 (init 옵션 + 인증 옵션 + run 옵션 통합)
+      local opts="--vm --split --shutdown --kvm-vm-policy \
+                  --incr-interval --max-incr --converge-threshold-sec --no-incr --deadline-sec --max-incr-phase2 \
+                  --jobs --chunk --coalesce-gap --base-args --incr-args --cutover-args \
+                  --vcenter --dst --mode --cred-file --target-format --target-storage --target-map-json --force-block-device --vddk-cred-file \
+                  --username --password \
+                  --json --dry-run --resume --force --foreground -h --help"
+      COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+      return
+      ;;
+
+    status)
+      if [[ "$prev" == "--vm" ]]; then
+        _ablestack_v2k_comp_vm_csv _ablestack_v2k_list_vms_phase2_candidates "$cur"
+        return
+      fi
+      local opts="--vm --json -h --help"
+      COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+      return
+      ;;
+  esac
+
+  local global_opts="--workdir --run-id --manifest --log --json --dry-run --resume --force -h --help"
+  COMPREPLY=( $(compgen -W "$global_opts" -- "$cur") )
+}
+
+complete -F _ablestack_v2k ablestack_v2k
