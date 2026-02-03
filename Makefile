@@ -28,6 +28,9 @@ GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 INSTALL_PREFIX = /usr/local
 BIN_DIR = $(INSTALL_PREFIX)/bin
 LIB_TARGET = $(INSTALL_PREFIX)/lib/$(NAME)
+COMPLETIONS_SRC = completions
+COMPLETIONS_TARGET = /usr/share/bash-completion/completions
+COMPLETIONS_FILE = $(COMPLETIONS_SRC)/$(V2K_NAME)
 
 DEB_PKG = $(NAME)_$(VERSION)-$(RELEASE)
 DEB_BUILD_DIR = $(DEB_PKG)
@@ -35,6 +38,7 @@ DEB_DOC_DIR = $(DEB_BUILD_DIR)/usr/share/doc/$(NAME)
 DEB_BIN_DIR = $(DEB_BUILD_DIR)/usr/bin
 DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
+DEB_COMPLETIONS_DIR = $(DEB_BUILD_DIR)/usr/share/bash-completion/completions
 
 .PHONY: all install uninstall rpm v2k-rpm deb windows clean
 
@@ -138,6 +142,18 @@ rpm:
 v2k-rpm:
 	@echo "📦 Building V2K RPM (isolated)..."
 	@test -f "$(V2K_SPEC)" || (echo "[ERR] Missing spec: $(V2K_SPEC)" >&2; exit 2)
+
+	@# Sanity check for new assets (does not fail build; spec may still package lib/v2k/*)
+	@if [ -f "lib/v2k/fleet.sh" ]; then \
+		echo "OK: lib/v2k/fleet.sh detected"; \
+	else \
+		echo "[WARN] Missing: lib/v2k/fleet.sh"; \
+	fi
+	@if [ -f "$(V2K_COMPLETIONS_SRC)" ]; then \
+		echo "OK: $(V2K_COMPLETIONS_SRC) detected"; \
+	else \
+		echo "[WARN] Missing: $(V2K_COMPLETIONS_SRC)"; \
+	fi
 
 	# Fully isolated rpmbuild tree for V2K (keeps existing 'rpmbuild/' untouched)
 	mkdir -p rpmbuild_v2k/{BUILD,RPMS,SOURCES,SPECS,SRPMS}

@@ -25,6 +25,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 Requires:       bash
+Requires:       bash-completion
 Requires:       jq
 Requires:       python3
 Requires:       openssl
@@ -42,6 +43,10 @@ Assets such as VDDK and govc are handled by the offline ISO installer.
 %setup -q
 
 %install
+# NOTE:
+# - lib/v2k/fleet.sh 는 기존 cp -a lib/v2k/* 로 자동 포함됩니다.
+# - completions/ablestack_v2k 는 아래 bash-completion 경로로 별도 설치합니다.
+
 # Binaries (explicit path: /usr/local/bin)
 mkdir -p %{buildroot}/usr/local/bin
 install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
@@ -50,6 +55,10 @@ install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k
 cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev/null || :
 
+# Bash completion (standard location)
+mkdir -p %{buildroot}/usr/share/bash-completion/completions
+install -m 0644 completions/ablestack_v2k %{buildroot}/usr/share/bash-completion/completions/ablestack_v2k
+
 %files
 
 
@@ -57,6 +66,7 @@ cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev
 %license LICENSE
 /usr/local/bin/ablestack_v2k
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
+/usr/share/bash-completion/completions/ablestack_v2k
 
 %changelog
 * Sun Jan 11 2026 ABLECLOUD <dev@ablecloud.io> %{version}-%{release}
