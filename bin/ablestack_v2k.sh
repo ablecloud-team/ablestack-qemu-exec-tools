@@ -28,6 +28,8 @@ source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/orchestrator.sh"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/fleet.sh"
 
 v2k_resolve_vddk_libdir() {
   # Do NOT modify the path (no auto appending like /lib64).
@@ -187,9 +189,20 @@ v2k_set_paths \
   "${MANIFEST}" \
   "${EVENTS_LOG}"
 
+# [NEW] Ensure NBD module is loaded (Auto-recovery after reboot)
+if ! lsmod | grep -q "^nbd"; then
+    v2k_event INFO "linux_bootstrap" "" "loading_nbd_module" "{}"
+    modprobe nbd max_part=16
+    udevadm settle
+fi
+
 case "${CMD}" in
   run|auto)
-    v2k_cmd_run "${shifted_args[@]}"
+    if v2k_fleet_should_handle_run "${shifted_args[@]}"; then
+      v2k_fleet_cmd_run "${shifted_args[@]}"
+    else
+      v2k_cmd_run "${shifted_args[@]}"
+    fi
     ;;
   init)
     v2k_cmd_init "${shifted_args[@]}"
@@ -213,7 +226,11 @@ case "${CMD}" in
     v2k_cmd_cleanup "${shifted_args[@]}"
     ;;
   status)
-    v2k_cmd_status "${shifted_args[@]}"
+    if v2k_fleet_should_handle_status "${shifted_args[@]}"; then
+      v2k_fleet_cmd_status "${shifted_args[@]}"
+    else
+      v2k_cmd_status "${shifted_args[@]}"
+    fi
     ;;
   *)
     echo "Unknown command: ${CMD}" >&2

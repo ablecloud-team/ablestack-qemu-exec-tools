@@ -210,80 +210,68 @@ v2k_cmd_run_foreground() {
   local base_args_str="" incr_args_str="" cutover_args_str=""
 
   local vm="" vcenter_host="" username="" password="" dst=""
+  local cred_file_in="" vddk_cred_file_in=""
 
   local init_mode="govc"
   local init_target_format="" init_target_storage="" init_target_map_json=""
   local init_force_block_device="0"
 
+  # ---------------------------------------------------------------------------
+  # 1. Parse Arguments
+  # ---------------------------------------------------------------------------
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      # control
-      --foreground) shift 1;; # already in foreground
-
-      # minimal inputs
+      --foreground) shift 1;;
       --vm) vm="${2:-}"; shift 2;;
       --vcenter) vcenter_host="${2:-}"; shift 2;;
       --username) username="${2:-}"; shift 2;;
       --password) password="${2:-}"; shift 2;;
       --dst) dst="${2:-}"; shift 2;;
       --insecure) insecure="${2:-}"; shift 2;;
-
-      # orchestrator options
+      --cred-file) cred_file_in="${2:-}"; shift 2;;
+      --vddk-cred-file) vddk_cred_file_in="${2:-}"; shift 2;;
       --shutdown) shutdown="${2:-}"; shift 2;;
       --kvm-vm-policy) kvm_vm_policy="${2:-}"; shift 2;;
       --incr-interval) incr_interval="${2:-}"; shift 2;;
       --max-incr) max_incr="${2:-}"; shift 2;;
       --converge-threshold-sec) converge_threshold_sec="${2:-}"; shift 2;;
       --no-incr) no_incr="1"; shift 1;;
-
-      # split-run options
       --split) split="${2-}"; shift 2;;
       --deadline-sec) deadline_sec="${2-}"; shift 2;;
       --max-incr-phase2) max_incr_phase2="${2-}"; shift 2;;
-
-      # cleanup controls
       --no-cleanup) do_cleanup="0"; shift 1;;
       --keep-snapshots) keep_snapshots="1"; shift 1;;
       --keep-workdir) keep_workdir="1"; shift 1;;
-
-      # sync defaults
       --jobs) default_jobs="${2:-}"; shift 2;;
       --chunk) default_chunk="${2:-}"; shift 2;;
       --coalesce-gap) default_coalesce_gap="${2:-}"; shift 2;;
-
-      # extras
       --base-args) base_args_str="${2:-}"; shift 2;;
       --incr-args) incr_args_str="${2:-}"; shift 2;;
       --cutover-args) cutover_args_str="${2:-}"; shift 2;;
-
-      # init knobs supported by engine.sh init
       --mode) init_mode="${2:-}"; shift 2;;
       --target-format) init_target_format="${2:-}"; shift 2;;
       --target-storage) init_target_storage="${2:-}"; shift 2;;
       --target-map-json) init_target_map_json="${2:-}"; shift 2;;
       --force-block-device) init_force_block_device="1"; shift 1;;
-
-      *)
-        v2k_die "Unknown option for run: $1"
-        ;;
+      *) v2k_die "Unknown option for run: $1" ;;
     esac
   done
 
+  # ---------------------------------------------------------------------------
+  # 2. Logic Check & Defaults
+  # ---------------------------------------------------------------------------
   case "${shutdown}" in manual|guest|poweroff) ;; *) v2k_die "invalid --shutdown: ${shutdown}";; esac
   case "${kvm_vm_policy}" in none|define-only|define-and-start) ;; *) v2k_die "invalid --kvm-vm-policy: ${kvm_vm_policy}";; esac
   [[ "${incr_interval}" =~ ^[0-9]+$ ]] || v2k_die "--incr-interval must be integer seconds"
-  [[ "${max_incr}" =~ ^[0-9]+$ ]] || v2k_die "--max-incr must be integer (0 means unlimited)"
+  [[ "${max_incr}" =~ ^[0-9]+$ ]] || v2k_die "--max-incr must be integer"
   [[ "${converge_threshold_sec}" =~ ^[0-9]+$ ]] || v2k_die "--converge-threshold-sec must be integer seconds"
   [[ "${insecure}" =~ ^[01]$ ]] || v2k_die "--insecure must be 0 or 1"
 
   case "${split}" in
     full|phase1|phase2) ;;
-    *) v2k_die "Invalid --split: ${split} (allowed: full|phase1|phase2)" ;;
+    *) v2k_die "Invalid --split: ${split}" ;;
   esac
-  [[ "${deadline_sec}" =~ ^[0-9]+$ ]] || v2k_die "--deadline-sec must be integer seconds"
-  [[ "${max_incr_phase2}" =~ ^[0-9]+$ ]] || v2k_die "--max-incr-phase2 must be integer"
-
-  # Split-run safety: for phase1/phase2 we default to keeping workdir/resources for resume
+  
   if [[ "${split}" == "phase1" && "${do_cleanup}" == "1" ]]; then
     do_cleanup=0
   fi
@@ -293,49 +281,131 @@ v2k_cmd_run_foreground() {
   fi
 
   [[ -n "${vm}" ]] || v2k_die "missing --vm"
-  [[ -n "${vcenter_host}" ]] || v2k_die "missing --vcenter"
-  v2k_validate_vcenter_host "${vcenter_host}" || v2k_die "--vcenter must be host/ip only (no scheme/path)"
-  [[ -n "${username}" ]] || v2k_die "missing --username"
-  [[ -n "${password}" ]] || v2k_die "missing --password"
+
+  # ---------------------------------------------------------------------------
+  # 3. Workdir Initialization (Moved BEFORE Validation for Phase 2 Discovery)
+  # ---------------------------------------------------------------------------
+  if [[ -z "${V2K_RUN_ID:-}" ]]; then
+      export V2K_RUN_ID="$(date +%Y%m%d-%H%M%S)"
+  fi
+  
+  if [[ -z "${V2K_WORKDIR:-}" ]]; then
+      export V2K_WORKDIR="/var/lib/ablestack-v2k/${vm}/${V2K_RUN_ID}"
+  fi
+  
+  if [[ -z "${V2K_MANIFEST:-}" ]]; then
+      export V2K_MANIFEST="${V2K_WORKDIR}/manifest.json"
+  fi
+
+  # Create workdir if not exists (important for full run, harmless for phase2)
+  mkdir -p "${V2K_WORKDIR}"
+
+  # ---------------------------------------------------------------------------
+  # 4. Phase 2 Credential Auto-Discovery
+  # ---------------------------------------------------------------------------
+  # If we are in phase2, and no creds were passed, look inside the workdir.
+  if [[ "${split}" == "phase2" ]]; then
+      if [[ -z "${cred_file_in}" && -f "${V2K_WORKDIR}/govc.env" ]]; then
+          cred_file_in="${V2K_WORKDIR}/govc.env"
+      fi
+      if [[ -z "${vddk_cred_file_in}" && -f "${V2K_WORKDIR}/vddk.cred" ]]; then
+          vddk_cred_file_in="${V2K_WORKDIR}/vddk.cred"
+      fi
+  fi
+
+  # ---------------------------------------------------------------------------
+  # 5. Validation (Check if creds exist)
+  # ---------------------------------------------------------------------------
+  if [[ -z "${cred_file_in}" ]]; then
+      [[ -n "${vcenter_host}" ]] || v2k_die "missing --vcenter (or --cred-file)"
+      [[ -n "${username}" ]] || v2k_die "missing --username (or --cred-file)"
+      [[ -n "${password}" ]] || v2k_die "missing --password (or --cred-file)"
+  fi
+  
   if [[ -z "${dst}" ]]; then dst="/var/lib/libvirt/images/${vm}"; fi
 
-  # init args for engine.sh v2k_cmd_init
+  # init args setup
   local -a init_args=( --vm "${vm}" --vcenter "${vcenter_host}" --dst "${dst}" --mode "${init_mode}" )
   [[ -n "${init_target_format}" ]] && init_args+=( --target-format "${init_target_format}" )
   [[ -n "${init_target_storage}" ]] && init_args+=( --target-storage "${init_target_storage}" )
   [[ -n "${init_target_map_json}" ]] && init_args+=( --target-map-json "${init_target_map_json}" )
   [[ "${init_force_block_device}" == "1" ]] && init_args+=( --force-block-device )
 
-  # Create govc.env + vddk.cred
-  local govc_url tmp_govc_env tmp_vddk_cred
-  govc_url="$(v2k_build_govc_url_from_vcenter_host "${vcenter_host}")"
-  tmp_govc_env="$(v2k_mktemp_file "govc.env")"
-  tmp_vddk_cred="$(v2k_mktemp_file "vddk.cred")"
-  local -a cleanup_tmp=( "${tmp_govc_env}" "${tmp_vddk_cred}" )
-  v2k_trap_append EXIT 'for f in "${cleanup_tmp[@]:-}"; do [[ -n "${f}" && -f "${f}" ]] && rm -f "${f}" || true; done'
+  # -----------------------------------------------------------------------------
+  # 6. Credential Setup (Load or Generate)
+  # -----------------------------------------------------------------------------
+  local tmp_govc_env=""
+  local tmp_vddk_cred=""
+  local persisted_govc_env="${V2K_WORKDIR}/govc.env"
+  local persisted_vddk_cred="${V2K_WORKDIR}/vddk.cred"
+  
+  local -a cleanup_tmp=()
 
-  v2k_write_kv_file "${tmp_govc_env}" \
-    "GOVC_URL=${govc_url}" \
-    "GOVC_USERNAME=${username}" \
-    "GOVC_PASSWORD=${password}" \
-    "GOVC_INSECURE=${insecure}"
+  # A. GOVC Credential
+  if [[ -n "${cred_file_in}" ]]; then
+      # User provided or Auto-discovered
+      tmp_govc_env="${cred_file_in}"
+  else
+      # Generate from args
+      local govc_url
+      govc_url="$(v2k_build_govc_url_from_vcenter_host "${vcenter_host}")"
+      tmp_govc_env="$(v2k_mktemp_file "govc.env")"
+      v2k_write_kv_file "${tmp_govc_env}" \
+        "GOVC_URL=${govc_url}" \
+        "GOVC_USERNAME=${username}" \
+        "GOVC_PASSWORD=${password}" \
+        "GOVC_INSECURE=${insecure}"
+      cleanup_tmp+=("${tmp_govc_env}")
+  fi
 
-  v2k_write_kv_file "${tmp_vddk_cred}" \
-    "VDDK_USER=${username}" \
-    "VDDK_PASSWORD=${password}" \
-    "VDDK_SERVER=${vcenter_host}"
+  # B. VDDK Credential
+  if [[ -n "${vddk_cred_file_in}" ]]; then
+      # User provided or Auto-discovered
+      tmp_vddk_cred="${vddk_cred_file_in}"
+  else
+      # Generate from args if username is present
+      if [[ -n "${username}" ]]; then
+          tmp_vddk_cred="$(v2k_mktemp_file "vddk.cred")"
+          v2k_write_kv_file "${tmp_vddk_cred}" \
+            "VDDK_USER=${username}" \
+            "VDDK_PASSWORD=${password}" \
+            "VDDK_SERVER=${vcenter_host}"
+          cleanup_tmp+=("${tmp_vddk_cred}")
+      fi
+  fi
 
-  # ✅ 중요: govc 단계들이 env 기반으로 동작할 수 있으므로 즉시 환경에 반영
-  v2k_source_kv_env "${tmp_govc_env}"
+  # C. Persist to Workdir (Idempotent: cp even if same file, to ensure permission/existence)
+  # Only persist if it's NOT already the persisted file to avoid "cp: same file" warning
+  if [[ "${tmp_govc_env}" != "${persisted_govc_env}" ]]; then
+      install -m 600 "${tmp_govc_env}" "${persisted_govc_env}"
+  fi
+  
+  if [[ -n "${tmp_vddk_cred}" ]]; then
+      if [[ "${tmp_vddk_cred}" != "${persisted_vddk_cred}" ]]; then
+          install -m 600 "${tmp_vddk_cred}" "${persisted_vddk_cred}"
+      fi
+      export V2K_VDDK_CRED_FILE="${persisted_vddk_cred}"
+      # If auto-discovered, V2K_VDDK_SERVER needs to be loaded or assumed. 
+      # Usually loaded from govc.env but let's ensure exported if passed by arg.
+      [[ -n "${vcenter_host}" ]] && export V2K_VDDK_SERVER="${vcenter_host}"
+      
+      init_args+=( --vddk-cred-file "${persisted_vddk_cred}" )
+  fi
 
-  # ✅ manifest에 vddk cred 경로를 남기고, 후속 단계에서 참조 가능하도록 env에도 설정
-  export V2K_VDDK_SERVER="${vcenter_host}"
-  export V2K_VDDK_CRED_FILE="${tmp_vddk_cred}"
+  # Load Env
+  v2k_source_kv_env "${persisted_govc_env}"
+  
+  # For init, we point to the persisted file
+  init_args+=( --cred-file "${persisted_govc_env}" )
 
-  init_args+=( --cred-file "${tmp_govc_env}" --vddk-cred-file "${V2K_VDDK_CRED_FILE}" )
+  # Cleanup temps
+  if (( ${#cleanup_tmp[@]} > 0 )); then
+      # shellcheck disable=SC2064
+      v2k_trap_append EXIT "rm -f ${cleanup_tmp[*]} 2>/dev/null || true"
+  fi
 
   # -----------------------------------------------------------------------------
-  # Failure handling (productization)
+  # Failure handling setup
   # -----------------------------------------------------------------------------
   local __v2k_cleanup_done=0
   local __v2k_failed=0
@@ -356,13 +426,9 @@ v2k_cmd_run_foreground() {
       if declare -F v2k_event_storage_snapshot >/dev/null 2>&1; then
         v2k_event_storage_snapshot "on_error_post_cleanup" || true
       fi
-      if declare -F v2k_event >/dev/null 2>&1; then
-        v2k_event WARN "orchestrator" "" "cleanup_attempted_on_error" "{\"keep_snapshots\":${keep_snapshots},\"keep_workdir\":${keep_workdir}}"
-      fi
     fi
   '
 
-  # sync defaults + extras
   local -a sync_defaults=()
   [[ -n "${default_jobs}" ]] && sync_defaults+=(--jobs "${default_jobs}")
   [[ -n "${default_chunk}" ]] && sync_defaults+=(--chunk "${default_chunk}")
@@ -373,20 +439,15 @@ v2k_cmd_run_foreground() {
   v2k_parse_arg_string "${incr_args_str}" incr_extra
   v2k_parse_arg_string "${cutover_args_str}" cutover_extra
 
-  # Windows auto driver injection (WinPE bootstrap)
-  # - Enabled by default for run/auto.
-  # - Disable by setting V2K_RUN_WINPE_BOOTSTRAP_AUTO=0.
   local winpe_bootstrap_auto="${V2K_RUN_WINPE_BOOTSTRAP_AUTO:-1}"
 
-  # Pipeline
-
+  # Pipeline start
   local skip_init=0
   local skip_cbt=0
   local skip_base=0
   local have_manifest=0
   [[ -f "${V2K_MANIFEST}" ]] && have_manifest=1
 
-  # split=phase2: phase1에서 생성된 manifest/progress를 재사용해야 하므로 init/cbt/base를 재실행하지 않는다.
   if [[ "${split}" == "phase2" ]]; then
     if [[ "${have_manifest}" -ne 1 ]]; then
       v2k_die "split=phase2 requires existing manifest at ${V2K_MANIFEST}"
@@ -394,6 +455,22 @@ v2k_cmd_run_foreground() {
     if ! v2k_manifest_split_is_done "${V2K_MANIFEST}" "phase1"; then
       v2k_die "split=phase2 requires split=phase1 completion marker in manifest"
     fi
+    
+    # Reload environment in Phase 2
+    if [[ -f "${persisted_govc_env}" ]]; then
+        v2k_source_kv_env "${persisted_govc_env}"
+    fi
+    if [[ -f "${persisted_vddk_cred}" ]]; then
+        export V2K_VDDK_CRED_FILE="${persisted_vddk_cred}"
+        # VDDK Server might be needed from govc.env if not set
+        if [[ -z "${V2K_VDDK_SERVER:-}" ]]; then
+             export V2K_VDDK_SERVER="${GOVC_URL_HOST:-${GOVC_URL:-}}"
+             # Remove https:// prefix if exists for VDDK_SERVER just in case, though usually govc handles it
+             V2K_VDDK_SERVER="${V2K_VDDK_SERVER#*://}"
+             V2K_VDDK_SERVER="${V2K_VDDK_SERVER%%/*}"
+        fi
+    fi
+
     skip_init=1
     skip_cbt=1
     skip_base=1
@@ -402,7 +479,6 @@ v2k_cmd_run_foreground() {
 
   if [[ "${skip_init}" -eq 0 ]]; then
     v2k_cmd_init "${init_args[@]}"
-    v2k_keep_govc_env_in_workdir "${tmp_govc_env}" || true
   fi
 
   if [[ "${skip_cbt}" -eq 0 ]]; then
@@ -415,11 +491,7 @@ v2k_cmd_run_foreground() {
     v2k_manifest_phase_done "${V2K_MANIFEST}" "base"
   fi
 
-  # -------------------------------------------------------------------
-  # Split-run: Phase1 boundary
-  # - Phase1 is fixed to: base snapshot/sync + incr1 snapshot/sync
-  # - Keep same run_id/workdir and exit without cutover for day-time runs.
-  # -------------------------------------------------------------------
+  # Phase1 boundary
   if [[ "${split}" == "phase1" ]]; then
     v2k_event INFO "run" "" "phase" "{\"which\":\"phase1\",\"action\":\"enter\"}"
     v2k_emit_progress_event "run" "phase1:incr1_snapshot"
@@ -427,7 +499,12 @@ v2k_cmd_run_foreground() {
     v2k_emit_progress_event "run" "phase1:incr1_sync"
     v2k_cmd_incr_sync
     v2k_manifest_phase_done "${V2K_MANIFEST}" "incr_sync"
-    v2k_manifest_mark_split_done "${V2K_MANIFEST}" "phase1"
+    
+    v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.split.phase1.done" "true"
+    if declare -F v2k_manifest_mark_split_done >/dev/null; then
+       v2k_manifest_mark_split_done "${V2K_MANIFEST}" "phase1" 2>/dev/null || true
+    fi
+    
     v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.progress" "{\"percent\":$(v2k_progress_percent_from_manifest "${V2K_MANIFEST}"),\"last_step\":\"phase1_done\"}"
     v2k_emit_progress_event "run" "phase1:done"
     v2k_event INFO "run" "" "phase" "{\"which\":\"phase1\",\"action\":\"exit\"}"
@@ -435,6 +512,7 @@ v2k_cmd_run_foreground() {
     return 0
   fi
 
+  # Incr loop
   if [[ "${no_incr}" == "0" ]]; then
     local iter=0 converged=0
     local incr_failed=0
@@ -446,12 +524,6 @@ v2k_cmd_run_foreground() {
       t0="$(date +%s)"
       v2k_cmd_snapshot incr
 
-      # ------------------------------------------------------------
-      # IMPORTANT:
-      # incr sync failure MUST NOT abort the run pipeline.
-      # If incr fails (e.g. CBT changeId missing), stop incr loop
-      # and continue to cutover.
-      # ------------------------------------------------------------
       if ! v2k_cmd_sync incr "${sync_defaults[@]}" "${incr_extra[@]}"; then
         incr_failed=1
         if declare -F v2k_event >/dev/null 2>&1; then
@@ -464,9 +536,7 @@ v2k_cmd_run_foreground() {
       t1="$(date +%s)"
       elapsed=$((t1 - t0))
 
-      # Stop condition
       if [[ "${split}" == "phase2" ]]; then
-        # Deadline-driven: if last incr sync finished within deadline_sec -> cutover
         if [[ "${elapsed}" -le "${deadline_sec}" ]]; then
           v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.sync_within_deadline" "true"
           converged=1
@@ -475,13 +545,11 @@ v2k_cmd_run_foreground() {
           v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.sync_within_deadline" "false"
         fi
 
-        # Safety cap (avoid infinite loop in ops mistakes)
         if [[ "${iter}" -ge "${max_incr_phase2}" ]]; then
           v2k_event WARN "run" "" "deadline" "{\"reason\":\"max_incr_phase2_reached\",\"iter\":${iter},\"deadline_sec\":${deadline_sec}}"
           break
         fi
       else
-        # Legacy converge-threshold driven
         if [[ "${converge_threshold_sec}" != "0" ]] && (( elapsed <= converge_threshold_sec )); then
           converged=1
           if declare -F v2k_event >/dev/null 2>&1; then
@@ -510,7 +578,6 @@ v2k_cmd_run_foreground() {
     fi
   fi
 
-  # Split-run: Phase2 safety gate
   if [[ "${split}" == "phase2" ]]; then
     local within_deadline
     within_deadline="$(jq -r '.runtime.sync_within_deadline // false' "${V2K_MANIFEST}" 2>/dev/null || echo false)"
@@ -521,7 +588,6 @@ v2k_cmd_run_foreground() {
     fi
   fi
 
-  # Auto WinPE bootstrap for Windows VMs (policy)
   local is_windows=0
   if v2k_manifest_is_windows "${V2K_MANIFEST}"; then
     is_windows=1
@@ -530,7 +596,6 @@ v2k_cmd_run_foreground() {
   local -a cutover_args=(--shutdown "${shutdown}")
 
   if [[ "${is_windows}" -eq 1 && "${V2K_RUN_WINPE_BOOTSTRAP_AUTO}" == "1" ]]; then
-    # Ensure KVM actions occur for Windows: at least define+start + winpe bootstrap.
     if [[ "${kvm_vm_policy}" == "none" ]]; then
       kvm_vm_policy="define-and-start"
     fi
@@ -543,7 +608,6 @@ v2k_cmd_run_foreground() {
     define-and-start) cutover_args+=(--start) ;;
   esac
 
-  # Auto-add WinPE bootstrap for Windows guests unless the user explicitly passed WinPE-related cutover args.
   if [[ "${winpe_bootstrap_auto}" == "1" ]]; then
     if declare -F v2k_manifest_is_windows >/dev/null 2>&1 && v2k_manifest_is_windows "${V2K_MANIFEST}"; then
       local winpe_explicit=0
@@ -565,7 +629,7 @@ v2k_cmd_run_foreground() {
 
   v2k_cmd_cutover "${cutover_args[@]}"
 
-  # Cleanup (after successful cutover)
+  # Cleanup
   if [[ "${do_cleanup}" == "1" ]]; then
     local -a cleanup_args=()
     [[ "${keep_snapshots}" == "1" ]] && cleanup_args+=(--keep-snapshots)
@@ -578,6 +642,10 @@ v2k_cmd_run_foreground() {
     if declare -F v2k_event_storage_snapshot >/dev/null 2>&1; then
       v2k_event_storage_snapshot "post_cleanup" || true
     fi
+  fi
+
+  if [[ "${split}" == "phase2" ]]; then
+    v2k_manifest_runtime_set "${V2K_MANIFEST}" ".runtime.split.phase2.done" "true"
   fi
 }
 

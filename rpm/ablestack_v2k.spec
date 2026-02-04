@@ -1,4 +1,4 @@
-# ablestack-v2k.spec - RPM spec for ablestack-v2k (V2K add-on)
+# ablestack_v2k.spec - RPM spec for ablestack_v2k (V2K add-on)
 #
 # Copyright 2026 ABLECLOUD
 #
@@ -25,6 +25,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 Requires:       bash
+Requires:       bash-completion
 Requires:       jq
 Requires:       python3
 Requires:       openssl
@@ -35,13 +36,17 @@ Requires:       qemu-img
 Requires:       libvirt-client
 
 %description
-ablestack-v2k provides ABLESTACK VMware-to-KVM (V2K) migration scripts and libraries.
+ablestack_v2k provides ABLESTACK VMware-to-KVM (V2K) migration scripts and libraries.
 Assets such as VDDK and govc are handled by the offline ISO installer.
 
 %prep
 %setup -q
 
 %install
+# NOTE:
+# - lib/v2k/fleet.sh 는 기존 cp -a lib/v2k/* 로 자동 포함됩니다.
+# - completions/ablestack_v2k 는 아래 bash-completion 경로로 별도 설치합니다.
+
 # Binaries (explicit path: /usr/local/bin)
 mkdir -p %{buildroot}/usr/local/bin
 install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
@@ -50,6 +55,10 @@ install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k
 cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev/null || :
 
+# Bash completion (standard location)
+mkdir -p %{buildroot}%{_datadir}/bash-completion/completions
+install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/completions/%{name}
+
 %files
 
 
@@ -57,8 +66,9 @@ cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev
 %license LICENSE
 /usr/local/bin/ablestack_v2k
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
+%{_datadir}/bash-completion/completions/%{name}
 
 %changelog
 * Sun Jan 11 2026 ABLECLOUD <dev@ablecloud.io> %{version}-%{release}
-- Initial packaging for ablestack-v2k (scripts + lib/v2k)
+- Initial packaging for ablestack_v2k (scripts + lib/v2k)
 - Git hash: %{githash}

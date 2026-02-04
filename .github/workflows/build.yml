@@ -190,6 +190,15 @@ jobs:
           # NOTE: 기존 make rpm 경로와 분리된 V2K 전용 타겟을 사용해야 함
           #       (예: make v2k-rpm)
           make v2k-rpm
+ 
+      - name: Verify ablestack_v2k rpm contains bash completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          RPM_FILE=$(ls -1 build/rpm-v2k/ablestack_v2k-*.rpm | head -n 1)
+          echo "[INFO] verifying rpm: ${RPM_FILE}"
+          rpm -qlp "${RPM_FILE}" | grep -E "bash-completion/completions/ablestack_v2k$" >/dev/null
+          echo "[OK] bash completion is packaged"
 
       - name: Create V2K RPM repo (offline) for ABLESTACK (Rocky 9.6)
         run: |
@@ -933,7 +942,7 @@ jobs:
           gpgcheck=0
           EOV
                           sudo dnf clean all
-                          sudo dnf -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack-v2k || \
+                          sudo dnf -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
                             sudo dnf -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
                             sudo dnf -y localinstall "${V2K_REPO_DIR}"/*.rpm
                           sudo rm -f "${V2K_REPO_FILE}"

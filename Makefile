@@ -28,6 +28,9 @@ GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 INSTALL_PREFIX = /usr/local
 BIN_DIR = $(INSTALL_PREFIX)/bin
 LIB_TARGET = $(INSTALL_PREFIX)/lib/$(NAME)
+COMPLETIONS_SRC = completions
+COMPLETIONS_TARGET = /usr/share/bash-completion/completions
+COMPLETIONS_FILE = $(COMPLETIONS_SRC)/$(V2K_NAME)
 
 DEB_PKG = $(NAME)_$(VERSION)-$(RELEASE)
 DEB_BUILD_DIR = $(DEB_PKG)
@@ -35,6 +38,7 @@ DEB_DOC_DIR = $(DEB_BUILD_DIR)/usr/share/doc/$(NAME)
 DEB_BIN_DIR = $(DEB_BUILD_DIR)/usr/bin
 DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
+DEB_COMPLETIONS_DIR = $(DEB_BUILD_DIR)/usr/share/bash-completion/completions
 
 .PHONY: all install uninstall rpm v2k-rpm deb windows clean
 
@@ -138,6 +142,15 @@ rpm:
 v2k-rpm:
 	@echo "📦 Building V2K RPM (isolated)..."
 	@test -f "$(V2K_SPEC)" || (echo "[ERR] Missing spec: $(V2K_SPEC)" >&2; exit 2)
+	@test -f "$(COMPLETIONS_FILE)" || (echo "[ERR] Missing completion file: $(COMPLETIONS_FILE)" >&2; exit 2)
+
+	@# Sanity check for new assets (does not fail build; spec may still package lib/v2k/*)
+	@if [ -f "lib/v2k/fleet.sh" ]; then \
+		echo "OK: lib/v2k/fleet.sh detected"; \
+	else \
+		echo "[WARN] Missing: lib/v2k/fleet.sh"; \
+	fi
+	echo "OK: $(COMPLETIONS_FILE) detected"
 
 	# Fully isolated rpmbuild tree for V2K (keeps existing 'rpmbuild/' untouched)
 	mkdir -p rpmbuild_v2k/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
@@ -155,6 +168,15 @@ v2k-rpm:
 	mkdir -p build/rpm-v2k
 	cp rpmbuild_v2k/RPMS/noarch/*.rpm build/rpm-v2k/ 2>/dev/null || true
 	cp rpmbuild_v2k/RPMS/*/*.rpm build/rpm-v2k/ 2>/dev/null || true
+
+	@echo "🔎 Verifying completion file is included in ablestack_v2k RPM..."
+	@RPM_FILE="$$(ls -1 build/rpm-v2k/$(V2K_NAME)-*.rpm 2>/dev/null | head -n 1)"; \
+	if [ -z "$$RPM_FILE" ]; then \
+	  echo "[ERR] Built RPM not found under build/rpm-v2k" >&2; exit 2; \
+	fi; \
+	rpm -qlp "$$RPM_FILE" | grep -qE "bash-completion/completions/$(V2K_NAME)$$" || \
+	  (echo "[ERR] completion file missing in RPM: $$RPM_FILE" >&2; exit 2)
+
 	@echo "✅ V2K RPM package created: build/rpm-v2k/"
 
 deb:

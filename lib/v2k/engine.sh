@@ -41,6 +41,11 @@ source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/nbd_utils.sh"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/v2k_target_device.sh"
 
+# [Global Variable for LVM Lock FD]
+# We use a global variable to hold the file descriptor for the LVM lock
+# so that it persists across function calls until cleanup.
+V2K_LVM_LOCK_FD=""
+
 v2k_nbd_has_children_types() {
   # Return 0 if dev has suspicious children types (lvm/crypt/raid), meaning "not clean".
   # We intentionally avoid allocating/using such nbd for bootstrap to prevent LVM auto-activation ghosts.
@@ -547,8 +552,6 @@ v2k_linux_bootstrap_lvm_find_vgs_on_nbd() {
 }
 
 v2k_linux_bootstrap_lvm_activate_vg() {
-  # Activate a specific VG (scoped to this nbd device) and ensure LV nodes appear.
-  # Return 0 on success (at least one LV becomes active), non-zero otherwise.
   local nbd_dev="$1" vg="$2"
   v2k_has_lvm_tools || return 1
   [[ -n "${vg}" ]] || return 1
@@ -557,17 +560,57 @@ v2k_linux_bootstrap_lvm_activate_vg() {
   bn="$(basename "${nbd_dev}")"
   cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
 
-  # settle before activation to ensure partitions are visible
+  # [CRITICAL ADDITION] VG Name Collision Locking
+  # If multiple VMs have the same VG name (e.g. "rl"), we MUST serialize activation.
+  # Otherwise, kernel device mapper will reject duplicate /dev/mapper/rl-root names.
+  local lock_file="/var/lock/ablestack-v2k/lvm_name_${vg}.lock"
+  mkdir -p "$(dirname "${lock_file}")"
+  
+  # Open lock file on a new file descriptor
+  local lock_fd
+  eval "exec {lock_fd}>${lock_file}"
+  
+  v2k_event INFO "linux_bootstrap" "" "lvm_lock_acquire_wait" "{\"vg\":\"${vg}\"}"
+  
+  # Wait for exclusive lock (timeout 300s to prevent indefinite hang)
+  if ! flock -x -w 300 "${lock_fd}"; then
+      v2k_event ERROR "linux_bootstrap" "" "lvm_lock_timeout" "{\"vg\":\"${vg}\"}"
+      eval "exec ${lock_fd}>&-"
+      return 5
+  fi
+  
+  # Lock acquired! Store FD globally so cleanup() can release it later.
+  # We DO NOT close it here; holding it keeps the VG exclusively ours.
+  V2K_LVM_LOCK_FD="${lock_fd}"
+  v2k_event INFO "linux_bootstrap" "" "lvm_lock_acquired" "{\"vg\":\"${vg}\"}"
+
+  # [CRITICAL ADDITION] VG Name Collision Locking
+  # If multiple VMs have the same VG name (e.g. "rl"), we MUST serialize activation.
+  # Otherwise, kernel device mapper will reject duplicate /dev/mapper/rl-root names.
+  local lock_file="/var/lock/ablestack-v2k/lvm_name_${vg}.lock"
+  mkdir -p "$(dirname "${lock_file}")"
+  local lock_fd
+  eval "exec {lock_fd}>${lock_file}"
+  
+  v2k_event INFO "linux_bootstrap" "" "lvm_lock_acquire_wait" "{\"vg\":\"${vg}\"}"
+  if ! flock -x -w 300 "${lock_fd}"; then
+      v2k_event ERROR "linux_bootstrap" "" "lvm_lock_timeout" "{\"vg\":\"${vg}\"}"
+      eval "exec ${lock_fd}>&-"
+      return 5
+  fi
+  # Lock acquired! Store FD globally so cleanup() can release it later.
+  V2K_LVM_LOCK_FD="${lock_fd}"
+  v2k_event INFO "linux_bootstrap" "" "lvm_lock_acquired" "{\"vg\":\"${vg}\"}"
+
   udevadm settle >/dev/null 2>&1 || true
 
-  # NOTE:
-  # - Do NOT use pvscan/vgscan --cache here; it can pollute global cache and amplify "duplicate PV" noise.
-  # - Instead, directly activate the VG we discovered on this nbd device.
+  # Activate
   if ! lvm vgchange --config "${cfg}" -ay "${vg}" >/dev/null 2>&1; then
+    # If activation fails, we should release lock immediately to be polite,
+    # though cleanup() will catch it too.
     return 2
   fi
 
-  # Ensure device nodes are created (udev) and LV is truly active (lv_attr contains 'a')
   udevadm settle >/dev/null 2>&1 || true
   if lvm lvs --config "${cfg}" --noheadings -o lv_attr "${vg}" 2>/dev/null \
       | awk '{$1=$1}; $1 ~ /a/ {found=1} END{exit(found?0:1)}'; then
@@ -577,31 +620,14 @@ v2k_linux_bootstrap_lvm_activate_vg() {
 }
 
 v2k_linux_bootstrap_try_mount_lvm() {
-  # Try to find root inside LVM LV by activating only volumes on this nbd device.
-  # Returns selected LV path (e.g. /dev/mapper/rl-root) via stdout.
   local nbd_dev="$1" mnt="$2"
-
-  # -------------------------------------------------------------------
-  # IMPORTANT: LVM runtime state isolation
-  #
-  # LVM can remember previously-seen PVs (same PVID on another device) via
-  # runtime/cache state. In V2K bootstrap flows, a prior run may have used
-  # a different /dev/nbdX for the same guest disk PV, causing:
-  #   "PV ... is duplicate for PVID ... on ... /dev/nbd0p3"
-  #
-  # To make bootstrap deterministic and prevent cross-run contamination,
-  # linux_bootstrap_one() sets LVM_SYSTEM_DIR to a per-run temp directory.
-  # This function intentionally relies on that isolation.
-  # -------------------------------------------------------------------
-
   v2k_has_lvm_tools || return 1
 
   local bn cfg
   bn="$(basename "${nbd_dev}")"
-  # LVM device filter: allow only /dev/nbdX and its partitions, reject everything else
-  cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
+  # [Isolation] global_filter ensures no PVID collisions during this serialized session
+  cfg="devices { global_filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] }"
 
-  # --- Debug snapshot (before any LVM ops) ---
   v2k_event INFO "linux_bootstrap" "" "lvm_debug_pre" \
     "$(v2k_linux_bootstrap_json \
       --arg nbd "${nbd_dev}" \
@@ -610,69 +636,39 @@ v2k_linux_bootstrap_try_mount_lvm() {
       --arg blkid "$(v2k_linux_bootstrap_dbg_cmd blkid "${nbd_dev}")" \
       '{nbd:$nbd,note:$note,lsblk:$lsblk,blkid:$blkid}')"
 
-  # Make sure device nodes are settled
   udevadm settle >/dev/null 2>&1 || true
+  sleep 1
 
-  # ------------------------------------------------------------
-  # Deterministic activation path:
-  # 1) Try pvscan --activate for each PV partition on this nbd.
-  #    This avoids global scans and is resilient to duplicate PVID warnings.
-  # ------------------------------------------------------------
-  local pv pvscan_ok=0 activated=0
-  while read -r pv; do
-    [[ -b "${pv}" ]] || continue
-    # pvscan alone may not mark LVs as 'active' immediately on some layouts.
-    # Treat pvscan success as "candidate activated" and continue with vgchange -ay below.
-    if v2k_linux_bootstrap_lvm_try_activate_by_pv "${nbd_dev}" "${pv}"; then
-      pvscan_ok=1
-      break
-    fi
-  done < <(v2k_linux_bootstrap_lvm_pv_candidates "${nbd_dev}")
+  # [Step 1] Force Cache Update
+  local scan_out scan_rc
+  v2k_linux_bootstrap_run_event "cmd_pvscan_force" scan_out scan_rc -- \
+     lvm pvscan --config "${cfg}" --cache
 
-  # pvscan이 성공했으면 vgchange -ay를 반드시 수행해서 LV를 "진짜 활성" 상태로 만든다.
-  if [[ "${pvscan_ok}" -eq 1 ]]; then
-    local vgall_out vgall_rc
-    v2k_linux_bootstrap_run_event "cmd_vgchange_activate_all" vgall_out vgall_rc -- \
-      lvm vgchange --config "${cfg}" -ay
-    v2k_event INFO "linux_bootstrap" "" "lvm_vgchange_activate_all" \
-      "$(v2k_linux_bootstrap_json \
-        --argjson rc "${vgall_rc}" \
-        --arg out "$(printf '%s' "${vgall_out}" | head -c 1500)" \
-        '{rc:$rc,out:$out}')"
+  # [Step 2] Discover VGs
+  local vgs_out vgs_rc
+  v2k_linux_bootstrap_run_event "cmd_vgs_discover" vgs_out vgs_rc -- \
+     lvm vgs --config "${cfg}" --noheadings -o vg_name
+  
+  local vgs
+  vgs="$(echo "${vgs_out}" | awk '{$1=$1}; $1!=""{print $1}' | sort -u)"
 
-    # vgchange 이후에 active LV 존재 여부로 activated 판정
-    if lvm lvs --config "${cfg}" --noheadings -o lv_attr 2>/dev/null \
-        | awk '{$1=$1}; $1 ~ /a/ {found=1} END{exit(found?0:1)}'; then
-      activated=1
-    fi
+  local activated=0
+  if [[ -n "${vgs}" ]]; then
+      v2k_event INFO "linux_bootstrap" "" "lvm_vgs_found" "{\"vgs\":\"${vgs}\"}"
+      
+      # [Step 3] Activate (Safe due to global serialization)
+      for vg in ${vgs}; do
+          [[ -n "${vg}" ]] || continue
+          
+          if lvm vgchange --config "${cfg}" -ay "${vg}"; then
+              activated=1
+          fi
+      done
+  else
+      v2k_event WARN "linux_bootstrap" "" "lvm_no_vgs_found" \
+        "{\"note\":\"vgscan found nothing on ${nbd_dev}\", \"scan_rc\":${scan_rc}}"
   fi
 
-  # ------------------------------------------------------------
-  # Fallback:
-  # If still not activated, attempt to discover VG name(s) and activate explicitly.
-  # ------------------------------------------------------------
-  if [[ "${activated}" -ne 1 ]]; then
-    local vgs vg
-    local vgs_out vgs_rc
-    v2k_linux_bootstrap_run_event "cmd_vgs_list_vg_names" vgs_out vgs_rc -- \
-      lvm vgs --config "${cfg}" --noheadings -o vg_name
-    vgs="$(printf '%s\n' "${vgs_out}" | awk '{$1=$1}; $1!=""{print $1}' | sort -u)"
-    v2k_event INFO "linux_bootstrap" "" "lvm_vg_candidates" \
-      "$(v2k_linux_bootstrap_json \
-        --arg vgs "$(printf '%s' "${vgs}" | tr '\n' ',' | sed -E 's/,+$//')" \
-        --argjson vgs_rc "${vgs_rc}" \
-        '{vgs:$vgs,vgs_rc:$vgs_rc}')"
-
-    while read -r vg; do
-      [[ -n "${vg}" ]] || continue
-      if v2k_linux_bootstrap_lvm_try_activate_vg_name "${nbd_dev}" "${vg}"; then
-        activated=1
-        break
-      fi
-    done <<< "${vgs}"
-  fi
-
-  # --- Debug snapshot (after activation attempts) ---
   v2k_event INFO "linux_bootstrap" "" "lvm_debug_post" \
     "$(v2k_linux_bootstrap_json \
       --argjson activated "${activated}" \
@@ -681,45 +677,22 @@ v2k_linux_bootstrap_try_mount_lvm() {
       --arg lvs "$(v2k_linux_bootstrap_dbg_cmd lvm lvs --config "${cfg}" --noheadings -o lv_name,vg_name,lv_attr,lv_path)" \
       '{activated:$activated,pvs:$pvs,vgs:$vgs,lvs:$lvs}')"
 
-  # 3) Enumerate LVs and find one containing /etc/os-release
-  local lv lvlist_out lvlist_rc
-
-  # Capture LV list using stable fields (vg_name,lv_name). Avoid lv_path blank issues.
-  v2k_linux_bootstrap_run_event "cmd_lvs_list_vg_lv" lvlist_out lvlist_rc -- \
-    lvm lvs --config "${cfg}" --noheadings -o vg_name,lv_name
-
-  # 파싱용(raw)
+  # [Step 4] Mount Logic
   local lvlist_raw
   lvlist_raw="$(lvm lvs --config "${cfg}" --noheadings -o vg_name,lv_name 2>/dev/null || true)"
 
-  v2k_event INFO "linux_bootstrap" "" "lvs_lv_path_result" \
-    "$(v2k_linux_bootstrap_json \
-      --argjson rc "${lvlist_rc}" \
-      --arg out "$(printf '%s' "${lvlist_out}" | head -c 1500)" \
-      '{rc:$rc,out:$out}')"
-
-  # Normalize and iterate: build candidate device path from vg/lv.
-  # Prefer /dev/<vg>/<lv> because it's common on RHEL/Rocky.
   while read -r vg lvname; do
     vg="$(printf '%s' "${vg}" | awk '{$1=$1};1')"
     lvname="$(printf '%s' "${lvname}" | awk '{$1=$1};1')"
     [[ -n "${vg}" && -n "${lvname}" ]] || continue
 
-    lv="/dev/${vg}/${lvname}"
-    # Race guard: ensure LV node is ready before mount.
-    # IMPORTANT: do NOT pre-filter with -b before waiting; LV nodes can appear late (udev/dm race).
+    local lv="/dev/${vg}/${lvname}"
+    
     if ! v2k_linux_bootstrap_wait_blockdev "${lv}" 10; then
-      v2k_event INFO "linux_bootstrap" "" "lv_node_not_ready_skip" \
-        "$(v2k_linux_bootstrap_json \
-          --arg lv "${lv}" \
-          --argjson timeout_sec 10 \
-          --arg note "LV path not a block device within timeout; skipping (udev/dm race guard)" \
-          '{lv:$lv,timeout_sec:$timeout_sec,note:$note}')"
       continue
     fi
     udevadm settle >/dev/null 2>&1 || true
 
-    # guard: clear any leftover mount on mnt (prevents false rc=0)
     v2k_linux_bootstrap_umount_robust "${mnt}" --recursive >/dev/null 2>&1 || true
 
     local mout mrc
@@ -727,23 +700,12 @@ v2k_linux_bootstrap_try_mount_lvm() {
       v2k_linux_bootstrap_mount_robust "${lv}" "${mnt}" "ro"
 
     if [[ "${mrc}" -ne 0 ]]; then
-      v2k_event INFO "linux_bootstrap" "" "mount_try_lv_failed" \
-        "$(v2k_linux_bootstrap_json \
-          --arg lv "${lv}" \
-          --argjson rc "${mrc}" \
-          --arg note "mount failed" \
-          '{lv:$lv,rc:$rc,note:$note}')"
       continue
     fi
 
     local has_os=0
     [[ -f "${mnt}/etc/os-release" ]] && has_os=1
-    v2k_event INFO "linux_bootstrap" "" "mount_try_lv_probe" \
-      "$(v2k_linux_bootstrap_json \
-        --arg lv "${lv}" \
-        --argjson has_os_release "${has_os}" \
-        '{lv:$lv,has_os_release:$has_os_release}')"
-
+    
     if [[ "${has_os}" -eq 1 ]]; then
       v2k_linux_bootstrap_umount_robust "${mnt}" >/dev/null 2>&1 || true
       echo "${lv}"
@@ -829,6 +791,13 @@ v2k_linux_bootstrap_initramfs() {
 v2k_linux_bootstrap_one() {
   local img="$1"
 
+  # [NEW] Ensure NBD module is loaded (Auto-recovery after reboot)
+  if ! lsmod | grep -q "^nbd"; then
+      v2k_event INFO "linux_bootstrap" "" "loading_nbd_module" "{}"
+      modprobe nbd max_part=16
+      udevadm settle
+  fi
+
   local nbd_dev=""
   local mnt=""
   local bootmnt=""
@@ -837,6 +806,9 @@ v2k_linux_bootstrap_one() {
   local had_old_lvm_system_dir=0
   mnt="$(mktemp -d /tmp/v2k_root.XXXXXX)"
   bootmnt="$(mktemp -d /tmp/v2k_boot.XXXXXX)"
+
+  # [Global Lock Variable]
+  V2K_BOOTSTRAP_LOCK_FD=""
 
   cleanup() {
     set +e
@@ -847,7 +819,7 @@ v2k_linux_bootstrap_one() {
         --arg bootmnt "${bootmnt:-}" \
         '{nbd:$nbd,mnt:$mnt,bootmnt:$bootmnt}')"
 
-    # Unmount order: chroot bind mounts -> /boot -> root
+    # [STEP 1] Unmount Filesystems
     if [[ -n "${mnt:-}" ]]; then
       v2k_linux_bootstrap_umount_robust "${mnt}/dev"  --recursive >/dev/null 2>&1 || true
       v2k_linux_bootstrap_umount_robust "${mnt}/proc" --recursive >/dev/null 2>&1 || true
@@ -859,25 +831,27 @@ v2k_linux_bootstrap_one() {
       v2k_linux_bootstrap_umount_robust "${bootmnt}"  --recursive >/dev/null 2>&1 || true
     fi
 
-    # Deactivate LVM activated from this nbd (observable)
+    # [STEP 2] Deactivate LVM & Targeted DM Cleanup
     if [[ -n "${nbd_dev:-}" ]]; then
       local bn cfg lvm_out lvm_rc
       bn="$(basename "${nbd_dev}")"
-      cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
+      # Target ONLY this NBD for deactivation
+      cfg="devices { global_filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] }"
 
       v2k_linux_bootstrap_run_event "cmd_lvm_vgchange_deactivate" lvm_out lvm_rc -- \
         lvm vgchange --config "${cfg}" -an
 
-      if [[ "${lvm_rc}" -eq 0 ]]; then
-        v2k_event INFO "linux_bootstrap" "" "lvm_deactivate_ok" \
-          "{\"nbd\":\"${nbd_dev}\"}"
-      else
-        v2k_event WARN "linux_bootstrap" "" "lvm_deactivate_failed" \
-          "{\"nbd\":\"${nbd_dev}\",\"rc\":${lvm_rc}}"
-      fi
+      # [SAFE FIX] Remove DM devices ONLY if they are holders of THIS nbd device
+      for holder in /sys/block/${bn}/holders/*; do
+          if [[ -e "${holder}" ]]; then
+              local dm_name
+              dm_name="$(basename "${holder}")"
+              dmsetup remove --force "${dm_name}" >/dev/null 2>&1 || true
+          fi
+      done
     fi
 
-    # [추가] 전역 예약 락 해제
+    # [STEP 3] Remove Reservation Lock
     if [[ -n "${nbd_dev:-}" ]]; then
         local base lock_dir
         base="$(basename "${nbd_dev}")"
@@ -885,54 +859,65 @@ v2k_linux_bootstrap_one() {
         rm -rf "${lock_dir}" >/dev/null 2>&1 || true
     fi
 
-    # Disconnect nbd (robust + observable)
+    # [STEP 4] Disconnect NBD & WAIT for Removal
     if [[ -n "${nbd_dev:-}" ]]; then
-      local bn pid sys_pid attempt=0 max_attempts=3
+      local bn pid sys_pid attempt=0 max_attempts=5
       bn="$(basename "${nbd_dev}")"
       sys_pid="/sys/block/${bn}/pid"
 
       while [[ "${attempt}" -lt "${max_attempts}" ]]; do
         attempt=$((attempt+1))
-
-        v2k_linux_bootstrap_run_event "cmd_qemu_nbd_disconnect_try" _out _rc -- \
-          qemu-nbd -d "${nbd_dev}"
-
+        qemu-nbd -d "${nbd_dev}" >/dev/null 2>&1 || true
         udevadm settle >/dev/null 2>&1 || true
-        sleep 0.2
-
+        sleep 0.5
         pid="$(cat "${sys_pid}" 2>/dev/null || echo "")"
-        if [[ -z "${pid}" || "${pid}" == "0" ]]; then
-          v2k_event INFO "linux_bootstrap" "" "nbd_disconnect_ok" \
-            "{\"nbd\":\"${nbd_dev}\",\"attempt\":${attempt}}"
-          break
-        fi
-
-        # force kill leftover qemu-nbd
+        if [[ -z "${pid}" || "${pid}" == "0" ]]; then break; fi
         kill -TERM "${pid}" >/dev/null 2>&1 || true
-        sleep 0.3
+        sleep 0.5
         kill -KILL "${pid}" >/dev/null 2>&1 || true
-        sleep 0.3
       done
-
-      pid="$(cat "${sys_pid}" 2>/dev/null || echo "")"
-      if [[ -n "${pid}" && "${pid}" != "0" ]]; then
-        v2k_event ERROR "linux_bootstrap" "" "nbd_disconnect_failed" \
-          "{\"nbd\":\"${nbd_dev}\",\"pid\":\"${pid}\",\"attempts\":${attempt}}"
-      fi
+      
+      # Wait for nodes to disappear
+      local wait_attempt=0
+      while ls "${nbd_dev}"p* >/dev/null 2>&1; do
+          wait_attempt=$((wait_attempt+1))
+          if [[ "${wait_attempt}" -gt 20 ]]; then
+              udevadm trigger --action=remove "${nbd_dev}" >/dev/null 2>&1 || true
+              break
+          fi
+          sleep 0.5
+      done
+      udevadm settle >/dev/null 2>&1 || true
+      
+      # --------------------------------------------------------
+      # [CRITICAL FIX] Post-Disconnect Cache Wipe
+      # Now that the NBD device is GONE, we must tell LVM to scan
+      # and realize it's gone. This removes the "Ghost" entry.
+      # We use a filter that accepts NBDs so LVM *looks* for them,
+      # finds nothing, and updates the cache to "missing".
+      # --------------------------------------------------------
+      local refresh_cfg="devices { filter=[ \"a|^/dev/nbd|\", \"r|.*|\" ] }"
+      lvm pvscan --config "${refresh_cfg}" --cache >/dev/null 2>&1 || true
+      # --------------------------------------------------------
     fi
 
-    # LVM runtime isolation cleanup (per-run)
     if [[ -n "${lvm_sysdir:-}" ]]; then
       rm -rf "${lvm_sysdir}" >/dev/null 2>&1 || true
-      lvm_sysdir=""
     fi
-    # Restore caller's LVM_SYSTEM_DIR if it existed
     if [[ "${had_old_lvm_system_dir:-0}" -eq 1 ]]; then
       export LVM_SYSTEM_DIR="${old_lvm_system_dir:-}"
     else
       unset LVM_SYSTEM_DIR >/dev/null 2>&1 || true
     fi
     rm -rf "${mnt:-}" "${bootmnt:-}" >/dev/null 2>&1 || true
+
+    # [STEP 5] Release Global Lock
+    if [[ -n "${V2K_BOOTSTRAP_LOCK_FD}" ]]; then
+        v2k_event INFO "linux_bootstrap" "" "global_lock_release" "{}"
+        flock -u "${V2K_BOOTSTRAP_LOCK_FD}" 2>/dev/null || true
+        eval "exec ${V2K_BOOTSTRAP_LOCK_FD}>&-" || true
+        V2K_BOOTSTRAP_LOCK_FD=""
+    fi
 
     v2k_event INFO "linux_bootstrap" "" "cleanup_done" \
       "$(v2k_linux_bootstrap_json \
@@ -944,15 +929,81 @@ v2k_linux_bootstrap_one() {
   trap cleanup EXIT INT TERM
 
   finish() {
-    # Ensure cleanup runs for ALL exit paths (success/fail)
     local _rc="${1:-0}"
     cleanup
-    # Do not leak trap to outer scope / later phases
     trap - EXIT INT TERM
     return "${_rc}"
   }
+
+  # ------------------------------------------------------------
+  # [GLOBAL SERIALIZATION START]
+  local lock_file="/var/lock/ablestack-v2k/linux_bootstrap_global.lock"
+  mkdir -p "$(dirname "${lock_file}")"
+  local lock_fd
+  eval "exec {lock_fd}>${lock_file}"
+  
+  v2k_event INFO "linux_bootstrap" "" "global_lock_wait" "{}"
+  if ! flock -x -w 1200 "${lock_fd}"; then
+      v2k_event ERROR "linux_bootstrap" "" "global_lock_timeout" "{}"
+      eval "exec ${lock_fd}>&-"
+      finish 89
+      return $?
+  fi
+  V2K_BOOTSTRAP_LOCK_FD="${lock_fd}"
+  v2k_event INFO "linux_bootstrap" "" "global_lock_acquired" "{}"
+  
+  # ------------------------------------------------------------
+  # [SAFE PRE-FLIGHT CLEANUP]
+  # Remove zombies and their DM holders.
+  # ------------------------------------------------------------
+  v2k_event INFO "linux_bootstrap" "" "preflight_safe_cleanup" "{}"
+  
+  for z_nbd_path in /sys/class/block/nbd*; do
+      # e.g., /sys/class/block/nbd0
+      local z_bn="$(basename "${z_nbd_path}")"
+      local z_dev="/dev/${z_bn}"
+      local z_pid_file="${z_nbd_path}/pid"
+      
+      # 1. Check if active process exists
+      if [[ -f "${z_pid_file}" ]]; then
+          local z_pid
+          z_pid="$(cat "${z_pid_file}" 2>/dev/null || echo "")"
+          if [[ -n "${z_pid}" && "${z_pid}" != "0" ]]; then
+              if kill -0 "${z_pid}" 2>/dev/null; then
+                  continue # Process is alive, skip
+              fi
+          fi
+      fi
+
+      # 2. Process is dead. Remove DM holders first.
+      if [[ -d "${z_nbd_path}/holders" ]]; then
+          for holder in "${z_nbd_path}/holders/"*; do
+              if [[ -e "${holder}" ]]; then
+                  local dm_name
+                  dm_name="$(basename "${holder}")"
+                  v2k_event WARN "linux_bootstrap" "" "removing_stale_dm" "{\"nbd\":\"${z_bn}\",\"dm\":\"${dm_name}\"}"
+                  dmsetup remove --force "${dm_name}" >/dev/null 2>&1 || true
+              fi
+          done
+      fi
+
+      # 3. Clean up the zombie NBD itself
+      if ls "${z_dev}"p* >/dev/null 2>&1; then
+          local wipe_cfg="devices { global_filter=[ \"a|^/dev/${z_bn}|\", \"r|.*|\" ] filter=[ \"a|^/dev/${z_bn}|\", \"r|.*|\" ] }"
+          lvm vgchange --config "${wipe_cfg}" -an >/dev/null 2>&1 || true
+          qemu-nbd -d "${z_dev}" >/dev/null 2>&1 || true
+      fi
+  done
+  
+  # 4. Global Cache Refresh (Pre-flight)
+  # Ensure we start with a clean slate regarding NBDs.
+  local pre_refresh_cfg="devices { filter=[ \"a|^/dev/nbd|\", \"r|.*|\" ] }"
+  lvm pvscan --config "${pre_refresh_cfg}" --cache >/dev/null 2>&1 || true
+  
+  udevadm settle >/dev/null 2>&1 || true
+  sleep 0.5
+  # ------------------------------------------------------------
  
-  # Attach image to a free /dev/nbdX
   nbd_dev="$(v2k_linux_bootstrap_pick_nbd || true)"
   if [[ -z "${nbd_dev}" ]]; then
     v2k_event ERROR "linux_bootstrap" "" "no_free_nbd" "{}"
@@ -960,7 +1011,6 @@ v2k_linux_bootstrap_one() {
     return $?
   fi
 
-  # Connect (rw) + partition scan
   local qout qrc
   v2k_linux_bootstrap_run_event "cmd_qemu_nbd_connect" qout qrc -- \
     qemu-nbd --connect "${nbd_dev}" "${img}"
@@ -973,17 +1023,22 @@ v2k_linux_bootstrap_one() {
   udevadm settle >/dev/null 2>&1 || true
   local pout prc
   v2k_linux_bootstrap_run_event "cmd_partprobe" pout prc -- partprobe "${nbd_dev}"
-  udevadm settle >/dev/null 2>&1 || true
-  sleep 1
+  
+  # [Partition Wait Loop]
+  local pt_attempt=0
+  while [[ "${pt_attempt}" -lt 20 ]]; do
+      udevadm settle >/dev/null 2>&1 || true
+      if ls "${nbd_dev}"p* >/dev/null 2>&1; then
+          break
+      fi
+      if lsblk -rn "${nbd_dev}" 2>/dev/null | grep -q "part"; then
+          sleep 0.5
+      else
+          break
+      fi
+      pt_attempt=$((pt_attempt+1))
+  done
 
-  # ------------------------------------------------------------
-  # LVM runtime isolation for this bootstrap run
-  #
-  # Prevent "duplicate PV for PVID ..." across runs when the same
-  # guest disk PV appears on different /dev/nbdX in prior executions.
-  # We keep LVM_SYSTEM_DIR set for the entire bootstrap lifetime so
-  # that later vgchange -an (cleanup) can operate consistently.
-  # ------------------------------------------------------------
   if v2k_has_lvm_tools; then
     if [[ -n "${LVM_SYSTEM_DIR-}" ]]; then
       had_old_lvm_system_dir=1
@@ -997,20 +1052,17 @@ v2k_linux_bootstrap_one() {
     export LVM_SYSTEM_DIR="${lvm_sysdir}"
   fi
 
-  # Find root: (1) direct partitions, then (2) LVM LVs (common on Rocky/RHEL)
   local root_dev=""
   root_dev="$(v2k_linux_bootstrap_try_mount_partitions "${nbd_dev}" "${mnt}" || true)"
   if [[ -z "${root_dev}" ]]; then
     root_dev="$(v2k_linux_bootstrap_try_mount_lvm "${nbd_dev}" "${mnt}" || true)"
   fi
   if [[ -z "${root_dev}" ]]; then
-    # More informative event: we did not find a mountable root filesystem
     v2k_event ERROR "linux_bootstrap" "" "root_partition_not_found" "{\"nbd\":\"${nbd_dev}\",\"note\":\"no /etc/os-release found on partitions or LVM LVs\"}"
     finish 80
     return $?
   fi
 
-  # Mount root read-write for initramfs rebuild
   local rout rrc
   v2k_linux_bootstrap_wait_blockdev "${root_dev}" 5 || true
   v2k_linux_bootstrap_run_event "mount_root_rw" rout rrc -- \
@@ -1022,53 +1074,78 @@ v2k_linux_bootstrap_one() {
     return $?
   fi
 
-  # If /boot is separate, mount it (best-effort)
   if [[ -f "${mnt}/etc/fstab" ]]; then
     local boot_src
     boot_src="$(awk '$2=="/boot"{print $1}' "${mnt}/etc/fstab" 2>/dev/null | head -n1 || true)"
     if [[ -n "${boot_src}" ]]; then
       mkdir -p "${mnt}/boot"
-      # resolve UUID=... in fstab (best-effort)
       if [[ "${boot_src}" =~ ^UUID= ]]; then
         local uuid="${boot_src#UUID=}"
-        boot_src="$(blkid -U "${uuid}" 2>/dev/null || true)"
+        boot_src=""
+        local p
+        for p in "${nbd_dev}"p*; do
+           [[ -b "$p" ]] || continue
+           local puuid
+           puuid="$(blkid -o value -s UUID "$p" 2>/dev/null || true)"
+           if [[ "${puuid}" == "${uuid}" ]]; then
+              boot_src="$p"
+              break
+           fi
+        done
       fi
       if [[ -b "${boot_src}" ]]; then
         local bout brc
         v2k_linux_bootstrap_wait_blockdev "${boot_src}" 5 || true
         v2k_linux_bootstrap_run_event "mount_boot_rw" bout brc -- \
           v2k_linux_bootstrap_mount_robust "${boot_src}" "${mnt}/boot" "rw"
+      else
+        v2k_event WARN "linux_bootstrap" "" "boot_partition_not_found_on_nbd" "{}"
       fi
     fi
   fi
 
-  # root_part variable was not defined; emit a single consistent event.
-  # Keep key name "root_part" for compatibility, but report actual selected device.
   v2k_event INFO "linux_bootstrap" "" "root_mounted" "{\"root_part\":\"${root_dev}\"}"
 
-  # Ensure virtio modules are included in initramfs for next boot
-  v2k_linux_bootstrap_rebuild_initramfs "${mnt}"
+  v2k_linux_bootstrap_rebuild_initramfs "${mnt}" "${nbd_dev}"
   local rc=$?
   if [[ "${rc}" -ne 0 ]]; then
     finish "${rc}"
     return $?
   fi
 
-  # Success path MUST cleanup before returning to cutover/libvirt define/start.
+  sync
+  
   finish 0
   return $?
 }
 
 v2k_linux_bootstrap_rebuild_initramfs() {
   local rootmnt="$1"
+  local nbd_dev="$2"
 
   # ------------------------------------------------------------
-  # bind mounts for chroot (robust + mount propagation control)
-  # - use rbind for /dev to include submounts
-  # - make them rslave to prevent propagation/leak back to host
+  # [Modified] bind mounts for chroot with ISOLATION
+  # Instead of binding host /dev, we populate a tmpfs with
+  # only the necessary nodes + this VM's NBD devices.
   # ------------------------------------------------------------
   mkdir -p "${rootmnt}/dev" "${rootmnt}/proc" "${rootmnt}/sys"
-  v2k_linux_bootstrap_mount_robust "/dev"  "${rootmnt}/dev"  "" || return 85
+  
+  # 1. Mount tmpfs on chroot /dev
+  mount -t tmpfs tmpfs "${rootmnt}/dev" -o mode=0755,nosuid,noexec || return 85
+
+  # 2. Copy essentials from host /dev
+  local node
+  for node in null zero full random urandom tty console ptmx; do
+    if [[ -e "/dev/${node}" ]]; then
+      cp -a "/dev/${node}" "${rootmnt}/dev/"
+    fi
+  done
+
+  # 3. Copy specific NBD device nodes (Current VM's disk only)
+  if [[ -n "${nbd_dev}" ]]; then
+    cp -a "${nbd_dev}"* "${rootmnt}/dev/" 2>/dev/null || true
+  fi
+
   v2k_linux_bootstrap_mount_robust "/proc" "${rootmnt}/proc" "" || return 85
   v2k_linux_bootstrap_mount_robust "/sys"  "${rootmnt}/sys"  "" || return 85
 
@@ -1113,6 +1190,15 @@ EOF
     return 82
   fi
 
+  # Function for final sync barrier
+  flush_buffers() {
+      v2k_event INFO "linux_bootstrap" "" "syncing_disks" "{}"
+      sync
+      if [[ -n "${nbd_dev}" && -b "${nbd_dev}" ]]; then
+          blockdev --flushbufs "${nbd_dev}" >/dev/null 2>&1 || true
+      fi
+  }
+
   # Choose rebuild tool
   if chroot "${rootmnt}" /bin/bash -lc 'command -v dracut >/dev/null 2>&1'; then
     # RHEL/Rocky/Alma etc.
@@ -1123,6 +1209,9 @@ EOF
       v2k_event ERROR "linux_bootstrap" "" "dracut_failed" "{}"
       return 82
     fi
+
+    # [Added] Sync Barrier
+    flush_buffers
 
     # ------------------------------------------------------------------
     # Verify that initramfs was actually updated and virtio drivers exist
@@ -1150,6 +1239,10 @@ EOF
       v2k_event ERROR "linux_bootstrap" "" "update_initramfs_failed" "{}"
       return 83
     fi
+    
+    # [Added] Sync Barrier
+    flush_buffers
+
     v2k_event INFO "linux_bootstrap" "" "update_initramfs_ok" "{}"
     return 0
   fi
@@ -1746,15 +1839,17 @@ v2k_force_cleanup_run() {
     done < <(losetup -a 2>/dev/null | awk -v wd="${workdir}" '$0 ~ wd {sub(/:.*/,"",$1); print $1}')
   fi
 
+  # [DISABLED] Concurrent Safety Fix: Do not sweep global /tmp mounts.
+  # This kills other running VMs' bootstrap processes. rely on per-process trap cleanup.  
   # 4) Unmount any mountpoints under /tmp/v2k_* that might be left behind
-  if command -v findmnt >/dev/null 2>&1; then
-    local mp
-    while read -r mp; do
-      [[ -n "${mp}" ]] || continue
-      umount -R -l "${mp}" >/dev/null 2>&1 || umount -l "${mp}" >/dev/null 2>&1 || true
-      v2k_event INFO "cleanup" "" "force_cleanup_umount" "{\"path\":\"${mp}\"}"
-    done < <(findmnt -rn -o TARGET 2>/dev/null | grep -E '^/tmp/v2k_(root|boot|lvm)\.' || true)
-  fi
+  #if command -v findmnt >/dev/null 2>&1; then
+  #  local mp
+  #  while read -r mp; do
+  #    [[ -n "${mp}" ]] || continue
+  #    umount -R -l "${mp}" >/dev/null 2>&1 || umount -l "${mp}" >/dev/null 2>&1 || true
+  #    v2k_event INFO "cleanup" "" "force_cleanup_umount" "{\"path\":\"${mp}\"}"
+  #  done < <(findmnt -rn -o TARGET 2>/dev/null | grep -E '^/tmp/v2k_(root|boot|lvm)\.' || true)
+  #fi
 
   # 5) Clean workdir-local temp artifacts (do NOT remove workdir itself here)
   if [[ -n "${workdir}" ]]; then
