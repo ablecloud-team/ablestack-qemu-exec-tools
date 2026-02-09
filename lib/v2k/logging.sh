@@ -115,13 +115,45 @@ v2k_event_storage_snapshot() {
 }
 
 v2k_event() {
-  local level="$1" phase="$2" disk_id="$3" event="$4" detail_json="$5"
-  local ts run_id
+  local level="$1" phase="$2" disk_id="$3" event="$4" detail_json="${5-}"
+  local ts run_id log
   ts="$(v2k_now_rfc3339)"
   run_id="${V2K_RUN_ID:-unknown}"
-  local log="${V2K_EVENTS_LOG:-}"
+  log="${V2K_EVENTS_LOG:-}"
   [[ -n "${log}" ]] || return 0
   mkdir -p "$(dirname "${log}")"
-  printf '{"ts":"%s","run_id":"%s","level":"%s","phase":"%s","disk_id":"%s","event":"%s","detail":%s}\n' \
-    "${ts}" "${run_id}" "${level}" "${phase}" "${disk_id}" "${event}" "${detail_json}" >> "${log}"
+
+  # Always emit valid JSONL even if detail_json is broken JSON.
+  if ! command -v jq >/dev/null 2>&1; then
+    printf '{\"ts\":\"%s\",\"run_id\":\"%s\",\"level\":\"%s\",\"phase\":\"%s\",\"disk_id\":\"%s\",\"event\":\"%s\",\"detail\":{}}\n' \
+      "${ts}" "${run_id}" "${level}" "${phase}" "${disk_id}" "${event}" >> "${log}"
+    return 0
+  fi
+
+  local detail_compact event_json
+  if [[ -z "${detail_json}" ]]; then
+    detail_compact="{}"
+  elif detail_compact="$(printf '%s' "${detail_json}" | jq -c '.' 2>/dev/null)"; then
+    : # ok
+  else
+    detail_compact="$(jq -cn --arg raw "${detail_json}" '{_invalid_detail_raw:$raw,_reason:"invalid_json"}' 2>/dev/null || echo '{}')"
+  fi
+
+  event_json="$(jq -cn \
+    --arg ts "${ts}" \
+    --arg run_id "${run_id}" \
+    --arg level "${level}" \
+    --arg phase "${phase}" \
+    --arg disk_id "${disk_id}" \
+    --arg event "${event}" \
+    --argjson detail "${detail_compact}" \
+    '{ts:$ts,run_id:$run_id,level:$level,phase:$phase,disk_id:$disk_id,event:$event,detail:$detail}' \
+    2>/dev/null || true)"
+
+  if [[ -n "${event_json}" ]]; then
+    printf '%s\n' "${event_json}" >> "${log}"
+  else
+    printf '{\"ts\":\"%s\",\"run_id\":\"%s\",\"level\":\"%s\",\"phase\":\"%s\",\"disk_id\":\"%s\",\"event\":\"%s\",\"detail\":{}}\n' \
+      "${ts}" "${run_id}" "${level}" "${phase}" "${disk_id}" "${event}" >> "${log}"
+  fi
 }

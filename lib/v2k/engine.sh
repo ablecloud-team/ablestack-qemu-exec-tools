@@ -639,18 +639,43 @@ v2k_linux_bootstrap_try_mount_lvm() {
   udevadm settle >/dev/null 2>&1 || true
   sleep 1
 
-  # [Step 1] Force Cache Update
-  local scan_out scan_rc
-  v2k_linux_bootstrap_run_event "cmd_pvscan_force" scan_out scan_rc -- \
-     lvm pvscan --config "${cfg}" --cache
-
-  # [Step 2] Discover VGs
-  local vgs_out vgs_rc
-  v2k_linux_bootstrap_run_event "cmd_vgs_discover" vgs_out vgs_rc -- \
-     lvm vgs --config "${cfg}" --noheadings -o vg_name
+  # [Step 1 & 2] Force Cache Update & Discover VGs (Direct & Simple)
+  # lsblk로 확인하는 과정 없이, 필터가 적용된 LVM 명령을 직접 수행하여 VG를 찾습니다.
+  # 호스트 udev 간섭(Retry Storm)을 뚫기 위해 5회 재시도합니다.
   
-  local vgs
-  vgs="$(echo "${vgs_out}" | awk '{$1=$1}; $1!=""{print $1}' | sort -u)"
+  local scan_out scan_rc vgs_out vgs_rc
+  local attempt=0 max_retry=5
+  local vgs=""
+
+  while [[ "${attempt}" -lt "${max_retry}" ]]; do
+      attempt=$((attempt+1))
+
+      # 1. 명시적 PVScan (캐시 갱신)
+      # 필터가 적용되어 있으므로 NBD 장치만 안전하게 스캔합니다.
+      v2k_linux_bootstrap_run_event "cmd_pvscan_direct" scan_out scan_rc -- \
+         lvm pvscan --config "${cfg}" --cache --activate ay
+      
+      # 2. 명시적 VGS 조회
+      # lsblk 조건 없이 바로 조회를 시도합니다. (사용자 수동 성공 방식)
+      v2k_linux_bootstrap_run_event "cmd_vgs_direct" vgs_out vgs_rc -- \
+         lvm vgs --config "${cfg}" --noheadings -o vg_name
+      
+      # 결과 파싱
+      vgs="$(echo "${vgs_out}" | awk '{$1=$1}; $1!=""{print $1}' | sort -u)"
+
+      if [[ -n "${vgs}" ]]; then
+          # VG를 찾았으면 루프 탈출
+          v2k_event INFO "linux_bootstrap" "" "lvm_vg_found_retry" \
+            "{\"attempt\":${attempt},\"vgs\":\"${vgs}\"}"
+          break
+      fi
+      
+      # VG를 못 찾았으면 잠시 대기 (udev 폭풍 대기)
+      v2k_event WARN "linux_bootstrap" "" "lvm_scan_retry" \
+        "{\"attempt\":${attempt},\"note\":\"waiting for lvm visibility\"}"
+      sleep 2
+      udevadm settle >/dev/null 2>&1 || true
+  done
 
   local activated=0
   if [[ -n "${vgs}" ]]; then
@@ -841,13 +866,21 @@ v2k_linux_bootstrap_one() {
       v2k_linux_bootstrap_run_event "cmd_lvm_vgchange_deactivate" lvm_out lvm_rc -- \
         lvm vgchange --config "${cfg}" -an
 
-      # [SAFE FIX] Remove DM devices ONLY if they are holders of THIS nbd device
+      # 1. NBD 장치를 물고 있는 DM 제거 (기존 로직)
       for holder in /sys/block/${bn}/holders/*; do
           if [[ -e "${holder}" ]]; then
               local dm_name
               dm_name="$(basename "${holder}")"
               dmsetup remove --force "${dm_name}" >/dev/null 2>&1 || true
           fi
+      done
+
+      # 2. [추가] 'rl' (Rocky Linux) 관련 좀비 매핑 강제 제거
+      # Global Lock을 보유 중이므로, 현재 시스템에 보이는 'rl-*' 매핑은 
+      # 나의 좀비이거나 이전 실행의 찌꺼기일 확률이 높으므로 정리합니다.
+      for dm_path in /dev/mapper/rl-*; do
+          [[ -e "${dm_path}" ]] || continue
+          dmsetup remove --force "${dm_path}" >/dev/null 2>&1 || true
       done
     fi
 
@@ -1011,7 +1044,7 @@ v2k_linux_bootstrap_one() {
     return $?
   fi
 
-  local qout qrc
+local qout qrc
   v2k_linux_bootstrap_run_event "cmd_qemu_nbd_connect" qout qrc -- \
     qemu-nbd --connect "${nbd_dev}" "${img}"
   if [[ "${qrc}" -ne 0 ]]; then
@@ -1020,7 +1053,32 @@ v2k_linux_bootstrap_one() {
     finish 79
     return $?
   fi
+
+  # -----------------------------------------------------------------------------
+  # [FIX] Host LVM/udev Interference Mitigation (Rocky Linux Fix)
+  # 호스트 udev가 NBD 연결 즉시 'rl' VG를 자동 활성화하는 것을 강제로 해제합니다.
+  # -----------------------------------------------------------------------------
   udevadm settle >/dev/null 2>&1 || true
+  
+  # 1. 호스트가 이 NBD 장치에서 활성화한 VG 즉시 비활성화 (필터 사용으로 안전 확보)
+  lvm vgchange --config "devices { filter=[ \"a|^${nbd_dev}|\", \"r|.*|\" ] }" -an >/dev/null 2>&1 || true
+
+  # 2. Device Mapper에 남은 좀비 매핑(holder) 강제 제거
+  # 호스트가 /dev/mapper/rl-root 등을 잡고 있으면 제거하여 이름 충돌 방지
+  local bn_fix
+  bn_fix="$(basename "${nbd_dev}")"
+  for holder in /sys/block/${bn_fix}/holders/*; do
+      if [[ -e "${holder}" ]]; then
+          local dm_name
+          dm_name="$(basename "${holder}")"
+          dmsetup remove --force "${dm_name}" >/dev/null 2>&1 || true
+      fi
+  done
+
+  # 3. LVM 캐시 갱신 (호스트가 이 장치를 더 이상 '사용 중'으로 인식하지 않게 함)
+  lvm pvscan --config "devices { filter=[ \"a|^${nbd_dev}|\", \"r|.*|\" ] }" --cache >/dev/null 2>&1 || true
+  # -----------------------------------------------------------------------------
+
   local pout prc
   v2k_linux_bootstrap_run_event "cmd_partprobe" pout prc -- partprobe "${nbd_dev}"
   

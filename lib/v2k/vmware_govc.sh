@@ -24,6 +24,91 @@
 
 set -euo pipefail
 
+# -----------------------------------------------------------------------------
+# Physical size helpers (VMDK actual/physical size)
+#
+# govc datastore.ls -l "[datastore] path/to.vmdk"
+#   4.7GB  Thu Feb 5 15:13:25 2026  utest1.vmdk
+#
+# We parse the first token (human size) and convert to bytes.
+# -----------------------------------------------------------------------------
+
+v2k_vmware__human_to_bytes() {
+  # Input examples: 4.7GB, 512MB, 1023KB, 123B
+  # Output: integer bytes (best-effort; uses binary 1024 units)
+  local s="${1-}"
+  [[ -n "${s}" ]] || { echo 0; return 0; }
+
+  # split number and unit (case-insensitive)
+  local num unit
+  num="$(printf '%s' "${s}" | sed -E 's/^[[:space:]]*([0-9]+(\.[0-9]+)?).*/\1/' | tr -d '[:space:]')"
+  unit="$(printf '%s' "${s}" | sed -E 's/^[[:space:]]*[0-9]+(\.[0-9]+)?([A-Za-z]+).*/\2/I' | tr -d '[:space:]')"
+  unit="$(printf '%s' "${unit}" | tr '[:lower:]' '[:upper:]')"
+
+  # If parsing failed, return 0
+  [[ "${num}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo 0; return 0; }
+
+  # Default unit
+  [[ -n "${unit}" && "${unit}" != "${s}" ]] || unit="B"
+
+  # Convert using awk to handle decimals, then integer-cast.
+  awk -v n="${num}" -v u="${unit}" '
+    function pow1024(e,    i,r){ r=1; for(i=0;i<e;i++) r*=1024; return r }
+    BEGIN{
+      m=1
+      if(u=="B") m=1
+      else if(u=="KB") m=pow1024(1)
+      else if(u=="MB") m=pow1024(2)
+      else if(u=="GB") m=pow1024(3)
+      else if(u=="TB") m=pow1024(4)
+      else if(u=="PB") m=pow1024(5)
+      else m=1
+      # integer bytes (truncate)
+      printf "%.0f", (n*m)
+    }'
+}
+
+v2k_vmware_datastore_vmdk_physical_bytes() {
+  # Args: "<[datastore] path/to.vmdk>"
+  # Returns: physical bytes (integer) or 0 on failure
+  local ds_path="${1-}"
+  [[ -n "${ds_path}" ]] || { echo 0; return 0; }
+
+  command -v govc >/dev/null 2>&1 || { echo 0; return 0; }
+
+  # Ensure govc is configured; if not, fail fast.
+  govc about >/dev/null 2>&1 || { echo 0; return 0; }
+
+  local line size_h size_b
+  # Use the first line only.
+  line="$(govc datastore.ls -l "${ds_path}" 2>/dev/null | head -n 1 || true)"
+  [[ -n "${line}" ]] || { echo 0; return 0; }
+
+  size_h="$(awk '{print $1}' <<<"${line}")"
+  size_b="$(v2k_vmware__human_to_bytes "${size_h}")"
+  [[ "${size_b}" =~ ^[0-9]+$ ]] || size_b=0
+  echo "${size_b}"
+}
+
+v2k_vmware_manifest_sum_vmdk_physical_bytes() {
+  # Args: manifest.json
+  # Returns: sum of physical bytes for all disks (best-effort) or 0
+  local manifest="${1-}"
+  [[ -n "${manifest}" && -f "${manifest}" ]] || { echo 0; return 0; }
+
+  command -v jq >/dev/null 2>&1 || { echo 0; return 0; }
+
+  local sum=0 vmdk_path b
+  while IFS= read -r vmdk_path; do
+    [[ -n "${vmdk_path}" ]] || continue
+    b="$(v2k_vmware_datastore_vmdk_physical_bytes "${vmdk_path}")"
+    [[ "${b}" =~ ^[0-9]+$ ]] || b=0
+    sum=$(( sum + b ))
+  done < <(jq -r '.disks[].vmdk.path // empty' "${manifest}" 2>/dev/null || true)
+
+  echo "${sum}"
+}
+
 # NOTE:
 # - We intentionally rely on govc commands only.
 # - Hard power-off is the most reliable option in the field.

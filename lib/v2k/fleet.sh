@@ -134,6 +134,522 @@ v2k_fleet_should_handle_status() {
 }
 
 # ------------------------------------------------------------
+# Fleet status: detailed step/progress (best-effort)
+# - Do NOT touch engine/orchestrator logic.
+# - Parse workdir/events.log (JSONL) + manifest.json for step/state/progress.
+# ------------------------------------------------------------
+
+v2k_fleet_events_tail_json() {
+  # Usage: v2k_fleet_events_tail_json <events_file> [lines]
+  local f="${1-}" n="${2:-800}"
+  [[ -n "${f}" && -f "${f}" ]] || { echo '[]'; return 0; }
+
+  # Robust JSONL -> JSON array (ignore broken lines)
+  # NOTE: jq fromjson? returns null for invalid JSON; we filter them out.
+  tail -n "${n}" "${f}" 2>/dev/null \
+    | jq -sR 'split("\n") | map(select(length>0) | (fromjson? // empty))' 2>/dev/null \
+    || echo '[]'
+}
+
+v2k_fleet_events_select_meaningful() {
+  # Reads JSON array from stdin; outputs filtered array (jq)
+  jq -c '
+    def is_step_phase:
+      (.phase|tostring) as $p
+      | ($p=="cbt_enable"
+         or $p=="snapshot.base" or $p=="snapshot.incr" or $p=="snapshot.final"
+         or $p=="sync.base" or $p=="sync.incr" or $p=="sync.final"
+         or $p=="cutover" or $p=="cleanup");
+
+    def is_step_event:
+      (.event|tostring) as $e
+      | ($e=="phase_start" or $e=="phase_done" or $e=="phase_skipped_by_policy"
+         or $e=="disk_start" or $e=="disk_done" or $e=="no_changes"
+         or $e=="changed_areas_fetched"
+         or $e=="start" or $e=="done" or $e=="error" or $e=="fail"
+         or $e=="nbdkit_log");
+
+    map(select(is_step_phase and is_step_event))
+  ' 2>/dev/null || echo '[]'
+}
+
+v2k_fleet_step_priority() {
+  # Higher = later stage
+  case "${1-}" in
+    CLEANUP) echo 90;;
+    CUTOVER) echo 80;;
+    FINAL_SYNC) echo 70;;
+    FINAL_SNAP) echo 65;;
+    INCR_SYNC) echo 60;;
+    INCR_SNAP) echo 55;;
+    BASE_SYNC) echo 50;;
+    BASE_SNAP) echo 45;;
+    CBT_ENABLE) echo 40;;
+    *) echo 0;;
+  esac
+}
+
+v2k_fleet_parse_percent_from_log() {
+  # Usage: v2k_fleet_parse_percent_from_log <log_file>
+  # Returns: percent integer [0-100] or empty
+  local f="${1-}"
+  [[ -n "${f}" && -f "${f}" ]] || return 1
+
+  # Best-effort patterns:
+  # - qemu-img convert -p: " (xx.xx/yy.yy)  12.34% "
+  # - nbdcopy --progress: often contains "xx%" somewhere in the line
+  local last
+  last="$(tail -n 50 "${f}" 2>/dev/null | grep -Eo '([0-9]{1,3}(\.[0-9]+)?)%' | tail -n 1 || true)"
+  [[ -n "${last}" ]] || return 1
+  last="${last%\%}"
+  # floor numeric
+  printf '%s' "${last}" | awk '{printf("%d\n",$1)}'
+}
+
+v2k_fleet_calc_step_progress() {
+  # Usage: v2k_fleet_calc_step_progress <workdir> <manifest_path> <fleet_state> <fleet_phase>
+  # Output: compact JSON object with step/step_state/sync totals and last_event
+  local workdir="${1-}" manifest="${2-}" fleet_state="${3-}" fleet_phase="${4-}"
+
+  local events_file="${workdir}/events.log"
+  local ev_arr meaningful
+
+  ev_arr="$(v2k_fleet_events_tail_json "${events_file}" 800)"
+  meaningful="$(printf '%s' "${ev_arr}" | v2k_fleet_events_select_meaningful)"
+
+  # Collect manifest-derived stats (best-effort)
+  local incr_max="0" total_bytes_base="0"
+  local -A disk_size=()
+  if [[ -n "${manifest}" && -f "${manifest}" ]]; then
+    incr_max="$(jq -r '[.disks[].transfer.incr_seq // 0] | max // 0' "${manifest}" 2>/dev/null || echo 0)"
+    total_bytes_base="$(jq -r '[.disks[].size_bytes // 0] | add // 0' "${manifest}" 2>/dev/null || echo 0)"
+    # Build disk_id -> size_bytes map for base progress
+    while IFS=$'\t' read -r did sz; do
+      [[ -n "${did}" ]] || continue
+      disk_size["${did}"]="${sz:-0}"
+    done < <(jq -r '.disks[] | [.disk_id, (.size_bytes//0)] | @tsv' "${manifest}" 2>/dev/null || true)
+  fi
+
+  # If no meaningful events, fall back to coarse fleet_state only
+  if [[ -z "${workdir}" || ! -d "${workdir}" || "${meaningful}" == "[]" ]]; then
+    jq -cn --arg step "" --arg step_state "" --argjson total 0 --argjson done 0 --argjson percent 0 \
+      --arg last_ts "" --arg last_phase "" --arg last_event "" \
+      '{step:$step,step_state:$step_state,sync:{total_bytes:$total,done_bytes:$done,percent:$percent,mode:""},last_event:{ts:$last_ts,phase:$last_phase,event:$last_event}}'
+    return 0
+  fi
+
+  # Determine the "current" event (last by ts)
+  # Note: ts is RFC3339; lexical sort works.
+  local last_json
+  last_json="$(printf '%s' "${meaningful}" | jq -c 'sort_by(.ts) | last' 2>/dev/null || echo '{}')"
+  local last_phase last_event last_ts last_level last_disk
+  last_phase="$(jq -r '.phase // ""' <<<"${last_json}" 2>/dev/null || echo "")"
+  last_event="$(jq -r '.event // ""' <<<"${last_json}" 2>/dev/null || echo "")"
+  last_ts="$(jq -r '.ts // ""' <<<"${last_json}" 2>/dev/null || echo "")"
+  last_level="$(jq -r '.level // ""' <<<"${last_json}" 2>/dev/null || echo "")"
+  last_disk="$(jq -r '.disk_id // ""' <<<"${last_json}" 2>/dev/null || echo "")"
+
+  # Map last event -> canonical step + step_state
+  local step="" step_base="" step_state="running" mode=""
+  local n_disp=""
+
+  case "${last_phase}" in
+    cbt_enable) step="CBT_ENABLE";;
+    snapshot.base) step="BASE_SNAP";;
+    sync.base) step="BASE_SYNC"; mode="base";;
+    snapshot.incr) step="INCR_SNAP";;
+    sync.incr) step="INCR_SYNC"; mode="incr";;
+    snapshot.final) step="FINAL_SNAP";;
+    sync.final) step="FINAL_SYNC"; mode="final";;
+    cutover) step="CUTOVER";;
+    cleanup) step="CLEANUP";;
+    *) step="";;
+  esac
+
+  # step_state from event/level
+  if [[ "${last_level}" == "ERROR" || "${last_event}" == "error" || "${last_event}" == "fail" ]]; then
+    step_state="failed"
+  else
+    case "${last_event}" in
+      phase_done|done) step_state="done";;
+      phase_skipped_by_policy) step_state="skipped";;
+      *) step_state="running";;
+    esac
+  fi
+
+  # N display (incr)
+  if [[ "${step}" == "INCR_SNAP" || "${step}" == "INCR_SYNC" ]]; then
+    # If we are in "running" part of the cycle, show incr_max+1; for done/no_changes/disk_done/phase_done show incr_max.
+    case "${last_event}" in
+      phase_start|disk_start|changed_areas_fetched|nbdkit_log)
+        n_disp="$((incr_max + 1))"
+        ;;
+      *)
+        n_disp="${incr_max}"
+        ;;
+    esac
+  fi
+
+  # Sync totals/done/percent
+  local sync_total=0 sync_done=0 sync_percent=0
+
+  if [[ "${step}" == "BASE_SYNC" ]]; then
+    sync_total="${total_bytes_base:-0}"
+
+    # Done bytes by completed disks in this base phase
+    local done_list
+    done_list="$(printf '%s' "${meaningful}" | jq -r '
+        # slice events after last sync.base phase_start if exists
+        def after_last_start($p):
+          ( [ range(0; length) | select(.[.].phase==$p and .[.].event=="phase_start") ] | last ) as $i
+          | if ($i|type)=="number" then .[$i:] else . end;
+        after_last_start("sync.base")
+        | map(select(.phase=="sync.base" and .event=="disk_done" and (.disk_id//"")!="") | .disk_id) | unique | .[]
+      ' 2>/dev/null || true)"
+
+    local did
+    for did in ${done_list}; do
+      sync_done=$(( sync_done + ${disk_size["${did}"]:-0} ))
+    done
+
+    # If there's an active disk and we have nbdkit_log -> parse percent for that disk (best-effort)
+    local log_path=""
+    log_path="$(printf '%s' "${meaningful}" | jq -r '
+        def after_last_start($p):
+          ( [ range(0; length) | select(.[.].phase==$p and .[.].event=="phase_start") ] | last ) as $i
+          | if ($i|type)=="number" then .[$i:] else . end;
+        after_last_start("sync.base")
+        | map(select(.phase=="sync.base" and .event=="nbdkit_log") | (.detail.path // "")) | map(select(length>0)) | last // ""
+      ' 2>/dev/null || echo "")"
+
+    if [[ -n "${log_path}" && -f "${log_path}" && -n "${last_disk}" ]]; then
+      local pct=""
+      pct="$(v2k_fleet_parse_percent_from_log "${log_path}" || true)"
+      if [[ -n "${pct}" && "${pct}" =~ ^[0-9]+$ && "${pct}" -ge 0 && "${pct}" -le 100 ]]; then
+        local dsz="${disk_size["${last_disk}"]:-0}"
+        # add partial done for current disk (avoid double counting if already done)
+        if ! grep -qx "${last_disk}" <<<"${done_list}"; then
+          sync_done=$(( sync_done + (dsz * pct / 100) ))
+        fi
+      fi
+    fi
+
+    if [[ "${sync_total}" -gt 0 ]]; then
+      sync_percent=$(( sync_done * 100 / sync_total ))
+    else
+      sync_percent=0
+    fi
+  elif [[ "${step}" == "INCR_SYNC" || "${step}" == "FINAL_SYNC" ]]; then
+    # Consider only events after last phase_start of this phase
+    local p="${last_phase}"
+    sync_total="$(printf '%s' "${meaningful}" | jq -r --arg p "${p}" '
+        def after_last_start($p):
+          ( [ range(0; length) | select(.[.].phase==$p and .[.].event=="phase_start") ] | last ) as $i
+          | if ($i|type)=="number" then .[$i:] else . end;
+        after_last_start($p)
+        | map(select(.phase==$p and .event=="changed_areas_fetched") | (.detail.bytes // 0)) | add // 0
+      ' 2>/dev/null || echo 0)"
+
+    sync_done="$(printf '%s' "${meaningful}" | jq -r --arg p "${p}" '
+        def after_last_start($p):
+          ( [ range(0; length) | select(.[.].phase==$p and .[.].event=="phase_start") ] | last ) as $i
+          | if ($i|type)=="number" then .[$i:] else . end;
+        after_last_start($p)
+        | map(select(.phase==$p and .event=="disk_done") | (.detail.bytes_written // 0)) | add // 0
+      ' 2>/dev/null || echo 0)"
+
+    if [[ "${sync_total}" -gt 0 ]]; then
+      sync_percent=$(( sync_done * 100 / sync_total ))
+    else
+      # total=0 can mean "no_changes" across disks; treat as 100% if we have any no_changes/disk_done.
+      local has_any
+      has_any="$(printf '%s' "${meaningful}" | jq -r --arg p "${p}" '
+          def after_last_start($p):
+            ( [ range(0; length) | select(.[.].phase==$p and .[.].event=="phase_start") ] | last ) as $i
+            | if ($i|type)=="number" then .[$i:] else . end;
+          after_last_start($p)
+          | map(select(.phase==$p and (.event=="no_changes" or .event=="disk_done"))) | length
+        ' 2>/dev/null || echo 0)"
+      if [[ "${has_any}" -gt 0 ]]; then
+        sync_percent=100
+      else
+        sync_percent=0
+      fi
+    fi
+  else
+    sync_total=0; sync_done=0; sync_percent=0
+  fi
+
+  # Embed N into step label if needed
+  local step_label="${step}"
+  if [[ "${step}" == "INCR_SNAP" || "${step}" == "INCR_SYNC" ]]; then
+    if [[ -n "${n_disp}" ]]; then
+      step_label="${step}#${n_disp}"
+    fi
+  fi
+
+  jq -cn \
+    --arg step "${step_label}" \
+    --arg step_state "${step_state}" \
+    --argjson total "${sync_total:-0}" \
+    --argjson done "${sync_done:-0}" \
+    --argjson percent "${sync_percent:-0}" \
+    --arg mode "${mode}" \
+    --arg last_ts "${last_ts}" \
+    --arg last_phase "${last_phase}" \
+    --arg last_event "${last_event}" \
+    '{step:$step,step_label:$step,step_state:$step_state,sync:{total_bytes:$total,done_bytes:$done,percent:$percent,mode:$mode},last_event:{ts:$last_ts,phase:$last_phase,event:$last_event}}'
+}
+
+v2k_fleet_die() { echo "ERROR: $*" >&2; exit 2; }
+
+v2k_fleet_now_rfc3339() {
+  date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+}
+
+# [Helper] 실행 중인 patch_apply.py 프로세스의 I/O 양을 조회하여 반환
+v2k_fleet_get_active_patch_bytes() {
+  local target_path="$1"
+  [[ -z "${target_path}" ]] && echo 0 && return
+
+  # 1. target_path를 인자로 가지는 python3 patch_apply.py 프로세스 찾기
+  # pgrep -f는 전체 커맨드라인을 검색함.
+  # grep으로 patch_apply.py와 target_path가 모두 포함된 라인 필터링
+  local pids
+  pids=$(pgrep -f "patch_apply.py" 2>/dev/null || true)
+  
+  local total_active_bytes=0
+  
+  for pid in ${pids}; do
+    # 해당 PID의 cmdline 확인 (정확성 보장)
+    if [[ -f "/proc/${pid}/cmdline" ]]; then
+      # cmdline은 null로 구분되므로 cat -v 등으로 읽거나 grep -a 사용
+      if grep -a -q "${target_path}" "/proc/${pid}/cmdline"; then
+        # 2. /proc/[pid]/io 에서 write_bytes 추출
+        # write_bytes: 123456
+        local wb
+        wb=$(grep "write_bytes:" "/proc/${pid}/io" 2>/dev/null | awk '{print $2}' || echo 0)
+        total_active_bytes=$((total_active_bytes + wb))
+      fi
+    fi
+  done
+  
+  echo "${total_active_bytes}"
+}
+
+# ------------------------------------------------------------
+# 상태 조회 상세 계산 (딜레이 제거, 상세 상태 복구, 에러 우선 감지)
+# ------------------------------------------------------------
+v2k_fleet_calculate_detailed_status() {
+  local workdir="$1" manifest="$2" phase_hint="$3"
+  local events_log="${workdir}/events.log"
+  local govc_env="${workdir}/govc.env"
+  local last_ev_json phase_raw event_raw level_raw step_str="Ready"
+  local vm_total_phys=0 vm_current_phys=0 vm_sync_pct=0
+  local t_gb c_gb ref_state="starting"
+
+  # 1. 로그 분석 (최근 50줄)
+  if [[ -f "${events_log}" ]]; then
+    last_ev_json="$(tail -n 50 "${events_log}" 2>/dev/null | jq -sR '
+      split("\n") | map(select(length>0) | fromjson?) 
+      | map(select(.event | test("start|done|failed|error|progress|shutdown|snapshot|mount|dracut|update"))) 
+      | last' 2>/dev/null || echo "{}")"
+    
+    phase_raw=$(echo "${last_ev_json}" | jq -r '.phase // ""')
+    event_raw=$(echo "${last_ev_json}" | jq -r '.event // ""')
+    level_raw=$(echo "${last_ev_json}" | jq -r '.level // ""')
+  fi
+
+  # 2. Step 문자열 상세 매핑
+  case "${phase_raw:-}" in
+    cbt_enable)     step_str="cbt enabled" ;;
+    snapshot.base)  step_str="base snap" ;;
+    sync.base|base_sync) step_str="base sync" ;;
+    snapshot.incr)  step_str="incr snap" ;;
+    sync.incr|incr_sync) step_str="incr sync" ;;
+    
+    # [상세화] Cutover 및 Bootstrap 단계 세분화
+    snapshot.final) step_str="final snap" ;;
+    sync.final|final_sync) step_str="final sync" ;;
+    linux_bootstrap)
+        if [[ "${event_raw}" == *"dracut"* || "${event_raw}" == *"initramfs"* ]]; then
+            step_str="initramfs rebuild"
+        elif [[ "${event_raw}" == *"mount"* ]]; then
+            step_str="mounting disk"
+        elif [[ "${event_raw}" == *"lvm"* ]]; then
+            step_str="lvm scanning"
+        else
+            step_str="bootstrap"
+        fi
+        ;;
+    winpe)          step_str="winpe driver" ;;
+    cutover)
+        if [[ "${event_raw}" == *"shutdown"* ]]; then
+            step_str="shutting down"
+        elif [[ "${event_raw}" == *"start"* ]]; then
+            step_str="cutover start"
+        else
+            step_str="cutover"
+        fi
+        ;;
+    cleanup)        step_str="cleaning up" ;;
+    *)              step_str="${phase_raw:-Ready}" ;;
+  esac
+
+  # 완료 이벤트 오버라이드
+  if [[ "${phase_raw}" == "cleanup" && "${event_raw}" == *"done"* ]]; then
+      step_str="done"
+  fi
+
+  # 3. 물리 용량 계산
+  vm_total_phys=$(jq -r '[.disks[] | (.vmdk.physical_bytes // 0)] | add' "${manifest}" 2>/dev/null || echo 0)
+  if [[ "${vm_total_phys}" -le 0 && -f "${govc_env}" ]]; then
+    export GOVC_URL=$(grep "GOVC_URL=" "${govc_env}" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    export GOVC_USERNAME=$(grep "GOVC_USERNAME=" "${govc_env}" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    export GOVC_PASSWORD=$(grep "GOVC_PASSWORD=" "${govc_env}" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    export GOVC_INSECURE=$(grep "GOVC_INSECURE=" "${govc_env}" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    if command -v v2k_vmware_manifest_sum_vmdk_physical_bytes >/dev/null 2>&1; then
+      vm_total_phys=$(v2k_vmware_manifest_sum_vmdk_physical_bytes "${manifest}" 2>/dev/null || echo 0)
+    fi
+  fi
+  [[ "${vm_total_phys}" -le 0 ]] && vm_total_phys=$(jq -r '[.disks[].size_bytes // 0] | add' "${manifest}" 2>/dev/null || echo 0)
+
+  local display_total
+  display_total=$(awk "BEGIN {printf \"%.1f\", ${vm_total_phys}/1024/1024/1024}")
+
+  # [우선순위 1] 에러/실패 감지
+  if [[ "${level_raw}" == "ERROR" || "${event_raw}" == *"failed"* || "${event_raw}" == "fail" ]]; then
+      jq -cn \
+        --arg step "${step_str}" \
+        --arg sync "Physical ${display_total}G/${display_total}G (100%)" \
+        --arg state "failed" \
+        --argjson history "{}" \
+        '{step:$step, sync_display:$sync, refined_state:$state, history:$history}'
+      return 0
+  fi
+
+  # [우선순위 2] 완료 감지
+  local is_cutover_done
+  is_cutover_done=$(jq -r '.phases.cutover.done // false' "${manifest}" 2>/dev/null)
+  
+  if [[ "${is_cutover_done}" == "true" || "${step_str}" == "done" ]]; then
+      jq -cn \
+        --arg step "success" \
+        --arg sync "Physical ${display_total}G/${display_total}G (100%)" \
+        --arg state "done" \
+        --argjson history "{}" \
+        '{step:$step, sync_display:$sync, refined_state:$state, history:$history}'
+      return 0
+  fi
+
+  # [우선순위 3] 진행 상태 용량 계산 (Logic Fix)
+  # - 기본적으로 Phase 2 힌트가 있으면 Delta 모드로 동작하지만,
+  # - Bootstrap, Cleanup 등 "동기화 이후" 단계에서는 0.0G가 아닌 전체 용량(100%)을 보여주기 위해
+  #   강제로 Base Mode(Done)로 취급합니다.
+  local sync_mode="base"
+  local target_phase_key="sync.base"
+  local force_full_display=0
+  
+  if [[ "${step_str}" == *"bootstrap"* || "${step_str}" == *"initramfs"* || "${step_str}" == *"mounting"* || "${step_str}" == *"lvm"* || "${step_str}" == *"cleaning"* || "${step_str}" == "done" || "${step_str}" == "success" ]]; then
+     force_full_display=1
+  fi
+
+  if [[ "${force_full_display}" -eq 1 ]]; then
+     sync_mode="base"
+  elif [[ "${phase_hint}" == "phase2" || "${phase_raw}" == *"incr"* || "${phase_raw}" == *"final"* || "${phase_raw}" == *"cutover"* ]]; then
+     sync_mode="delta"
+     if [[ "${phase_raw}" == *"final"* || "${phase_raw}" == *"cutover"* ]]; then 
+         target_phase_key="sync.final" 
+     else 
+         target_phase_key="sync.incr"
+     fi
+  fi
+
+  local is_base_done=$(jq -r '.phases.base_sync.done // false' "${manifest}" 2>/dev/null)
+  local history_json="{}" # (History 로직은 생략하거나 필요시 기존 유지)
+
+  if [[ "${sync_mode}" == "base" ]]; then
+    if [[ "${is_base_done}" == "true" || "${force_full_display}" -eq 1 ]]; then
+      vm_current_phys=${vm_total_phys}
+    else
+      local target_p b block_s
+      while IFS= read -r target_p; do
+        if [[ -f "${target_p}" ]]; then
+          b=$(stat -c '%b' "${target_p}" 2>/dev/null || echo 0)
+          block_s=$(stat -c '%B' "${target_p}" 2>/dev/null || echo 512)
+          vm_current_phys=$((vm_current_phys + (b * block_s)))
+        fi
+      done < <(jq -r '.disks[].transfer.target_path' "${manifest}")
+    fi
+  else
+    # Delta Mode
+    local delta_stats
+    delta_stats=$(tail -n 1500 "${events_log}" 2>/dev/null | jq -sR --arg p "${target_phase_key}" '
+      split("\n") | map(select(length>0) | fromjson?) |
+      (map(select(.phase == $p and .event == "phase_start")) | last | .ts // "") as $start_ts |
+      if $start_ts == "" then {total: 0, current: 0} else
+        map(select(.phase == $p and .ts >= $start_ts)) |
+        {
+          total: (map(select(.event == "changed_areas_fetched") | .detail.bytes // 0) | add // 0),
+          current: (map(select(.event == "disk_done") | .detail.bytes_written // 0) | add // 0)
+        }
+      end
+    ')
+    vm_total_phys=$(echo "${delta_stats}" | jq -r '.total')
+    vm_current_phys=$(echo "${delta_stats}" | jq -r '.current')
+    
+    # (Optional) Active I/O tracking here...
+  fi
+
+  local display_current
+  display_current=$(awk "BEGIN {printf \"%.1f\", ${vm_current_phys}/1024/1024/1024}")
+  
+  if (( vm_total_phys > 0 )); then
+    vm_sync_pct=$(awk "BEGIN {p=(${vm_current_phys}*100/${vm_total_phys}); printf \"%d\", (p>100?100:p)}")
+  else
+    if [[ "${sync_mode}" == "delta" ]]; then vm_sync_pct=100; else vm_sync_pct=0; fi
+  fi
+  
+  # Delta 모드인데 0.0G/0.0G (100%) 로 나오면 보기 싫으므로, 부트스트랩/완료 단계면 display_total(원본크기) 사용
+  if [[ "${force_full_display}" -eq 1 ]]; then
+     display_current="${display_total}"
+  fi
+
+  [[ "${event_raw}" == *"start"* || "${event_raw}" == "progress" ]] && ref_state="started"
+
+  jq -cn \
+    --arg step "${step_str}" \
+    --arg sync "Physical ${display_current}G/${display_total}G (${vm_sync_pct}%)" \
+    --arg state "${ref_state}" \
+    --argjson history "{}" \
+    '{step:$step, sync_display:$sync, refined_state:$state, history:$history}'
+}
+
+v2k_fleet_human_bytes() {
+  # Usage: v2k_fleet_human_bytes <bytes>
+  local b="${1:-0}"
+  [[ "${b}" =~ ^[0-9]+$ ]] || { printf '%s' "${b}"; return 0; }
+  local units=(B K M G T P)
+  local u=0
+  local v="${b}"
+  while (( v >= 1024 && u < ${#units[@]}-1 )); do
+    v=$(( v / 1024 ))
+    u=$(( u + 1 ))
+  done
+  printf '%s%s' "${v}" "${units[$u]}"
+}
+
+v2k_fleet_format_sync() {
+  # Usage: v2k_fleet_format_sync <total_bytes> <done_bytes> <percent> <mode>
+  local total="${1:-0}" done="${2:-0}" pct="${3:-0}" mode="${4:-}"
+  if [[ -z "${mode}" || "${mode}" == "null" || ( "${total}" == "0" && "${done}" == "0" ) ]]; then
+    echo "-"
+    return 0
+  fi
+  printf '%s/%s (%s%%)' "$(v2k_fleet_human_bytes "${done}")" "$(v2k_fleet_human_bytes "${total}")" "${pct}"
+}
+
+# ------------------------------------------------------------
 # Fleet bookkeeping paths
 # ------------------------------------------------------------
 
@@ -630,6 +1146,69 @@ v2k_fleet_cmd_run() {
   # [MODIFIED] Allow single VM (>=1)
   (( ${#vms[@]} >= 1 )) || v2k_fleet_die "fleet requires multiple VMs in --vm (comma-separated)"
 
+  # --------------------------------------------------------------------------
+  # [FIX START] Idempotency Check: Filter out completed VMs
+  # VM 데이터는 'fleet' 폴더가 아닌 '/var/lib/ablestack-v2k/<VM_NAME>'에 있습니다.
+  # --------------------------------------------------------------------------
+  local -a pending_vms=()
+  
+  # [수정] VM 데이터가 있는 실제 루트 디렉토리 지정
+  local data_root="${V2K_WORKDIR:-/var/lib/ablestack-v2k}"
+
+  for vm in "${vms[@]}"; do
+      local skip=0
+      # [수정] VM별 디렉토리 경로 수정 (fleet 제외)
+      local current_vm_dir="${data_root}/${vm}"
+      
+      # 최신 Run ID 조회
+      local latest_run_id=""
+      if [[ -d "${current_vm_dir}" ]]; then
+          latest_run_id=$(ls -1t "${current_vm_dir}" 2>/dev/null | head -n 1 || true)
+      fi
+
+      if [[ -n "${latest_run_id}" ]]; then
+          local current_manifest="${current_vm_dir}/${latest_run_id}/manifest.json"
+          if [[ -f "${current_manifest}" ]]; then
+              local is_done="false"
+              
+              # Split 변수에 따라 검사할 JSON 키 분기
+              if [[ "${split}" == "phase1" ]]; then
+                  # Phase 1 요청 -> Base Sync 완료 여부 확인
+                  is_done=$(jq -r '.phases.base_sync.done // false' "${current_manifest}" 2>/dev/null)
+              else
+                  # Phase 2 요청 -> Cutover 완료 여부 확인
+                  is_done=$(jq -r '.phases.cutover.done // false' "${current_manifest}" 2>/dev/null)
+              fi
+              
+              # 해당 단계가 이미 완료되었고, 강제 실행 플래그가 없으면 스킵
+              if [[ "${is_done}" == "true" && "${V2K_FORCE:-0}" != "1" ]]; then
+                  echo "[Fleet] Skipping VM '${vm}': Already completed (${split})."
+                  skip=1
+              fi
+          fi
+      fi
+
+      if [[ "${skip}" -eq 0 ]]; then
+          pending_vms+=("${vm}")
+      fi
+  done
+
+  # 모든 VM이 완료된 경우 종료
+  if (( ${#pending_vms[@]} == 0 )); then
+      echo "All requested VMs are already completed for ${split}. Nothing to do."
+      exit 0
+  fi
+
+  # 필터링된 VM 목록으로 vms 배열 및 vm_raw 문자열 갱신
+  vms=("${pending_vms[@]}")
+  vm_raw=$(IFS=,; echo "${vms[*]}")
+  
+  echo "[Fleet] Starting fleet for ${#vms[@]} VM(s) in ${split}: ${vm_raw}"
+  # --------------------------------------------------------------------------
+  # [FIX END]
+  # --------------------------------------------------------------------------
+
+  # Fleet 실행 로그는 기존대로 fleet 폴더에 저장
   local fleet_id
   fleet_id="$(v2k_fleet_mk_fleet_id)"
   local out_dir
@@ -673,6 +1252,7 @@ v2k_fleet_cmd_run() {
   fi
 
   (
+    # 필터링된 vm_raw를 넘겨줍니다.
     _v2k_fleet_run_core "${fleet_id}" "${split}" "${vm_raw}" "${extra_args[@]+"${extra_args[@]}"}"
   ) > /dev/null 2>&1 & disown
 
@@ -690,105 +1270,523 @@ v2k_fleet_cmd_run() {
 # Status Command
 # ------------------------------------------------------------
 
-v2k_fleet_cmd_status() {
-  local vm_raw=""
-  v2k_fleet_extract_opt "--vm" vm_raw "$@" || v2k_fleet_die "fleet status requires --vm"
-  local -a vms=()
-  v2k_fleet_parse_vm_csv "${vm_raw}" vms
-  
-  # [MODIFIED] Allow single VM (>=1)
-  (( ${#vms[@]} >= 1 )) || v2k_fleet_die "fleet status requires multiple VMs"
+# -----------------------------------------------------------------------------
+# Fleet status helpers (best-effort telemetry; does NOT affect success/failure)
+# -----------------------------------------------------------------------------
 
-  local json_out=0
-  if [[ "${V2K_JSON_OUT:-0}" == "1" ]] || v2k_fleet_has_opt "--json" "$@"; then
-    json_out=1
+v2k_fleet_manifest_get_run_id() {
+  local manifest="$1"
+  jq -r '.run.run_id // ""' "${manifest}" 2>/dev/null || echo ""
+}
+
+v2k_fleet_manifest_get_vm_name() {
+  local manifest="$1"
+  jq -r '.source.vm.name // ""' "${manifest}" 2>/dev/null || echo ""
+}
+
+v2k_fleet_used_bytes_file() {
+  local path="$1"
+  [[ -n "${path}" && -f "${path}" ]] || { echo 0; return 0; }
+  # allocated blocks * block size (works even when qemu-img info is blocked/locked)
+  stat -c '%b %B' "${path}" 2>/dev/null | awk '{print $1*$2}' || echo 0
+}
+
+v2k_fleet_used_bytes_rbd() {
+  local spec="$1" # e.g. rbd:pool/image
+  command -v rbd >/dev/null 2>&1 || { echo 0; return 0; }
+  local img="${spec#rbd:}"
+  # try json output first
+  local used
+  used="$(rbd du --format json "${img}" 2>/dev/null | jq -r '
+      .images[0] // {} | (.used_size // .used_bytes // .used // 0)
+    ' 2>/dev/null || echo 0)"
+  [[ "${used}" =~ ^[0-9]+$ ]] || used=0
+  echo "${used}"
+}
+
+v2k_fleet_disk_used_bytes() {
+  local manifest="$1" disk_id="$2"
+  local st
+  st="$(jq -r '.target.storage.type // ""' "${manifest}" 2>/dev/null || echo "")"
+  local target_path
+  target_path="$(jq -r --arg did "${disk_id}" '.disks[] | select(.disk_id==$did) | .transfer.target_path // ""' "${manifest}" 2>/dev/null || echo "")"
+
+  case "${st}" in
+    file)
+      v2k_fleet_used_bytes_file "${target_path}"
+      ;;
+    rbd)
+      # manifest.sh enforces rbd: prefix for rbd type
+      v2k_fleet_used_bytes_rbd "${target_path}"
+      ;;
+    *)
+      # block/unknown: best-effort not available
+      echo 0
+      ;;
+  esac
+}
+
+v2k_fleet_cache_dir() {
+  local workdir="$1"
+  echo "${workdir}/.fleet-cache"
+}
+
+v2k_fleet_cache_key() {
+  # sanitize to a safe filename
+  local s="$1"
+  echo "${s}" | tr -c 'A-Za-z0-9_.-@' '_'
+}
+
+v2k_fleet_cache_get_or_set_baseline() {
+  local workdir="$1" key="$2" now_bytes="$3"
+  local dir f
+  dir="$(v2k_fleet_cache_dir "${workdir}")"
+  mkdir -p "${dir}" 2>/dev/null || true
+  f="${dir}/$(v2k_fleet_cache_key "${key}").start"
+  if [[ -f "${f}" ]]; then
+    cat "${f}" 2>/dev/null || echo "${now_bytes}"
+    return 0
+  fi
+  printf '%s\n' "${now_bytes}" > "${f}" 2>/dev/null || true
+  echo "${now_bytes}"
+}
+
+v2k_fleet_events_tail_valid_json() {
+  local events_log="$1" tail_n="${2:-5000}"
+  [[ -f "${events_log}" ]] || { echo '[]'; return 0; }
+  tail -n "${tail_n}" "${events_log}" 2>/dev/null \
+    | jq -sR '
+        split("\n")
+        | map(select(length>0) | (fromjson? // empty))
+      ' 2>/dev/null || echo '[]'
+}
+
+v2k_fleet_meaningful_events() {
+  # input: JSON array on stdin
+  jq '
+    map(
+      select(.phase|tostring|IN(
+        "cbt_enable",
+        "snapshot.base","snapshot.incr","snapshot.final",
+        "sync.base","sync.incr","sync.final",
+        "cutover","cleanup"
+      ))
+      | select(.event|tostring|IN(
+        "phase_start","phase_done","phase_skipped_by_policy",
+        "disk_start","disk_done","no_changes","changed_areas_fetched",
+        "start","done","error","fail","nbdkit_log",
+        "policy_evaluation",
+        "shutdown_guest_start","final_snapshot_start","final_sync_start","libvirt_define_start"
+      ))
+    )
+  '
+}
+
+v2k_fleet_calc_step_progress() {
+  local workdir="$1" manifest="$2" state="$3" phase_hint="$4"
+  local events_log="${workdir}/events.log"
+  local E M
+  E="$(v2k_fleet_events_tail_valid_json "${events_log}" 8000)"
+  M="$(printf '%s' "${E}" | v2k_fleet_meaningful_events 2>/dev/null || echo '[]')"
+
+  # last meaningful event
+  local last_ev
+  last_ev="$(printf '%s' "${M}" | jq -c 'sort_by(.ts) | last // {}' 2>/dev/null || echo '{}')"
+
+  local has_events
+  has_events="$(printf '%s' "${M}" | jq -r 'length>0' 2>/dev/null || echo false)"
+
+  # disk sizes + disk ids
+  local disks_json
+  disks_json="$(jq -c '.disks // []' "${manifest}" 2>/dev/null || echo '[]')"
+
+  # choose step based on hint + events
+  local step="" step_state="" step_label=""
+  local phase="${phase_hint:-}"
+
+  # NOTE: fleet state phase("phase1/phase2") is a runner phase, not a step phase.
+  # If we use it here, step mapping will fail and STEP/SYNC will be blank.
+  if [[ "${phase}" == "phase1" || "${phase}" == "phase2" ]]; then
+    phase=""
   fi
 
-  local fleet_root
-  fleet_root="$(v2k_fleet_root_dir)"
-  local -a items_json=()
-  local vm
-  for vm in "${vms[@]}"; do
-    local latest_state=""
-    latest_state="$(ls -1t "${fleet_root}"/*/state/"${vm}".json 2>/dev/null | head -n 1 || true)"
+  if [[ -z "${phase}" || "${phase}" == "null" ]]; then
+    phase="$(printf '%s' "${last_ev}" | jq -r '.phase // ""' 2>/dev/null || echo "")"
+  fi
 
-    local state="unknown" phase="" updated_at="" extra="{}" workdir=""
-    
-    if [[ -n "${latest_state}" && -f "${latest_state}" ]]; then
-      state="$(jq -r '.state // "unknown"' "${latest_state}" 2>/dev/null || echo "unknown")"
-      phase="$(jq -r '.phase // ""' "${latest_state}" 2>/dev/null || echo "")"
-      updated_at="$(jq -r '.updated_at // ""' "${latest_state}" 2>/dev/null || echo "")"
-      workdir="$(jq -r '.workdir // ""' "${latest_state}" 2>/dev/null || echo "")"
-      extra="$(jq -c '.' "${latest_state}" 2>/dev/null || echo '{}')"
+  case "${phase}" in
+    sync.base)  step="BASE_SYNC";  step_label="base sync" ;;
+    sync.incr)  step="INCR_SYNC";  step_label="incr sync" ;;
+    sync.final) step="FINAL_SYNC"; step_label="final sync" ;;
+    snapshot.base)  step="BASE_SNAP";  step_label="base snap" ;;
+    snapshot.incr)  step="INCR_SNAP";  step_label="incr snap" ;;
+    snapshot.final) step="FINAL_SNAP"; step_label="final snap" ;;
+    cutover)    step="CUTOVER";    step_label="cutover" ;;
+    cleanup)    step="CLEANUP";    step_label="cleanup" ;;
+    *) step=""; step_label="" ;;
+  esac
+
+  # step_state: starting/started/done (telemetry only)
+  if [[ "${state}" == "done" || "${state}" == "failed" ]]; then
+    step_state="${state}"
+  else
+    if [[ "${has_events}" == "true" ]]; then
+      step_state="started"
+    else
+      step_state="starting"
     fi
+  fi
 
-    if [[ -z "${workdir}" ]]; then
-       v2k_fleet_find_latest_workdir "${vm}" workdir || true
-    fi
+  # totals/done per step
+  local sync_total=0 sync_done=0 sync_pct=0 sync_kind="" sync_mode=""
+  local total_bytes_base=0 total_kind_base="logical"
+  local total_bytes_phys=0
 
-    local manifest="${workdir}/manifest.json"
-    local p1="false" p2="false" base_done="false" incr_max="0"
-    
-    if [[ -n "${workdir}" && -f "${manifest}" ]]; then
-        p1="$(jq -r '.runtime.split.phase1.done // false' "${manifest}" 2>/dev/null || echo false)"
-        p2="$(jq -r '.runtime.split.phase2.done // false' "${manifest}" 2>/dev/null || echo false)"
-        base_done="$(jq -r '[.disks[].transfer.base_done] | all' "${manifest}" 2>/dev/null || echo false)"
-        incr_max="$(jq -r '[.disks[].transfer.incr_seq // 0] | max' "${manifest}" 2>/dev/null || echo 0)"
-    fi
-
-    if [[ "${state}" == "unknown" ]]; then
-      if [[ "${p2}" == "true" ]]; then
-        state="done"
-        phase="phase2"
-      elif [[ "${p1}" == "true" ]]; then
-        state="ready"
-        phase="phase2"
-      elif [[ -n "${workdir}" ]]; then
-        state="stopped"
+  if [[ -f "${manifest}" ]]; then
+    total_bytes_base="$(jq -r '[.disks[].size_bytes // 0] | add // 0' "${manifest}" 2>/dev/null || echo 0)"
+    total_bytes_phys="$(jq -r '[.disks[].vmdk.physical_bytes // .disks[].source.physical_bytes // 0] | add // 0' "${manifest}" 2>/dev/null || echo 0)"
+    if [[ "${total_bytes_phys}" =~ ^[0-9]+$ ]] && (( total_bytes_phys > 0 )); then
+      total_kind_base="physical"
+    else
+      # If manifest doesn't have physical size, try govc via vmware_govc.sh (best-effort)
+      if declare -F v2k_vmware_manifest_sum_vmdk_physical_bytes >/dev/null 2>&1; then
+        total_bytes_phys="$(v2k_vmware_manifest_sum_vmdk_physical_bytes "${manifest}")"
+      else
+        total_bytes_phys=0
       fi
-      if [[ -z "${updated_at}" ]]; then
-         updated_at="$(v2k_fleet_now_rfc3339)"
+      if [[ "${total_bytes_phys}" =~ ^[0-9]+$ ]] && (( total_bytes_phys > 0 )); then
+        total_kind_base="physical"
+      else
+        total_bytes_phys=0
+        total_kind_base="logical"
       fi
     fi
+  fi
 
-    items_json+=("$(jq -cn \
-      --arg vm "${vm}" \
-      --arg phase "${phase}" \
-      --arg state "${state}" \
-      --arg workdir "${workdir}" \
-      --arg updated_at "${updated_at}" \
-      --argjson base_done "${base_done}" \
-      --argjson incr_max "${incr_max}" \
-      --argjson phase1_done "${p1}" \
-      --argjson phase2_done "${p2}" \
-      --argjson fleet_state "${extra}" \
-      '{vm:$vm,phase:$phase,state:$state,workdir:$workdir,updated_at:$updated_at,progress:{base_done:$base_done,incr_max:$incr_max,phase1_done:$phase1_done,phase2_done:$phase2_done},fleet_state:$fleet_state}' \
-    )")
+  # helper: sum used bytes for all disks
+  local disk_ids
+  disk_ids="$(printf '%s' "${disks_json}" | jq -r '.[].disk_id' 2>/dev/null || true)"
+  local used_sum=0
+  local did
+  for did in ${disk_ids}; do
+    used_sum=$(( used_sum + $(v2k_fleet_disk_used_bytes "${manifest}" "${did}") ))
   done
 
-  if (( json_out == 1 )); then
-    local json_array
-    if (( ${#items_json[@]} > 0 )); then
-       json_array="$(printf '%s\n' "${items_json[@]}" | jq -s '.')"
+  if [[ "${step}" == "BASE_SYNC" ]]; then
+    if [[ "${total_kind_base}" == "physical" ]]; then
+      sync_total="${total_bytes_phys}"
     else
-       json_array="[]"
+      sync_total="${total_bytes_base}"
     fi
-    
-    jq -cn --arg ts "$(v2k_fleet_now_rfc3339)" --argjson vms "${json_array}" '{ok:true,timestamp:$ts,vms:$vms}'
+    sync_done="${used_sum}"
+    sync_kind="${total_kind_base}"
+    sync_mode="base"
+  elif [[ "${step}" == "INCR_SYNC" || "${step}" == "FINAL_SYNC" ]]; then
+    local p="sync.incr"
+    [[ "${step}" == "FINAL_SYNC" ]] && p="sync.final"
+    sync_mode="${p#sync.}"
+
+    # window start ts
+    local start_ts
+    start_ts="$(printf '%s' "${M}" | jq -r --arg p "${p}" '
+        ( [ range(0; length) | select(.[.].phase==$p and .[.].event=="phase_start") ] | last ) as $i
+        | if ($i|type)=="number" then .[$i].ts else "" end
+      ' 2>/dev/null || echo "")"
+
+    # window events
+    local total_delta done_event
+    total_delta="$(printf '%s' "${M}" | jq -r --arg p "${p}" --arg st "${start_ts}" '
+        if ($st=="") then 0 else
+          ( . | map(select(.phase==$p and .ts >= $st and .event=="changed_areas_fetched") | (.detail.bytes // 0)) | add // 0 )
+        end
+      ' 2>/dev/null || echo 0)"
+    done_event="$(printf '%s' "${M}" | jq -r --arg p "${p}" --arg st "${start_ts}" '
+        if ($st=="") then 0 else
+          ( . | map(select(.phase==$p and .ts >= $st and .event=="disk_done") | (.detail.bytes_written // 0)) | add // 0 )
+        end
+      ' 2>/dev/null || echo 0)"
+
+    sync_total="${total_delta}"
+    sync_kind="delta"
+
+    # baseline cache for this window (progress display only)
+    local run_id
+    run_id="$(v2k_fleet_manifest_get_run_id "${manifest}")"
+    local key="run=${run_id}|phase=${p}|start_ts=${start_ts}"
+    local base_used
+    base_used="$(v2k_fleet_cache_get_or_set_baseline "${workdir}" "${key}" "${used_sum}")"
+    local delta_used=$(( used_sum - base_used ))
+    (( delta_used < 0 )) && delta_used=0
+
+    if [[ "${done_event}" =~ ^[0-9]+$ ]] && (( done_event > 0 )); then
+      sync_done="${done_event}"
+    else
+      sync_done="${delta_used}"
+    fi
+  fi
+
+  if (( sync_total > 0 )); then
+    sync_pct=$(( (sync_done * 100) / sync_total ))
+    (( sync_pct > 100 )) && sync_pct=100
+  else
+    sync_pct=0
+  fi
+
+  jq -cn \
+    --arg step "${step}" \
+    --arg step_label "${step_label}" \
+    --arg step_state "${step_state}" \
+    --argjson has_events "$( [[ "${has_events}" == "true" ]] && echo true || echo false )" \
+    --argjson sync_total "${sync_total}" \
+    --argjson sync_done "${sync_done}" \
+    --argjson sync_pct "${sync_pct}" \
+    --arg sync_kind "${sync_kind}" \
+    --arg sync_mode "${sync_mode}" \
+    --arg last_ev_ts "$(printf '%s' "${last_ev}" | jq -r '.ts // ""' 2>/dev/null || echo "")" \
+    --arg last_ev_phase "$(printf '%s' "${last_ev}" | jq -r '.phase // ""' 2>/dev/null || echo "")" \
+    --arg last_ev_event "$(printf '%s' "${last_ev}" | jq -r '.event // ""' 2>/dev/null || echo "")" \
+    '{
+      has_events:$has_events,
+      step:$step,
+      step_label:$step_label,
+      step_state:$step_state,
+      sync:{mode:$sync_mode,kind:$sync_kind,total_bytes:$sync_total,done_bytes:$sync_done,percent:$sync_pct},
+      last_event:{ts:$last_ev_ts,phase:$last_ev_phase,event:$last_ev_event}
+    }'
+}
+
+v2k_fleet_base_total_bytes_physical_or_logical() {
+  # Args: manifest.json
+  # Returns: "kind bytes" (e.g. "physical 123", "logical 456")
+  local manifest="${1-}"
+  [[ -n "${manifest}" && -f "${manifest}" ]] || { echo "logical 0"; return 0; }
+
+  local logical phys
+  logical="$(jq -r '[.disks[].size_bytes // 0] | add // 0' "${manifest}" 2>/dev/null || echo 0)"
+  phys="$(jq -r '[.disks[].vmdk.physical_bytes // .disks[].source.physical_bytes // 0] | add // 0' "${manifest}" 2>/dev/null || echo 0)"
+
+  if [[ "${phys}" =~ ^[0-9]+$ ]] && (( phys > 0 )); then
+    echo "physical ${phys}"
     return 0
   fi
 
-  printf '%-24s %-8s %-12s %-8s %-24s\n' "VM" "PHASE" "STATE" "INCR" "WORKDIR"
-  printf '%-24s %-8s %-12s %-8s %-24s\n' "------------------------" "--------" "------------" "--------" "------------------------"
-  local item
-  for item in "${items_json[@]}"; do
-    local name phase state workdir incr
-    name="$(echo "${item}" | jq -r '.vm')"
-    phase="$(echo "${item}" | jq -r '.phase')"
-    state="$(echo "${item}" | jq -r '.state')"
-    incr="$(echo "${item}" | jq -r '.progress.incr_max')"
-    workdir="$(echo "${item}" | jq -r '.workdir')"
-    workdir="${workdir##*/ablestack-v2k/}"
-    printf '%-24s %-8s %-12s %-8s %-24s\n' "${name}" "${phase}" "${state}" "${incr}" "${workdir:0:24}"
+  # fallback: govc query (vmware_govc.sh)
+  if declare -F v2k_vmware_manifest_sum_vmdk_physical_bytes >/dev/null 2>&1; then
+    phys="$(v2k_vmware_manifest_sum_vmdk_physical_bytes "${manifest}")"
+    if [[ "${phys}" =~ ^[0-9]+$ ]] && (( phys > 0 )); then
+      echo "physical ${phys}"
+      return 0
+    fi
+  fi
+
+  [[ "${logical}" =~ ^[0-9]+$ ]] || logical=0
+  echo "logical ${logical}"
+}
+
+v2k_fleet_last_step_from_events() {
+  # Args: workdir
+  # Returns: "step_label" or empty
+  local workdir="${1-}"
+  local ev="${workdir}/events.log"
+  [[ -f "${ev}" ]] || { echo ""; return 0; }
+  command -v jq >/dev/null 2>&1 || { echo ""; return 0; }
+
+  local phase
+  phase="$(tail -n 5000 "${ev}" 2>/dev/null | jq -sR '
+    split("\n")
+    | map(select(length>0) | (fromjson? // empty))
+    | map(select(.phase|tostring|IN("snapshot.base","snapshot.incr","snapshot.final","sync.base","sync.incr","sync.final","cutover","cleanup")))
+    | sort_by(.ts)
+    | (last // {}) .phase // ""
+  ' 2>/dev/null || echo "")"
+
+  case "${phase}" in
+    sync.base) echo "base sync" ;;
+    sync.incr) echo "incr sync" ;;
+    sync.final) echo "final sync" ;;
+    snapshot.base) echo "base snap" ;;
+    snapshot.incr) echo "incr snap" ;;
+    snapshot.final) echo "final snap" ;;
+    cutover) echo "cutover" ;;
+    cleanup) echo "cleanup" ;;
+    *) echo "" ;;
+  esac
+}
+
+# ------------------------------------------------------------
+# Status Command
+# ------------------------------------------------------------
+
+v2k_fleet_cmd_status() {
+  # [FIX 1] JSON Flag Inheritance
+  local vm_raw="" json_out="${V2K_JSON_OUT:-0}" watch_mode=0
+  v2k_fleet_extract_opt "--vm" vm_raw "$@" || true
+  
+  # Check flags
+  for a in "$@"; do
+    [[ "$a" == "--json" ]] && json_out=1
+    [[ "$a" == "--watch" ]] && watch_mode=1
   done
+
+  # Parse requested VMs into array
+  local -a filter_vms=()
+  v2k_fleet_parse_vm_csv "${vm_raw}" filter_vms
+
+  # [FIX] Correct Root Dir Path
+  local root_dir="${V2K_WORKDIR:-/var/lib/ablestack-v2k}"
+  [[ -d "${root_dir}" ]] || { echo "No data found in ${root_dir}"; return 0; }
+
+  local -a items_json=()
+  local d vm_name
+
+  # Iterate through all VM directories in the work root
+  for d in "${root_dir}"/*; do
+    [[ -d "$d" ]] || continue
+    vm_name="$(basename "$d")"
+
+    # Skip metadata directory
+    [[ "${vm_name}" == "fleet" ]] && continue
+
+    # Filter by VM name if provided
+    if (( ${#filter_vms[@]} > 0 )); then
+        local match=0
+        for f in "${filter_vms[@]}"; do
+            if [[ "${f}" == "${vm_name}" ]]; then
+                match=1
+                break
+            fi
+        done
+        [[ "${match}" -eq 0 ]] && continue
+    fi
+
+    # Find latest run_id
+    local latest_run_id
+    latest_run_id=$(ls -1t "$d" 2>/dev/null | head -n 1 || true)
+    
+    if [[ -z "${latest_run_id}" ]]; then
+      continue
+    fi
+
+    local current_vm_dir="$d/${latest_run_id}"
+    local current_manifest="${current_vm_dir}/manifest.json"
+    local phase="unknown"
+    local state="unknown"
+    local step="-"
+    local sync="-"
+    local history="{}"
+
+    if [[ -f "${current_manifest}" ]]; then
+      # 1. Determine Phase (Initial Guess)
+      local p1_done p2_done
+      p1_done=$(jq -r '.phases.base_sync.done // false' "${current_manifest}" 2>/dev/null)
+      p2_done=$(jq -r '.phases.cutover.done // false' "${current_manifest}" 2>/dev/null)
+      
+      if [[ "${p2_done}" == "true" ]]; then
+        phase="phase2" # Completed
+      elif [[ "${p1_done}" == "true" ]]; then
+        phase="phase1" # Default to phase1 unless active Phase 2 work is detected
+      else
+        phase="phase1"
+      fi
+      
+      # 2. Determine State/Step/Sync from Detail Logic
+      local detail_json
+      detail_json="$(v2k_fleet_calculate_detailed_status "${current_vm_dir}" "${current_manifest}" "${phase}")"
+      
+      state=$(echo "${detail_json}" | jq -r '.refined_state // ""')
+      [[ -z "${state}" ]] && state="started" # fallback
+
+      step=$(echo "${detail_json}" | jq -r '.step // "Ready"')
+      sync=$(echo "${detail_json}" | jq -r '.sync_display // "-"')
+      
+      if [[ "${json_out}" -eq 1 ]]; then
+        history=$(echo "${detail_json}" | jq -c '.history // {}')
+      fi
+
+      # --------------------------------------------------------------------------
+      # [FIX 3] Phase Promotion Logic (Strict Inclusion - Incr Excluded)
+      # 'incr sync'는 Phase 1으로 유지하고, 
+      # 실제 Cutover 및 Final Sync 관련 작업만 Phase 2로 승격합니다.
+      # --------------------------------------------------------------------------
+      local is_phase2_activity=0
+      
+      # 1) 최종 동기화(final) 및 스냅샷 (증분 incr 제외!)
+      if [[ "${step}" == *"final"* ]]; then
+          is_phase2_activity=1
+      fi
+      
+      # 2) 컷오버 및 종료
+      if [[ "${step}" == *"cutover"* || "${step}" == *"shut"* ]]; then
+          is_phase2_activity=1
+      fi
+      
+      # 3) 부트스트랩 관련 (initramfs, mount, lvm, winpe)
+      if [[ "${step}" == *"bootstrap"* || "${step}" == *"initramfs"* || "${step}" == *"mount"* || "${step}" == *"lvm"* || "${step}" == *"winpe"* ]]; then
+          is_phase2_activity=1
+      fi
+      
+      # 4) 클린업 및 완료
+      if [[ "${step}" == *"clean"* || "${step}" == "success" || "${step}" == "done" ]]; then
+          # 단, Phase 1 완료 상태(done)가 아니라 실제 작업 완료(done)인 경우여야 함.
+          # 이는 p2_done 체크와 결합되어 처리됨.
+          if [[ "${p2_done}" == "true" ]]; then
+              is_phase2_activity=1
+          fi
+      fi
+
+      # 조건 충족 시 승격
+      if [[ "${is_phase2_activity}" -eq 1 ]]; then
+          phase="phase2"
+      fi
+
+      # [Phase 1 완료 상태 오버라이드]
+      # 승격되지 않고 여전히 phase1 상태라면 (즉, incr sync나 대기 상태),
+      # 완료 플래그를 확인하여 상태를 표시합니다.
+      if [[ "${phase}" == "phase1" && "${p1_done}" == "true" && "${state}" != "failed" ]]; then
+          # 증분 동기화(incr) 중일 때는 'started/running' 상태를 그대로 보여줌 (덮어쓰기 방지)
+          if [[ "${step}" == *"incr"* ]]; then
+              : # Keep current state (e.g., Phase 1 | started | incr sync)
+          else
+              # 그 외의 경우(run, Ready 등 유휴 상태)에는 'Phase2 Ready'로 표시
+              state="done"
+              step="Phase2 Ready"
+          fi
+      fi
+    fi
+
+    local short_wd="${vm_name}/${latest_run_id}"
+
+    if [[ "${json_out}" -eq 1 ]]; then
+      items_json+=("$(jq -cn --arg vm "${vm_name}" --arg ph "${phase}" --arg st "${state}" \
+        --arg step "${step}" --arg sync "${sync}" --arg wd "${short_wd}" --argjson hist "${history}" \
+        '{vm:$vm, phase:$ph, state:$st, step:$step, sync:$sync, workdir:$wd, history:$hist}')")
+    else
+       # Table row format: VM PHASE STATE STEP SYNC WORKDIR
+       items_json+=("${vm_name}|${phase}|${state}|${step}|${sync}|${short_wd}")
+    fi
+  done
+
+  # Output
+  if [[ "${json_out}" -eq 1 ]]; then
+    local joined
+    joined=$(printf ",%s" "${items_json[@]}")
+    joined="${joined:1}"
+    echo "[${joined}]"
+  else
+    if (( ${#items_json[@]} == 0 )); then
+        if (( ${#filter_vms[@]} > 0 )); then
+            echo "No status found for specified VMs: ${vm_raw}"
+        else
+            echo "No VMs found."
+        fi
+    else
+        {
+          echo "VM|PHASE|STATE|STEP|SYNC(Physical)|WORKDIR"
+          echo "--------------------|--------|----------|---------------|----------------------|--------------------"
+          for item in "${items_json[@]}"; do
+            echo "${item}"
+          done
+        } | column -t -s "|"
+    fi
+  fi
 }
