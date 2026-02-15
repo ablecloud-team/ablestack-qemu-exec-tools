@@ -43,7 +43,7 @@ DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 DEB_COMPLETIONS_DIR = $(DEB_BUILD_DIR)/usr/share/bash-completion/completions
 
-+.PHONY: all install uninstall rpm v2k-rpm hangctl-rpm deb windows clean
+.PHONY: all install uninstall rpm v2k-rpm hangctl-rpm deb windows clean
 
 all:
 	@echo "Available targets: install, uninstall, rpm, deb, windows, clean"
