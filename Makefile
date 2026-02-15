@@ -125,8 +125,18 @@ uninstall-keep-lib:
 rpm:
 	@echo "📦 Building RPM..."
 	mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-	tar czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
-		--transform="s,^,$(NAME)-$(VERSION)/," .
+	@TMP_TGZ="$$(mktemp /tmp/ablestack-qemu-exec-tools-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,ablestack-qemu-exec-tools-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild/SOURCES/ablestack-qemu-exec-tools-$(VERSION).tar.gz"
 
 	# spec 파일 복사 (rpm 디렉토리에서 가져오기)
 	cp rpm/$(NAME).spec rpmbuild/SPECS/
@@ -149,18 +159,18 @@ hangctl-rpm:
 	@mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
 	@echo "[INFO] Packing sources to temp (avoid self-include)..."
-	@TMP_TGZ="$$(mktemp /tmp/$(HANGCTL_NAME)-$(VERSION).tar.gz.XXXXXX)"; \
-	tar czf "$$TMP_TGZ" \
-		--transform="s,^,$(HANGCTL_NAME)-$(VERSION)/," \
-		--exclude=./rpmbuild \
-		--exclude=./rpmbuild_v2k \
-		--exclude=./rpmbuild_hangctl \
-		--exclude=./build \
-		--exclude=./dist \
-		--exclude=./repo \
-		--exclude=./release \
-		. ; \
-	mv -f "$$TMP_TGZ" "rpmbuild_hangctl/SOURCES/$(HANGCTL_NAME)-$(VERSION).tar.gz"
+	TMP_TGZ="$(mktemp /tmp/${NAME_HANGCTL}-${VERSION}.tar.gz.XXXXXX)"
+    tar czf "${TMP_TGZ}" \
+      --transform="s,^,${NAME_HANGCTL}-${VERSION}/," \
+      --exclude=./rpmbuild \
+      --exclude=./rpmbuild_v2k \
+      --exclude=./rpmbuild_hangctl \
+      --exclude=./build \
+      --exclude=./release \
+      --exclude=./repo \
+      --exclude=./dist \
+      .
+    mv -f "${TMP_TGZ}" "rpmbuild_hangctl/SOURCES/${NAME_HANGCTL}-${VERSION}.tar.gz"
 
 	@cp $(HANGCTL_SPEC) rpmbuild_hangctl/SPECS/
 
@@ -190,8 +200,18 @@ v2k-rpm:
 
 	# Fully isolated rpmbuild tree for V2K (keeps existing 'rpmbuild/' untouched)
 	mkdir -p rpmbuild_v2k/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-	tar czf rpmbuild_v2k/SOURCES/$(V2K_NAME)-$(VERSION).tar.gz \
-		--transform="s,^,$(V2K_NAME)-$(VERSION)/," .
+	@TMP_TGZ="$$(mktemp /tmp/ablestack_v2k-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,ablestack_v2k-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild_v2k/SOURCES/ablestack_v2k-$(VERSION).tar.gz"
 
 	cp $(V2K_SPEC) rpmbuild_v2k/SPECS/
 
