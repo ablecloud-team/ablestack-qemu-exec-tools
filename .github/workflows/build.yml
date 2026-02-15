@@ -115,8 +115,18 @@ jobs:
           # 기존 패키지들과 동일하게 'spec 파일 basename'을 prefix로 사용
           # (즉, ablestack_vm_hangctl-<version>.tar.gz)
           NAME_HANGCTL="ablestack_vm_hangctl"
-          tar czf "rpmbuild_hangctl/SOURCES/${NAME_HANGCTL}-${VERSION}.tar.gz" \
-            --transform="s,^,${NAME_HANGCTL}-${VERSION}/," .
+          TMP_TGZ="$(mktemp /tmp/${NAME_HANGCTL}-${VERSION}.tar.gz.XXXXXX)"
+          tar czf "${TMP_TGZ}" \
+            --transform="s,^,${NAME_HANGCTL}-${VERSION}/," \
+            --exclude=./rpmbuild \
+            --exclude=./rpmbuild_v2k \
+            --exclude=./rpmbuild_hangctl \
+            --exclude=./build \
+            --exclude=./release \
+            --exclude=./repo \
+            --exclude=./dist \
+            .
+          mv -f "${TMP_TGZ}" "rpmbuild_hangctl/SOURCES/${NAME_HANGCTL}-${VERSION}.tar.gz"
 
           cp "${SPEC}" rpmbuild_hangctl/SPECS/
 

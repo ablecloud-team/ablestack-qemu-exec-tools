@@ -159,18 +159,18 @@ hangctl-rpm:
 	@mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
 	@echo "[INFO] Packing sources to temp (avoid self-include)..."
-	TMP_TGZ="$(mktemp /tmp/${NAME_HANGCTL}-${VERSION}.tar.gz.XXXXXX)"
-    tar czf "${TMP_TGZ}" \
-      --transform="s,^,${NAME_HANGCTL}-${VERSION}/," \
-      --exclude=./rpmbuild \
-      --exclude=./rpmbuild_v2k \
-      --exclude=./rpmbuild_hangctl \
-      --exclude=./build \
-      --exclude=./release \
-      --exclude=./repo \
-      --exclude=./dist \
-      .
-    mv -f "${TMP_TGZ}" "rpmbuild_hangctl/SOURCES/${NAME_HANGCTL}-${VERSION}.tar.gz"
+	@TMP_TGZ="$$(mktemp /tmp/$(HANGCTL_NAME)-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,$(HANGCTL_NAME)-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild_hangctl/SOURCES/$(HANGCTL_NAME)-$(VERSION).tar.gz"
 
 	@cp $(HANGCTL_SPEC) rpmbuild_hangctl/SPECS/
 
