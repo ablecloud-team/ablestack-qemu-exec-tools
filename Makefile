@@ -145,16 +145,24 @@ rpm:
 hangctl-rpm:
 	@echo "📦 Building HANGCTL RPM (isolated)..."
 	@test -f "$(HANGCTL_SPEC)" || (echo "[ERR] Missing spec: $(HANGCTL_SPEC)" >&2; exit 2)
-	@test -f "lib/hangctl/systemd/ablestack-vm-hangctl.service" || (echo "[ERR] Missing unit: lib/hangctl/systemd/ablestack-vm-hangctl.service" >&2; exit 2)
-	@test -f "lib/hangctl/systemd/ablestack-vm-hangctl.timer" || (echo "[ERR] Missing unit: lib/hangctl/systemd/ablestack-vm-hangctl.timer" >&2; exit 2)
-	@test -f "rpm/ablestack-vm-hangctl.conf" || (echo "[ERR] Missing default config: rpm/ablestack-vm-hangctl.conf" >&2; exit 2)
 
-	# Fully isolated rpmbuild tree for hangctl
-	mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-	tar czf rpmbuild_hangctl/SOURCES/$(HANGCTL_NAME)-$(VERSION).tar.gz \
-		--transform="s,^,$(HANGCTL_NAME)-$(VERSION)/," .
+	@mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
-	cp $(HANGCTL_SPEC) rpmbuild_hangctl/SPECS/
+	@echo "[INFO] Packing sources to temp (avoid self-include)..."
+	@TMP_TGZ="$$(mktemp /tmp/$(HANGCTL_NAME)-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,$(HANGCTL_NAME)-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./build \
+		--exclude=./dist \
+		--exclude=./repo \
+		--exclude=./release \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild_hangctl/SOURCES/$(HANGCTL_NAME)-$(VERSION).tar.gz"
+
+	@cp $(HANGCTL_SPEC) rpmbuild_hangctl/SPECS/
 
 	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild_hangctl" \
 	         --define "version $(VERSION)" \
@@ -165,7 +173,6 @@ hangctl-rpm:
 	mkdir -p build/rpm-hangctl
 	cp rpmbuild_hangctl/RPMS/noarch/*.rpm build/rpm-hangctl/ 2>/dev/null || true
 	cp rpmbuild_hangctl/RPMS/*/*.rpm build/rpm-hangctl/ 2>/dev/null || true
-
 	@echo "✅ HANGCTL RPM package created: build/rpm-hangctl/"
 
 v2k-rpm:
@@ -258,6 +265,7 @@ windows:
 clean:
 	rm -rf rpmbuild
 	rm -rf rpmbuild_v2k
+	rm -rf rpmbuild_hangctl
 	rm -rf $(DEB_BUILD_DIR)
 	rm -f *.deb
 	rm -rf build/*
