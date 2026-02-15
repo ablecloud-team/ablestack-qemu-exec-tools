@@ -139,10 +139,10 @@ fi
 # ───────────────────────────────────────────────────────────
 # 2.1) hangctl(systemd/config) 추가 설치 (dev/source install)
 #   - unit: lib/hangctl/systemd/*.service|*.timer -> /etc/systemd/system/
-#   - config(default): rpm/ablestack-vm-hangctl.conf -> /etc/ablestack/ablestack-vm-hangctl.conf (noreplace)
+#   - config(default): etc/ablestack-vm-hangctl.conf -> /etc/ablestack/ablestack-vm-hangctl.conf (noreplace)
 #   - enable/start는 하지 않음(운영 정책은 사용자가 결정)
 # ───────────────────────────────────────────────────────────
-HANGCTL_DEFAULT_CONF_SRC="rpm/ablestack-vm-hangctl.conf"
+HANGCTL_DEFAULT_CONF_SRC="etc/ablestack-vm-hangctl.conf"
 HANGCTL_DEFAULT_CONF_DST="/etc/ablestack/ablestack-vm-hangctl.conf"
 HANGCTL_UNIT_SRC_DIR="${LIB_SRC}/hangctl/systemd"
 

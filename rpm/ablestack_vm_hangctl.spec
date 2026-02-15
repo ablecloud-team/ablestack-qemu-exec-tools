@@ -49,7 +49,7 @@ find %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/hangctl -type f -name 
 
 # Default config
 install -d %{buildroot}/etc/ablestack
-install -m 0644 rpm/ablestack-vm-hangctl.conf %{buildroot}/etc/ablestack/ablestack-vm-hangctl.conf
+install -m 0644 etc/ablestack-vm-hangctl.conf %{buildroot}/etc/ablestack/ablestack-vm-hangctl.conf
 
 # systemd unit files
 install -d %{buildroot}%{_unitdir}
