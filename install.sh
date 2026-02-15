@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # install.sh - ablestack-qemu-exec-tools 설치 스크립트 (통합)
+# (dev/source install 용)
 #
 # Copyright 2025 ABLECLOUD
 #
@@ -24,6 +25,7 @@ LIB_TARGET="${INSTALL_PREFIX}/lib/ablestack-qemu-exec-tools"
 PAYLOAD_SRC="payload"
 LIB_SRC="lib"
 BIN_SRC="bin"
+SYSTEMD_UNIT_DIR="/etc/systemd/system"
 
 ISO_DEFAULT_DIR="/usr/share/ablestack/tools"   # ISO가 존재해야 하는 디렉토리
 ISO_DEFAULT_PATH="${ISO_DEFAULT_DIR}/ablestack-qemu-exec-tools.iso"
@@ -67,6 +69,8 @@ need_cmd jq
 need_cmd virsh
 
 # 오프라인 주입 관련 권장(실제 기능에 필요)
+# NOTE: hangctl는 시스템 운영 도구이므로, 아래 권장 도구 유무와 무관하게 설치 가능
+#       (의존성은 런타임 환경에서 개별 충족)
 need_cmd virt-inspector
 need_cmd virt-copy-in
 need_cmd virt-customize
@@ -91,10 +95,10 @@ fi
 
 if [[ "$INSTALL_MODE" == "HOST" ]]; then
   # ABLESTACK Host: 최소 도구만 설치
-  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "v2k_test_install.sh")
+  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
 else
   # 일반 VM: 전체 도구 설치
-  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "v2k_test_install.sh")
+  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
 fi
 
 for script in "${BIN_SCRIPTS[@]}"; do
@@ -131,6 +135,47 @@ else
   echo "⚠️  라이브러리 소스 디렉토리 미존재: $LIB_SRC"
 fi
 
+#
+# ───────────────────────────────────────────────────────────
+# 2.1) hangctl(systemd/config) 추가 설치 (dev/source install)
+#   - unit: lib/hangctl/systemd/*.service|*.timer -> /etc/systemd/system/
+#   - config(default): rpm/ablestack-vm-hangctl.conf -> /etc/ablestack/ablestack-vm-hangctl.conf (noreplace)
+#   - enable/start는 하지 않음(운영 정책은 사용자가 결정)
+# ───────────────────────────────────────────────────────────
+HANGCTL_DEFAULT_CONF_SRC="rpm/ablestack-vm-hangctl.conf"
+HANGCTL_DEFAULT_CONF_DST="/etc/ablestack/ablestack-vm-hangctl.conf"
+HANGCTL_UNIT_SRC_DIR="${LIB_SRC}/hangctl/systemd"
+
+if [[ -d "${HANGCTL_UNIT_SRC_DIR}" ]]; then
+  echo "➤ hangctl systemd unit 설치: ${SYSTEMD_UNIT_DIR}"
+  sudo mkdir -p "${SYSTEMD_UNIT_DIR}"
+  # service/timer만 복사
+  if ls "${HANGCTL_UNIT_SRC_DIR}"/*.service >/dev/null 2>&1; then
+    sudo cp -a "${HANGCTL_UNIT_SRC_DIR}"/*.service "${SYSTEMD_UNIT_DIR}/"
+    sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.service 2>/dev/null || true
+  fi
+  if ls "${HANGCTL_UNIT_SRC_DIR}"/*.timer >/dev/null 2>&1; then
+    sudo cp -a "${HANGCTL_UNIT_SRC_DIR}"/*.timer "${SYSTEMD_UNIT_DIR}/"
+    sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.timer 2>/dev/null || true
+  fi
+  sudo systemctl daemon-reload 2>/dev/null || true
+else
+  echo "⚠️  hangctl systemd unit 소스 디렉토리 미존재(건너뜀): ${HANGCTL_UNIT_SRC_DIR}"
+fi
+
+if [[ -f "${HANGCTL_DEFAULT_CONF_SRC}" ]]; then
+  echo "➤ hangctl 기본 설정 설치(존재 시 유지): ${HANGCTL_DEFAULT_CONF_DST}"
+  sudo mkdir -p "$(dirname "${HANGCTL_DEFAULT_CONF_DST}")"
+  if [[ -f "${HANGCTL_DEFAULT_CONF_DST}" ]]; then
+    echo "   ✅ 기존 설정 존재: ${HANGCTL_DEFAULT_CONF_DST} (덮어쓰지 않음)"
+  else
+    sudo cp -a "${HANGCTL_DEFAULT_CONF_SRC}" "${HANGCTL_DEFAULT_CONF_DST}"
+    sudo chmod 644 "${HANGCTL_DEFAULT_CONF_DST}" 2>/dev/null || true
+    echo "   ✅ 설치 완료: ${HANGCTL_DEFAULT_CONF_DST}"
+  fi
+else
+  echo "⚠️  hangctl 기본 설정 템플릿 없음(건너뜀): ${HANGCTL_DEFAULT_CONF_SRC}"
+fi
 
 echo "➤ 페이로드 설치 경로: ${LIB_TARGET}/payload"
 mkdir -p "${LIB_TARGET}/payload"
@@ -171,6 +216,13 @@ echo ""
 echo "사용 예시:"
 echo "  vm_autoinstall <domain>     # ISO 핫플러그 + (QGA 있으면 온라인) / (없으면 오프라인 주입+부팅)"
 echo "  vm_exec                      # 게스트 내부 명령 실행(QGA 필요)"
+echo ""
+echo "  ablestack_vm_hangctl health  # libvirtd 상태 점검"
+echo "  ablestack_vm_hangctl scan    # VM hang 스캔/조치(설정 기반)"
+echo ""
+echo "systemd(개발 설치 시 유닛만 배치, enable은 수동):"
+echo "  systemctl enable --now ablestack-vm-hangctl.timer"
+echo "  systemctl status ablestack-vm-hangctl.timer --no-pager -l"
 echo ""
 echo "참고:"
 echo "  - 오프라인 주입 스크립트는 ${LIB_TARGET}/payload/* 를 사용합니다."

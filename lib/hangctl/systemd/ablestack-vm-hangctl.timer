@@ -1,0 +1,12 @@
+[Unit]
+Description=Run ABLESTACK VM hang controller periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60
+Unit=ablestack-vm-hangctl.service
+Persistent=true
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

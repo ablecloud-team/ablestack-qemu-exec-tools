@@ -18,6 +18,9 @@ NAME = ablestack-qemu-exec-tools
 V2K_NAME = ablestack_v2k
 V2K_SPEC = rpm/$(V2K_NAME).spec
 
+HANGCTL_NAME = ablestack_vm_hangctl
+HANGCTL_SPEC = rpm/$(HANGCTL_NAME).spec
+
 # Read VERSION file
 VERSION := $(shell . ./VERSION; printf "%s" "$$VERSION" | tr -d '\r\n[:space:]')
 RELEASE := $(shell . ./VERSION; printf "%s" "$$RELEASE" | tr -d '\r\n[:space:]')
@@ -40,7 +43,7 @@ DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 DEB_COMPLETIONS_DIR = $(DEB_BUILD_DIR)/usr/share/bash-completion/completions
 
-.PHONY: all install uninstall rpm v2k-rpm deb windows clean
++.PHONY: all install uninstall rpm v2k-rpm hangctl-rpm deb windows clean
 
 all:
 	@echo "Available targets: install, uninstall, rpm, deb, windows, clean"
@@ -138,6 +141,32 @@ rpm:
 	mkdir -p build/rpm
 	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
 	@echo "✅ RPM package created: build/rpm/"
+
+hangctl-rpm:
+	@echo "📦 Building HANGCTL RPM (isolated)..."
+	@test -f "$(HANGCTL_SPEC)" || (echo "[ERR] Missing spec: $(HANGCTL_SPEC)" >&2; exit 2)
+	@test -f "lib/hangctl/systemd/ablestack-vm-hangctl.service" || (echo "[ERR] Missing unit: lib/hangctl/systemd/ablestack-vm-hangctl.service" >&2; exit 2)
+	@test -f "lib/hangctl/systemd/ablestack-vm-hangctl.timer" || (echo "[ERR] Missing unit: lib/hangctl/systemd/ablestack-vm-hangctl.timer" >&2; exit 2)
+	@test -f "rpm/ablestack-vm-hangctl.conf" || (echo "[ERR] Missing default config: rpm/ablestack-vm-hangctl.conf" >&2; exit 2)
+
+	# Fully isolated rpmbuild tree for hangctl
+	mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+	tar czf rpmbuild_hangctl/SOURCES/$(HANGCTL_NAME)-$(VERSION).tar.gz \
+		--transform="s,^,$(HANGCTL_NAME)-$(VERSION)/," .
+
+	cp $(HANGCTL_SPEC) rpmbuild_hangctl/SPECS/
+
+	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild_hangctl" \
+	         --define "version $(VERSION)" \
+	         --define "release $(RELEASE)" \
+	         --define "githash $(GIT_HASH)" \
+	         rpmbuild_hangctl/SPECS/$(HANGCTL_NAME).spec
+
+	mkdir -p build/rpm-hangctl
+	cp rpmbuild_hangctl/RPMS/noarch/*.rpm build/rpm-hangctl/ 2>/dev/null || true
+	cp rpmbuild_hangctl/RPMS/*/*.rpm build/rpm-hangctl/ 2>/dev/null || true
+
+	@echo "✅ HANGCTL RPM package created: build/rpm-hangctl/"
 
 v2k-rpm:
 	@echo "📦 Building V2K RPM (isolated)..."

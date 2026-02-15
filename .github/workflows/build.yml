@@ -74,6 +74,87 @@ jobs:
           path: release/rpm/**
 
   # ───────────────────────────────────────────────
+  # 1-A) HANGCTL RPM BUILD (Rocky 9 only)
+  #  - 목표: Rocky9 ABLESTACK Host에서만 설치되도록 spec(%pre 가드) 반영
+  #  - build.yml에서는 "빌드/리포 구성/배포"만 담당 (가드는 spec에서 처리)
+  # ───────────────────────────────────────────────
+  build-hangctl-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux/rockylinux:9
+      options: --user 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps (hangctl)
+        run: |
+          set -e
+          dnf -y distro-sync
+          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
+
+      - name: Build HANGCTL RPM (ablestack_vm_hangctl.spec)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SPEC="rpm/ablestack_vm_hangctl.spec"
+          test -f "${SPEC}" || (echo "[ERR] Missing spec: ${SPEC}" >&2; exit 2)
+
+          # VERSION / RELEASE는 repo 루트의 VERSION 파일을 동일하게 사용
+          VERSION="$(. ./VERSION; printf "%s" "$VERSION" | tr -d '\r\n[:space:]')"
+          RELEASE="$(. ./VERSION; printf "%s" "$RELEASE" | tr -d '\r\n[:space:]')"
+          GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+
+          echo "[INFO] VERSION=${VERSION} RELEASE=${RELEASE} GIT_HASH=${GIT_HASH}"
+
+          mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          # tarball 이름은 spec의 Source0 규칙과 일치해야 하므로,
+          # 기존 패키지들과 동일하게 'spec 파일 basename'을 prefix로 사용
+          # (즉, ablestack_vm_hangctl-<version>.tar.gz)
+          NAME_HANGCTL="ablestack_vm_hangctl"
+          tar czf "rpmbuild_hangctl/SOURCES/${NAME_HANGCTL}-${VERSION}.tar.gz" \
+            --transform="s,^,${NAME_HANGCTL}-${VERSION}/," .
+
+          cp "${SPEC}" rpmbuild_hangctl/SPECS/
+
+          rpmbuild --noplugins -ba --define "_topdir $(pwd)/rpmbuild_hangctl" \
+                   --define "version ${VERSION}" \
+                   --define "release ${RELEASE}" \
+                   --define "githash ${GIT_HASH}" \
+                   "rpmbuild_hangctl/SPECS/ablestack_vm_hangctl.spec"
+
+          mkdir -p build/rpm-hangctl
+          cp rpmbuild_hangctl/RPMS/noarch/*.rpm build/rpm-hangctl/ 2>/dev/null || true
+          cp rpmbuild_hangctl/RPMS/*/*.rpm build/rpm-hangctl/ 2>/dev/null || true
+
+          echo "[INFO] Built RPM(s):"
+          ls -lah build/rpm-hangctl || true
+
+      - name: Create HANGCTL RPM repo (Rocky 9)
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="repo/hangctl-rpm-rocky9"
+          mkdir -p "$WORKDIR"
+
+          # hangctl RPM 복사
+          cp -v build/rpm-hangctl/*.rpm "$WORKDIR"/
+
+          echo "[INFO] Creating repo metadata..."
+          createrepo_c "$WORKDIR"
+
+          mkdir -p release/hangctl-rpm
+          mv repo release/hangctl-rpm/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hangctl-rpm-package
+          path: release/hangctl-rpm/**
+          
+  # ───────────────────────────────────────────────
   # 1-B) V2K RPM BUILD (별도 경로, 기존 빌드 프로세스 훼손 금지)
   # ───────────────────────────────────────────────
   build-v2k-rpm:
@@ -437,7 +518,7 @@ jobs:
   # 4) RELEASE + ISO CREATION (VirtIO 통합 포함)
   # ───────────────────────────────────────────────
   release:
-    needs: [build-rpm, build-deb, build-windows, build-v2k-rpm]
+    needs: [build-rpm, build-hangctl-rpm, build-deb, build-windows, build-v2k-rpm]
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
@@ -519,6 +600,19 @@ jobs:
               fi
             fi
           done
+
+          echo "🔍 Collecting HANGCTL RPM repo (Rocky 9)..."
+          HANGCTL_DIR="$(find dist -type d \( \
+                          -path "*/hangctl-rpm-package/release/hangctl-rpm/repo/hangctl-rpm-rocky9" -o \
+                          -path "*/hangctl-rpm-package/repo/hangctl-rpm-rocky9" \
+                        \) | head -n 1 || true)"
+          if [[ -n "${HANGCTL_DIR}" && -d "${HANGCTL_DIR}" ]]; then
+            echo "[INFO] Found ${HANGCTL_DIR}"
+            mkdir -p release/rpm/hangctl-rpm-rocky9
+            cp -r "${HANGCTL_DIR}/." release/rpm/hangctl-rpm-rocky9/
+          else
+            echo "[WARN] No HANGCTL RPM repo found (hangctl-rpm-package)."
+          fi
 
           echo "🔍 Collecting DEB repos..."
           for ver in 22.04 24.04; do
@@ -919,6 +1013,40 @@ jobs:
                   sudo dnf -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
                   sudo rm -f /etc/yum.repos.d/ablestack-qemu-exec-tools.repo
                   sudo dnf clean all
+
+                  # ───────────────────────────────────────────────
+                  # HANGCTL add-on (ABLESTACK Host only, Rocky 9 only)
+                  #  - Install ablestack_vm_hangctl from ISO local repo
+                  #  - If not ABLESTACK host / not Rocky9 -> skip
+                  # ───────────────────────────────────────────────
+                  if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${MAJOR_VERSION:-}" == "9" ]]; then
+                      echo "[INFO] ABLESTACK Host on Rocky 9 detected. Installing HANGCTL add-on..."
+
+                      HANGCTL_REPO_DIR="${ISO_MNT}/rpm/hangctl-rpm-rocky9"
+                      if [[ -d "${HANGCTL_REPO_DIR}" ]]; then
+                          HANGCTL_REPO_FILE=/etc/yum.repos.d/ablestack-vm-hangctl.repo
+                          sudo tee "${HANGCTL_REPO_FILE}" >/dev/null <<-EOH
+          [ablestack-vm-hangctl]
+          name=ablestack-vm-hangctl
+          baseurl=file://${HANGCTL_REPO_DIR}
+          enabled=1
+          gpgcheck=0
+          EOH
+                          sudo dnf clean all
+                          if sudo dnf -y --disablerepo="*" --enablerepo="ablestack-vm-hangctl" install ablestack_vm_hangctl; then
+                              echo "[OK] ablestack_vm_hangctl installed."
+                          else
+                              echo "[WARN] Failed to install ablestack_vm_hangctl from ISO repo. Continuing."
+                          fi
+                          sudo rm -f "${HANGCTL_REPO_FILE}"
+                          sudo dnf clean all
+                      else
+                          echo "[WARN] HANGCTL RPM repo not found in ISO: ${HANGCTL_REPO_DIR} (skip)"
+                      fi
+                  else
+                      echo "[INFO] HANGCTL add-on skipped (not ABLESTACK host or not Rocky 9)."
+                  fi
+
                   # ───────────────────────────────────────────────
                   # V2K add-on (ABLESTACK Host only)
                   #  - based on bin/v2k_test_install.sh
@@ -1174,4 +1302,5 @@ jobs:
           files: |
             build/iso/*.iso
             release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
+            release/rpm/hangctl-rpm-rocky9/*.rpm
             release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
