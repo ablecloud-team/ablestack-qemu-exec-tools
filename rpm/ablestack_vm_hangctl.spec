@@ -17,7 +17,7 @@ Requires:       jq
 Requires:       libvirt-client
 Requires:       systemd
 
-# systemd scriptlet ordering/requires must be in preamble (NOT in %prep/%install)
+# systemd scriptlet ordering/requires must be in preamble (NOT in prep/install script sections)
 %{?systemd_requires}
 
 %description
