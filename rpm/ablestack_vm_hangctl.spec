@@ -17,6 +17,9 @@ Requires:       jq
 Requires:       libvirt-client
 Requires:       systemd
 
+# systemd scriptlet ordering/requires must be in preamble (NOT in %prep/%install)
+%{?systemd_requires}
+
 %description
 ablestack_vm_hangctl provides automated handling for hung libvirt/QEMU domains:
 scan/probe, evidence collection (including memory dump), destroy/kill escalation,
@@ -25,7 +28,6 @@ for production operation.
 
 %prep
 %setup -q
-%{?systemd_requires}
 
 %build
 :
