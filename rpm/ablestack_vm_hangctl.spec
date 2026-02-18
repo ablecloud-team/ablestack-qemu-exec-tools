@@ -1,6 +1,6 @@
 Name:           ablestack_vm_hangctl
 Version:        %{?version}%{!?version:0.0.0}
-Release:        %{?release}%{!?release:1}%{?dist}
+Release:        %{?release}%{!?release:1}
 Summary:        ABLESTACK VM hang controller (scan/probe/dump/destroy + libvirtd safety)
 
 License:        Apache-2.0
@@ -9,6 +9,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 
+BuildRequires:  systemd-rpm-macros
 Requires:       bash
 Requires:       coreutils
 Requires:       findutils
@@ -24,12 +25,16 @@ for production operation.
 
 %prep
 %setup -q
+%{?systemd_requires}
 
 %build
 :
 
 %install
 rm -rf %{buildroot}
+
+# Fail fast if systemd macros are missing
+%{!?_unitdir: %{error: systemd unitdir macro (_unitdir) is not defined. Install systemd-rpm-macros.}}
 
 # Binaries: keep /usr/local/bin convention to match existing toolchain layout.
 install -d %{buildroot}/usr/local/bin
@@ -77,5 +82,5 @@ install -m 0644 lib/hangctl/systemd/ablestack-vm-hangctl.timer %{buildroot}%{_un
 %{_unitdir}/ablestack-vm-hangctl.timer
 
 %changelog
-* Sat Feb 15 2026 ABLECLOUD - %{version}-%{release}
+* Sat Feb 15 2026 ABLECLOUD <dev@ablecloud.io> - %{version}-%{release}
 - Add systemd oneshot+timer units and RPM packaging for ablestack_vm_hangctl
