@@ -367,7 +367,7 @@ hangctl_collect_dump_pre_action() {
   stable_need="${HANGCTL_DUMP_STABLE_COUNT-${HANGCTL__DUMP_STABLE_COUNT_DEFAULT}}"
   stable_interval="${HANGCTL_DUMP_STABLE_INTERVAL_SEC-${HANGCTL__DUMP_STABLE_INTERVAL_SEC_DEFAULT}}"
   hangctl__run_dump_with_watch "${tout}" "${stable_need}" "${stable_interval}" out err rc -- \
-    virsh -c qemu:///system dump --memory-only "${vm}" "${dump_path}" || true 
+    virsh -c qemu:///system dump --memory-only --crash "${vm}" "${dump_path}" || true 
 
   local result
   if [[ "${rc}" == "124" || "${rc}" == "143" ]]; then

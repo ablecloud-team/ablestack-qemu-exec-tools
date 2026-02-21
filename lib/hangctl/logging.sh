@@ -24,6 +24,35 @@
 # - JSONL events logging with fixed schema
 # - scan lifecycle events
 
+hangctl_log_rotate_if_needed() {
+  local log_file="${HANGCTL_EVENTS_LOG}"
+  local max_size_mb="${HANGCTL_LOG_MAX_SIZE_MB}"
+  local rotate_count="${HANGCTL_LOG_ROTATE_COUNT}"
+
+  [[ -f "${log_file}" ]] || return 0
+
+  # 현재 크기 확인 (KB 단위)
+  local current_size_kb
+  current_size_kb=$(du -k "${log_file}" | cut -f1)
+  local max_size_kb=$(( max_size_mb * 1024 ))
+
+  if [[ "${current_size_kb}" -ge "${max_size_kb}" ]]; then
+    # 회전 시작 로그 기록
+    hangctl_log_event "logging" "log.rotate" "ok" "" "" "" "reason=size_limit size_kb=${current_size_kb}"
+    
+    # 이전 백업 파일들 밀어내기 (Rotation)
+    local i
+    for ((i=rotate_count-1; i>=1; i--)); do
+      [[ -f "${log_file}.${i}" ]] && mv -f "${log_file}.${i}" "${log_file}.$((i+1))"
+    done
+    mv -f "${log_file}" "${log_file}.1"
+    
+    # 새 로그 파일 생성 및 권한 설정
+    touch "${log_file}"
+    chmod 0644 "${log_file}" 2>/dev/null || true
+  fi
+}
+
 hangctl_new_scan_id() {
   # Example: 20260211-191500-acde12
   local ts rid

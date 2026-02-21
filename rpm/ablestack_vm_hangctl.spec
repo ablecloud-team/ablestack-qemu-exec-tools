@@ -66,6 +66,10 @@ install -m 0644 lib/hangctl/systemd/ablestack-vm-hangctl.timer %{buildroot}%{_un
 %post
 %systemd_post ablestack-vm-hangctl.service
 %systemd_post ablestack-vm-hangctl.timer
+if [ $1 -eq 1 ]; then
+  # fresh install only (not upgrade)
+  systemctl enable --now ablestack-vm-hangctl.timer >/dev/null 2>&1 || :
+fi
 
 %preun
 %systemd_preun ablestack-vm-hangctl.service

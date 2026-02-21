@@ -151,7 +151,9 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local dom_out dom_err dom_rc
   dom_out=""; dom_err=""; dom_rc=0
 
-  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" dom_out dom_err dom_rc -- -c qemu:///system domstate "${vm}" || true
+  # 1. 상세 가상머신 상태 확인 (이유 포함)
+  # 'domstate --reason'을 통해 마이그레이션 중인지 식별 가능
+  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" dom_out dom_err dom_rc -- -c qemu:///system domstate --reason "${vm}" || true
   local dom_result
   dom_result="$(hangctl__result_from_rc "${dom_rc}")"
   if [[ "${dom_result}" != "ok" ]]; then
@@ -161,28 +163,56 @@ hangctl_detect_probe_maybe_act_one_vm() {
     return 0
   fi
 
-  local domstate
-  domstate="$(echo "${dom_out}" | head -n 1 | tr -d '\r' | xargs)"
+  # 상태 문자열 파싱 (예: "paused (in-migration)" -> domstate="paused", reason="in-migration")
+  local domstate_full
+  domstate_full="$(echo "${dom_out}" | head -n 1 | tr '[:upper:]' '[:lower:]' | xargs)"
+  local domstate="${domstate_full%% *}" 
   [[ -z "${domstate}" ]] && domstate="unknown"
 
+  # 2. 상태 저장 및 유지 시간 계산
   hangctl_state_update_domstate "${vm}" "${domstate}"
-  local stuck_sec
-  stuck_sec="$(hangctl_state_get_stuck_sec "${vm}")"
+  local duration_sec
+  duration_sec="$(hangctl_state_get_duration_sec "${vm}")"
+  local stuck_sec="${duration_sec}"
 
-  local decision="clear"
-  if [[ "${stuck_sec}" -ge "${HANGCTL_CONFIRM_WINDOW_SEC}" ]]; then
+  # 3. 마이그레이션 여부 및 상태별 임계값 결정
+  local is_migration=0
+  [[ "${domstate_full}" == *"migration"* ]] && is_migration=1
+
+  local current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
+  if [[ "${is_migration}" -eq 1 ]]; then
+    # 마이그레이션 수신 중인 경우 전용 임계값 적용 (예: 1800초)
+    current_window="${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC}"
+  elif [[ "${domstate}" == "paused" ]]; then
+    # 일반 paused 상태인 경우 별도 임계값 적용 (예: 300초)
+    current_window="${HANGCTL_PAUSED_CONFIRM_WINDOW_SEC}"
+  fi
+
+  # 4. 의심 상태(suspect) 1차 판정
+  local decision="normal"
+  if [[ "${duration_sec}" -ge "${current_window}" ]]; then
     decision="suspect"
   fi
 
-  hangctl_log_event "detect" "vm.domstate" "ok" "${vm}" "" "" \
-    "domstate=${domstate} stuck_sec=${stuck_sec} decision=${decision} confirm_window=${HANGCTL_CONFIRM_WINDOW_SEC}"
+  hangctl_log_event "detect" "vm.status_check" "ok" "${vm}" "" "" \
+    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window}"
 
   if [[ "${decision}" != "suspect" ]]; then
-    hangctl_log_event "detect" "vm.decision" "ok" "${vm}" "" "" \
-      "final=clear reason=domstate_not_stuck domstate=${domstate} stuck_sec=${stuck_sec}"
     return 0
   fi
 
+  # 5. 마이그레이션 진척도 정밀 검증 (좀비 VM 판별)
+  # 임계치를 넘었더라도 데이터 전송이 진행 중이면 정상으로 간주하여 보호
+  if [[ "${is_migration}" -eq 1 ]]; then
+    if ! hangctl_probe_migration_zombie_check "${vm}"; then
+      hangctl_log_event "detect" "vm.migration_check" "ok" "${vm}" "" "" \
+        "status=progressing note=protecting_active_migration stuck_sec=${stuck_sec}"
+      return 0
+    fi
+    # 진척도가 0이라면 confirmed로 가기 위해 계속 진행
+  fi
+
+  # 6. 정밀 프로브 (QMP / QGA) 실행
   local qmp_status qmp_rc qmp_result
   qmp_status=""; qmp_rc=0
   hangctl_probe_qmp_query_status "${vm}" qmp_status qmp_rc || true
@@ -197,19 +227,39 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local confirm_reason="domstate_stuck"
   local qmp_status_lc
   qmp_status_lc="$(echo "${qmp_status}" | tr '[:upper:]' '[:lower:]' | xargs)"
-  if [[ "${qmp_result}" != "ok" ]]; then
+
+  # 7. 최종 확정 로직 (마이그레이션 좀비/Running/Paused 통합)
+  if [[ "${is_migration}" -eq 1 ]]; then
     final_decision="confirmed"
-    confirm_reason="qmp_${qmp_result}"
-  elif [[ "${qmp_status_lc}" == "paused" ]]; then
+    confirm_reason="migration_zombie_no_progress"
+  elif [[ "${domstate}" == "paused" ]]; then
+    final_decision="confirmed"
+    confirm_reason="stuck_in_paused_state"
+  elif [[ "${qmp_rc}" == "124" || "${qmp_status_lc}" == "unknown" ]]; then
+    final_decision="confirmed"
+    confirm_reason="qmp_no_response"
+  elif [[ "${qmp_status_lc}" == "running" ]]; then
+    final_decision="clear"
+    confirm_reason="qmp_responding_running"
+  elif [[ "${qmp_status_lc}" == "paused" || "${domstate}" == "paused" ]]; then
     final_decision="confirmed"
     confirm_reason="qmp_status_paused"
   elif [[ "${qmp_status_lc}" == "inmigrate" ]]; then
+    # QMP 상에서도 마이그레이션 수신 중이면 진척도 체크 결과에 따라 최종 판단
     final_decision="confirmed"
-    confirm_reason="qmp_status_inmigrate"
+    confirm_reason="qmp_status_inmigrate_stuck"
+  elif [[ "${qmp_result}" != "ok" ]]; then
+    final_decision="confirmed"
+    confirm_reason="qmp_fail_unknown"
   fi
 
   hangctl_log_event "detect" "vm.decision" "ok" "${vm}" "" "" \
-    "final=${final_decision} reason=${confirm_reason} domstate=${domstate} stuck_sec=${stuck_sec} confirm_window=${HANGCTL_CONFIRM_WINDOW_SEC} qmp_result=${qmp_result} qmp_rc=${qmp_rc} qmp_status=${qmp_status} has_qga=${has_qga} qga_result=${qga_result} qga_rc=${qga_rc}"
+    "final=${final_decision} reason=${confirm_reason} domstate=${domstate_full} stuck_sec=${stuck_sec} confirm_window=${current_window} qmp_result=${qmp_result} qmp_status=${qmp_status}"
+
+  # 8. 액션 실행
+  if [[ "${final_decision}" == "clear" || "${final_decision}" == "normal" ]]; then
+    return 0
+  fi
 
   if [[ "${do_action}" == "1" && "${final_decision}" == "confirmed" ]]; then
     hangctl_action_handle_confirmed_vm "${vm}" "${confirm_reason}" "${domstate}" "${stuck_sec}" "${qmp_status}" || true
@@ -270,6 +320,8 @@ cmd_scan() {
   hangctl_config_load_file "${HANGCTL_CONFIG_PATH}"
   # CLI overrides last (highest precedence)
   hangctl_config_apply_cli "${cfg}" "${pol}" "${dry}"
+  # Logging config (rotate) is applied in hangctl_log_rotate_if_needed called by scan lifecycle events, so no need to handle here separately.
+  hangctl_log_rotate_if_needed
 
   # Commit 08.1: CLI overrides for filters
   [[ -n "${target_vm}" ]] && HANGCTL_TARGET_VM="${target_vm}"
@@ -308,8 +360,8 @@ cmd_scan() {
   vm_array=()
 
   rc=0
-  # We need the stdout to count VMs, so run virsh wrapper and log a separate event with count.
-  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" out err rc -- -c qemu:///system list --state-running --name || true
+  # 1. 스캔 대상 추출 수정 (running과 paused 모두 포함)
+  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" out err rc -- -c qemu:///system list --state-running --state-paused --name
   result="$(hangctl__result_from_rc "${rc}")"
   if [[ "${result}" != "ok" ]]; then
     local err_short2="${err:0:200}"
@@ -362,12 +414,18 @@ cmd_scan() {
   # -------------------------------------------------------------------
   local vm
   for vm in "${vm_array[@]}"; do
-    hangctl_detect_probe_maybe_act_one_vm "${vm}" "1"
+    # 1. 각 VM 처리를 서브쉘 ( ) 내에서 실행하여 변수 간섭 방지
+    # 2. < /dev/null 을 통해 표준 입력 소비 방지
+    (
+      hangctl_detect_probe_maybe_act_one_vm "${vm}" "1" || {
+        hangctl_log_event "scan" "vm.skip" "fail" "${vm}" "" "" "reason=function_failed"
+      }
+    ) < /dev/null
   done
 
   # Commit 06 scope ends here: no further VM probing yet (QMP/QGA later).
   hangctl_log_event "scan" "scan.end" "ok" "" "" "" \
-    "policy=${HANGCTL_POLICY} dry_run=${HANGCTL_DRY_RUN} running=${vm_count}"
+    "policy=${HANGCTL_POLICY} dry_run=${HANGCTL_DRY_RUN} scanned_vms=${vm_count}"
 }
 
 cmd_check()  {

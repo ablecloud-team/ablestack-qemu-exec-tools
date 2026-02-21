@@ -81,21 +81,23 @@ hangctl_state_update_domstate() {
   local prev_state prev_change
   prev_state="$(hangctl_state__read_kv "${path}" "domstate" || true)"
   prev_change="$(hangctl_state__read_kv "${path}" "last_change_ts" || true)"
-  [[ -z "${prev_change}" ]] && prev_change="${now}"
 
   local change_ts="${prev_change}"
   if [[ -z "${prev_state}" ]]; then
-    # first sighting: treat as just changed "now"
+    # 처음 발견된 VM은 현재 상태를 기준으로 기록을 시작하여 stuck_sec을 0으로 유지
+    prev_state="${domstate}"
     change_ts="${now}"
   elif [[ "${prev_state}" != "${domstate}" ]]; then
+    change_ts="${now}"
+  elif [[ -z "${change_ts}" ]]; then
     change_ts="${now}"
   fi
 
   hangctl_state__write_file "${path}" "${domstate}" "${change_ts}" || true
 }
 
-hangctl_state_get_stuck_sec() {
-  # usage: hangctl_state_get_stuck_sec <vm>
+hangctl_state_get_duration_sec() {
+  # usage: hangctl_state_get_duration_sec <vm>
   local vm="${1-}"
   local path
   path="$(hangctl_state__path "${vm}")"
@@ -107,9 +109,27 @@ hangctl_state_get_stuck_sec() {
     echo -n "0"
     return 0
   fi
-  local stuck=$(( now - change_ts ))
-  if [[ "${stuck}" -lt 0 ]]; then
-    stuck=0
+  local duration=$(( now - change_ts ))
+  if [[ "${duration}" -lt 0 ]]; then
+    duration=0
   fi
-  echo -n "${stuck}"
+  echo -n "${duration}"
+}
+
+# migration progress state
+hangctl_state_get_migration_progress() {
+  # usage: hangctl_state_get_migration_progress <vm> <current_bytes>
+  local vm="${1-}"
+  local current="${2-0}"
+  local path
+  path="$(hangctl_state__path "${vm}").migrate"
+
+  local prev
+  prev="$(cat "${path}" 2>/dev/null || echo "0")"
+  
+  # 현재 수치를 파일에 저장
+  echo "${current}" > "${path}"
+  
+  # 이전 수치와 비교하여 증분 반환
+  echo $(( current - prev ))
 }

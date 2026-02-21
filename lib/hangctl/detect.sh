@@ -121,3 +121,27 @@ hangctl_probe_qga_ping_optional() {
     "timeout_sec=${HANGCTL_QGA_TIMEOUT_SEC} has_qga=yes"
   return 0
 }
+
+# migration zombie check
+hangctl_probe_migration_zombie_check() {
+  # usage: hangctl_probe_migration_zombie_check <vm>
+  local vm="${1-}"
+  local out err rc=0
+  
+  # 1. 마이그레이션 작업 정보 조회
+  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" out err rc -- -c qemu:///system domjobinfo "${vm}" || true
+  
+  # 'Data processed' 또는 'Memory remaining' 수치 추출 (대상 호스트 기준)
+  local current_data
+  current_data="$(echo "${out}" | grep -iE "Data processed|Memory processed" | awk '{print $3}' | tr -d ',' || echo "0")"
+  
+  # 2. 진척도 비교 (이전 스캔 대비 데이터 유입량)
+  local diff
+  diff="$(hangctl_state_get_migration_progress "${vm}" "${current_data}")"
+  
+  # 데이터 변화가 0이고, 이미 설정된 마이그레이션 임계치를 넘었다면 좀비로 판단
+  if [[ "${diff}" -eq 0 ]]; then
+    return 0 # 진척 없음 (위험)
+  fi
+  return 1 # 진행 중 (정상)
+}
