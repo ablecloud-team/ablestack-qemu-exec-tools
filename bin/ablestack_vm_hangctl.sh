@@ -148,115 +148,101 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local vm="${1-}"
   local do_action="${2-0}"
 
+  # --- [단계 1] 생존 신호(QMP) 및 상태 기본 확인 ---
+  local qmp_status qmp_rc qmp_result
+  qmp_status=""; qmp_rc=0
+  # QMP 응답 여부가 시간 초기화의 핵심 기준임
+  hangctl_probe_qmp_query_status "${vm}" qmp_status qmp_rc || true
+  qmp_result="$(hangctl__result_from_rc "${qmp_rc}")"
+
   local dom_out dom_err dom_rc
   dom_out=""; dom_err=""; dom_rc=0
-
-  # 1. 상세 가상머신 상태 확인 (이유 포함)
-  # 'domstate --reason'을 통해 마이그레이션 중인지 식별 가능
   hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" dom_out dom_err dom_rc -- -c qemu:///system domstate --reason "${vm}" || true
-  local dom_result
-  dom_result="$(hangctl__result_from_rc "${dom_rc}")"
-  if [[ "${dom_result}" != "ok" ]]; then
-    local err_short="${dom_err:0:200}"
-    hangctl_log_event "detect" "vm.domstate" "${dom_result}" "${vm}" "" "${dom_rc}" \
-      "timeout_sec=${HANGCTL_VIRSH_TIMEOUT_SEC} err_url=${err_short// /%20}"
-    return 0
-  fi
-
-  # 상태 문자열 파싱 (예: "paused (in-migration)" -> domstate="paused", reason="in-migration")
+  
+  # 상태 문자열 파싱 (예: "paused (in-migration)")
   local domstate_full
   domstate_full="$(echo "${dom_out}" | head -n 1 | tr '[:upper:]' '[:lower:]' | xargs)"
   local domstate="${domstate_full%% *}" 
   [[ -z "${domstate}" ]] && domstate="unknown"
 
-  # 2. 상태 저장 및 유지 시간 계산
-  hangctl_state_update_domstate "${vm}" "${domstate}"
+  # --- [단계 2] 시간 초기화 또는 누적 결정 (대표님 의도 반영 핵심) ---
+  if [[ "${qmp_rc}" == "0" ]]; then
+    # QMP 응답이 성공적이면 살아있는 것으로 간주하여 시간 초기화
+    hangctl_state_touch_heartbeat "${vm}"
+    hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=qmp_responding"
+  fi
+
+  # 마지막 heartbeat(또는 QMP 실패 시작점)로부터 경과 시간 계산
   local duration_sec
   duration_sec="$(hangctl_state_get_duration_sec "${vm}")"
   local stuck_sec="${duration_sec}"
 
-  # 3. 마이그레이션 여부 및 상태별 임계값 결정
+  # --- [단계 3] 마이그레이션 여부 및 임계값 결정 ---
   local is_migration=0
   [[ "${domstate_full}" == *"migration"* ]] && is_migration=1
 
   local current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
   if [[ "${is_migration}" -eq 1 ]]; then
-    # 마이그레이션 수신 중인 경우 전용 임계값 적용 (예: 1800초)
     current_window="${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC}"
   elif [[ "${domstate}" == "paused" ]]; then
-    # 일반 paused 상태인 경우 별도 임계값 적용 (예: 300초)
     current_window="${HANGCTL_PAUSED_CONFIRM_WINDOW_SEC}"
   fi
 
-  # 4. 의심 상태(suspect) 1차 판정
+  # --- [단계 4] 의심 상태(suspect) 1차 판정 ---
   local decision="normal"
   if [[ "${duration_sec}" -ge "${current_window}" ]]; then
     decision="suspect"
   fi
 
   hangctl_log_event "detect" "vm.status_check" "ok" "${vm}" "" "" \
-    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window}"
+    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window} qmp_status=${qmp_status}"
 
+  # 의심 상황이 아니면(시간이 충분히 흐르지 않았으면) 종료
   if [[ "${decision}" != "suspect" ]]; then
     return 0
   fi
 
-  # 5. 마이그레이션 진척도 정밀 검증 (좀비 VM 판별)
-  # 임계치를 넘었더라도 데이터 전송이 진행 중이면 정상으로 간주하여 보호
+  # --- [단계 5] 정밀 검증 (마이그레이션 좀비 체크) ---
   if [[ "${is_migration}" -eq 1 ]]; then
     if ! hangctl_probe_migration_zombie_check "${vm}"; then
       hangctl_log_event "detect" "vm.migration_check" "ok" "${vm}" "" "" \
         "status=progressing note=protecting_active_migration stuck_sec=${stuck_sec}"
       return 0
     fi
-    # 진척도가 0이라면 confirmed로 가기 위해 계속 진행
   fi
 
-  # 6. 정밀 프로브 (QMP / QGA) 실행
-  local qmp_status qmp_rc qmp_result
-  qmp_status=""; qmp_rc=0
-  hangctl_probe_qmp_query_status "${vm}" qmp_status qmp_rc || true
-  qmp_result="$(hangctl__result_from_rc "${qmp_rc}")"
-
-  local has_qga qga_rc qga_result
-  has_qga="unknown"; qga_rc=0
-  hangctl_probe_qga_ping_optional "${vm}" has_qga qga_rc || true
-  qga_result="$(hangctl__result_from_rc "${qga_rc}")"
-
+  # --- [단계 6] 최종 확정 로직 (QMP 응답 없음 및 상태 통합 판단) ---
   local final_decision="suspect"
   local confirm_reason="domstate_stuck"
   local qmp_status_lc
   qmp_status_lc="$(echo "${qmp_status}" | tr '[:upper:]' '[:lower:]' | xargs)"
 
-  # 7. 최종 확정 로직 (마이그레이션 좀비/Running/Paused 통합)
   if [[ "${is_migration}" -eq 1 ]]; then
     final_decision="confirmed"
     confirm_reason="migration_zombie_no_progress"
   elif [[ "${domstate}" == "paused" ]]; then
+    # QMP 응답이 계속 없으면서(duration 경과) 상태가 paused인 경우
     final_decision="confirmed"
     confirm_reason="stuck_in_paused_state"
   elif [[ "${qmp_rc}" == "124" || "${qmp_status_lc}" == "unknown" ]]; then
     final_decision="confirmed"
     confirm_reason="qmp_no_response"
   elif [[ "${qmp_status_lc}" == "running" ]]; then
+    # QMP가 응답하고 running이면 정상(clear) - 위에서 이미 처리되었으나 이중 검증
     final_decision="clear"
     confirm_reason="qmp_responding_running"
-  elif [[ "${qmp_status_lc}" == "paused" || "${domstate}" == "paused" ]]; then
+  elif [[ "${qmp_status_lc}" == "paused" ]]; then
     final_decision="confirmed"
-    confirm_reason="qmp_status_paused"
-  elif [[ "${qmp_status_lc}" == "inmigrate" ]]; then
-    # QMP 상에서도 마이그레이션 수신 중이면 진척도 체크 결과에 따라 최종 판단
-    final_decision="confirmed"
-    confirm_reason="qmp_status_inmigrate_stuck"
-  elif [[ "${qmp_result}" != "ok" ]]; then
+    confirm_reason="qmp_status_paused_stuck"
+  else
     final_decision="confirmed"
     confirm_reason="qmp_fail_unknown"
   fi
 
   hangctl_log_event "detect" "vm.decision" "ok" "${vm}" "" "" \
-    "final=${final_decision} reason=${confirm_reason} domstate=${domstate_full} stuck_sec=${stuck_sec} confirm_window=${current_window} qmp_result=${qmp_result} qmp_status=${qmp_status}"
+    "final=${final_decision} reason=${confirm_reason} domstate=${domstate_full} stuck_sec=${stuck_sec}"
 
-  # 8. 액션 실행
+  # --- [단계 7] 액션 실행 ---
   if [[ "${final_decision}" == "clear" || "${final_decision}" == "normal" ]]; then
     return 0
   fi
@@ -422,6 +408,29 @@ cmd_scan() {
       }
     ) < /dev/null
   done
+
+  # Commit 09 scope: cleanup orphan state files for VMs that no longer exist (not in current vm_array)
+  local state_dir="${HANGCTL_STATE_DIR}"
+  if [[ -d "${state_dir}" ]]; then
+    for state_file in "${state_dir}"/*.state; do
+      [[ -e "${state_file}" ]] || continue
+      local cached_vm
+      cached_vm=$(basename "${state_file}" .state)
+      
+      # vm_array에 cached_vm이 있는지 확인
+      local found=0
+      for v in "${vm_array[@]}"; do
+        if [[ "$(hangctl_state__vm_key "${v}")" == "${cached_vm}" ]]; then
+          found=1; break
+        fi
+      done
+      
+      if [[ "${found}" -eq 0 ]]; then
+        # 실행 중이 아니므로 상태 초기화
+        hangctl_state_reset_vm "${cached_vm}"
+      fi
+    done
+  fi
 
   # Commit 06 scope ends here: no further VM probing yet (QMP/QGA later).
   hangctl_log_event "scan" "scan.end" "ok" "" "" "" \
