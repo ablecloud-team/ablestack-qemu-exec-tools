@@ -151,10 +151,16 @@ hangctl_detect_probe_maybe_act_one_vm() {
   # --- [단계 1] 생존 신호(QMP) 및 상태 기본 확인 ---
   local qmp_status qmp_rc qmp_result
   qmp_status=""; qmp_rc=0
-  # QMP 응답 여부가 시간 초기화의 핵심 기준임
+  
+  # QMP 프로브 실행
   hangctl_probe_qmp_query_status "${vm}" qmp_status qmp_rc || true
   qmp_result="$(hangctl__result_from_rc "${qmp_rc}")"
 
+  # QMP 상태값 소문자 정규화 (초기화 로직에서 사용하기 위해 상단 배치)
+  local qmp_status_lc
+  qmp_status_lc="$(echo "${qmp_status}" | tr '[:upper:]' '[:lower:]' | xargs)"
+
+  # virsh를 통한 도메인 상태 확인
   local dom_out dom_err dom_rc
   dom_out=""; dom_err=""; dom_rc=0
   hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" dom_out dom_err dom_rc -- -c qemu:///system domstate --reason "${vm}" || true
@@ -165,11 +171,25 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local domstate="${domstate_full%% *}" 
   [[ -z "${domstate}" ]] && domstate="unknown"
 
-  # --- [단계 2] 시간 초기화 또는 누적 결정 (대표님 의도 반영 핵심) ---
-  if [[ "${qmp_rc}" == "0" ]]; then
-    # QMP 응답이 성공적이면 살아있는 것으로 간주하여 시간 초기화
-    hangctl_state_touch_heartbeat "${vm}"
-    hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=qmp_responding"
+  # --- [단계 2] 시간 초기화 또는 누적 결정 ---
+  if [[ "${qmp_rc}" == "0" && -n "${qmp_status_lc}" && "${qmp_status_lc}" != "unknown" ]]; then
+      # 정상 응답이므로 현재 시간으로 갱신 (duration을 0으로 만듦)
+      hangctl_state_touch_heartbeat "${vm}"
+      hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=qmp_responding_valid status=${qmp_status_lc}"
+  else
+      # QMP 응답이 없거나 unknown인 경우
+      # 만약 기존에 기록된 시간이 없다면, 지금 이 순간을 '장애 시작 시점'으로 기록해야 함
+      local existing_ts
+      existing_ts="$(hangctl_state__read_kv "$(hangctl_state__path "${vm}")" "last_change_ts" || true)"
+      
+      if [[ -z "${existing_ts}" ]]; then
+          # 최초 실패 시점이므로 현재 시간을 기록하여 누적 시작점 생성
+          hangctl_state_touch_heartbeat "${vm}"
+          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_start_detected"
+      else
+          # 이미 실패 기록이 있으므로 갱신하지 않고 유지 (시간이 흐르게 둠)
+          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_continuing status=${qmp_status_lc}"
+      fi
   fi
 
   # 마지막 heartbeat(또는 QMP 실패 시작점)로부터 경과 시간 계산
@@ -183,8 +203,10 @@ hangctl_detect_probe_maybe_act_one_vm() {
 
   local current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
   if [[ "${is_migration}" -eq 1 ]]; then
+    # 마이그레이션 중인 경우 전용 임계값 적용
     current_window="${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC}"
   elif [[ "${domstate}" == "paused" ]]; then
+    # 일반 paused 상태인 경우 별도 임계값 적용
     current_window="${HANGCTL_PAUSED_CONFIRM_WINDOW_SEC}"
   fi
 
@@ -197,7 +219,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
   hangctl_log_event "detect" "vm.status_check" "ok" "${vm}" "" "" \
     "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window} qmp_status=${qmp_status}"
 
-  # 의심 상황이 아니면(시간이 충분히 흐르지 않았으면) 종료
+  # 의심 상황이 아니면(시간이 충분히 흐르지 않았으면) 다음 VM으로 넘어감
   if [[ "${decision}" != "suspect" ]]; then
     return 0
   fi
@@ -211,24 +233,22 @@ hangctl_detect_probe_maybe_act_one_vm() {
     fi
   fi
 
-  # --- [단계 6] 최종 확정 로직 (QMP 응답 없음 및 상태 통합 판단) ---
+  # --- [단계 6] 최종 확정 로직 ---
   local final_decision="suspect"
   local confirm_reason="domstate_stuck"
-  local qmp_status_lc
-  qmp_status_lc="$(echo "${qmp_status}" | tr '[:upper:]' '[:lower:]' | xargs)"
 
   if [[ "${is_migration}" -eq 1 ]]; then
     final_decision="confirmed"
     confirm_reason="migration_zombie_no_progress"
   elif [[ "${domstate}" == "paused" ]]; then
-    # QMP 응답이 계속 없으면서(duration 경과) 상태가 paused인 경우
+    # QMP 응답 실패가 누적된 상태에서 domstate까지 paused인 경우
     final_decision="confirmed"
     confirm_reason="stuck_in_paused_state"
-  elif [[ "${qmp_rc}" == "124" || "${qmp_status_lc}" == "unknown" ]]; then
+  elif [[ "${qmp_rc}" == "124" || "${qmp_status_lc}" == "unknown" || -z "${qmp_status_lc}" ]]; then
     final_decision="confirmed"
     confirm_reason="qmp_no_response"
   elif [[ "${qmp_status_lc}" == "running" ]]; then
-    # QMP가 응답하고 running이면 정상(clear) - 위에서 이미 처리되었으나 이중 검증
+    # QMP가 응답하고 running이면 정상(clear)
     final_decision="clear"
     confirm_reason="qmp_responding_running"
   elif [[ "${qmp_status_lc}" == "paused" ]]; then
@@ -248,6 +268,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
   fi
 
   if [[ "${do_action}" == "1" && "${final_decision}" == "confirmed" ]]; then
+    # 확정된 VM에 대해 destroy 등 후속 조치 실행
     hangctl_action_handle_confirmed_vm "${vm}" "${confirm_reason}" "${domstate}" "${stuck_sec}" "${qmp_status}" || true
   fi
 }
