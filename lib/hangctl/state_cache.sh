@@ -163,3 +163,70 @@ hangctl_state_touch_heartbeat() {
   # 상태와 관계없이 마지막 응답 시점을 현재로 업데이트 (시간 초기화 효과)
   hangctl_state__write_file "${path}" "alive" "${now}" || true
 }
+
+# state_cache.sh (업데이트 및 추가)
+
+# 기존 write_file을 확장하여 여러 키값을 유연하게 저장하도록 개선
+hangctl_state__write_kv_all() {
+  # usage: hangctl_state__write_kv_all <path> <key1=val1> <key2=val2> ...
+  local path="${1-}"
+  shift
+  local dir
+  dir="$(dirname "${path}")"
+  [[ -d "${dir}" ]] || mkdir -p "${dir}" 2>/dev/null || true
+
+  local tmp="${path}.tmp"
+  # 기존 파일이 있으면 읽어서 유지하고, 새로운 값들로 덮어씀
+  if [[ -f "${path}" ]]; then
+    cat "${path}" > "${tmp}"
+  else
+    touch "${tmp}"
+  fi
+
+  for kv in "$@"; do
+    local k="${kv%%=*}"
+    local v="${kv#*=}"
+    # 기존 키가 있으면 삭제 후 추가
+    sed -i "/^${k}=/d" "${tmp}"
+    echo "${k}=${v}" >> "${tmp}"
+  done
+
+  mv -f "${tmp}" "${path}" 2>/dev/null || return 1
+}
+
+# QMP 응답 성공 시 호출 (기존 함수 유지하되 확장된 write_kv_all 사용)
+hangctl_state_touch_heartbeat() {
+  local vm="${1-}"
+  local path
+  path="$(hangctl_state__path "${vm}")"
+  local now
+  now="$(date +%s)"
+  
+  # heartbeat 시점에 blockstats는 유지하고 alive 상태와 ts만 갱신
+  hangctl_state__write_kv_all "${path}" "domstate=alive" "last_change_ts=${now}" || true
+}
+
+# 신규: 블록 통계(Read/Write Ops) 저장
+hangctl_state_update_blockstats() {
+  # usage: hangctl_state_update_blockstats <vm> <rd_ops> <wr_ops>
+  local vm="${1-}"
+  local rd_ops="${2-0}"
+  local wr_ops="${3-0}"
+  local path
+  path="$(hangctl_state__path "${vm}")"
+
+  hangctl_state__write_kv_all "${path}" "prev_rd_ops=${rd_ops}" "prev_wr_ops=${wr_ops}" || true
+}
+
+# 신규: 이전 블록 통계 가져오기
+hangctl_state_get_prev_blockstats() {
+  # usage: hangctl_state_get_prev_blockstats <vm> <out_rd_var> <out_wr_var>
+  local vm="${1-}"
+  local -n _rd="${2}"
+  local -n _wr="${3}"
+  local path
+  path="$(hangctl_state__path "${vm}")"
+
+  _rd="$(hangctl_state__read_kv "${path}" "prev_rd_ops" || echo "0")"
+  _wr="$(hangctl_state__read_kv "${path}" "prev_wr_ops" || echo "0")"
+}

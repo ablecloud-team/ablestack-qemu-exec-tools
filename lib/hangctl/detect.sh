@@ -145,3 +145,78 @@ hangctl_probe_migration_zombie_check() {
   fi
   return 1 # 진행 중 (정상)
 }
+
+# detect.sh 에 추가
+
+# QMP를 통해 모든 가상 디스크의 I/O 통계를 수집하는 함수
+hangctl_probe_blockstats() {
+  # usage: hangctl_probe_blockstats <vm> <out_rd_ops_var> <out_wr_ops_var>
+  local vm="${1-}"
+  local -n _rd_ops="${2}"
+  local -n _wr_ops="${3}"
+
+  _rd_ops=0
+  _wr_ops=0
+
+  local out err rc
+  out=""
+  err=""
+  rc=0
+
+  # QMP query-blockstats 실행 (모든 드라이브의 통계를 합산하여 전체 I/O 흐름 파악)
+  local cmd='{"execute":"query-blockstats"}'
+  hangctl_virsh "${HANGCTL_QMP_TIMEOUT_SEC}" out err rc -- -c qemu:///system qemu-monitor-command "${vm}" --cmd "${cmd}" || true
+
+  local result
+  result="$(hangctl__result_from_rc "${rc}")"
+  if [[ "${result}" != "ok" ]]; then
+    return "${rc}"
+  fi
+
+  # jq를 사용하여 모든 드라이브의 rd_operations와 wr_operations 합계 추출
+  if command -v jq >/dev/null 2>&1; then
+    _rd_ops=$(echo "${out}" | jq '[.return[].stats.rd_operations] | add' 2>/dev/null || echo "0")
+    _wr_ops=$(echo "${out}" | jq '[.return[].stats.wr_operations] | add' 2>/dev/null || echo "0")
+  else
+    # jq가 없는 경우 첫 번째 장치의 수치만 sed로 추출 (fallback)
+    _rd_ops=$(echo "${out}" | sed -nE 's/.*"rd_operations"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' | head -n 1 || echo "0")
+    _wr_ops=$(echo "${out}" | sed -nE 's/.*"wr_operations"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' | head -n 1 || echo "0")
+  fi
+
+  [[ -z "${_rd_ops}" ]] && _rd_ops=0
+  [[ -z "${_wr_ops}" ]] && _wr_ops=0
+
+  return 0
+}
+
+# 블록 I/O Stall 여부를 판단하는 함수
+hangctl_detect_block_stall() {
+  # usage: hangctl_detect_block_stall <vm> <curr_rd> <curr_wr>
+  # return: 0 (Stall 의심), 1 (정상 또는 판단 불가)
+  local vm="${1-}"
+  local curr_rd="${2-0}"
+  local curr_wr="${3-0}"
+
+  local prev_rd=0
+  local prev_wr=0
+  # 1단계에서 만든 함수로 이전 값 로드
+  hangctl_state_get_prev_blockstats "${vm}" prev_rd prev_wr
+
+  # 현재 수치를 다음 스캔을 위해 저장
+  hangctl_state_update_blockstats "${vm}" "${curr_rd}" "${curr_wr}"
+
+  # 이전 기록이 없으면(첫 스캔) 정상으로 간주
+  if [[ "${prev_rd}" -eq 0 && "${prev_wr}" -eq 0 ]]; then
+    return 1
+  fi
+
+  # 판단 로직: I/O 요청 횟수가 이전과 정확히 일치한다면?
+  # 1. 아예 I/O가 없는 한가한 상태이거나
+  # 2. I/O가 꽉 막혀서 처리가 안 되고 있는 상태임
+  if [[ "${curr_rd}" -eq "${prev_rd}" && "${curr_wr}" -eq "${prev_wr}" ]]; then
+    # 이 시점에서는 의심(suspect) 단계로 보고 duration을 누적하게 됨
+    return 0
+  fi
+
+  return 1
+}

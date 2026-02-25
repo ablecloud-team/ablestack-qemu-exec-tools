@@ -144,7 +144,7 @@ hangctl_apply_target_filters() {
 
 hangctl_detect_probe_maybe_act_one_vm() {
   # usage:
-  #   hangctl_detect_probe_maybe_act_one_vm <vm> <do_action:0|1>
+  #    hangctl_detect_probe_maybe_act_one_vm <vm> <do_action:0|1>
   local vm="${1-}"
   local do_action="${2-0}"
 
@@ -160,6 +160,14 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local qmp_status_lc
   qmp_status_lc="$(echo "${qmp_status}" | tr '[:upper:]' '[:lower:]' | xargs)"
 
+  # [신규] 블록 I/O 통계 수집 및 Stall 여부 확인
+  local curr_rd=0 curr_wr=0
+  hangctl_probe_blockstats "${vm}" curr_rd curr_wr || true
+  
+  local io_stall=1
+  # 0이면 Stall 의심, 1이면 정상 (이전 스캔 데이터와 비교)
+  hangctl_detect_block_stall "${vm}" "${curr_rd}" "${curr_wr}" || io_stall=$?
+
   # virsh를 통한 도메인 상태 확인
   local dom_out dom_err dom_rc
   dom_out=""; dom_err=""; dom_rc=0
@@ -171,28 +179,32 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local domstate="${domstate_full%% *}" 
   [[ -z "${domstate}" ]] && domstate="unknown"
 
-  # --- [단계 2] 시간 초기화 또는 누적 결정 ---
-  if [[ "${qmp_rc}" == "0" && -n "${qmp_status_lc}" && "${qmp_status_lc}" != "unknown" ]]; then
-      # 정상 응답이므로 현재 시간으로 갱신 (duration을 0으로 만듦)
+  # --- [단계 2] 시간 초기화 또는 누적 결정 (I/O Stall 반영) ---
+  # 정상 조건: QMP 응답 성공 AND 상태가 unknown 아님 AND I/O 흐름이 정상(io_stall=1)
+  if [[ "${qmp_rc}" == "0" && -n "${qmp_status_lc}" && "${qmp_status_lc}" != "unknown" && "${io_stall}" == "1" ]]; then
+      # 모든 지표가 정상이므로 현재 시간으로 갱신 (duration을 0으로 만듦)
       hangctl_state_touch_heartbeat "${vm}"
-      hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=qmp_responding_valid status=${qmp_status_lc}"
+      hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=healthy status=${qmp_status_lc}"
   else
-      # QMP 응답이 없거나 unknown인 경우
+      # QMP 응답이 없거나 unknown인 경우, 혹은 I/O가 멈춘 경우
       # 만약 기존에 기록된 시간이 없다면, 지금 이 순간을 '장애 시작 시점'으로 기록해야 함
       local existing_ts
       existing_ts="$(hangctl_state__read_kv "$(hangctl_state__path "${vm}")" "last_change_ts" || true)"
       
+      local fail_type="qmp_issue"
+      [[ "${io_stall}" == "0" ]] && fail_type="io_stall_detected"
+
       if [[ -z "${existing_ts}" ]]; then
           # 최초 실패 시점이므로 현재 시간을 기록하여 누적 시작점 생성
           hangctl_state_touch_heartbeat "${vm}"
-          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_start_detected"
+          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_start_detected type=${fail_type}"
       else
           # 이미 실패 기록이 있으므로 갱신하지 않고 유지 (시간이 흐르게 둠)
-          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_continuing status=${qmp_status_lc}"
+          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_continuing type=${fail_type} status=${qmp_status_lc}"
       fi
   fi
 
-  # 마지막 heartbeat(또는 QMP 실패 시작점)로부터 경과 시간 계산
+  # 마지막 heartbeat(또는 QMP/IO 실패 시작점)로부터 경과 시간 계산
   local duration_sec
   duration_sec="$(hangctl_state_get_duration_sec "${vm}")"
   local stuck_sec="${duration_sec}"
@@ -200,13 +212,17 @@ hangctl_detect_probe_maybe_act_one_vm() {
   # --- [단계 3] 마이그레이션 여부 및 임계값 결정 ---
   local is_migration=0
   [[ "${domstate_full}" == *"migration"* ]] && is_migration=1
+  
+  # libvirt가 자체적으로 감지한 디스크 에러 확인
+  local is_disk_error=0
+  [[ "${domstate_full}" == *"disk error"* ]] && is_disk_error=1
 
   local current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
   if [[ "${is_migration}" -eq 1 ]]; then
     # 마이그레이션 중인 경우 전용 임계값 적용
     current_window="${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC}"
-  elif [[ "${domstate}" == "paused" ]]; then
-    # 일반 paused 상태인 경우 별도 임계값 적용
+  elif [[ "${domstate}" == "paused" || "${is_disk_error}" -eq 1 ]]; then
+    # 일반 paused 상태나 디스크 에러가 명시된 경우 별도 임계값 적용
     current_window="${HANGCTL_PAUSED_CONFIRM_WINDOW_SEC}"
   fi
 
@@ -217,7 +233,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
   fi
 
   hangctl_log_event "detect" "vm.status_check" "ok" "${vm}" "" "" \
-    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window} qmp_status=${qmp_status}"
+    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window} qmp_status=${qmp_status} io_stall=${io_stall}"
 
   # 의심 상황이 아니면(시간이 충분히 흐르지 않았으면) 다음 VM으로 넘어감
   if [[ "${decision}" != "suspect" ]]; then
@@ -240,6 +256,14 @@ hangctl_detect_probe_maybe_act_one_vm() {
   if [[ "${is_migration}" -eq 1 ]]; then
     final_decision="confirmed"
     confirm_reason="migration_zombie_no_progress"
+  elif [[ "${is_disk_error}" -eq 1 ]]; then
+    # Libvirt가 명시적으로 디스크 문제를 보고한 경우
+    final_decision="confirmed"
+    confirm_reason="libvirt_reported_disk_error"
+  elif [[ "${io_stall}" == "0" ]]; then
+    # QMP 상태와 무관하게 장시간 I/O 변화가 없는 경우 (Stall)
+    final_decision="confirmed"
+    confirm_reason="continuous_io_stall_detected"
   elif [[ "${domstate}" == "paused" ]]; then
     # QMP 응답 실패가 누적된 상태에서 domstate까지 paused인 경우
     final_decision="confirmed"
@@ -248,7 +272,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
     final_decision="confirmed"
     confirm_reason="qmp_no_response"
   elif [[ "${qmp_status_lc}" == "running" ]]; then
-    # QMP가 응답하고 running이면 정상(clear)
+    # QMP가 응답하고 running이며 I/O도 정상이면 통과
     final_decision="clear"
     confirm_reason="qmp_responding_running"
   elif [[ "${qmp_status_lc}" == "paused" ]]; then
