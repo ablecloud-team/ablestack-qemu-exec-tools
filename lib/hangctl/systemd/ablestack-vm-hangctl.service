@@ -1,0 +1,12 @@
+[Unit]
+Description=ABLESTACK VM hang controller (oneshot scan)
+After=network.target libvirtd.service
+Wants=libvirtd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ablestack_vm_hangctl scan
+# scan 내에서 dump/evidence/timeout을 자체적으로 처리하므로 systemd timeout은 넉넉히
+TimeoutStartSec=20min
+# 실패 시 systemd가 재시도하지 않게 (재시도는 timer가 담당)
+Restart=no

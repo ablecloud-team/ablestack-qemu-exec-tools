@@ -18,6 +18,9 @@ NAME = ablestack-qemu-exec-tools
 V2K_NAME = ablestack_v2k
 V2K_SPEC = rpm/$(V2K_NAME).spec
 
+HANGCTL_NAME = ablestack_vm_hangctl
+HANGCTL_SPEC = rpm/$(HANGCTL_NAME).spec
+
 # Read VERSION file
 VERSION := $(shell . ./VERSION; printf "%s" "$$VERSION" | tr -d '\r\n[:space:]')
 RELEASE := $(shell . ./VERSION; printf "%s" "$$RELEASE" | tr -d '\r\n[:space:]')
@@ -40,7 +43,7 @@ DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 DEB_COMPLETIONS_DIR = $(DEB_BUILD_DIR)/usr/share/bash-completion/completions
 
-.PHONY: all install uninstall rpm v2k-rpm deb windows clean
+.PHONY: all install uninstall rpm v2k-rpm hangctl-rpm deb windows clean
 
 all:
 	@echo "Available targets: install, uninstall, rpm, deb, windows, clean"
@@ -122,8 +125,18 @@ uninstall-keep-lib:
 rpm:
 	@echo "📦 Building RPM..."
 	mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-	tar czf rpmbuild/SOURCES/$(NAME)-$(VERSION).tar.gz \
-		--transform="s,^,$(NAME)-$(VERSION)/," .
+	@TMP_TGZ="$$(mktemp /tmp/ablestack-qemu-exec-tools-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,ablestack-qemu-exec-tools-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild/SOURCES/ablestack-qemu-exec-tools-$(VERSION).tar.gz"
 
 	# spec 파일 복사 (rpm 디렉토리에서 가져오기)
 	cp rpm/$(NAME).spec rpmbuild/SPECS/
@@ -138,6 +151,39 @@ rpm:
 	mkdir -p build/rpm
 	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
 	@echo "✅ RPM package created: build/rpm/"
+
+hangctl-rpm:
+	@echo "📦 Building HANGCTL RPM (isolated)..."
+	@test -f "$(HANGCTL_SPEC)" || (echo "[ERR] Missing spec: $(HANGCTL_SPEC)" >&2; exit 2)
+
+	@mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+	@echo "[INFO] Packing sources to temp (avoid self-include)..."
+	@TMP_TGZ="$$(mktemp /tmp/$(HANGCTL_NAME)-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,$(HANGCTL_NAME)-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild_hangctl/SOURCES/$(HANGCTL_NAME)-$(VERSION).tar.gz"
+
+	@cp $(HANGCTL_SPEC) rpmbuild_hangctl/SPECS/
+
+	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild_hangctl" \
+	         --define "version $(VERSION)" \
+	         --define "release $(RELEASE)" \
+	         --define "githash $(GIT_HASH)" \
+	         rpmbuild_hangctl/SPECS/$(HANGCTL_NAME).spec
+
+	mkdir -p build/rpm-hangctl
+	cp rpmbuild_hangctl/RPMS/noarch/*.rpm build/rpm-hangctl/ 2>/dev/null || true
+	cp rpmbuild_hangctl/RPMS/*/*.rpm build/rpm-hangctl/ 2>/dev/null || true
+	@echo "✅ HANGCTL RPM package created: build/rpm-hangctl/"
 
 v2k-rpm:
 	@echo "📦 Building V2K RPM (isolated)..."
@@ -154,8 +200,18 @@ v2k-rpm:
 
 	# Fully isolated rpmbuild tree for V2K (keeps existing 'rpmbuild/' untouched)
 	mkdir -p rpmbuild_v2k/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-	tar czf rpmbuild_v2k/SOURCES/$(V2K_NAME)-$(VERSION).tar.gz \
-		--transform="s,^,$(V2K_NAME)-$(VERSION)/," .
+	@TMP_TGZ="$$(mktemp /tmp/ablestack_v2k-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,ablestack_v2k-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild_v2k/SOURCES/ablestack_v2k-$(VERSION).tar.gz"
 
 	cp $(V2K_SPEC) rpmbuild_v2k/SPECS/
 
@@ -229,6 +285,7 @@ windows:
 clean:
 	rm -rf rpmbuild
 	rm -rf rpmbuild_v2k
+	rm -rf rpmbuild_hangctl
 	rm -rf $(DEB_BUILD_DIR)
 	rm -f *.deb
 	rm -rf build/*
