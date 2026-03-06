@@ -140,14 +140,14 @@ fi
 # 2.1) hangctl(systemd/config) 추�? ?�치 (dev/source install)
 #   - unit: lib/hangctl/systemd/*.service|*.timer -> /etc/systemd/system/
 #   - config(default): etc/ablestack-vm-hangctl.conf -> /etc/ablestack/ablestack-vm-hangctl.conf (noreplace)
-#   - enable/start???��? ?�음(?�영 ?�책?� ?�용?��? 결정)
+#   - enable/start 여부는 아님(운영 책무에 따라 결정)
 # ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 HANGCTL_DEFAULT_CONF_SRC="etc/ablestack-vm-hangctl.conf"
 HANGCTL_DEFAULT_CONF_DST="/etc/ablestack/ablestack-vm-hangctl.conf"
 HANGCTL_UNIT_SRC_DIR="${LIB_SRC}/hangctl/systemd"
 
 if [[ -d "${HANGCTL_UNIT_SRC_DIR}" ]]; then
-  echo "??hangctl systemd unit ?�치: ${SYSTEMD_UNIT_DIR}"
+  echo "hangctl systemd unit 설치: ${SYSTEMD_UNIT_DIR}"
   sudo mkdir -p "${SYSTEMD_UNIT_DIR}"
   # service/timer�?복사
   if ls "${HANGCTL_UNIT_SRC_DIR}"/*.service >/dev/null 2>&1; then
@@ -160,71 +160,71 @@ if [[ -d "${HANGCTL_UNIT_SRC_DIR}" ]]; then
   fi
   sudo systemctl daemon-reload 2>/dev/null || true
 else
-  echo "?�️  hangctl systemd unit ?�스 ?�렉?�리 미존??건너?�): ${HANGCTL_UNIT_SRC_DIR}"
+  echo "⚠️  hangctl systemd unit 소스 디렉터리 미존재(건너뜀): ${HANGCTL_UNIT_SRC_DIR}"
 fi
 
 if [[ -f "${HANGCTL_DEFAULT_CONF_SRC}" ]]; then
-  echo "??hangctl 기본 ?�정 ?�치(존재 ???��?): ${HANGCTL_DEFAULT_CONF_DST}"
+  echo "hangctl 기본 설정 설치(존재 확인): ${HANGCTL_DEFAULT_CONF_DST}"
   sudo mkdir -p "$(dirname "${HANGCTL_DEFAULT_CONF_DST}")"
   if [[ -f "${HANGCTL_DEFAULT_CONF_DST}" ]]; then
-    echo "   ??기존 ?�정 존재: ${HANGCTL_DEFAULT_CONF_DST} (??��?��? ?�음)"
+    echo "   기존 설정 존재: ${HANGCTL_DEFAULT_CONF_DST} (덮어쓰지 않음)"
   else
     sudo cp -a "${HANGCTL_DEFAULT_CONF_SRC}" "${HANGCTL_DEFAULT_CONF_DST}"
     sudo chmod 644 "${HANGCTL_DEFAULT_CONF_DST}" 2>/dev/null || true
-    echo "   ???�치 ?�료: ${HANGCTL_DEFAULT_CONF_DST}"
+    echo "   설치 완료: ${HANGCTL_DEFAULT_CONF_DST}"
   fi
 else
-  echo "?�️  hangctl 기본 ?�정 ?�플�??�음(건너?�): ${HANGCTL_DEFAULT_CONF_SRC}"
+  echo "⚠️  hangctl 기본 설정 템플릿 없음(건너뜀): ${HANGCTL_DEFAULT_CONF_SRC}"
 fi
 
-echo "???�이로드 ?�치 경로: ${LIB_TARGET}/payload"
+echo "페이로드 설치 경로: ${LIB_TARGET}/payload"
 mkdir -p "${LIB_TARGET}/payload"
 if [[ -d "$PAYLOAD_SRC" ]]; then
-  # ?�체 payload�???��?�기
+  # 전체 payload 복사 수행
   rsync -a "$PAYLOAD_SRC/"" " "${LIB_TARGET}/payload/" 2>/dev/null || cp -a "$PAYLOAD_SRC/"* "${LIB_TARGET}/payload/" 2>/dev/null || true
 else
-  echo "?�️  ?�이로드 ?�스 ?�렉?�리 미존?? $PAYLOAD_SRC"
+  echo "⚠️  페이로드 소스 디렉터리 미존재: $PAYLOAD_SRC"
 fi
 
 # ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 # 3) ISO 기본 경로 ?�내/?�성
 # ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
-echo "??ISO 기본 경로 ?�인: ${ISO_DEFAULT_DIR}"
+echo "ISO 기본 경로 확인: ${ISO_DEFAULT_DIR}"
 mkdir -p "${ISO_DEFAULT_DIR}"
 if [[ -f "${ISO_DEFAULT_PATH}" ]]; then
-  echo "   ??ISO 존재: ${ISO_DEFAULT_PATH}"
+  echo "   ISO 존재: ${ISO_DEFAULT_PATH}"
 else
-  echo "   ?�️  ISO가 ?�습?�다: ${ISO_DEFAULT_PATH}"
-  echo "      - GitHub Actions ?�출물을 ??경로�?배치?�거??"
-  echo "      - ?�른 경로�??�용??경우 vm_autoinstall?�서 ?�경변??ISO_PATH_DEFAULT�?지?�하?�요."
+  echo "   ⚠️  ISO가 없습니다: ${ISO_DEFAULT_PATH}"
+  echo "      - GitHub Actions 출력물을 이 경로에 배치하거나"
+  echo "      - 다른 경로를 사용할 경우 vm_autoinstall에서 환경변수 ISO_PATH_DEFAULT를 지정하세요."
 fi
 
 # ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 # 4) ?�경 ?�일(?�택): ?�이�?경로/ISO 경로 ?�트 ?�공
 # ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 PROFILE_D="/etc/profile.d/ablestack-qemu-exec-tools.sh"
-echo "???�경?�정 ?�트: ${PROFILE_D}"
+echo "환경설정 파일: ${PROFILE_D}"
 cat <<EOF | sudo tee "${PROFILE_D}" >/dev/null
 # ablestack-qemu-exec-tools env (hint)
 export ABLESTACK_QEMU_EXEC_TOOLS_HOME="${LIB_TARGET}"
 export ISO_PATH_DEFAULT="${ISO_DEFAULT_PATH}"
 EOF
 
-echo "???�치 ?�료!"
+echo "설치 완료!"
 
 echo ""
-echo "?�용 ?�시:"
+echo "사용 예시:"
 echo "  vm_autoinstall <domain>     # ISO ?�플?�그 + (QGA ?�으�??�라?? / (?�으�??�프?�인 주입+부??"
-echo "  vm_exec                      # 게스???��? 명령 ?�행(QGA ?�요)"
+echo "  vm_exec                      # 게스트 시스템 명령 실행(QGA 필요)"
 echo ""
 echo "  ablestack_vm_hangctl health  # libvirtd ?�태 ?��?"
 echo "  ablestack_vm_hangctl scan    # VM hang ?�캔/조치(?�정 기반)"
 echo ""
-echo "systemd(개발 ?�치 ???�닛�?배치, enable?� ?�동):"
+echo "systemd(개발 설치 시 유닛으로 배치, enable후 시동):"
 echo "  systemctl enable --now ablestack-vm-hangctl.timer"
 echo "  systemctl status ablestack-vm-hangctl.timer --no-pager -l"
 echo ""
 echo "참고:"
-echo "  - ?�프?�인 주입 ?�크립트??${LIB_TARGET}/payload/* �??�용?�니??"
-echo "  - ISO??${ISO_DEFAULT_PATH} ??존재?�야 ?�니??"
-echo "  - Windows: ISO 루트??install.bat ?�행 / Linux: install-linux.sh ?�행"
+echo "  - 게스트 인젝션 스크립트는 ${LIB_TARGET}/payload/* 에서 사용합니다."
+echo "  - ISO는 ${ISO_DEFAULT_PATH} 에 존재해야 합니다."
+echo "  - Windows: ISO 루트에 install.bat 실행 / Linux: install-linux.sh 실행"
