@@ -258,6 +258,9 @@ v2k_transfer_patch_one() {
     bytes_total="$(echo "${areas_json}" | jq -r '[.areas[].length] | add // 0')"
     new_change_id="$(echo "${areas_json}" | jq -r '.new_change_id // empty')"
 
+    # Debug logging
+    echo "DEBUG: areas_json for disk ${disk_id}: ${areas_json}" >&2
+
     # No changed areas is a valid no-op incremental/final sync.
     if [[ "${areas_count}" -eq 0 ]]; then
       v2k_event INFO "sync.${which}" "${disk_id}" "no_changes" "{}"

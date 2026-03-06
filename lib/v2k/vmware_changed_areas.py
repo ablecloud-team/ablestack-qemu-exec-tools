@@ -307,6 +307,9 @@ def main() -> None:
         if not new_change_id:
             new_change_id = _disk_backing_change_id(disk) or ""
 
+        # Debug logging
+        sys.stderr.write(f"DEBUG: Queried {len(areas)} changed areas for disk {args.disk_id}, change_id={effective_change_id}\n")
+
         print(json.dumps({
             "disk_id": args.disk_id,
             "change_id": effective_change_id,

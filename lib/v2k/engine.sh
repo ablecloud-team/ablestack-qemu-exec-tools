@@ -1929,7 +1929,7 @@ v2k_cmd_sync() {
 
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
-  local which="${1:-}" jobs=1 coalesce_gap=$((1024*1024)) chunk=$((4*1024*1024))
+  local which="${1:-}" jobs=1 coalesce_gap=$((64*1024)) chunk=$((4*1024*1024))
   shift || true
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2211,8 +2211,8 @@ v2k_cmd_cutover() {
   # final sync (observable)
   # ---------------------------
   _ts="$(v2k_now_ms)"
-  v2k_step_start "cutover" "final_sync" "{\"jobs\":1,\"coalesce_gap\":$((1024*1024)),\"chunk\":$((4*1024*1024))}"
-  if v2k_transfer_patch_all "${V2K_MANIFEST}" "final" 1 $((1024*1024)) $((4*1024*1024)); then
+  v2k_step_start "cutover" "final_sync" "{\"jobs\":1,\"coalesce_gap\":$((64*1024)),\"chunk\":$((4*1024*1024))}"
+  if v2k_transfer_patch_all "${V2K_MANIFEST}" "final" 1 $((64*1024)) $((4*1024*1024)); then
     v2k_manifest_phase_done "${V2K_MANIFEST}" "final_sync" || true
     v2k_step_done "cutover" "final_sync" "${_ts}" 0 "{}"
   else

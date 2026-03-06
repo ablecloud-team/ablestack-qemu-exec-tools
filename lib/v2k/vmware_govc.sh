@@ -527,7 +527,7 @@ v2k_vmware_snapshot_create() {
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
   v2k_event INFO "snapshot.${which}" "" "snapshot_create_start" "{\"name\":$(v2k_json_s "${name}")}"
-  govc snapshot.create -vm "${vm}" -m=false -q=false "${name}" >/dev/null
+  govc snapshot.create -vm "${vm}" -m=false -q=true "${name}" >/dev/null
   v2k_event INFO "snapshot.${which}" "" "snapshot_create_done" "{\"name\":$(v2k_json_s "${name}")}"
 }
 
