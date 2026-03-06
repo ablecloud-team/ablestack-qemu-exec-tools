@@ -146,7 +146,7 @@ hangctl_action_handle_confirmed_vm() {
   local dump_path dump_sha dump_bytes
   dump_path=""; dump_sha=""; dump_bytes="0"
 
-  # hangctl_action_handle_confirmed_vm 내 덤프 호출 부분 개선 제안
+  # hangctl_action_handle_confirmed_vm ???�프 ?�출 부�?개선 ?�안
   hangctl_collect_dump_pre_action "${vm}" "${incident_id}" dump_path dump_sha dump_bytes || {
       hangctl_log_event "evidence" "dump.skip" "warn" "${vm}" "${incident_id}" "" "reason=dump_failed_proceeding_to_action"
   }

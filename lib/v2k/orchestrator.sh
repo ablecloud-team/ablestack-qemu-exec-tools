@@ -126,7 +126,7 @@ v2k_build_govc_url_from_vcenter_host() {
 }
 
 v2k_generate_run_id() {
-  # engine.sh init과 동일한 형식(호환성 유지)
+  # engine.sh init�??�일???�식(?�환???��?)
   # YYYYMMDD-HHMMSS-<4bytes hex>
   printf '%s-%s\n' \
     "$(date +%Y%m%d-%H%M%S)" \
@@ -165,7 +165,7 @@ v2k_keep_vddk_cred_in_workdir() {
 v2k_source_kv_env() {
   local path="$1"
   [[ -f "${path}" ]] || return 0
-  # key=value 파일을 현재 쉘에 로드 + export
+  # key=value ?�일???�재 ?�에 로드 + export
   set -a
   # shellcheck disable=SC1090
   source "${path}"
@@ -188,7 +188,7 @@ v2k_shell_quote_args() {
 }
 
 # -----------------------------------------------------------------------------
-# Foreground worker (기존 파이프라인)
+# Foreground worker (기존 ?�이?�라??
 # -----------------------------------------------------------------------------
 v2k_cmd_run_foreground() {
   v2k_run_defaults
@@ -650,7 +650,7 @@ v2k_cmd_run_foreground() {
 }
 
 # -----------------------------------------------------------------------------
-# Background launcher (default): run_id 반환 후 워커를 nohup로 분리 실행
+# Background launcher (default): run_id 반환 ???�커�?nohup�?분리 ?�행
 # -----------------------------------------------------------------------------
 v2k_cmd_run() {
   # If user explicitly wants foreground

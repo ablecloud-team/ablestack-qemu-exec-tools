@@ -130,8 +130,7 @@ v2k_transfer_base_one() {
     if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
       kind="file-qcow2"
       mkdir -p "$(dirname "${target_path}")"
-      # qcow2는 먼저 만들어둬야 qemu-nbd attach 가능
-      if [[ ! -f "${target_path}" ]]; then
+      # qcow2??먼�? 만들?�둬??qemu-nbd attach 가??      if [[ ! -f "${target_path}" ]]; then
         qemu-img create -f qcow2 "${target_path}" "${size_bytes}" >/dev/null
       fi
     elif [[ "${st}" == "file" && "${fmt}" == "raw" ]]; then
@@ -142,10 +141,9 @@ v2k_transfer_base_one() {
       fi
     elif [[ "${st}" == "block" ]]; then
       kind="block-device"
-      # target_path는 /dev/sdX 등 “디바이스 자체”
-    elif [[ "${st}" == "rbd" ]]; then
+      # target_path??/dev/sdX ???�디바이???�체??    elif [[ "${st}" == "rbd" ]]; then
       kind="rbd"
-      # target_path는 rbd:pool/image (manifest에서 강제)
+      # target_path??rbd:pool/image (manifest?�서 강제)
     else
       echo "Unsupported target: storage=${st} format=${fmt}" >&2
       exit 31
@@ -200,7 +198,7 @@ v2k_transfer_base_one() {
     # - V2K_BASE_METHOD=nbdcopy : nbdcopy
     base_method="${V2K_BASE_METHOD:-nbdcopy}"
 
-    # normalize: trim + lowercase (whitespace/newline 방지)
+    # normalize: trim + lowercase (whitespace/newline 방�?)
     base_method="$(echo -n "${base_method}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 
     run_str=""
