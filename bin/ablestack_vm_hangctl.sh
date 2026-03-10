@@ -148,7 +148,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local vm="${1-}"
   local do_action="${2-0}"
 
-  # --- [?�계 1] ?�존 ?�호(QMP) �??�태 기본 ?�인 ---
+  # --- [단계 1] VM 상태 수집 및 초기 분석 ---
   local qmp_status qmp_rc qmp_result
   qmp_status=""; qmp_rc=0
   
@@ -184,7 +184,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
       hangctl_state_touch_heartbeat "${vm}"
       hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=healthy status=${qmp_status_lc}"
   else
-      # QMP ?�답 ?�패, unknown ?�태, ?��? I/O가 멈춘 경우 (최초 ?�패 ?�점 기록 로직 ?�함)
+      # QMP 응답 실패 또는 Stall 감지 시 기존 heartbeat 타임스탬프 확인
       local existing_ts
       existing_ts="$(hangctl_state__read_kv "$(hangctl_state__path "${vm}")" "last_change_ts" || true)"
       
@@ -290,7 +290,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
   hangctl_log_event "detect" "vm.decision" "ok" "${vm}" "" "" \
     "final=${final_decision} reason=${confirm_reason} domstate=${domstate_full} stuck_sec=${stuck_sec}"
 
-  # --- [?�계 7] ?�션 ?�행 ---
+  # 최종 결정이 clear 또는 normal이면 조치 없이 종료
   if [[ "${final_decision}" == "clear" || "${final_decision}" == "normal" ]]; then
     return 0
   fi
@@ -394,7 +394,7 @@ cmd_scan() {
   vm_array=()
 
   rc=0
-  # 1. ?�캔 ?�??추출 ?�정 (running�?paused 모두 ?�함)
+  # HANGCTL_VIRSH_TIMEOUT_SEC 초과 시 rc=124, libvirt 오류 시 rc=1, 성공 시 rc=0
   hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" out err rc -- -c qemu:///system list --state-running --state-paused --name
   result="$(hangctl__result_from_rc "${rc}")"
   if [[ "${result}" != "ok" ]]; then
@@ -474,7 +474,7 @@ cmd_scan() {
       done
       
       if [[ "${found}" -eq 0 ]]; then
-        # ?�행 중이 ?�니므�??�태 초기??
+        # 실행 중이 아니므로 상태 초기화
         hangctl_state_reset_vm "${cached_vm}"
       fi
     done

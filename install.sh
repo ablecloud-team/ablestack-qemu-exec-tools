@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # install.sh - ablestack-qemu-exec-tools 설치 스크립트 (개발/소스 설치용)
-# (dev/source install ??
+# (dev/source install 용)
 #
 # Copyright 2025 ABLECLOUD
 #
@@ -107,8 +107,8 @@ for script in "${BIN_SCRIPTS[@]}"; do
 done
 
 # 2) 라이브러리 및 페이로드 설치
-#    - lib/*  ?? ${LIB_TARGET}/
-#    - payload/* ??${LIB_TARGET}/payload/
+#    - lib/*  -> ${LIB_TARGET}/
+#    - payload/* -> ${LIB_TARGET}/payload/
 #    (게스트 인젝션 스크립트가 payload를 참조)
 
 echo "라이브러리 설치 경로: ${LIB_TARGET}"
@@ -138,7 +138,7 @@ HANGCTL_UNIT_SRC_DIR="${LIB_SRC}/hangctl/systemd"
 if [[ -d "${HANGCTL_UNIT_SRC_DIR}" ]]; then
   echo "hangctl systemd unit 설치: ${SYSTEMD_UNIT_DIR}"
   sudo mkdir -p "${SYSTEMD_UNIT_DIR}"
-  # service/timer�?복사
+  # service/timer 복사
   if ls "${HANGCTL_UNIT_SRC_DIR}"/*.service >/dev/null 2>&1; then
     sudo cp -a "${HANGCTL_UNIT_SRC_DIR}"/*.service "${SYSTEMD_UNIT_DIR}/"
     sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.service 2>/dev/null || true

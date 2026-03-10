@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 #
 # common.sh - Common utility functions for vm_exec.sh
 #
@@ -16,17 +16,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# 로그 출력 ?�수
+# 로그 출력 함수
 log_info() {
-  echo -e "?�� [INFO] $*"
+  echo -e "[INFO] $*"
 }
 
 log_warn() {
-  echo -e "?�️  [WARN] $*"
+  echo -e "[WARN] $*"
 }
 
 log_error() {
-  echo -e "??[ERROR] $*" >&2
+  echo -e "[ERROR] $*" >&2
 }
 
 abort() {
@@ -49,7 +49,7 @@ cut_fixed_range() {
   echo "${line:$start:$length}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-# Windows 경로 ?�스케?�프 처리
+# Windows 경로 이스케이프 처리
 escape_win_path() {
   echo "$1" | sed 's/\\\\/\\\\\\\\/g'
 }

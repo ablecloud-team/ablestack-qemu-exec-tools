@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 #
 # vm_exec.sh - Remote VM command execution tool using qemu-guest-agent
 #
@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ===== 공통 ?�이브러�?로드 =====
+# ===== 공통 라이브러리 로드 =====
 LIBDIR="/usr/local/lib/ablestack-qemu-exec-tools"
 source "$LIBDIR/common.sh"
 source "$LIBDIR/parse_linux_table.sh"
@@ -37,7 +37,7 @@ print_usage() {
   echo "  --json                     : Output result in JSON format"
   echo "  --csv                      : Parse CSV format output"
   echo "  --table                    : Parse table format output"
-  echo "  --headers "col1,col2,..."  : Use fixed-width columns based on header names (only with --table)"
+  echo "  --headers \"col1,col2,...\"  : Use fixed-width columns based on header names (only with --table)"
   echo "  --parallel                 : Execute commands in parallel (file mode only)"
   exit 1
 }
@@ -95,7 +95,7 @@ while [[ "$#" -gt 0 ]]; do
     --headers)
       shift
       if [[ "$#" -eq 0 || "$1" =~ ^-- ]]; then
-        echo "??Error: --headers option requires a comma-separated string argument."
+        echo "Error: --headers option requires a comma-separated string argument."
         exit 1
       fi
       USER_DEFINED_HEADERS="$1"
