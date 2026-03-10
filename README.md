@@ -59,10 +59,13 @@ payload/
 ---
 
 ## 📖 주요 사용법
+
 ### 1. VM 명령 실행 (vm_exec)
+
 ```bash
 vm_exec -l|-w <vm-name> "<command>"
 ```
+
 - `-l` 또는 `--linux` : Linux VM
 - `-w` 또는 `--windows` : Windows VM
 - `--headers`, `--json`, `--table`, `--csv` 파싱 옵션 제공
@@ -72,9 +75,11 @@ vm_exec -l|-w <vm-name> "<command>"
 ---
 
 ### 2. 에이전트 정책 자동화(agent_policy_fix)
+
 ```bash
 sudo agent_policy_fix
 ```
+
 - RHEL/Rocky 계열: 서비스 정책 생성 및 적용
 - Ubuntu/Debian: qemu-guest-agent 자동 설치 및 설정
 
@@ -87,6 +92,7 @@ sudo vm_autoinstall <vm-name> [--force-offline] [--no-reboot]
 ```
 
 #### 🔄 작업 개요
+
 | 상황 | 작업 |
 |------|------|
 | QGA(게스트 에이전트) 정상 | 무중단 온라인 설치 (게스트 내부 명령 직접 실행) |
@@ -96,6 +102,7 @@ sudo vm_autoinstall <vm-name> [--force-offline] [--no-reboot]
 | 설치 완료 | ISO 연결 분리 (detach_iso_safely 함수 사용) |
 
 #### ⚠️ 사전조건
+
 - 호스트에 ISO 존재:
   `/usr/share/ablestack/tools/ablestack-qemu-exec-tools.iso`
 - ISO 루트에 스크립트 존재:
@@ -103,6 +110,7 @@ sudo vm_autoinstall <vm-name> [--force-offline] [--no-reboot]
   - Linux 용 `install-linux.sh`
 
 #### 💡 예시
+
 ```bash
 sudo vm_autoinstall win11-test
 sudo vm_autoinstall rhel9-guest --force-offline
@@ -113,6 +121,7 @@ sudo vm_autoinstall rhel9-guest --force-offline
 ## 📦 ISO 작업 및 레벨 규칙
 
 GitHub Actions(`build.yml`)에서 자동 생성:
+
 ```bash
 mkisofs -o ablestack-qemu-exec-tools-${VERSION}.iso   -V "ABLESTACK"   -r -J release
 ```
@@ -151,6 +160,7 @@ mkisofs -o ablestack-qemu-exec-tools-${VERSION}.iso   -V "ABLESTACK"   -r -J rel
 ---
 
 ## 🐛 트러블슈팅
+
 | 증상 | 원인 / 해결 |
 |------|--------------|
 | `virt-*` 명령 실패 | 루트 권한 또는 `LIBGUESTFS_BACKEND=direct` 환경 필요 |

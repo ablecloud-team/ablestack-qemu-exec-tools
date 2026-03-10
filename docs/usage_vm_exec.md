@@ -12,6 +12,7 @@ vm_exec -l|-w|-d <vm-name> <command> [args...] [options]
 ```
 
 ### 실행 모드
+
 | 옵션      | 설명                                      |
 |-----------|-------------------------------------------|
 | `-l`      | Linux VM (명령: `bash -c`)                |
@@ -71,7 +72,7 @@ uptime
 ps aux
 ```
 
-#### 병렬 ?�행 (모든 명령???�시???�행):
+#### 병렬 ?�행 (모든 명령???�시???�행)
 
 ```bash
 vm_exec -l test-vm --file ./cmds.txt --parallel
@@ -81,7 +82,7 @@ vm_exec -l test-vm --file ./cmds.txt --parallel
 
 ## ?�� 출력 결과 ?�시
 
-### ??JSON 출력 (?�시):
+### ??JSON 출력 (?�시)
 
 ```json
 {

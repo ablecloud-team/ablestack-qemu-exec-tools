@@ -7,10 +7,12 @@
 ## 1. 기본 자동 실행 (권장)
 
 ### 대상
+
 - 일반 업무용 VM
 - qcow2 또는 raw(file) 스토리지
 
 ### 실행
+
 ```bash
 ablestack_v2k run \
   --vm <VM> \
@@ -21,6 +23,7 @@ ablestack_v2k run \
 ```
 
 특징:
+
 - 전체 라이프사이클 자동 실행
 - 중단 시간 최소화
 - 오류 발생 시 `--resume` 가능
@@ -30,6 +33,7 @@ ablestack_v2k run \
 ## 2. Split-run 운영 (대규모 VM)
 
 ### Phase1 (주간/업무시간)
+
 ```bash
 ablestack_v2k run --split phase1 ...
 ```
@@ -38,6 +42,7 @@ ablestack_v2k run --split phase1 ...
 - 업무 중단 없음
 
 ### Phase2 (야간/휴일시간)
+
 ```bash
 ablestack_v2k run --split phase2 --resume ...
 ```
@@ -66,6 +71,7 @@ ablestack_v2k run --split phase2 --resume ...
 ## 5. ?�애 복구 ?�략
 
 - ?�업 중단 ??
+
 ```bash
 ablestack_v2k status
 ablestack_v2k run --resume

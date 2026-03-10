@@ -1,5 +1,6 @@
 
 # agent_policy_fix 사용 설명서
+
 ## 개요
 
 `agent_policy_fix.sh`는 리눅스 가상머신(RHEL/Rocky/Alma/Ubuntu/Debian 계열) 환경에서 `qemu-guest-agent`의 설치, 서비스 설정 그리고(RHEL 계열 특정) RPC 정책 자동화를 수행하는 도구입니다.
@@ -24,10 +25,13 @@
 1. VM(게스트) 환경에 `agent_policy_fix.sh` 파일을 복사합니다.
 2. root 또는 sudo 권한이 필요합니다.
 3. 실행:
+
     ```bash
     sudo agent_policy_fix
     ```
+
    또는 파일 직접 실행
+
     ```bash
     sudo ./agent_policy_fix.sh
     ```
@@ -52,11 +56,13 @@
 - **?�책 ?�동???�요 ?�음:**
   - Ubuntu/Debian 계열?� qemu-guest-agent??모든 RPC 명령??기본 ?�용
   - 별도 ?�정/?�동???�이 바로 ?�용 가??
+
 ---
 
 ## 주요 ?�션 �??�자
 
 - �??�크립트??**?�션?�나 ?�자 ?�이 ?�행**?�면 ??- 별도???�경?�정?�나 추�? ?�션 불필??
+
 ---
 
 ## ?�용 ?�제
@@ -66,7 +72,9 @@
 ```bash
 sudo agent_policy_fix
 ```
+
 or
+
 ```bash
 sudo ./agent_policy_fix.sh
 ```

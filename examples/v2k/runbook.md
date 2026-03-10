@@ -18,6 +18,7 @@
 ## 1. 사전 검증(Go / No-Go)
 
 ### 1.1 VMware 측
+
 - [ ] VM의 CBT 활성화 가능 상태 (스냅샷 기반 증분 이슈 없음)
 - [ ] vCenter 접근 계정 준비(govc 사용)
 - [ ] ESXi 접근 계정 준비(VDDK 사용)
@@ -25,6 +26,7 @@
 - [ ] Windows VM의 경우 Fast Startup / Hibernation 비활성화 권장
 
 ### 1.2 KVM(ABLESTACK) 측
+
 - [ ] 대상 스토리지 경로 준비 (예: `/var/lib/libvirt/images/<VM>`)
 - [ ] 필수 패키지 설치: `qemu-img`, `virsh`, `jq`, `python3`
 - [ ] `nbdkit` 설치 및 실행 가능
@@ -57,6 +59,7 @@ source examples/v2k/govc.env.example
 ```
 
 ?�함 ??��:
+
 - `GOVC_URL`
 - `GOVC_USERNAME`
 - `GOVC_PASSWORD`
@@ -79,6 +82,7 @@ VDDK_PASSWORD="********"
 ```
 
 보안 ?�책:
+
 - init ??workdir�?복사
 - 권한: `600`
 - manifest?�는 **경로�?기록** (비�?번호 ?�??????
@@ -103,6 +107,7 @@ sudo ablestack_v2k init   --vm "${VMNAME}"   --vcenter "${GOVC_URL}"   --dst "${
 ```
 
 Init ?�계?�서 ?�동 ?�행?�는 ?�업:
+
 - VM inventory ?�집
 - ?�행 중인 ESXi host ?�색
 - ESXi management IP ?�동 결정
@@ -141,6 +146,7 @@ sudo ablestack_v2k --workdir <workdir> sync incr --jobs 4
 ```
 
 컷오�??�단 기�?:
+
 - incr 변경량??충분??감소
 - 마�?�?incr sync ?�간???�용 범위 ?�내
 
@@ -177,14 +183,17 @@ sudo ablestack_v2k --workdir <workdir> cleanup --keep-workdir
 ## 11. ?�러블슈??(VDDK 중심)
 
 ### VDDK ?�증 ?�패
+
 - `vddk.cred`??`VDDK_USER / VDDK_PASSWORD` ?�인
 - ESXi Lockdown Mode ?��? ?�인
 - `.source.vddk.server` ?�선 ?�용 ?��? ?�인
 - fallback: `.source.esxi_host`
 
 ### govc ?�류
+
 - `GOVC_*` ?�경 변???�인
 
 ### ?�능 ?�슈
+
 - `--jobs` 조정
 - ?�트?�크 병목 ?�인

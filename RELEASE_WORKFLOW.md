@@ -46,10 +46,12 @@
 3. **공식 릴리즈**
    - `release/0.3.0` 을 `main` 병합
    - 태그 생성 및 푸시:
+
      ```bash
      git tag v0.3.0
      git push origin v0.3.0
      ```
+
    - GitHub Actions `build.yml` 실행으로 `.rpm`, `.deb`, `.msi` 자동 생성 및 Release 업로드
 4. **개발 브랜치 갱신**
    - `release/0.3.0` ??`develop`?�도 병합?�여 변경사??반영
@@ -58,9 +60,9 @@
 
 ## ?�� ?�약
 
-- `main`: ?�정/배포?? 
-- `develop`: ?�합 개발?? 
-- `release/*`: 릴리�?준�?�?검�? 
+- `main`: ?�정/배포??
+- `develop`: ?�합 개발??
+- `release/*`: 릴리�?준�?�?검�?
 - `feature/*`: 기능 개발  
 - `hotfix/*`: 긴급 ?�치  
 
