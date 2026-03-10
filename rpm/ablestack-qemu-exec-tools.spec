@@ -1,4 +1,4 @@
-﻿# ablestack-qemu-exec-tools.spec - RPM spec for ablestack-qemu-exec-tools
+# ablestack-qemu-exec-tools.spec - RPM spec for ablestack-qemu-exec-tools
 #
 # Copyright 2025 ABLECLOUD
 #

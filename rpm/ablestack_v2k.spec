@@ -1,4 +1,4 @@
-﻿# ablestack_v2k.spec - RPM spec for ablestack_v2k (V2K add-on)
+# ablestack_v2k.spec - RPM spec for ablestack_v2k (V2K add-on)
 #
 # Copyright 2026 ABLECLOUD
 #
