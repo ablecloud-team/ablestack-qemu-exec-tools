@@ -25,7 +25,7 @@ HANGCTL_SPEC = rpm/$(HANGCTL_NAME).spec
 VERSION := $(shell . ./VERSION; printf "%s" "$$VERSION" | tr -d '\r\n[:space:]')
 RELEASE := $(shell . ./VERSION; printf "%s" "$$RELEASE" | tr -d '\r\n[:space:]')
 
-# Git hash???§Ìñâ ?úÏ†ê?êÏÑú ?êÎèô?ºÎ°ú Ï∂îÏ∂ú
+# Extract git hash dynamically at execution time
 GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 
 INSTALL_PREFIX = /usr/local
@@ -50,24 +50,24 @@ all:
 	@echo "VERSION: $(VERSION), RELEASE: $(RELEASE), GIT_HASH: $(GIT_HASH)"
 
 install:
-	@echo "?îß Installing $(NAME)..."
+	@echo "Installing $(NAME)..."
 	install -d $(BIN_DIR)
 	install -m 0755 bin/vm_exec.sh $(BIN_DIR)/vm_exec
 	install -m 0755 bin/agent_policy_fix.sh $(BIN_DIR)/agent_policy_fix
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(BIN_DIR)/install_ablestack_qemu_exec_tools; fi
 	install -d $(LIB_TARGET)
 	cp -a lib/* $(LIB_TARGET)/
-	@echo "??Installed to $(INSTALL_PREFIX)"
+	@echo "Installed to $(INSTALL_PREFIX)"
 
-##### ?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä
+##### ------------------------------------------------------------
 ##### ablestack-qemu-exec-tools: uninstall targets (via uninstall.sh)
-##### ?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä?Ä
+##### ------------------------------------------------------------
 
-# uninstall.sh ?ÑÏπò (Î¶¨Ìè¨ÏßÄ?†Î¶¨ Î£®Ìä∏ Í∏∞Ï?)
+# uninstall.sh path, relative to repository root
 UNINSTALL_SCRIPT ?= ./uninstall.sh
 
-# ?åÎûòÍ∑∏Î? Make Î≥Ä?òÎ°ú ?úÏñ¥?????àÍ≤å Îß§Ìïë
-# ?? make uninstall NO_PROMPT=1 PURGE=1 REMOVE_ISO=1
+# Map Make variables to uninstall.sh flags
+# Example: make uninstall NO_PROMPT=1 PURGE=1 REMOVE_ISO=1
 UNINSTALL_FLAGS :=
 ifeq ($(strip $(DRY_RUN)),1)
   UNINSTALL_FLAGS += --dry-run
@@ -94,24 +94,24 @@ endif
 .PHONY: uninstall uninstall-dry-run uninstall-purge uninstall-remove-iso \
         uninstall-keep-bins uninstall-keep-profile uninstall-keep-lib
 
-## Í∏∞Î≥∏ ?úÍ±∞(Î¨¥ÌîÑÎ°¨ÌîÑ??Í∂åÏû•)
+## Default uninstall target
 uninstall:
 	@echo ">> Running $(UNINSTALL_SCRIPT) $(UNINSTALL_FLAGS)"
 	@sudo $(UNINSTALL_SCRIPT) $(UNINSTALL_FLAGS)
 
-## ?úÍ±∞ Í≥ÑÌöçÎß?Ï∂úÎ†•
+## Print uninstall plan only
 uninstall-dry-run:
 	@$(MAKE) uninstall DRY_RUN=1
 
-## ?ºÏù¥Î∏åÎü¨Î¶¨ÍπåÏßÄ ?ÑÏ†Ñ ??†ú(Î∞±ÏóÖ ?ÜÏùå), Î¨¥ÌîÑÎ°¨ÌîÑ??
+## Remove everything including libraries, no backup
 uninstall-purge:
 	@$(MAKE) uninstall NO_PROMPT=1 PURGE=1
 
-## ISO ?åÏùºÍπåÏ? ??†ú(Î¨¥ÌîÑÎ°¨ÌîÑ??
+## Remove ISO files as well
 uninstall-remove-iso:
 	@$(MAKE) uninstall NO_PROMPT=1 REMOVE_ISO=1
 
-## ?†ÌÉù ?†Ï? ?µÏÖò???ÅÌô©Î≥?Ï°∞Ìï© Í∞Ä??
+## Keep selected components
 uninstall-keep-bins:
 	@$(MAKE) uninstall KEEP_BINS=1
 
@@ -123,7 +123,7 @@ uninstall-keep-lib:
 
 
 rpm:
-	@echo "?ì¶ Building RPM..."
+	@echo "Building RPM..."
 	mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 	@TMP_TGZ="$$(mktemp /tmp/ablestack-qemu-exec-tools-$(VERSION).tar.gz.XXXXXX)"; \
 	tar czf "$$TMP_TGZ" \
@@ -138,7 +138,7 @@ rpm:
 		. ; \
 	mv -f "$$TMP_TGZ" "rpmbuild/SOURCES/ablestack-qemu-exec-tools-$(VERSION).tar.gz"
 
-	# spec ?åÏùº Î≥µÏÇ¨ (rpm ?îÎ†â?†Î¶¨?êÏÑú Í∞Ä?∏Ïò§Í∏?
+	# Copy spec file from rpm directory
 	cp rpm/$(NAME).spec rpmbuild/SPECS/
 
 	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild" \
@@ -147,13 +147,13 @@ rpm:
 	         --define "githash $(GIT_HASH)" \
 	         rpmbuild/SPECS/$(NAME).spec
 
-	# ?∞Ï∂úÎ¨??ïÎ¶¨
+	# Collect build artifacts
 	mkdir -p build/rpm
 	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
-	@echo "??RPM package created: build/rpm/"
+	@echo "RPM package created: build/rpm/"
 
 hangctl-rpm:
-	@echo "?ì¶ Building HANGCTL RPM (isolated)..."
+	@echo "Building HANGCTL RPM (isolated)..."
 	@test -f "$(HANGCTL_SPEC)" || (echo "[ERR] Missing spec: $(HANGCTL_SPEC)" >&2; exit 2)
 
 	@mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
@@ -183,10 +183,10 @@ hangctl-rpm:
 	mkdir -p build/rpm-hangctl
 	cp rpmbuild_hangctl/RPMS/noarch/*.rpm build/rpm-hangctl/ 2>/dev/null || true
 	cp rpmbuild_hangctl/RPMS/*/*.rpm build/rpm-hangctl/ 2>/dev/null || true
-	@echo "??HANGCTL RPM package created: build/rpm-hangctl/"
+	@echo "HANGCTL RPM package created: build/rpm-hangctl/"
 
 v2k-rpm:
-	@echo "?ì¶ Building V2K RPM (isolated)..."
+	@echo "Building V2K RPM (isolated)..."
 	@test -f "$(V2K_SPEC)" || (echo "[ERR] Missing spec: $(V2K_SPEC)" >&2; exit 2)
 	@test -f "$(COMPLETIONS_FILE)" || (echo "[ERR] Missing completion file: $(COMPLETIONS_FILE)" >&2; exit 2)
 
@@ -225,7 +225,7 @@ v2k-rpm:
 	cp rpmbuild_v2k/RPMS/noarch/*.rpm build/rpm-v2k/ 2>/dev/null || true
 	cp rpmbuild_v2k/RPMS/*/*.rpm build/rpm-v2k/ 2>/dev/null || true
 
-	@echo "?îé Verifying completion file is included in ablestack_v2k RPM..."
+	@echo "Verifying completion file is included in ablestack_v2k RPM..."
 	@RPM_FILE="$$(ls -1 build/rpm-v2k/$(V2K_NAME)-*.rpm 2>/dev/null | head -n 1)"; \
 	if [ -z "$$RPM_FILE" ]; then \
 	  echo "[ERR] Built RPM not found under build/rpm-v2k" >&2; exit 2; \
@@ -233,10 +233,10 @@ v2k-rpm:
 	rpm -qlp "$$RPM_FILE" | grep -qE "bash-completion/completions/$(V2K_NAME)$$" || \
 	  (echo "[ERR] completion file missing in RPM: $$RPM_FILE" >&2; exit 2)
 
-	@echo "??V2K RPM package created: build/rpm-v2k/"
+	@echo "V2K RPM package created: build/rpm-v2k/"
 
 deb:
-	@echo "?ì¶ Building DEB..."
+	@echo "Building DEB..."
 	rm -rf $(DEB_BUILD_DIR)
 	mkdir -p $(DEB_DEBIAN_DIR) $(DEB_BIN_DIR) $(DEB_LIB_DIR) $(DEB_DOC_DIR)
 
@@ -249,18 +249,18 @@ deb:
 	# lib
 	cp -a lib/* $(DEB_LIB_DIR)/ 2>/dev/null || :
 
-	# docs & examples
+	# docs and examples
 	cp -a README.md $(DEB_DOC_DIR)/
 	@if [ -d docs ]; then cp -a docs/* $(DEB_DOC_DIR)/; fi
 	@if [ -f usage_agent_policy_fix.md ]; then cp -a usage_agent_policy_fix.md $(DEB_DOC_DIR)/; fi
 	@if [ -d examples ]; then cp -a examples/* $(DEB_DOC_DIR)/; fi
 
-	# control ?åÏùº ÏπòÌôò (?úÌîåÎ¶?-> ?§Ï†ú Î≤ÑÏ†Ñ ?ÅÏö©)
+	# Replace template values in control file
 	sed -e "s/\$${VERSION}/$(VERSION)/" \
 		-e "s/\$${RELEASE}/$(RELEASE)/" \
 		deb/control > $(DEB_DEBIAN_DIR)/control
 
-	# postinst ?åÏùº Ï∂îÍ?
+	# Add postinst if present
 	@if [ -f deb/postinst ]; then \
 		cp deb/postinst $(DEB_DEBIAN_DIR)/postinst; \
 		chmod 755 $(DEB_DEBIAN_DIR)/postinst; \
@@ -271,15 +271,15 @@ deb:
 	dpkg-deb --build $(DEB_BUILD_DIR)
 	mkdir -p build/deb
 	mv $(DEB_BUILD_DIR).deb build/deb/$(DEB_PKG).deb
-	@echo "??DEB package created: build/deb/$(DEB_PKG).deb"
+	@echo "DEB package created: build/deb/$(DEB_PKG).deb"
 
 windows:
-	@echo "?ì¶ Building Windows MSI..."
+	@echo "Building Windows MSI..."
 	powershell -ExecutionPolicy Bypass -File windows/msi/build-msi.ps1 \
 		-Version $(VERSION) -Release $(RELEASE) -GitHash $(GIT_HASH)
 	mkdir -p build/msi
 	cp windows/msi/out/* build/msi/ || echo "[WARN] No MSI files copied"
-	@echo "??Windows MSI built under build/msi/"
+	@echo "Windows MSI built under build/msi/"
 
 
 clean:
