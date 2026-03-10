@@ -1,4 +1,4 @@
-# ablestack-qemu-exec-tools.spec - RPM spec for ablestack-qemu-exec-tools
+﻿# ablestack-qemu-exec-tools.spec - RPM spec for ablestack-qemu-exec-tools
 #
 # Copyright 2025 ABLECLOUD
 #
@@ -28,7 +28,7 @@ Requires:       bash
 Requires:       jq
 Requires:       libvirt-client
 Requires:       cloud-init
-#Requires:       qemu-guest-agent   # ?�요??추�?
+#Requires:       qemu-guest-agent   # 필요 시 추가
 
 %description
 ablestack-qemu-exec-tools is a Bash-based tool that enables remote execution 
@@ -89,12 +89,13 @@ _is_ablestack_host() {
 
 if _is_ablestack_host; then
     echo "[INFO] ABLESTACK Host detected - skip guest cloud-init customization (agent_policy_fix, cloud_init_auto, dhcpcd, dhcp.py patch)."
-    # ?�기??바로 종료 ???�래 기존 guest???�업?� ?�행 ????    exit 0
+    # 여기서 바로 종료하고, 아래 기존 guest 후속 작업은 실행하지 않음
+    exit 0
 fi
 
 echo "[INFO] ablestack-qemu-exec-tools post install start (guest VM)"
 
-# agent_policy_fix / cloud_init_auto ?�행
+# agent_policy_fix / cloud_init_auto 실행
 if [ -x /usr/bin/agent_policy_fix ]; then
     /usr/bin/agent_policy_fix || echo "[WARN] agent_policy_fix failed"
 fi
@@ -110,7 +111,7 @@ if [ -f /etc/os-release ]; then
         # dhcpcd enable (not start)
         systemctl enable dhcpcd.service >/dev/null 2>&1 || true
 
-        # cloud-init dhcp.py ?�치 찾기
+        # cloud-init dhcp.py 위치 찾기
         PATCH_FILE=$(python3 -c "import cloudinit.net.dhcp as d; print(d.__file__)" 2>/dev/null || true)
         if [ -z "$PATCH_FILE" ] || [ ! -f "$PATCH_FILE" ]; then
             PATCH_FILE=$(find /usr/lib /usr/lib64 -path "*/site-packages/cloudinit/net/dhcp.py" 2>/dev/null | head -n1)
@@ -123,15 +124,15 @@ if [ -f /etc/os-release ]; then
             cp -f "$FIXED_FILE" "$PATCH_FILE"
             echo "[INFO] cloud-init dhcp.py replaced successfully: $PATCH_FILE"
 
-            # --- 추�?: 교체??dhcp.py 관???�이??캐시 ??�� ---
+            # --- 추가: 교체된 dhcp.py 관련 파이썬 캐시 삭제 ---
             PY_DIR="$(dirname "$PATCH_FILE")"
             PY_BASE="$(basename "$PATCH_FILE" .py)"
 
-            # __pycache__ ?�래 ?�당 모듈 캐시 ?�거
+            # __pycache__ 아래 해당 모듈 캐시 제거
             if [ -d "${PY_DIR}/__pycache__" ]; then
                 rm -f "${PY_DIR}/__pycache__/${PY_BASE}."* 2>/dev/null || true
             fi
-            # 같�? ?�렉?�리??직접 ?�성??*.pyc 가 ?�다�??�거
+            # 같은 디렉터리에 직접 생성된 *.pyc 가 있다면 제거
             rm -f "${PY_DIR}/${PY_BASE}.pyc" 2>/dev/null || true
             # ------------------------------------------------
         else

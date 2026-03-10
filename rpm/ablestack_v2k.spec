@@ -1,4 +1,4 @@
-# ablestack_v2k.spec - RPM spec for ablestack_v2k (V2K add-on)
+﻿# ablestack_v2k.spec - RPM spec for ablestack_v2k (V2K add-on)
 #
 # Copyright 2026 ABLECLOUD
 #
@@ -44,8 +44,8 @@ Assets such as VDDK and govc are handled by the offline ISO installer.
 
 %install
 # NOTE:
-# - lib/v2k/fleet.sh ??기존 cp -a lib/v2k/* �??�동 ?�함?�니??
-# - completions/ablestack_v2k ???�래 bash-completion 경로�?별도 ?�치?�니??
+# - lib/v2k/fleet.sh 는 기존 cp -a lib/v2k/* 에 자동 포함됩니다.
+# - completions/ablestack_v2k 는 표준 bash-completion 경로에 별도 설치합니다.
 
 # Binaries (explicit path: /usr/local/bin)
 mkdir -p %{buildroot}/usr/local/bin
