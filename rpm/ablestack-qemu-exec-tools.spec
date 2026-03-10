@@ -28,7 +28,7 @@ Requires:       bash
 Requires:       jq
 Requires:       libvirt-client
 Requires:       cloud-init
-#Requires:       qemu-guest-agent   # 필요시 추가
+#Requires:       qemu-guest-agent   # 필요 시 추가
 
 %description
 ablestack-qemu-exec-tools is a Bash-based tool that enables remote execution 
@@ -89,7 +89,7 @@ _is_ablestack_host() {
 
 if _is_ablestack_host; then
     echo "[INFO] ABLESTACK Host detected - skip guest cloud-init customization (agent_policy_fix, cloud_init_auto, dhcpcd, dhcp.py patch)."
-    # 여기서 바로 종료 → 아래 기존 guest용 작업은 실행 안 함
+    # 여기서 바로 종료하고, 아래 기존 guest 후속 작업은 실행하지 않음
     exit 0
 fi
 

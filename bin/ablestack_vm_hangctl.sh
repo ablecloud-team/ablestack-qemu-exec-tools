@@ -148,24 +148,24 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local vm="${1-}"
   local do_action="${2-0}"
 
-  # --- [단계 1] 생존 신호(QMP) 및 상태 기본 확인 ---
+  # --- [단계 1] VM 상태 수집 및 초기 분석 ---
   local qmp_status qmp_rc qmp_result
   qmp_status=""; qmp_rc=0
   
-  # QMP 프로브 실행
+  # QMP 프로토콜 실행
   hangctl_probe_qmp_query_status "${vm}" qmp_status qmp_rc || true
   qmp_result="$(hangctl__result_from_rc "${qmp_rc}")"
 
-  # QMP 상태값 소문자 정규화
+  # QMP 상태의 문법 규칙
   local qmp_status_lc
   qmp_status_lc="$(echo "${qmp_status}" | tr '[:upper:]' '[:lower:]' | xargs)"
 
-  # 블록 I/O 통계 수집 및 Stall 여부 확인
+  # 블록 I/O 계측 집계 Stall 감지
   local curr_rd=0 curr_wr=0
   hangctl_probe_blockstats "${vm}" curr_rd curr_wr || true
   
   local io_stall=1
-  # 0이면 Stall 의심, 1이면 정상 (이전 스캔 데이터와 비교)
+  # 0이면 Stall 의심, 1이면 정상 (이전 스캔 시점과 비교)
   hangctl_detect_block_stall "${vm}" "${curr_rd}" "${curr_wr}" || io_stall=$?
 
   # virsh를 통한 도메인 상태 확인
@@ -179,12 +179,12 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local domstate="${domstate_full%% *}" 
   [[ -z "${domstate}" ]] && domstate="unknown"
 
-  # --- [단계 2] 시간 초기화 또는 누적 결정 (I/O Stall 반영) ---
+  # --- [단계 2] 시간 초기화에 따른 적적 결정 (I/O Stall 반영) ---
   if [[ "${qmp_rc}" == "0" && -n "${qmp_status_lc}" && "${qmp_status_lc}" != "unknown" && "${io_stall}" == "1" ]]; then
       hangctl_state_touch_heartbeat "${vm}"
       hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=healthy status=${qmp_status_lc}"
   else
-      # QMP 응답 실패, unknown 상태, 혹은 I/O가 멈춘 경우 (최초 실패 시점 기록 로직 포함)
+      # QMP 응답 실패 또는 Stall 감지 시 기존 heartbeat 타임스탬프 확인
       local existing_ts
       existing_ts="$(hangctl_state__read_kv "$(hangctl_state__path "${vm}")" "last_change_ts" || true)"
       
@@ -199,38 +199,38 @@ hangctl_detect_probe_maybe_act_one_vm() {
       fi
   fi
 
-  # 마지막 heartbeat(또는 QMP/IO 실패 시작점)로부터 경과 시간 계산
+  # 마지막 heartbeat(또는 QMP/IO 실패 시작)로부터 경과 시간 계산
   local duration_sec
   duration_sec="$(hangctl_state_get_duration_sec "${vm}")"
   local stuck_sec="${duration_sec}"
 
-  # --- [단계 3] 마이그레이션/백업 작업 확인 및 임계값 결정 ---
+  # --- [단계 3] 마이그레이션/백업 작업 인식 및 계측 결정 ---
   local is_migration=0
   [[ "${domstate_full}" == *"migration"* ]] && is_migration=1
   
-  # libvirt가 자체적으로 감지한 디스크 에러 확인
+  # libvirt가 자체적으로 감지한 에러 상태 확인
   local is_disk_error=0
   [[ "${domstate_full}" == *"disk error"* ]] && is_disk_error=1
 
-  # [신규] 백업/스냅샷 작업 여부 확인 (domjobinfo 활용)
+  # [규칙] 백업/스냅샷 작업 여부 확인 (domjobinfo 이용)
   local job_out job_type
   job_out=$(virsh -c qemu:///system domjobinfo "${vm}" 2>/dev/null || true)
   job_type=$(echo "${job_out}" | grep "Job type:" | awk '{print $3}' || echo "None")
   
   local is_backup=0
-  # Job type이 None이 아니거나 Completed가 아니면 작업 중으로 간주
+  # Job type이 None이거나 Completed가 아니면 작업 중으로 간주
   [[ "${job_type}" != "None" && "${job_type}" != "Completed" && -n "${job_type}" ]] && is_backup=1
 
   local current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
   if [[ "${is_migration}" -eq 1 || "${is_backup}" -eq 1 ]]; then
-    # 마이그레이션 또는 백업 중인 경우 전용 임계값(예: 1800초) 적용하여 보호
+    # 마이그레이션 또는 백업 중인 경우 용인 계측을 1800초로 용인하여 보호
     current_window="${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC}"
   elif [[ "${domstate}" == "paused" || "${is_disk_error}" -eq 1 ]]; then
-    # 일반 paused 상태나 디스크 에러가 명시된 경우 별도 임계값 적용
+    # 일반 paused 상태에서 에러가 명시된 경우 별도 계측 적용
     current_window="${HANGCTL_PAUSED_CONFIRM_WINDOW_SEC}"
   fi
 
-  # --- [단계 4] 의심 상태(suspect) 1차 판정 ---
+  # --- [단계 4] 의심 상태(suspect) 1차 결정 ---
   local decision="normal"
   if [[ "${duration_sec}" -ge "${current_window}" ]]; then
     decision="suspect"
@@ -244,7 +244,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
     return 0
   fi
 
-  # --- [단계 5] 정밀 검증 (마이그레이션 좀비 체크) ---
+  # --- [단계 5] 추가 검증(마이그레이션 좀비체크) ---
   if [[ "${is_migration}" -eq 1 ]]; then
     if ! hangctl_probe_migration_zombie_check "${vm}"; then
       hangctl_log_event "detect" "vm.migration_check" "ok" "${vm}" "" "" \
@@ -253,7 +253,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
     fi
   fi
 
-  # --- [단계 6] 최종 확정 로직 ---
+  # --- [단계 6] 최종 결정 로직 ---
   local final_decision="suspect"
   local confirm_reason="domstate_stuck"
 
@@ -261,7 +261,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
     final_decision="confirmed"
     confirm_reason="migration_zombie_no_progress"
   elif [[ "${is_backup}" -eq 1 ]]; then
-    # 백업 중 임계값 초과 시 확정 (이미 긴 시간을 대기했으므로 장애로 판단)
+    # 백업 시 계측 초과 시 결정 (이전 시간에 기록했으므로 애초에 단)
     final_decision="confirmed"
     confirm_reason="backup_stuck_over_threshold"
   elif [[ "${is_disk_error}" -eq 1 ]]; then
@@ -290,7 +290,7 @@ hangctl_detect_probe_maybe_act_one_vm() {
   hangctl_log_event "detect" "vm.decision" "ok" "${vm}" "" "" \
     "final=${final_decision} reason=${confirm_reason} domstate=${domstate_full} stuck_sec=${stuck_sec}"
 
-  # --- [단계 7] 액션 실행 ---
+  # 최종 결정이 clear 또는 normal이면 조치 없이 종료
   if [[ "${final_decision}" == "clear" || "${final_decision}" == "normal" ]]; then
     return 0
   fi
@@ -394,7 +394,7 @@ cmd_scan() {
   vm_array=()
 
   rc=0
-  # 1. 스캔 대상 추출 수정 (running과 paused 모두 포함)
+  # HANGCTL_VIRSH_TIMEOUT_SEC 초과 시 rc=124, libvirt 오류 시 rc=1, 성공 시 rc=0
   hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" out err rc -- -c qemu:///system list --state-running --state-paused --name
   result="$(hangctl__result_from_rc "${rc}")"
   if [[ "${result}" != "ok" ]]; then
@@ -448,8 +448,8 @@ cmd_scan() {
   # -------------------------------------------------------------------
   local vm
   for vm in "${vm_array[@]}"; do
-    # 1. 각 VM 처리를 서브쉘 ( ) 내에서 실행하여 변수 간섭 방지
-    # 2. < /dev/null 을 통해 표준 입력 소비 방지
+    # 1. 각 VM 처리의 서브쉘( ) 에서 실행하여 변수 간섭 방지
+    # 2. < /dev/null 을 통해 불필요한 입력 차단 방지
     (
       hangctl_detect_probe_maybe_act_one_vm "${vm}" "1" || {
         hangctl_log_event "scan" "vm.skip" "fail" "${vm}" "" "" "reason=function_failed"
@@ -579,7 +579,7 @@ cmd_health() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --config) cfg="${2-}"; shift 2 ;;
-      --dry-run) dry="1"; shift ;; # 의미는 없지만 글로벌 옵션 일관성 유지
+      --dry-run) dry="1"; shift ;; # 무시하지만 글로벌 옵션 처리
       --) shift; break ;;
       -*) echo "ERROR: unknown option for health: $1" >&2; usage >&2; exit "${EXIT_USAGE}" ;;
       *) shift ;;

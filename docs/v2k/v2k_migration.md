@@ -1,13 +1,13 @@
 # ablestack_v2k
 
 `ablestack_v2k`는 VMware 기반 가상머신을 **ABLESTACK(KVM/libvirt)** 환경으로
-**CBT(Change Block Tracking)** 기반 최소 중단 방식으로 이관하기 위한 CLI 도구입니다.
+**CBT(Change Block Tracking)** 기반 최소 중단 방식으로 이전하기 위한 CLI 도구입니다.
 
 ## 주요 특징
 
 - VMware CBT 기반 base / incremental / final 동기화
-- qcow2 / raw(file) / raw(block, rbd) 타겟 지원
-- 단계별 수동 실행 및 `run(auto)` 기반 완전 자동화
+- qcow2 / raw(file) / raw(block, rbd) 대상 지원
+- 단계별 자동 실행 및 `run(auto)` 기반 전면 자동화
 - split-run (phase1 / phase2) 구조 지원
 - WinPE 기반 Windows 부트스트랩 자동화
 - manifest / events.log 기반 재개(resume)

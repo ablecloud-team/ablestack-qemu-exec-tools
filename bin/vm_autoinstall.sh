@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 #
 # Filename : vm_autoinstall.sh
 # Purpose : One-click automatic installation script for VMs
@@ -18,11 +18,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ── ensure bash (re-exec if not) ───────────────────────────
+# bash가 아니면 재실행
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi
-# ────────────────────────────────────────────────────────────
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +40,7 @@ print_bitlocker_help() {
   cat <<'HELP'
 [HELP] Offline injection cannot proceed because the guest disk is BitLocker-encrypted.
 
-Option 1 — Disable BitLocker inside the VM, then re-run:
+Option 1 - Disable BitLocker inside the VM, then re-run:
   1) Log in as an Administrator.
   2) Open PowerShell (Run as Administrator) and execute:
        Disable-BitLocker -MountPoint "C:"
@@ -49,7 +48,7 @@ Option 1 — Disable BitLocker inside the VM, then re-run:
   3) Wait until "PercentageEncrypted : 0" is shown for C:, then re-run:
        vm_autoinstall <VM-NAME>
 
-Option 2 — Manual install from the ISO:
+Option 2 - Manual install from the ISO:
   1) Log in to the VM.
   2) Open the CD/DVD drive that contains 'ablestack-qemu-exec-tools.iso'.
   3) Run 'install.bat' as Administrator.
@@ -79,13 +78,13 @@ done
 require_cmd virsh
 check_domain_exists "$DOM"
 
-# 0) ISO 핫플러그 (+ 라벨 부여를 원하면 virt-xml 로 라벨 설정)
+# 0) ISO 연결 (+ 필요하면 virt-xml 대신 기존 CD-ROM 설정 갱신)
 attach_cdrom_iso "$DOM" "${ISO_PATH_DEFAULT:-/usr/share/ablestack/tools/ablestack-qemu-exec-tools.iso}"
 
 # 1) QGA 경로 시도
 QGA="$(has_qga "$DOM")"
 if [[ "$FORCE_OFFLINE" == "no" && "$QGA" == "yes" ]]; then
-  echo "[INFO] QGA detected → Online (non-stop) installation path selected"
+  echo "[INFO] QGA detected - Online (non-stop) installation path selected"
   # OS 판별
   OS=$(detect_os_family_qga "$DOM")
   if [[ "$OS" == "linux" ]]; then
@@ -101,9 +100,9 @@ if [[ "$FORCE_OFFLINE" == "no" && "$QGA" == "yes" ]]; then
     if [[ -z "$vm_exec" ]]; then echo "[ERR] vm_exec not found (QGA caller)"; exit 1; fi
     "$vm_exec" -w -d "$DOM" \
       'powershell -NoProfile -ExecutionPolicy Bypass -File "$env:Temp\ablestack-runonce.ps1"' || true
-    # (교체) Windows 온라인 설치: ISO 루트의 install.bat 실행
+    # Windows 온라인 설치: ISO 루트의 install.bat 실행
     "$vm_exec" -w -d "$DOM" \
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = (Get-CimInstance Win32_LogicalDisk -Filter `\"DriveType=5`\" | ForEach-Object { $f = Join-Path ($_.DeviceID+`\"\\`\") `\"install.bat`\"; if (Test-Path $f) { $f } } | Select-Object -First 1); if ($p) { Start-Process -FilePath `\"cmd.exe`\" -ArgumentList `\"/c`\", $p -Wait } else { Write-Host `\"[ERR] install.bat not found on any drive`\" }"'
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = (Get-CimInstance Win32_LogicalDisk -Filter `"DriveType=5`" | ForEach-Object { $f = Join-Path ($_.DeviceID+`"\`") `"install.bat`"; if (Test-Path $f) { $f } } | Select-Object -First 1); if ($p) { Start-Process -FilePath `"cmd.exe`" -ArgumentList `"/c`", $p -Wait } else { Write-Host `"[ERR] install.bat not found on any drive`" }"'
     echo "[OK] Windows Guest Online Installation Attempt Completed"
     exit 0
   else
@@ -118,7 +117,7 @@ PERSIST=$(is_persistent "$DOM")
 TMPDIR="/var/lib/ablestack/vm_autoinstall/$DOM"
 mkdir -p "$TMPDIR"
 
-# 종료 전, 필수 정보 수집
+# 종료 전 필수 정보 수집
 XML_PATH="$TMPDIR/domain.xml"
 DISKS_FILE="$TMPDIR/disks.list"
 dump_transient_xml "$DOM" "$XML_PATH"
@@ -134,19 +133,19 @@ fi
 INSPECT_OUT="$TMPDIR/inspect.xml"
 INSPECT_ERR="$TMPDIR/inspect.err"
 
-# -a <disk> 쌍 생성
+# -a <disk> 인자 생성
 ARGS=()
 for d in "${DISKS[@]}"; do ARGS+=(-a "$d"); done
 
-# 👇 핵심: STDIN 닫기 + 타임아웃으로 사용자 입력 대기 방지
-#  - </dev/null : 아무 입력도 받지 않음 → 프롬프트가 떠도 즉시 EOF로 실패
-#  - timeout 10s : 혹시라도 블록되면 강제 종료
+# 핵심: STDIN 닫기 + 무한 대기 방지
+#  - </dev/null : 프롬프트가 떠도 즉시 EOF 처리
+#  - timeout 10s : 블록되면 강제 종료
 set +e
 timeout 10s virt-inspector "${ARGS[@]}" > "$INSPECT_OUT" 2> "$INSPECT_ERR" </dev/null
 rc=$?
 set -e
 
-# BitLocker / 암호화 감지 → 온라인 경로 안내 + 부팅
+# BitLocker / 암호화 감지 시 오프라인 경로 안내 후 부팅
 if grep -qiE 'BITLK|encrypt-on-write|could not find key to open LUKS|Enter key or passphrase' "$INSPECT_ERR" || [[ $rc -ne 0 ]]; then
   echo "[WARN] BitLocker-encrypted Windows volume detected. Skipping offline injection."
   echo "[INFO] Booting the VM so you can disable BitLocker or run install.bat manually."
@@ -155,10 +154,10 @@ if grep -qiE 'BITLK|encrypt-on-write|could not find key to open LUKS|Enter key o
   exit 0
 fi
 
-# virt-inspector는 <operatingsystems>/<operatingsystem>/<name> 에 OS 계열을 표기함
-# - Windows 계열: <name>windows</name> (일부 환경에서 mswindows 표기도 커버)
+# virt-inspector 결과로 OS 계열 판별
+# - Windows 계열: <name>windows</name>
 # - Linux 계열  : <name>linux</name>
-# 추가로 product_name/distro를 보조 지표로 사용해 견고성 강화
+# 추가로 product_name/distro를 보조 지표로 사용
 if grep -qiE '<name>\s*(ms)?windows\s*</name>|<product_name>[^<]*Windows' "$INSPECT_OUT"; then
   if ! "$ROOT_DIR/lib/ablestack-qemu-exec-tools/offline_inject_windows.sh" --disks "${DISKS[@]}"; then
     echo "[WARN] Offline injection failed on Windows (possible BitLocker or RO filesystem)."
@@ -167,20 +166,18 @@ if grep -qiE '<name>\s*(ms)?windows\s*</name>|<product_name>[^<]*Windows' "$INSP
     create_from_xml "$XML_PATH" >/dev/null 2>&1 || virsh start "$DOM" || true
     exit 0
   fi
-
 elif grep -qiE '<name>\s*linux\s*</name>|<distro>\s*(rocky|rhel|centos|almalinux|fedora|ubuntu|debian|opensuse|sles)\s*</distro>' "$INSPECT_OUT"; then
   "$ROOT_DIR/lib/ablestack-qemu-exec-tools/offline_inject_linux.sh" --disks "${DISKS[@]}"
-
 else
   echo "[ERR] Unsupported OS or detection failure"
   echo "----- inspector head -----"; head -n 50 "$INSPECT_OUT" || true
   exit 1
 fi
 
-# 재부팅: Persistent면 virsh start, Transient면 virsh create(ISO 포함 XML 사용)
+# 영구 VM이면 virsh start, transient이면 virsh create 사용
 ISO="${ISO_PATH_DEFAULT:-/usr/share/ablestack/tools/ablestack-qemu-exec-tools.iso}"
 
-# XML에 이미 우리의 ISO가 물려 있으면 skip, 아니면 XML 갱신
+# XML에 이미 ISO가 있으면 skip, 아니면 XML 갱신
 if [[ -f "$XML_PATH" ]]; then
   if [[ "$(xml_has_cdrom_iso "$XML_PATH" "$ISO")" == "yes" ]]; then
     echo "[OK] XML already has our ISO on a CD-ROM; skip XML edit"
@@ -191,28 +188,30 @@ if [[ -f "$XML_PATH" ]]; then
 fi
 
 if [[ "$PERSIST" == "yes" ]]; then
-  # 영구 도메인은 XML에 CD-ROM을 --config로 추가하는 편이 간단하지만
-  # 여기서는 재사용성을 위해 덤프 XML을 수정 후 define & start 로 처리
+  # 영구 VM은 XML 수정 후 define/start
   virsh define "$XML_PATH" >/dev/null
   start_domain "$DOM"
 else
-  # Transient: 덤프 XML에 CD-ROM 주입 → virsh create 로 부팅
+  # Transient는 수정한 XML로 create
   create_from_xml "$XML_PATH"
 fi
 
 # --- ISO 분리 정책 ---
-# 1) 강제 분리 요청 시: 즉시 이젝트
+# 1) 강제 분리 요청 시 즉시 eject
 if [[ "$FORCE_EJECT" -eq 1 ]]; then
   detach_iso_safely "$DOM" "$ISO" || echo "[WARN] ISO detach failed, but we will continue."
-# 2) 설치 완료 대기 옵션이 있고 QGA guest-exec 가능하면: 완료 감지 후 이젝트
+# 2) 설치 완료 대기 옵션 + QGA guest-exec 가능 시 완료 감지 후 eject
 elif [[ "$WAIT_COMPLETE" -eq 1 && "$(has_qga "$DOM")" == "yes" ]]; then
-  # OS 판별 결과 변수(GUEST_OS) 사용: linux/windows
-  if wait_install_done_via_qga "$DOM" "$GUEST_OS" 900; then    # 15분 타임아웃 예시
+  GUEST_OS="$OS"
+  if [[ -z "${GUEST_OS:-}" ]]; then
+    GUEST_OS=$(detect_os_family_qga "$DOM")
+  fi
+  if wait_install_done_via_qga "$DOM" "$GUEST_OS" 900; then
     detach_iso_safely "$DOM" "$ISO" || echo "[WARN] ISO detach failed after completion."
   else
     echo "[WARN] Could not confirm completion; leaving ISO attached for safety."
   fi
-# 3) 기본: 안전상 ISO 유지 (게스트 스크립트가 자체적으로 eject할 수도 있음)
+# 3) 기본: 안전하게 ISO 유지
 else
   echo "[INFO] Keeping ISO attached (no --wait-complete or QGA-exec not available)."
 fi

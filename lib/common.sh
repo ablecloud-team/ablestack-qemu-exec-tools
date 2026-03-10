@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 #
 # common.sh - Common utility functions for vm_exec.sh
 #
@@ -18,15 +18,15 @@
 
 # 로그 출력 함수
 log_info() {
-  echo -e "🔷 [INFO] $*"
+  echo -e "[INFO] $*"
 }
 
 log_warn() {
-  echo -e "⚠️  [WARN] $*"
+  echo -e "[WARN] $*"
 }
 
 log_error() {
-  echo -e "❌ [ERROR] $*" >&2
+  echo -e "[ERROR] $*" >&2
 }
 
 abort() {

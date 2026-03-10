@@ -46,7 +46,7 @@ parse_linux_table() {
     done
 
     if [[ -z "$header_line" ]]; then
-      echo "❌ Header keyword '$first_word' not found in data." >&2
+      echo "??Header keyword '$first_word' not found in data." >&2
       echo '[]'
       return
     fi

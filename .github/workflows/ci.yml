@@ -18,5 +18,5 @@ jobs:
 
       - name: Run Make (all targets)
         run: |
-          echo "ğŸ” Running CI build (basic validation)"
+          echo "?” Running CI build (basic validation)"
           make all

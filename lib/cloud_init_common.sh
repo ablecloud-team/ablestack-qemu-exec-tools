@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 #
 # ablestack-qemu-exec-tools cloud_init_common.sh
 #
@@ -57,11 +57,11 @@ install_cloud_init() {
 
     case "$os_id" in
         rocky|rhel|centos|almalinux)
-            msg "[INFO] cloud-init을 yum으로 설치합니다." "[INFO] Installing cloud-init with yum."
+            msg "[INFO] cloud-init를 yum으로 설치합니다." "[INFO] Installing cloud-init with yum."
             sudo yum install -y cloud-init
             ;;
         ubuntu|debian)
-            msg "[INFO] cloud-init을 apt로 설치합니다." "[INFO] Installing cloud-init with apt."
+            msg "[INFO] cloud-init를 apt로 설치합니다." "[INFO] Installing cloud-init with apt."
             sudo apt-get update
             sudo apt-get install -y cloud-init
             ;;
@@ -83,7 +83,7 @@ set_metadata_provider_configdrive_cloudstack() {
     # cloud.cfg.d가 없으면 생성
     sudo mkdir -p "$CFGD_DIR"
 
-    # 기존 datasource_list 삭제(충돌 방지)
+    # 기존 datasource_list 제거(충돌 방지)
     sudo sed -i '/^datasource_list:/d' "$MAIN_CFG" 2>/dev/null
 
     # 99_ablestack_datasource.cfg에 datasource_list 작성 (최우선 적용)
@@ -97,20 +97,17 @@ datasource:
   None: {}
 EOF
 
-    # cloud-init 초기화
-    sudo cloud-init clean --logs
-
-    # ds-identify.cfg에 policy: enabled 기록 (기존 내용 제거 후 새로 작성)
+    # ds-identify.cfg에 policy: enabled 기록 (기존 내용 제거 후 새로 생성)
     echo "policy: enabled" | sudo tee "$DSIDENTIFY_CFG" >/dev/null
 
-    msg "[INFO] metadata provider를 ConfigDrive, CloudStack, None 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, CloudStack, None"
+    msg "[INFO] metadata provider를 ConfigDrive, CloudStack, None으로 지정 완료" "[INFO] Metadata provider specified as ConfigDrive, CloudStack, None"
 }
 
 patch_cloud_cfg_users_root() {
     CFG="/etc/cloud/cloud.cfg"
     sudo cp -a "$CFG" "$CFG.ablestack.bak"
 
-    # 시스템 ID 추출
+    # 호스트 OS ID 추출
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         os_id="${ID,,}"
@@ -127,7 +124,7 @@ patch_cloud_cfg_users_root() {
             in_sysinfo=1
             sysinfo_done=1
             echo "$line" >> "$TMP"
-            # 다음 줄에 원하는 내용을 직접 추가
+            # 다음 줄에 필요한 내용을 직접 추가
             echo "  # This will affect which distro class gets used" >> "$TMP"
             echo "  distro: $os_id" >> "$TMP"
             echo "  # Default user name + that default users groups (if added/used)" >> "$TMP"
@@ -148,20 +145,22 @@ patch_cloud_cfg_users_root() {
             # system_info 아래 기존 내용은 모두 스킵
             continue
         fi
+
         # system_info 블록 내부는 건너뜀
         if [[ $in_sysinfo -eq 1 ]]; then
-            # 다음 상위 섹션(비인덴트 줄, 예: #, users:, cloud_init_modules:)에서 끝냄
+            # 다음 상위 섹션(비인덴트 줄)에서 빠져나감
             if [[ "$line" =~ ^[^[:space:]] ]]; then
                 in_sysinfo=0
                 echo "$line" >> "$TMP"
             fi
             continue
         fi
+
         # 나머지 줄은 그대로 복사
         echo "$line" >> "$TMP"
     done < "$CFG"
 
-    # 만약 system_info가 아예 없었다면, 마지막에 추가
+    # system_info가 아예 없었으면 파일 마지막에 추가
     if [[ $sysinfo_done -eq 0 ]]; then
         echo "" >> "$TMP"
         echo "system_info:" >> "$TMP"
@@ -182,30 +181,28 @@ patch_cloud_cfg_users_root() {
         echo "    cloud_dir: /var/lib/cloud/" >> "$TMP"
         echo "    templates_dir: /etc/cloud/templates/" >> "$TMP"
         echo "  ssh_svcname: sshd" >> "$TMP"
-
     fi
 
     sudo mv "$TMP" "$CFG"
 
-    msg "[INFO] system_info 블록(distro, default_user)만 패치 완료, users는 그대로 유지" \
+    msg "[INFO] system_info 블록(distro, default_user)만 수정 완료, users는 그대로 유지" \
         "[INFO] Only patched system_info block (distro, default_user); users left as-is"
 
-    # 2. disable_root: 값을 false로 교체 (존재시 치환, 없으면 루트 레벨 마지막에 추가)
+    # disable_root 값을 false로 교체 (존재 시 치환, 없으면 루트 레벨 마지막에 추가)
     if grep -q '^disable_root:' "$CFG"; then
         sudo sed -i 's/^disable_root:.*$/disable_root: false/' "$CFG"
     else
-        # 맨 마지막 users: 뒤가 아니라, 파일 마지막에 추가
         echo "disable_root: false" | sudo tee -a "$CFG" >/dev/null
     fi
 
-    # 3. ssh_pwauth: 값을 true로 교체 (존재시 치환, 없으면 루트 레벨 마지막에 추가)
+    # ssh_pwauth 값을 true로 교체 (존재 시 치환, 없으면 루트 레벨 마지막에 추가)
     if grep -q '^ssh_pwauth:' "$CFG"; then
         sudo sed -i 's/^ssh_pwauth:.*$/ssh_pwauth: true/' "$CFG"
     else
         echo "ssh_pwauth: true" | sudo tee -a "$CFG" >/dev/null
     fi
 
-    msg "[INFO] users, disable_root, ssh_pwauth 항목이 root/false/true로 패치 완료" \
+    msg "[INFO] users, disable_root, ssh_pwauth 항목을 root/false/true로 수정 완료" \
         "[INFO] users, disable_root, ssh_pwauth have been patched to root/false/true"
 }
 
@@ -213,7 +210,7 @@ patch_cloud_init_and_config_modules_frequency_partial() {
     CFG="/etc/cloud/cloud.cfg"
     sudo cp -a "$CFG" "$CFG.ablestack.bak.freq"
 
-    # 각 블록별 패치 대상 지정
+    # 각 블록별 수정 대상 지정
     modules_to_always_init=(set_hostname set_passwords ssh)
     modules_to_always_config=(runcmd)
 
@@ -236,7 +233,7 @@ patch_cloud_init_and_config_modules_frequency_partial() {
             continue
         fi
 
-        # 블록 내부
+        # 블록 내부 처리
         if [[ $in_block -eq 1 ]]; then
             # 블록 종료 감지(최상위 키)
             if [[ "$line" =~ ^[^[:space:]] && ! "$line" =~ ^- ]]; then
@@ -246,7 +243,7 @@ patch_cloud_init_and_config_modules_frequency_partial() {
                 continue
             fi
 
-            # - 모듈명 항목만 패치
+            # 모듈 항목만 수정
             if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*([a-zA-Z0-9_]+) ]]; then
                 mod="${BASH_REMATCH[1]}"
                 patch=0
@@ -271,31 +268,30 @@ patch_cloud_init_and_config_modules_frequency_partial() {
             continue
         fi
 
-        # 블록 외에는 그대로
+        # 블록 밖 내용은 그대로 유지
         echo "$line" >> "$TMP"
     done < "$CFG"
 
     sudo mv "$TMP" "$CFG"
 
-    msg "[INFO] 지정된 모듈만 always로 패치 완료 (cloud_init_modules, cloud_config_modules)" \
+    msg "[INFO] 지정된 모듈만 always로 수정 완료 (cloud_init_modules, cloud_config_modules)" \
         "[INFO] Only the specified modules set to always (cloud_init_modules, cloud_config_modules)."
 }
 
 setup_cloud_init_clean_on_shutdown() {
-    # 실제 동작은 "shutdown" 이 아니라 "부팅 완료 후(clean at boot)" 로 변경
-    # → 기존 이름은 유지하지만, 동작은 대안 2번 방식으로 구현
+    # 실제 동작은 shutdown 시점이 아니라 다음 부팅 완료 시 clean at boot 방식으로 수행
 
     local HELPER="/usr/local/libexec/ablestack-qemu-exec-tools/cloud_init_clean_at_boot.sh"
     local UNIT_PATH="/etc/systemd/system/ablestack-cloud-init-clean-at-boot.service"
 
-    # 헬퍼 스크립트 위치 생성
+    # 헬퍼 스크립트 설치 경로 생성
     sudo mkdir -p "$(dirname "$HELPER")"
 
-    # 1) 부팅 시 실행될 헬퍼 스크립트 작성
+    # 1) 부팅 후 실행할 헬퍼 스크립트 생성
     sudo tee "$HELPER" >/dev/null <<'EOS'
 #!/bin/bash
 # cloud_init_clean_at_boot.sh
-# 1) /var/log/cloud-init*.log 를 /var/log/cloud-init/ 아래 timestamp 백업
+# 1) /var/log/cloud-init*.log 를 /var/log/cloud-init/ 아래 timestamp로 백업
 # 2) cloud-init clean --logs 실행
 
 set -euo pipefail
@@ -314,7 +310,7 @@ backup_one() {
 
     if [ -f "$src" ]; then
         dst="${DST_DIR}/${base}.${ts}"
-        # 퍼미션/소유권 유지 시도, 실패하면 일반 cp
+        # 가능하면 원래 권한 보존, 실패하면 일반 cp
         if ! cp -p "$src" "$dst" 2>/dev/null; then
             cp "$src" "$dst"
         fi
@@ -325,7 +321,7 @@ backup_one() {
 backup_one "${SRC_DIR}/cloud-init.log"
 backup_one "${SRC_DIR}/cloud-init-output.log"
 
-# 2) cloud-init clean --logs 실행 (실패해도 부팅은 계속되어야 하므로 무시)
+# 2) cloud-init clean --logs 실행 (실패해도 부팅은 계속되도록 무시)
 if command -v cloud-init >/dev/null 2>&1; then
     cloud-init clean --logs || true
 fi
@@ -335,7 +331,7 @@ EOS
 
     sudo chmod +x "$HELPER"
 
-    # 2) 부팅 완료 시점(multi-user.target)에서 한 번 실행되는 서비스 유닛 작성
+    # 2) 부팅 완료 시점(multi-user.target)에서 한 번 실행되는 서비스 유닛 생성
     sudo tee "$UNIT_PATH" >/dev/null <<EOF
 [Unit]
 Description=ABLESTACK: Backup and clean cloud-init logs at boot
@@ -352,23 +348,23 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl enable ablestack-cloud-init-clean-at-boot.service
 
-    msg "[INFO] 시스템 부팅 완료 시 cloud-init 로그 백업 및 clean이 자동으로 실행되도록 설정했습니다." \
+    msg "[INFO] 부팅 완료 후 cloud-init 로그 백업 및 clean을 자동으로 수행하도록 설정했습니다." \
         "[INFO] Configured a systemd service to backup and clean cloud-init logs at boot."
 }
 
 print_final_message() {
     # 현재 OS 로케일 감지
     locale="$(locale 2>/dev/null | grep LANG= | cut -d= -f2 | cut -d. -f1)"
-    case "$locale" in 
-        ko_KR|ko|ko_KR_*) # 한국어 로케일일 때
+    case "$locale" in
+        ko_KR|ko|ko_KR_*)
             echo "---------------------------------------------"
             echo "[INFO] 모든 cloud-init 자동화 설정이 완료되었습니다."
             echo "[INFO] 이제 아래 순서로 VM을 마무리하세요:"
             echo
-            echo "  1. 가상머신을 셧다운(shutdown) 하십시오."
-            echo "  2. 종료된 VM을 템플릿으로 등록 또는 이미지로 변환하십시오."
+            echo "  1. 가상머신을 종료(shutdown)하십시오."
+            echo "  2. 종료된 VM을 템플릿으로 등록하거나 이미지로 변환하십시오."
             echo
-            echo "※ 템플릿/이미지에서 신규 VM을 만들면, cloud-init이 부팅마다 최신 메타데이터를 자동 적용합니다."
+            echo "* 이 템플릿/이미지에서 새 VM을 만들면 cloud-init가 부팅마다 최신 메타데이터를 자동 적용합니다."
             echo "---------------------------------------------"
             ;;
         *)

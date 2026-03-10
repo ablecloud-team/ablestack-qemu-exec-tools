@@ -8,7 +8,7 @@
                versionScope="nonSxS"
                xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-      <!-- PersistAllDeviceInstalls 제거: Windows 11에서 호환성 문제 방지 -->
+      <!-- PersistAllDeviceInstalls ?�거: Windows 11?�서 ?�환??문제 방�? -->
     </component>
   </settings>
 
@@ -22,9 +22,9 @@
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
         <NetworkLocation>Work</NetworkLocation>
-        <!-- Windows 11에서는 ProtectYourPC=3 (자동 업데이트 활성화) 권장 -->
+        <!-- Windows 11?�서??ProtectYourPC=3 (?�동 ?�데?�트 ?�성?? 권장 -->
         <ProtectYourPC>3</ProtectYourPC>
-        <!-- SkipMachineOOBE / SkipUserOOBE 제거: Windows 11 OOBE 충돌 방지 -->
+        <!-- SkipMachineOOBE / SkipUserOOBE ?�거: Windows 11 OOBE 충돌 방�? -->
       </OOBE>
     </component>
   </settings>

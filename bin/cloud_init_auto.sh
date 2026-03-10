@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 #
 # ablestack-qemu-exec-tools cloud_init_auto.sh
 #
@@ -20,7 +20,7 @@ LIBDIR="/usr/libexec/ablestack-qemu-exec-tools"
 source "$LIBDIR/cloud_init_common.sh"
 
 # ----------------------------------------------------------------------
-# cloud-init이 네트워크(IP 할당) 이후에 실행되도록 Unit override 생성
+# cloud-init가 네트워크(IP 할당) 이후 실행되도록 Unit override 생성
 #   - /etc/systemd/system/cloud-init.service.d/ablestack-network-online.conf
 #     를 만들어서,
 #
@@ -40,11 +40,11 @@ ensure_cloud_init_after_network_online() {
 # so that metadata from virtual router (not ConfigDrive) is available.
 
 [Unit]
-# 기존 cloud-init.service의 Before=network-online.target 설정을 제거
+# 기존 cloud-init.service의 Before=network-online.target 설정 제거
 Before=sshd-keygen.service sshd.service systemd-user-session.service
 EOF
 
-    # systemd 에 설정 반영
+    # systemd 설정 반영
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload || true
     fi
@@ -52,9 +52,9 @@ EOF
 
 msg "[INFO] cloud-init 설치 확인 중..." "[INFO] Checking cloud-init installation..."
 if check_cloud_init_installed; then
-    msg "[INFO] cloud-init이 이미 설치되어 있습니다." "[INFO] cloud-init is already installed."
+    msg "[INFO] cloud-init가 이미 설치되어 있습니다." "[INFO] cloud-init is already installed."
 else
-    msg "[INFO] cloud-init이 설치되어 있지 않아 설치를 진행합니다." \
+    msg "[INFO] cloud-init가 설치되어 있지 않아 설치를 진행합니다." \
         "[INFO] cloud-init is not installed, so installation will proceed."
     install_cloud_init || { msg "[ERROR] cloud-init 설치 실패!" "[ERROR] cloud-init installation failed!"; exit 1; }
 fi
@@ -67,11 +67,11 @@ msg "[INFO] cloud.cfg에서 users 항목을 root로 설정합니다..." \
     "[INFO] Set users entry to root in cloud.cfg..."
 patch_cloud_cfg_users_root
 
-msg "[INFO] set_hostname, set_passwords, ssh, runcmd 항목만 매 부팅(always) 실행으로 패치합니다..." \
+msg "[INFO] set_hostname, set_passwords, ssh, runcmd 항목만 매 부팅 시 always로 실행되도록 조정합니다..." \
     "[INFO] Patch only set_hostname, set_passwords, ssh, runcmd items to always run on every boot..."
 patch_cloud_init_and_config_modules_frequency_partial
 
-# 🔽 여기서 cloud-init Network Stage가 network-online.target 이후 실행되도록 override 적용
+# 추가로 cloud-init Network Stage가 network-online.target 이후 실행되도록 override 적용
 msg "[INFO] cloud-init Network Stage가 network-online.target 이후 실행되도록 Unit override를 구성합니다..." \
     "[INFO] Configure cloud-init Network Stage to start after network-online.target via systemd override..."
 ensure_cloud_init_after_network_online
@@ -81,11 +81,11 @@ if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "$ID" in
         ubuntu|debian)
-            msg "[INFO] Ubuntu/Debian detected: shutdown clean 서비스 등록을 건너뜁니다." \
+            msg "[INFO] Ubuntu/Debian 감지: shutdown clean 서비스 등록은 건너뜁니다." \
                 "[INFO] Ubuntu/Debian detected: skipping setup_cloud_init_clean_on_shutdown."
             ;;
         *)
-            msg "[INFO] cloud-init 초기화 설정을 가상머신 셧다운 시에 재설정(clean) 하도록 서비스를 등록합니다." \
+            msg "[INFO] cloud-init 초기화 설정이 가상머신 종료 시 초기화(clean)되도록 서비스를 등록합니다." \
                 "[INFO] Register a service to reset (clean) cloud-init initialization settings when the virtual machine is shut down."
             setup_cloud_init_clean_on_shutdown
             ;;

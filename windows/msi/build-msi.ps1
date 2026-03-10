@@ -28,10 +28,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# 0) wix CLI 확인
+# 0) wix CLI ?�인
 $wix = (Get-Command wix -ErrorAction Stop).Source
 
-# 1) 출력/소스 경로
+# 1) 출력/?�스 경로
 $out = Join-Path $PSScriptRoot "out"
 if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
 
@@ -39,7 +39,7 @@ $src = Join-Path $PSScriptRoot "SourceDir"
 $wxs = Join-Path $PSScriptRoot "Product.wxs"
 if (-not (Test-Path $wxs)) { throw "WiX source not found: $wxs" }
 
-# 2) 필요한 WiX 확장(Extensions) 등록
+# 2) ?�요??WiX ?�장(Extensions) ?�록
 $requiredExts = @(
   "WixToolset.Util.wixext/4.0.6",
   "WixToolset.Bal.wixext/4.0.6",
@@ -51,7 +51,7 @@ foreach ($ext in $requiredExts) {
   } catch { }
 }
 
-# 3) 빌드: 버전/릴리즈/깃해시 변수 전달
+# 3) 빌드: 버전/릴리�?깃해??변???�달
 $outMsi = Join-Path $out "ablestack-qemu-exec-tools-$Version-$Release-$GitHash.msi"
 & $wix build $wxs `
   -arch x64 `

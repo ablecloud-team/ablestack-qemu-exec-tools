@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# agent_policy_fix.sh - 게스트 qemu-guest-agent 정책 자동화 (RHEL/Ubuntu 계열)
+# agent_policy_fix.sh - 게스트 qemu-guest-agent 정책 자동화(RHEL/Ubuntu 계열)
 #
 # Copyright 2025 ABLECLOUD
 #
@@ -21,7 +21,7 @@ source "$LIBDIR/cloud_init_common.sh"
 
 set -e
 
-# 1. 배포판 감지
+# 1. 리눅스 배포판 감지
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     DIST=$ID
@@ -35,11 +35,12 @@ QGA_PKG="qemu-guest-agent"
 QGA_SERVICE="qemu-guest-agent"
 
 check_service_and_start() {
-    # 서비스 활성화 여부 확인 & 필요 시 enable/start
+    # 서비스 활성 상태 확인 및 필요 시 enable/start
     if ! systemctl is-active --quiet "$QGA_SERVICE"; then
-        msg "[WARN] $QGA_SERVICE 서비스가 활성화되어 있지 않습니다. enable 및 start를 시도합니다." "[WARN] $QGA_SERVICE service is not active. Attempting to enable and start."
+        msg "[WARN] $QGA_SERVICE 서비스가 활성 상태가 아닙니다. enable 및 start를 시도합니다." "[WARN] $QGA_SERVICE service is not active. Attempting to enable and start."
         sudo systemctl enable "$QGA_SERVICE"
         sudo systemctl start "$QGA_SERVICE"
+
         # 재확인
         if systemctl is-active --quiet "$QGA_SERVICE"; then
             msg "[SUCCESS] $QGA_SERVICE 서비스가 활성화되었습니다." "[SUCCESS] $QGA_SERVICE service has been activated."
@@ -48,52 +49,52 @@ check_service_and_start() {
             exit 3
         fi
     else
-        msg "[INFO] $QGA_SERVICE 서비스가 이미 활성화(실행) 상태입니다." "[INFO] $QGA_SERVICE service is already active (running)."
+        msg "[INFO] $QGA_SERVICE 서비스는 이미 활성(실행) 상태입니다." "[INFO] $QGA_SERVICE service is already active (running)."
     fi
 }
 
 if [[ "$DIST" =~ ^(rhel|centos|rocky|almalinux|ol)$ ]]; then
-    msg "[INFO] Rocky/RHEL 계열로 감지됨." "[INFO] Detected Rocky/RHEL family."
+    msg "[INFO] Rocky/RHEL 계열이 감지되었습니다." "[INFO] Detected Rocky/RHEL family."
 
     # 2-1. qemu-guest-agent 설치 확인 및 자동 설치 (RHEL 계열)
-    if ! rpm -q $QGA_PKG >/dev/null 2>&1; then
+    if ! rpm -q "$QGA_PKG" >/dev/null 2>&1; then
         msg "[WARN] $QGA_PKG가 설치되어 있지 않습니다. 자동 설치를 진행합니다." "[WARN] $QGA_PKG is not installed. Proceeding with automatic installation."
-        sudo dnf install -y $QGA_PKG
+        sudo dnf install -y "$QGA_PKG"
         if [ $? -ne 0 ]; then
             msg "[ERROR] $QGA_PKG 설치에 실패했습니다. 네트워크 또는 yum/dnf 설정을 확인하세요." "[ERROR] Failed to install $QGA_PKG. Please check your network or yum/dnf configuration."
             exit 2
         fi
-        msg "[SUCCESS] $QGA_PKG 패키지 설치 완료." "[SUCCESS] $QGA_PKG package installation completed."
+        msg "[SUCCESS] $QGA_PKG 패키지 설치가 완료되었습니다." "[SUCCESS] $QGA_PKG package installation completed."
     else
         msg "[INFO] $QGA_PKG가 이미 설치되어 있습니다." "[INFO] $QGA_PKG is already installed."
     fi
 
-    # 서비스 시작/활성화 확인 및 자동처리
+    # 서비스 시작/활성 상태 확인 및 자동 처리
     check_service_and_start
 elif [[ "$DIST" =~ ^(ubuntu|debian)$ ]]; then
-    msg "[INFO] Ubuntu/Debian 계열로 감지됨." "[INFO] Detected Ubuntu/Debian family."
+    msg "[INFO] Ubuntu/Debian 계열이 감지되었습니다." "[INFO] Detected Ubuntu/Debian family."
 
     # 2-2. qemu-guest-agent 설치 확인 및 자동 설치 (Ubuntu 계열)
-    if ! dpkg -l | grep -qw $QGA_PKG; then
+    if ! dpkg -l | grep -qw "$QGA_PKG"; then
         msg "[WARN] $QGA_PKG가 설치되어 있지 않습니다. 자동 설치를 진행합니다." "[WARN] $QGA_PKG is not installed. Proceeding with automatic installation."
         sudo apt-get update
-        sudo apt-get install -y $QGA_PKG
+        sudo apt-get install -y "$QGA_PKG"
         if [ $? -ne 0 ]; then
             msg "[ERROR] $QGA_PKG 설치에 실패했습니다. 네트워크 또는 apt 설정을 확인하세요." "[ERROR] Failed to install $QGA_PKG. Please check your network or apt configuration."
             exit 2
         fi
-        msg "[SUCCESS] $QGA_PKG 패키지 설치 완료." "[SUCCESS] $QGA_PKG package installation completed."
+        msg "[SUCCESS] $QGA_PKG 패키지 설치가 완료되었습니다." "[SUCCESS] $QGA_PKG package installation completed."
     else
         msg "[INFO] $QGA_PKG가 이미 설치되어 있습니다." "[INFO] $QGA_PKG is already installed."
     fi
 
-    # 서비스 시작/활성화 확인 및 자동처리
+    # 서비스 시작/활성 상태 확인 및 자동 처리
     check_service_and_start
 
     # Ubuntu 정책 자동화 안내
     msg "[NOTICE] Ubuntu 계열은 qemu-guest-agent의 모든 RPC 명령이 기본적으로 허용되어 있습니다." \
         "[NOTICE] In Ubuntu family, all RPC commands of qemu-guest-agent are allowed by default."
-    msg "         별도의 정책 설정이나 추가 자동화 작업은 필요하지 않습니다." \
+    msg "         별도의 정책 설정이나 추가 자동화 작업이 필요하지 않습니다." \
         "         No additional policy settings or automation tasks are required."
     exit 0
 else
@@ -102,10 +103,10 @@ else
     exit 0
 fi
 
-# 3. 환경파일 위치 확인
+# 3. 설정 파일 존재 확인
 CONF_FILE="/etc/sysconfig/qemu-ga"
 if [ ! -f "$CONF_FILE" ]; then
-    msg "[ERROR] 설정파일 $CONF_FILE 가 존재하지 않습니다." "[ERROR] Configuration file $CONF_FILE does not exist."
+    msg "[ERROR] 설정 파일 $CONF_FILE 가 존재하지 않습니다." "[ERROR] Configuration file $CONF_FILE does not exist."
     exit 3
 fi
 
@@ -121,11 +122,11 @@ BLOCK_CMDS_RAW=$(grep -E '^#.*--block-rpcs=' "$CONF_FILE" | \
     grep -v '^\s*$' | \
     grep -v '^?$')
 
-# allow-rpcs, block-rpcs 항목을 쉼표로 분리해서 배열화
+# allow-rpcs, block-rpcs 값을 콤마로 분리해서 배열화
 IFS=',' read -ra ALLOW_ARR <<< "$ALLOW_CMDS_RAW"
 IFS=',' read -ra BLOCK_ARR <<< "$BLOCK_CMDS_RAW"
 
-# 중복 없이 allow-rpcs 배열에 block-rpcs 항목 전체를 병합
+# 중복 없이 allow-rpcs 배열에 block-rpcs 값을 전체 병합
 for cmd in "${BLOCK_ARR[@]}"; do
     skip=0
     for allow in "${ALLOW_ARR[@]}"; do
@@ -134,7 +135,7 @@ for cmd in "${BLOCK_ARR[@]}"; do
     [[ $skip -eq 0 && -n "$cmd" ]] && ALLOW_ARR+=("$cmd")
 done
 
-# 배열 → 쉼표구분 문자열로 재조합
+# 배열을 콤마 구분 문자열로 재조합
 ALLOW_CMDS_FINAL=$(IFS=','; echo "${ALLOW_ARR[*]}" | sed 's/,,*/,/g;s/^,//;s/,$//')
 
 NEW_LINE="FILTER_RPC_ARGS=\"--allow-rpcs=$ALLOW_CMDS_FINAL\""
@@ -143,17 +144,17 @@ NEW_LINE="FILTER_RPC_ARGS=\"--allow-rpcs=$ALLOW_CMDS_FINAL\""
 sudo cp "$CONF_FILE" "${CONF_FILE}.bak.$(date +%Y%m%d%H%M%S)"
 sudo sed -i 's|^FILTER_RPC_ARGS=.*|'"$NEW_LINE"'|' "$CONF_FILE"
 
-msg "[INFO] $CONF_FILE의 FILTER_RPC_ARGS를 다음과 같이 수정했습니다:" "[INFO] Modified FILTER_RPC_ARGS in $CONF_FILE as follows:"
+msg "[INFO] $CONF_FILE 의 FILTER_RPC_ARGS를 다음과 같이 수정했습니다:" "[INFO] Modified FILTER_RPC_ARGS in $CONF_FILE as follows:"
 msg "      $NEW_LINE" "      $NEW_LINE"
 
 # 6. qemu-guest-agent 서비스 재시작
 msg "[INFO] qemu-guest-agent 서비스를 재시작합니다." "[INFO] Restarting qemu-guest-agent service."
-sudo systemctl restart $QGA_SERVICE
+sudo systemctl restart "$QGA_SERVICE"
 
 # 7. 서비스 상태 확인
-if systemctl is-active --quiet $QGA_SERVICE; then
+if systemctl is-active --quiet "$QGA_SERVICE"; then
     msg "[SUCCESS] qemu-guest-agent 서비스가 정상적으로 재시작되었습니다." "[SUCCESS] qemu-guest-agent service has been restarted successfully."
 else
-    msg "[ERROR] qemu-guest-agent 서비스가 비정상입니다. 로그 확인 요망." "[ERROR] qemu-guest-agent service is not active. Please check the logs."
+    msg "[ERROR] qemu-guest-agent 서비스가 비활성 상태입니다. 로그를 확인하세요." "[ERROR] qemu-guest-agent service is not active. Please check the logs."
     exit 4
 fi

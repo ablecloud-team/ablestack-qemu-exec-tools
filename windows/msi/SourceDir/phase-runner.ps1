@@ -132,7 +132,7 @@ function Invoke-Phase2 {
     throw "Phase2 failed (installer exit $($proc.ExitCode))"
   }
 
-  # If you still want a guard to run extra sysprep, keep it – installer already does sysprep.
+  # If you still want a guard to run extra sysprep, keep it ??installer already does sysprep.
   if ($SysprepAfterPhase2.IsPresent) {
     Write-Log "SysprepAfterPhase2 requested, but install script already performs sysprep. Skipping."
   }
@@ -141,7 +141,7 @@ function Invoke-Phase2 {
 # ---- Main ----
 try {
   if (Test-SetupInProgress) {
-    Write-Log "Setup/OOBE in progress → Phase-Runner exits."
+    Write-Log "Setup/OOBE in progress ??Phase-Runner exits."
     exit 0
   }
   

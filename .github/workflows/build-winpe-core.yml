@@ -58,8 +58,8 @@ jobs:
       WORKDIR: C:\winpe_work
       OUTDIR: C:\out
 
-      # Microsoft Learn(ADK/WinPE Add-on)에서 안내되는 fwlink를 사용.
-      # 향후 linkid 변경 가능성이 있으니, 실패 시 이 2개 URL만 갱신하면 됩니다.
+      # Microsoft Learn(ADK/WinPE Add-on)에서 제공하는 fwlink를 사용.
+      # 추후 linkid 변경 가능성이 있으므로 실패 시 URL을 갱신하면 됩니다.
       ADK_SETUP_URL: "https://go.microsoft.com/fwlink/?linkid=2289980"
       WINPE_ADDON_URL: "https://go.microsoft.com/fwlink/?linkid=2289981"
 

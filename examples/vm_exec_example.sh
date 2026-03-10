@@ -18,17 +18,17 @@
 
 # 이 스크립트는 vm_exec 명령의 사용 예시를 보여줍니다.
 
-echo "▶ Linux VM: ps aux 출력 파싱 (table + headers + json)"
+echo "Linux VM: ps aux 출력 파싱 (table + headers + json)"
 vm_exec -l ubuntu-vm ps aux --table --headers "USER,PID,%CPU,%MEM,COMMAND" --json
 
 echo ""
-echo "▶ Windows VM: tasklist 출력 파싱"
+echo "Windows VM: tasklist 출력 파싱"
 vm_exec -w win10-vm tasklist --table --headers "Image Name,PID,Session Name,Session#,Mem Usage" --json
 
 echo ""
-echo "▶ 스크립트 파일 실행 예시 (serial)"
+echo "스크립트 파일 실행 예시 (serial)"
 vm_exec -l centos-vm --file ./examples/commands.txt
 
 echo ""
-echo "▶ 스크립트 파일 실행 예시 (parallel)"
+echo "스크립트 파일 실행 예시 (parallel)"
 vm_exec -l centos-vm --file ./examples/commands.txt --parallel

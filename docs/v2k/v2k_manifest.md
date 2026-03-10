@@ -28,7 +28,7 @@
 | schema | manifest 스키마 버전 |
 | run_id | 실행 ID |
 | vm | VMware VM 식별자 |
-| target_storage_type | 타겟 스토리지 |
+| target_storage_type | 대상 스토리지 타입 |
 | target_format | 디스크 포맷 |
 | disks | 디스크 매핑 정보 |
 | phases | 단계별 상태 |
@@ -51,7 +51,7 @@
 
 ---
 
-## resume 동작
+## resume ?�작
 
-- `--resume` 옵션 시 manifest 기반으로 미완료 단계부터 재개
-- 완료 단계는 재실행되지 않음
+- `--resume` ?�션 ??manifest 기반?�로 미완�??�계부???�개
+- ?�료 ?�계???�실?�되지 ?�음
