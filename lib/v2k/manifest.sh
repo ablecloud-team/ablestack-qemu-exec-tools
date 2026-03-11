@@ -63,6 +63,43 @@ v2k_manifest_split_done() {
   jq -r --arg which "${which}" '.runtime.split[$which].done // false' "${manifest}" 2>/dev/null
 }
 
+
+v2k_manifest_set_rbd_mapped_device() {
+  # Usage: v2k_manifest_set_rbd_mapped_device <manifest> <disk_id> <uri> <dev_path>
+  local manifest="$1" disk_id="$2" uri="$3" dev_path="$4"
+  local ts tmp
+  ts="$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')"
+  tmp="$(mktemp)"
+  jq --arg disk_id "${disk_id}" --arg uri "${uri}" --arg dev_path "${dev_path}" --arg ts "${ts}" '
+    .runtime = (.runtime // {})
+    | .runtime.rbd = (.runtime.rbd // {})
+    | .runtime.rbd.mapped = (.runtime.rbd.mapped // {})
+    | .runtime.rbd.mapped[$disk_id] = {
+        uri: $uri,
+        dev_path: $dev_path,
+        mapped: true,
+        ts: $ts
+      }
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+v2k_manifest_get_rbd_mapped_device() {
+  # Usage: v2k_manifest_get_rbd_mapped_device <manifest> <disk_id>
+  local manifest="$1" disk_id="$2"
+  jq -c --arg disk_id "${disk_id}" '.runtime.rbd.mapped[$disk_id] // null' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_clear_rbd_mapped_device() {
+  # Usage: v2k_manifest_clear_rbd_mapped_device <manifest> <disk_id>
+  local manifest="$1" disk_id="$2"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg disk_id "${disk_id}" '
+    .runtime = (.runtime // {})
+    | .runtime.rbd = (.runtime.rbd // {})
+    | .runtime.rbd.mapped = ((.runtime.rbd.mapped // {}) | del(.[$disk_id]))
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
 v2k_manifest_init() {
   local manifest="$1" run_id="$2" workdir="$3" vm="$4" vcenter="$5" mode="$6" dst="$7" inv_json="$8"
 
