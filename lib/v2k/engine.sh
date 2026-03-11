@@ -96,11 +96,11 @@ v2k_linux_bootstrap_pick_nbd() {
     lock_dir="${V2K_NBD_LOCK_ROOT}/nbd${i}.lock.d"
     pid_file="${lock_dir}/pid"
 
-    # 1. ?ì???ˆì•½ ?œë„ (nbd_utils.sh?€ ?™ì¼ ë©”ì»¤?ˆì¦˜)
+    # 1. Try to reserve the slot first using the same lock discipline as nbd_utils.sh.
     if mkdir "${lock_dir}" 2>/dev/null; then
       echo "$$" > "${pid_file}"
       
-      # 2. ì»¤ë„ ?íƒœ ì²´í¬ (ê¸°ì¡´ ?¨ìˆ˜???œìš©)
+      # 2. Check the current device state using the existing helpers.
       if v2k_nbd_is_connected "${dev}" || \
          v2k_nbd_has_any_mountpoints "${dev}" || \
          v2k_nbd_has_children_types "${dev}"; then
@@ -109,7 +109,7 @@ v2k_linux_bootstrap_pick_nbd() {
          continue
       fi
       
-      # ì¶”ê?: pid ?Œì¼ ì²´í¬
+      # Additional guard: verify the kernel pid state as well.
       local kpid
       kpid="$(v2k_nbd_sys_pid "${dev}" 2>/dev/null || true)"
       if [[ -n "${kpid}" && "${kpid}" != "0" ]]; then
@@ -117,16 +117,16 @@ v2k_linux_bootstrap_pick_nbd() {
          continue
       fi
 
-      # ?±ê³µ! [?¥ì¹˜ëª? [???”ë ‰? ë¦¬] ë°˜í™˜ (cleanup???„í•´)
-      # ???”ë ‰? ë¦¬ ê²½ë¡œë¥??¸ì¶œ?ê? ?Œë©´ ?˜ì¤‘??ì§€?????ˆìŒ
+      # Success: return only the selected device path for later cleanup handling.
+      # The lock directory path is derived later by the cleanup logic.
       echo "${dev}"
       return 0
     else
-      # ?ˆì•½ ?¤íŒ¨ ??ì¢€ë¹???ì²´í¬ (? íƒ ?¬í•­?´ë‚˜ ê¶Œì¥)
+      # Reservation failed. Check whether the existing lock looks stale.
       if [[ -f "${pid_file}" ]]; then
         owner_pid="$(cat "${pid_file}" 2>/dev/null || true)"
         if [[ -n "${owner_pid}" ]] && ! kill -0 "${owner_pid}" 2>/dev/null; then
-           # ì£¼ì¸??ì£½ì—ˆê³??¥ì¹˜ê°€ free?˜ë‹¤ë©????œê±°
+           # If the owner is gone and the device is now free, remove the stale lock.
            if ! v2k_nbd_is_connected "${dev}"; then
              rm -rf "${lock_dir}"
            fi
@@ -243,12 +243,12 @@ v2k_is_linux_guest() {
   # Return 0(true) if the guest looks like Linux.
   #
   # NOTE:
-  # VMware Tools ë¯¸ë™???œí•œ ?˜ê²½?ì„œ??guestFamilyê°€ ë¹?ê°’ìœ¼ë¡??´ë ¤?¤ëŠ” ì¼€?´ìŠ¤ê°€ ?ˆìŒ
-  # (?? rockylinux_64Guest ?¸ë° guestFamily == "").
+  # guestFamily may be empty in some environments even for Linux guests.
+  # Example: guestId may indicate Linux while guestFamily is blank.
   #
   # Policy:
-  # 1) guestFamilyê°€ linuxGuestë©?Linux
-  # 2) ?„ë‹ˆë©?guestId/guestFullName/osFullName ?´ë¦¬?¤í‹±?¼ë¡œ Linux ?ë³„
+  # 1) If guestFamily is linuxGuest, treat the guest as Linux.
+  # 2) Otherwise infer Linux from guestId, guestFullName, or osFullName.
   local gf gid gfull osfull probe
   gf="$(jq -r '.source.vm.guestFamily // empty' "${V2K_MANIFEST}" 2>/dev/null || true)"
   if [[ "${gf}" == "linuxGuest" ]]; then
@@ -500,8 +500,8 @@ v2k_linux_bootstrap_lvm_try_activate_by_pv() {
 
   udevadm settle >/dev/null 2>&1 || true
 
-  # pvscan rc==0?´ë©´ "?œì„±???„ë³´ ?±ê³µ"?¼ë¡œ ê°„ì£¼?œë‹¤.
-  # ?¤ì œ LV active ?ì •?€ vgchange -ay ?´í›„ ?¨ê³„?ì„œ ?˜í–‰.
+  # If pvscan returned rc==0, treat the activation preparation step as successful.
+  # Actual LV activation is still verified later after vgchange -ay.
   [[ "${act_rc}" -eq 0 ]] && return 0
   return 2
 }
@@ -639,9 +639,9 @@ v2k_linux_bootstrap_try_mount_lvm() {
   udevadm settle >/dev/null 2>&1 || true
   sleep 1
 
-  # [Step 1 & 2] Force Cache Update & Discover VGs (Direct & Simple)
-  # lsblkë¡??•ì¸?˜ëŠ” ê³¼ì • ?†ì´, ?„í„°ê°€ ?ìš©??LVM ëª…ë ¹??ì§ì ‘ ?˜í–‰?˜ì—¬ VGë¥?ì°¾ìŠµ?ˆë‹¤.
-  # ?¸ìŠ¤??udev ê°„ì„­(Retry Storm)???«ê¸° ?„í•´ 5???¬ì‹œ?„í•©?ˆë‹¤.
+  # [Step 1 & 2] Refresh the cache and discover VGs directly.
+  # Run the filtered LVM commands directly instead of waiting on lsblk-driven probing.
+  # Retry a few times to absorb transient udev timing issues.
   
   local scan_out scan_rc vgs_out vgs_rc
   local attempt=0 max_retry=5
@@ -650,27 +650,27 @@ v2k_linux_bootstrap_try_mount_lvm() {
   while [[ "${attempt}" -lt "${max_retry}" ]]; do
       attempt=$((attempt+1))
 
-      # 1. ëª…ì‹œ??PVScan (ìºì‹œ ê°±ì‹ )
-      # ?„í„°ê°€ ?ìš©?˜ì–´ ?ˆìœ¼ë¯€ë¡?NBD ?¥ì¹˜ë§??ˆì „?˜ê²Œ ?¤ìº”?©ë‹ˆ??
+      # 1. Explicit pvscan with cache refresh.
+      # The device filter is already applied, so only the target NBD is scanned.
       v2k_linux_bootstrap_run_event "cmd_pvscan_direct" scan_out scan_rc -- \
          lvm pvscan --config "${cfg}" --cache --activate ay
       
-      # 2. ëª…ì‹œ??VGS ì¡°íšŒ
-      # lsblk ì¡°ê±´ ?†ì´ ë°”ë¡œ ì¡°íšŒë¥??œë„?©ë‹ˆ?? (?¬ìš©???˜ë™ ?±ê³µ ë°©ì‹)
+      # 2. Explicit VGS lookup.
+      # Query VGs directly without depending on a separate lsblk visibility check.
       v2k_linux_bootstrap_run_event "cmd_vgs_direct" vgs_out vgs_rc -- \
          lvm vgs --config "${cfg}" --noheadings -o vg_name
       
-      # ê²°ê³¼ ?Œì‹±
+      # Parse the result.
       vgs="$(echo "${vgs_out}" | awk '{$1=$1}; $1!=""{print $1}' | sort -u)"
 
       if [[ -n "${vgs}" ]]; then
-          # VGë¥?ì°¾ì•˜?¼ë©´ ë£¨í”„ ?ˆì¶œ
+          # Exit the retry loop once at least one VG is visible.
           v2k_event INFO "linux_bootstrap" "" "lvm_vg_found_retry" \
             "{\"attempt\":${attempt},\"vgs\":\"${vgs}\"}"
           break
       fi
       
-      # VGë¥?ëª?ì°¾ì•˜?¼ë©´ ? ì‹œ ?€ê¸?(udev ??’ ?€ê¸?
+      # If no VG is visible yet, wait briefly and try again.
       v2k_event WARN "linux_bootstrap" "" "lvm_scan_retry" \
         "{\"attempt\":${attempt},\"note\":\"waiting for lvm visibility\"}"
       sleep 2
@@ -779,30 +779,27 @@ v2k_linux_bootstrap_initramfs() {
   st="$(jq -r '.target.storage.type // "file"' "${manifest}" 2>/dev/null || echo "file")"
   fmt="$(jq -r '.target.format // "qcow2"' "${manifest}" 2>/dev/null || echo "qcow2")"
 
-  # For file qcow2/raw: mount via qemu-nbd
-  # For block/rbd: current implementation is conservative (follow-up patch can add direct mount)
-  if [[ "${st}" != "file" ]]; then
+  if [[ "${st}" != "file" && "${st}" != "rbd" ]]; then
     v2k_event WARN "linux_bootstrap" "" "unsupported_storage_type" \
-      "{\"storage_type\":\"${st}\",\"note\":\"current bootstrap supports file targets only\"}"
+      "{\"storage_type\":\"${st}\",\"note\":\"current bootstrap supports file and rbd targets only\"}"
     [[ "${V2K_LINUX_BOOTSTRAP_BEST_EFFORT}" == "1" ]] && return 0
     return 76
   fi
 
-  # We assume disk0 contains root FS in most Linux VMs.
-  local root_img
-  root_img="$(jq -r '.disks[0].transfer.target_path // empty' "${manifest}" 2>/dev/null || true)"
-  if [[ -z "${root_img}" || "${root_img}" == "null" || ! -f "${root_img}" ]]; then
-    v2k_event ERROR "linux_bootstrap" "" "root_image_missing" \
-      "{\"path\":\"${root_img}\"}"
+  local root_input="" root_cleanup_cmd=""
+  if ! v2k_linux_bootstrap_prepare_root_input "${manifest}" root_input root_cleanup_cmd; then
     [[ "${V2K_LINUX_BOOTSTRAP_BEST_EFFORT}" == "1" ]] && return 0
     return 77
   fi
 
   v2k_event INFO "linux_bootstrap" "" "phase_start" \
-    "{\"disk0\":\"${root_img}\",\"format\":\"${fmt}\",\"storage\":\"${st}\"}"
+    "{\"disk0\":\"${root_input}\",\"format\":\"${fmt}\",\"storage\":\"${st}\"}"
 
-  v2k_linux_bootstrap_one "${root_img}"
+  v2k_linux_bootstrap_one "${root_input}"
   local rc=$?
+  if [[ -n "${root_cleanup_cmd}" ]]; then
+    eval "${root_cleanup_cmd}" >/dev/null 2>&1 || true
+  fi
   if [[ "${rc}" -eq 0 ]]; then
     v2k_event INFO "linux_bootstrap" "" "phase_done" "{}"
     return 0
@@ -813,6 +810,51 @@ v2k_linux_bootstrap_initramfs() {
   return "${rc}"
 }
 
+
+v2k_linux_bootstrap_prepare_root_input() {
+  # Usage: v2k_linux_bootstrap_prepare_root_input <manifest> out_input out_cleanup_cmd
+  local manifest="$1" out_input_name="$2" out_cleanup_name="$3"
+  local st root_path size_bytes prepared_path cleanup_cmd
+  st="$(jq -r '.target.storage.type // "file"' "${manifest}" 2>/dev/null || echo "file")"
+  root_path="$(jq -r '.disks[0].transfer.target_path // empty' "${manifest}" 2>/dev/null || true)"
+
+  if [[ -z "${root_path}" || "${root_path}" == "null" ]]; then
+    v2k_event ERROR "linux_bootstrap" "" "root_image_missing" \
+      "{\"path\":\"${root_path}\"}"
+    return 1
+  fi
+
+  case "${st}" in
+    file)
+      if [[ ! -f "${root_path}" ]]; then
+        v2k_event ERROR "linux_bootstrap" "" "root_image_missing" \
+          "{\"path\":\"${root_path}\"}"
+        return 1
+      fi
+      prepared_path="${root_path}"
+      cleanup_cmd=""
+      ;;
+    rbd)
+      size_bytes="$(jq -r '.disks[0].size_bytes // 0' "${manifest}" 2>/dev/null || echo 0)"
+      prepare_target_device --kind rbd --path "${root_path}" --size-bytes "${size_bytes}" >/dev/null
+      prepared_path="${V2K_TARGET_BLOCKDEV:-}"
+      cleanup_cmd="${V2K_TARGET_CLEANUP_CMD:-}"
+      if [[ -z "${prepared_path}" || ! -b "${prepared_path}" ]]; then
+        v2k_event ERROR "linux_bootstrap" "" "root_blockdev_missing" \
+          "{\"path\":\"${root_path}\",\"prepared\":\"${prepared_path}\"}"
+        return 1
+      fi
+      ;;
+    *)
+      v2k_event WARN "linux_bootstrap" "" "unsupported_storage_type" \
+        "{\"storage_type\":\"${st}\",\"note\":\"current bootstrap supports file and rbd targets only\"}"
+      return 1
+      ;;
+  esac
+
+  printf -v "${out_input_name}" '%s' "${prepared_path}"
+  printf -v "${out_cleanup_name}" '%s' "${cleanup_cmd}"
+}
 v2k_linux_bootstrap_one() {
   local img="$1"
 
@@ -866,7 +908,7 @@ v2k_linux_bootstrap_one() {
       v2k_linux_bootstrap_run_event "cmd_lvm_vgchange_deactivate" lvm_out lvm_rc -- \
         lvm vgchange --config "${cfg}" -an
 
-      # 1. NBD ?¥ì¹˜ë¥?ë¬¼ê³  ?ˆëŠ” DM ?œê±° (ê¸°ì¡´ ë¡œì§)
+      # 1. Remove DM holders that still reference this NBD device.
       for holder in /sys/block/${bn}/holders/*; do
           if [[ -e "${holder}" ]]; then
               local dm_name
@@ -875,9 +917,9 @@ v2k_linux_bootstrap_one() {
           fi
       done
 
-      # 2. [ì¶”ê?] 'rl' (Rocky Linux) ê´€??ì¢€ë¹?ë§¤í•‘ ê°•ì œ ?œê±°
-      # Global Lock??ë³´ìœ  ì¤‘ì´ë¯€ë¡? ?„ì¬ ?œìŠ¤?œì— ë³´ì´??'rl-*' ë§¤í•‘?€ 
-      # ?˜ì˜ ì¢€ë¹„ì´ê±°ë‚˜ ?´ì „ ?¤í–‰??ì°Œêº¼ê¸°ì¼ ?•ë¥ ???’ìœ¼ë¯€ë¡??•ë¦¬?©ë‹ˆ??
+      # 2. Force-remove stale rl-* mappings that commonly appear on Rocky Linux.
+      # While the global lock is held, visible rl-* mappings are treated as stale for this bootstrap session.
+      # Clearing them here prevents name collisions with the guest mappings we are about to activate.
       for dm_path in /dev/mapper/rl-*; do
           [[ -e "${dm_path}" ]] || continue
           dmsetup remove --force "${dm_path}" >/dev/null 2>&1 || true
@@ -1056,15 +1098,15 @@ local qout qrc
 
   # -----------------------------------------------------------------------------
   # [FIX] Host LVM/udev Interference Mitigation (Rocky Linux Fix)
-  # ?¸ìŠ¤??udevê°€ NBD ?°ê²° ì¦‰ì‹œ 'rl' VGë¥??ë™ ?œì„±?”í•˜??ê²ƒì„ ê°•ì œë¡??´ì œ?©ë‹ˆ??
+  # Stop host udev/LVM from auto-activating the guest rl VG as soon as the NBD is connected.
   # -----------------------------------------------------------------------------
   udevadm settle >/dev/null 2>&1 || true
   
-  # 1. ?¸ìŠ¤?¸ê? ??NBD ?¥ì¹˜?ì„œ ?œì„±?”í•œ VG ì¦‰ì‹œ ë¹„í™œ?±í™” (?„í„° ?¬ìš©?¼ë¡œ ?ˆì „ ?•ë³´)
+  # 1. Immediately deactivate any VG activated from this NBD device.
   lvm vgchange --config "devices { filter=[ \"a|^${nbd_dev}|\", \"r|.*|\" ] }" -an >/dev/null 2>&1 || true
 
-  # 2. Device Mapper???¨ì? ì¢€ë¹?ë§¤í•‘(holder) ê°•ì œ ?œê±°
-  # ?¸ìŠ¤?¸ê? /dev/mapper/rl-root ?±ì„ ?¡ê³  ?ˆìœ¼ë©??œê±°?˜ì—¬ ?´ë¦„ ì¶©ëŒ ë°©ì?
+  # 2. Force-remove Device Mapper holders created by accidental host-side activation.
+  # This avoids conflicts such as duplicate /dev/mapper/rl-root names.
   local bn_fix
   bn_fix="$(basename "${nbd_dev}")"
   for holder in /sys/block/${bn_fix}/holders/*; do
@@ -1075,7 +1117,7 @@ local qout qrc
       fi
   done
 
-  # 3. LVM ìºì‹œ ê°±ì‹  (?¸ìŠ¤?¸ê? ???¥ì¹˜ë¥????´ìƒ '?¬ìš© ì¤??¼ë¡œ ?¸ì‹?˜ì? ?Šê²Œ ??
+  # 3. Refresh the LVM cache so the host stops treating the guest device as active.
   lvm pvscan --config "devices { filter=[ \"a|^${nbd_dev}|\", \"r|.*|\" ] }" --cache >/dev/null 2>&1 || true
   # -----------------------------------------------------------------------------
 
@@ -1424,7 +1466,7 @@ v2k_resolve_winpe_iso() {
   return 1
 }
 
-# vCenter(?ëŠ” ì§€??server)??SSL SHA1 thumbprint ê³„ì‚°
+# Compute the SSL SHA1 thumbprint for vCenter or another target server.
 v2k_get_ssl_thumbprint_sha1() {
   local host="$1"
   [[ -n "${host}" ]] || return 1
@@ -1561,7 +1603,7 @@ v2k_step_fail() {
 }
 
 v2k_load_runtime_flags_from_manifest() {
-  # manifestê°€ ì¡´ì¬?œë‹¤???„ì œ(v2k_require_manifest ?´í›„ ?¸ì¶œ)
+  # The manifest is guaranteed to exist here because v2k_require_manifest already ran.
   local force
   force="$(jq -r '.target.storage.force_block_device // false' "${V2K_MANIFEST}" 2>/dev/null || echo "false")"
 
@@ -1571,8 +1613,8 @@ v2k_load_runtime_flags_from_manifest() {
     export V2K_FORCE_BLOCK_DEVICE="0"
   fi
 
-  # Observability: force-block-device ?íƒœë¥?event??ê¸°ë¡
-  # - command ë³„ë¡œ ?¸ì¶œ?˜ë?ë¡? ?´ë‹¹ ì»¤ë§¨?œì˜ phase_start ?„ì— ?¨ê²¨??ë¬¸ì œ ?†ìŒ
+  # Observability: record the force-block-device state as an event.
+  # This is emitted outside individual command handlers to avoid phase_start ordering issues.
   v2k_event INFO "runtime" "" "force_block_device" \
     "{\"enabled\":${force},\"source\":\"manifest\",\"manifest\":\"${V2K_MANIFEST}\"}"
 }
@@ -1614,9 +1656,9 @@ v2k_cmd_init() {
     v2k_vmware_load_cred_file "${cred_file}"
   fi
 
-  # (FIX) VDDK cred ?Œì¼?€ workdir ?•ì •/?ì„± ?´í›„???€?¥í•´????
-  # - ê¸°ì¡´ ì½”ë“œ: V2K_WORKDIR ?¤ì • ?„ì— install ?˜í–‰ -> ë¹?ê²½ë¡œ/?¤ë™??ê°€??
-  # - ?•ì±…: password??manifest???€?¥í•˜ì§€ ?Šê³ , workdir ??vddk.credë¡œë§Œ ë³´ê?
+  # Persist the VDDK credential file only after workdir creation is complete.
+  # The older flow could run before V2K_WORKDIR was ready and hit empty or invalid paths.
+  # Keep secrets out of manifest content; store them only in workdir/vddk.cred.
 
   # Validate & apply target overrides (CLI wins for this run)
   if [[ -n "${target_format}" ]]; then
@@ -1689,24 +1731,24 @@ v2k_cmd_init() {
     export V2K_VDDK_CRED_FILE=""
   fi
 
-  # ---- VDDK(vCenter) thumbprint ?œí’ˆ???ë™??----
-  # 1) cred_file ?´ë???VDDK_THUMBPRINTê°€ ?ˆìœ¼ë©??°ì„  ?¬ìš©
-  # 2) ?†ìœ¼ë©?V2K_VDDK_SERVER(?ëŠ” vCenter host)ë¡?openssl ê³„ì‚°
+  # ---- Resolve the VDDK(vCenter) thumbprint automatically when possible ----
+  # 1) If the cred file already defines VDDK_THUMBPRINT, prefer that value.
+  # 2) Otherwise compute it from V2K_VDDK_SERVER or the vCenter host with openssl.
   if [[ -n "${V2K_VDDK_CRED_FILE-}" && -f "${V2K_VDDK_CRED_FILE}" ]]; then
     # shellcheck disable=SC1090
     source "${V2K_VDDK_CRED_FILE}"
-    # cred ?Œì¼??user/pass/server/thumbprintê°€ ?ˆë‹¤ë©?envë¡??¹ê²©
+    # If the cred file contains user/server/thumbprint values, promote them into env vars.
     [[ -n "${VDDK_USER-}" ]] && export V2K_VDDK_USER="${VDDK_USER}"
     [[ -n "${VDDK_SERVER-}" ]] && export V2K_VDDK_SERVER="${VDDK_SERVER}"
     [[ -n "${VDDK_THUMBPRINT-}" ]] && export V2K_VDDK_THUMBPRINT="${VDDK_THUMBPRINT}"
   fi
 
-  # thumbprintê°€ ?¬ì „??ë¹„ì–´?ˆìœ¼ë©?server ?€?ìœ¼ë¡??ë™ ê³„ì‚°
+  # If the thumbprint is still empty, compute it from the selected server.
   if [[ -z "${V2K_VDDK_THUMBPRINT-}" ]]; then
     local server host_from_vcenter
     server="${V2K_VDDK_SERVER-}"
     if [[ -z "${server}" ]]; then
-      # GOVC_URL == https://x.x.x.x/sdk ?•íƒœ?ì„œ hostë§?ì¶”ì¶œ
+      # Extract only the host part from GOVC_URL such as https://x.x.x.x/sdk.
       host_from_vcenter="$(printf '%s' "${GOVC_URL-}" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##; s#^.*@##; s#:[0-9]+$##')"
       server="${host_from_vcenter}"
       [[ -n "${server}" ]] && export V2K_VDDK_SERVER="${server}"
@@ -1873,16 +1915,16 @@ v2k_force_cleanup_run() {
   fi
 
   # ==============================================================================
-  # [?? œ?? 2) Defensive process kill (RunID/Workdir)
-  # ?ì¸: RunID??? ë‹ˆ?¬í•˜ë¯€ë¡?ì¢€ë¹„ê? ì¡´ì¬?????†ìœ¼ë©? ?¤íˆ??ë¶€ëª??„ë¡œ?¸ìŠ¤(sudo ??ë¥?ì£½ì—¬
-  #       ?¤í¬ë¦½íŠ¸ê°€ ì¤‘ë‹¨?˜ê±°???¸ì…˜??ì¢…ë£Œ?˜ëŠ” ?ì¸????
+  # [Disabled] Defensive process-kill block for run-id/workdir patterns.
+  # Root cause: broad pattern kills can terminate the parent sudo shell or this script itself.
+  # That can abort the session while stale helper processes are still being cleaned up elsewhere.
   # ==============================================================================
   # [FIX] Do not kill myself (current PID $$) via pkill -f pattern match
   #if [[ -n "${run_id}" ]]; then
-    # ?ê¸° ?ì‹ ($$)???œì™¸???˜ë¨¸ì§€ ?„ë¡œ?¸ìŠ¤ë§?ì¢…ë£Œ
+    # Keep the current process ($$) excluded if this block is ever re-enabled.
   #  pgrep -f "ablestack_v2k.*${run_id}" | grep -v "^$$\$" | xargs -r kill -TERM >/dev/null 2>&1 || true
   #fi
-  # [FIX 2] workdir ê¸°ë°˜ ì¢…ë£Œ ???ê¸° ?ì‹ ($$) ?œì™¸ (ì§€?í•´ì£¼ì‹  ë¶€ë¶?
+  # [Disabled] The workdir-based variant has the same self-kill risk.
   #if [[ -n "${workdir}" ]]; then
   #  pgrep -f "${workdir}" | grep -v "^$$\$" | xargs -r kill -TERM >/dev/null 2>&1 || true
   #fi
@@ -1989,7 +2031,7 @@ v2k_cmd_sync() {
       v2k_event INFO "sync.base" "" "phase_start" "{\"jobs\":${jobs}}"
       v2k_transfer_base_all "${V2K_MANIFEST}" "${jobs}"
 
-      # [Fix] Base Sync ì§í›„, ?„ì¬ Change IDë¥?ì¡°íšŒ?˜ì—¬ ê¸°ì????•ë³´ (?°ì´???„ë½ ë°©ì?)
+      # After base sync, fetch the current change IDs so the next incremental starts from a stable baseline.
       local py_script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vmware_changed_areas.py"
       v2k_manifest_fetch_and_save_base_change_ids "${V2K_MANIFEST}" "${py_script_path}"
 
@@ -2105,7 +2147,7 @@ v2k_cmd_cutover() {
   guest_id="$(jq -r '.source.vm.guestId // .source.vm.guest_id // empty' "${V2K_MANIFEST}" 2>/dev/null || true)"
   guest_full="$(jq -r '.source.vm.guestFullName // .source.vm.guest_full_name // empty' "${V2K_MANIFEST}" 2>/dev/null || true)"
 
-  # windows heuristics (govc ê¸°ì?)
+  # Windows heuristics based on govc inventory fields.
   if [[ "${guest_family}" == "windowsGuest" ]]; then
     is_windows=1
   elif [[ "${guest_id}" =~ [Ww]in ]]; then
@@ -2390,7 +2432,7 @@ v2k_cmd_cutover() {
   v2k_event INFO "cutover" "" "phase_done" "{}"
   v2k_json_or_text_ok "cutover" "{}" "Cutover done (final snapshot + final sync)."
 
-  # Cleanup ì§„ì… ??vCenter ?íƒœ ?ˆì •???€ê¸?
+  # Give vCenter a brief moment to settle before cleanup begins.
   sleep 3
 }
 
