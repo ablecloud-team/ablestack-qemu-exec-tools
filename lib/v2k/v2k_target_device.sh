@@ -224,7 +224,7 @@ v2k_rbd_dev_path() {
 v2k_rbd_map() {
   local rbd_uri="$1"
   local spec="${rbd_uri#rbd:}"
-  local dev_path
+  local dev_path map_out
 
   command -v rbd >/dev/null 2>&1 || v2k_die "rbd CLI not found; cannot map ${rbd_uri}"
 
@@ -234,10 +234,12 @@ v2k_rbd_map() {
     return 0
   fi
 
-  rbd map "${spec}" >/dev/null
+  if ! map_out="$(rbd map "${spec}" 2>&1)"; then
+    v2k_die "rbd map failed: ${spec} :: ${map_out}"
+  fi
   udevadm settle >/dev/null 2>&1 || true
 
-  [[ -b "${dev_path}" ]] || v2k_die "rbd map succeeded but device path is missing: ${dev_path}"
+  [[ -b "${dev_path}" ]] || v2k_die "rbd map completed but device path is missing: ${dev_path} :: ${map_out}"
   echo "${dev_path}"
 }
 
@@ -267,29 +269,32 @@ v2k_rbd_precheck() {
 v2k_rbd_ensure_image() {
   local rbd_uri="$1" size_bytes="$2"
   local spec="${rbd_uri#rbd:}"  # pool/image
+  local size_mib cur
 
   [[ -n "${size_bytes}" && "${size_bytes}" != "0" ]] || {
     v2k_die "RBD ensure requires --size-bytes (got empty/0) for ${rbd_uri}"
   }
 
-  command -v rbd >/dev/null 2>&1 || return 0  # keep current behavior if rbd CLI absent
+  command -v rbd >/dev/null 2>&1 || return 0
+
+  size_mib="$(( (size_bytes + 1024*1024 - 1) / (1024*1024) ))"
+  [[ "${size_mib}" -gt 0 ]] || size_mib=1
 
   # If not exists -> create
   if ! rbd info "${spec}" >/dev/null 2>&1; then
-    # rbd CLI expects size in bytes with --size (supports suffix too, but bytes is safest)
-    v2k_log "INFO: creating RBD image ${spec} size_bytes=${size_bytes}"
-    rbd create "${spec}" --size "${size_bytes}" >/dev/null
+    v2k_log "INFO: creating RBD image ${spec} size_bytes=${size_bytes} size_mib=${size_mib}"
+    rbd create "${spec}" --size "${size_mib}" >/dev/null \
+      || v2k_die "rbd create failed: ${spec} size_mib=${size_mib}"
     return 0
   fi
 
   # Exists -> ensure size >= requested
-  local cur
   cur="$(rbd info "${spec}" 2>/dev/null | awk -F': ' '/^size /{print $2}' | awk '{print $1}' || true)"
-  # cur is typically bytes; if parsing fails, skip resize
   if [[ -n "${cur}" && "${cur}" =~ ^[0-9]+$ ]]; then
     if [[ "${cur}" -lt "${size_bytes}" ]]; then
-      v2k_log "INFO: resizing RBD image ${spec} from ${cur} to ${size_bytes} bytes"
-      rbd resize "${spec}" --size "${size_bytes}" >/dev/null
+      v2k_log "INFO: resizing RBD image ${spec} from ${cur} to ${size_bytes} bytes size_mib=${size_mib}"
+      rbd resize "${spec}" --size "${size_mib}" >/dev/null \
+        || v2k_die "rbd resize failed: ${spec} size_mib=${size_mib}"
     fi
   fi
 }
