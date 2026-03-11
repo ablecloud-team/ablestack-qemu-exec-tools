@@ -302,7 +302,7 @@ v2k_rbd_ensure_image() {
 #   V2K_TARGET_BLOCKDEV
 #   V2K_TARGET_CLEANUP_CMD (eval-able)
 prepare_target_device() {
-  local kind="" path="" rbd_uri="" format="" nbd_dev="" size_bytes=""
+  local kind="" path="" rbd_uri="" format="" nbd_dev="" size_bytes="" register_cleanup=1
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -312,6 +312,7 @@ prepare_target_device() {
       --format) format="$2"; shift 2 ;; # optional override
       --nbd-dev) nbd_dev="$2"; shift 2 ;;
       --size-bytes) size_bytes="$2"; shift 2 ;; # for rbd create/resize
+      --no-register-cleanup) register_cleanup=0; shift 1 ;;
       *) v2k_die "prepare_target_device: unknown arg: $1" ;;
     esac
   done
@@ -343,7 +344,9 @@ prepare_target_device() {
 
       V2K_TARGET_BLOCKDEV="$dev"
       V2K_TARGET_CLEANUP_CMD="v2k_qemu_nbd_disconnect '$dev'"
-      v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
       ;;
 
     file-raw)
@@ -365,7 +368,9 @@ prepare_target_device() {
 
       V2K_TARGET_BLOCKDEV="$dev"
       V2K_TARGET_CLEANUP_CMD="v2k_qemu_nbd_disconnect '$dev'"
-      v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
       ;;
 
     rbd)
@@ -389,7 +394,9 @@ prepare_target_device() {
         v2k_die "cannot read mapped rbd device size: ${V2K_TARGET_BLOCKDEV}"
 
       V2K_TARGET_CLEANUP_CMD="v2k_rbd_unmap '${V2K_TARGET_BLOCKDEV}'"
-      v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
       ;;
     block-device)
       # direct device like /dev/sdf

@@ -94,7 +94,10 @@ _v2k_target_disk_xml() {
 
   if [[ "${st}" == "rbd" ]]; then
     local block_path
-    block_path="$(_v2k_rbd_dev_path_from_uri "${path}")"
+    block_path="$(jq -r ".runtime.rbd.mapped[.disks[$idx].disk_id].dev_path // empty" "${manifest}" 2>/dev/null || true)"
+    if [[ -z "${block_path}" ]]; then
+      block_path="$(_v2k_rbd_dev_path_from_uri "${path}")"
+    fi
     cat <<EOF
     <disk type='block' device='disk'>
       <driver name='qemu' type='raw' cache='none' io='io_uring' discard='unmap'/>

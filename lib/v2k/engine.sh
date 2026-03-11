@@ -2074,6 +2074,32 @@ v2k_cmd_verify() {
   v2k_json_or_text_ok "verify" "${out}" "${out}"
 }
 
+v2k_cutover_prepare_rbd_mappings() {
+  local manifest="$1"
+  local st count i disk_id target_path size_bytes mapped_path
+
+  st="$(jq -r '.target.storage.type // "file"' "${manifest}" 2>/dev/null || echo "file")"
+  [[ "${st}" == "rbd" ]] || return 0
+
+  count="$(jq -r '.disks | length' "${manifest}" 2>/dev/null || echo 0)"
+  for ((i=0;i<count;i++)); do
+    disk_id="$(jq -r ".disks[$i].disk_id // empty" "${manifest}" 2>/dev/null || true)"
+    target_path="$(jq -r ".disks[$i].transfer.target_path // empty" "${manifest}" 2>/dev/null || true)"
+    size_bytes="$(jq -r ".disks[$i].size_bytes // 0" "${manifest}" 2>/dev/null || echo 0)"
+
+    [[ -n "${disk_id}" && -n "${target_path}" ]] || continue
+
+    prepare_target_device --kind rbd --path "${target_path}" --size-bytes "${size_bytes}" --no-register-cleanup >/dev/null
+    mapped_path="${V2K_TARGET_BLOCKDEV:-}"
+    [[ -n "${mapped_path}" && -b "${mapped_path}" ]] || {
+      v2k_event ERROR "cutover" "${disk_id}" "rbd_map_missing" "{\"target\":\"${target_path}\",\"mapped\":\"${mapped_path}\"}"
+      return 1
+    }
+
+    v2k_manifest_set_rbd_mapped_device "${manifest}" "${disk_id}" "${target_path}" "${mapped_path}"
+    v2k_event INFO "cutover" "${disk_id}" "rbd_map_ready" "{\"target\":\"${target_path}\",\"mapped\":\"${mapped_path}\"}"
+  done
+}
 v2k_cmd_cutover() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
@@ -2317,6 +2343,10 @@ v2k_cmd_cutover() {
 
   # libvirt define
   if [[ "${define_only}" -eq 1 || "${start_vm}" -eq 1 || "${winpe_bootstrap}" -eq 1 ]]; then
+    if ! v2k_cutover_prepare_rbd_mappings "${V2K_MANIFEST}"; then
+      echo "Failed to prepare persistent RBD mappings for cutover." >&2
+      exit 66
+    fi
     _ts="$(v2k_now_ms)"
     v2k_step_start "cutover" "libvirt_define" "{\"define_only\":${define_only},\"start\":${start_vm},\"winpe\":${winpe_bootstrap}}"
     local xml_path
