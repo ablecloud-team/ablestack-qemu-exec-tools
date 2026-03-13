@@ -93,16 +93,21 @@ _v2k_target_disk_xml() {
   st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
 
   if [[ "${st}" == "rbd" ]]; then
-    local block_path
+    local block_path serial
     block_path="$(jq -r ".runtime.rbd.mapped[.disks[$idx].disk_id].dev_path // empty" "${manifest}" 2>/dev/null || true)"
     if [[ -z "${block_path}" ]]; then
       block_path="$(_v2k_rbd_dev_path_from_uri "${path}")"
     fi
+    serial="$(printf ''%s'' "${path#rbd:}" | tr -cd ''[:alnum:]'' | cut -c1-20)"
+    [[ -n "${serial}" ]] || serial="rbd${idx}"
     cat <<EOF
     <disk type='block' device='disk'>
       <driver name='qemu' type='raw' cache='none' io='io_uring' discard='unmap'/>
-      <source dev='$(_v2k_escape_xml "${block_path}")'/>
+      <source dev='$(_v2k_escape_xml "${block_path}")' index='${idx}'/>
       <target dev='${dev}' bus='${bus}'/>
+      <serial>${serial}</serial>
+      <alias name='scsi0-0-0-${idx}'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='${idx}'/>
     </disk>
 EOF
     return 0

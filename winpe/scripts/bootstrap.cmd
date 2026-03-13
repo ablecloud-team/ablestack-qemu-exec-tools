@@ -24,6 +24,13 @@ if "%NOW_UTC%"=="" set "NOW_UTC=unknown-time"
 REM Wait policy for VirtIO ISO attach (host will attach after WinPE boot)
 set "WAIT_TIMEOUT_SEC=300"
 set "WAIT_INTERVAL_SEC=5"
+if "%WAIT_TIMEOUT_SEC%"=="" set "WAIT_TIMEOUT_SEC=300"
+if "%WAIT_INTERVAL_SEC%"=="" set "WAIT_INTERVAL_SEC=5"
+
+REM WinPE does not always provide TEMP/TMP in a usable state.
+if "%TEMP%"=="" set "TEMP=X:\Temp"
+if "%TMP%"=="" set "TMP=%TEMP%"
+if not exist "%TEMP%" mkdir "%TEMP%" >nul 2>&1
 
 REM Shutdown policy:
 REM - Default: shutdown (release behavior)
@@ -165,7 +172,8 @@ REM Force rescan to pick up newly attached CDROM/volumes
   echo exit
 ) | diskpart >> "%LOG_FILE%" 2>>&1
 
-ping -n %WAIT_INTERVAL_SEC% >nul
+timeout /t %WAIT_INTERVAL_SEC% /nobreak >nul 2>&1
+if errorlevel 1 ping -n %WAIT_INTERVAL_SEC% 127.0.0.1 >nul
 set /a "ELAPSED+=WAIT_INTERVAL_SEC"
 goto :wait_loop
 

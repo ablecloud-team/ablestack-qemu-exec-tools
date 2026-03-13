@@ -115,10 +115,20 @@ v2k_qemu_nbd_connect() {
   rm -f "$err" || true
   udevadm settle >/dev/null 2>&1 || true
 
-  blockdev --getsize64 "$dev" >/dev/null 2>&1 || {
-    v2k_qemu_nbd_disconnect "$dev"
-    v2k_die "qemu-nbd attach succeeded but blockdev size read failed: $dev (uri=$uri)"
-  }
+  local size_bytes check_tries=0 check_max=30
+  while true; do
+    size_bytes="$(blockdev --getsize64 "$dev" 2>/dev/null || echo 0)"
+    if [[ "${size_bytes}" =~ ^[0-9]+$ && "${size_bytes}" -gt 0 ]]; then
+      break
+    fi
+    check_tries=$((check_tries+1))
+    if [[ "${check_tries}" -ge "${check_max}" ]]; then
+      v2k_qemu_nbd_disconnect "$dev"
+      v2k_die "qemu-nbd attach succeeded but block device size is still zero: $dev (uri=$uri)"
+    fi
+    udevadm settle >/dev/null 2>&1 || true
+    sleep 0.2
+  done
 }
 
 # ---------- safety checks for direct block device ----------
@@ -224,13 +234,15 @@ v2k_rbd_dev_path() {
 v2k_rbd_map() {
   local rbd_uri="$1"
   local spec="${rbd_uri#rbd:}"
-  local dev_path map_out
+  local stable_path map_out mapped_dev
 
   command -v rbd >/dev/null 2>&1 || v2k_die "rbd CLI not found; cannot map ${rbd_uri}"
 
-  dev_path="$(v2k_rbd_dev_path "${rbd_uri}")"
-  if [[ -b "${dev_path}" ]]; then
-    echo "${dev_path}"
+  stable_path="$(v2k_rbd_dev_path "${rbd_uri}")"
+  if [[ -b "${stable_path}" ]]; then
+    mapped_dev="$(readlink -f "${stable_path}" 2>/dev/null || true)"
+    [[ -n "${mapped_dev}" && -b "${mapped_dev}" ]] || mapped_dev="${stable_path}"
+    echo "${mapped_dev}"
     return 0
   fi
 
@@ -239,8 +251,10 @@ v2k_rbd_map() {
   fi
   udevadm settle >/dev/null 2>&1 || true
 
-  [[ -b "${dev_path}" ]] || v2k_die "rbd map completed but device path is missing: ${dev_path} :: ${map_out}"
-  echo "${dev_path}"
+  mapped_dev="$(printf '%s' "${map_out}" | tail -n1 | tr -d '\r')"
+  [[ -n "${mapped_dev}" && -b "${mapped_dev}" ]] || v2k_die "rbd map completed but mapped device is missing: ${spec} :: ${map_out}"
+  [[ -b "${stable_path}" ]] || v2k_die "rbd map completed but stable path is missing: ${stable_path} :: ${map_out}"
+  echo "${mapped_dev}"
 }
 
 v2k_rbd_unmap() {
@@ -269,7 +283,7 @@ v2k_rbd_precheck() {
 v2k_rbd_ensure_image() {
   local rbd_uri="$1" size_bytes="$2"
   local spec="${rbd_uri#rbd:}"  # pool/image
-  local size_mib cur
+  local size_mb cur
 
   [[ -n "${size_bytes}" && "${size_bytes}" != "0" ]] || {
     v2k_die "RBD ensure requires --size-bytes (got empty/0) for ${rbd_uri}"
@@ -277,14 +291,14 @@ v2k_rbd_ensure_image() {
 
   command -v rbd >/dev/null 2>&1 || return 0
 
-  size_mib="$(( (size_bytes + 1024*1024 - 1) / (1024*1024) ))"
-  [[ "${size_mib}" -gt 0 ]] || size_mib=1
+  size_mb="$(( (size_bytes + 1024*1024 - 1) / (1024*1024) ))"
+  [[ "${size_mb}" -gt 0 ]] || size_mb=1
 
   # If not exists -> create
   if ! rbd info "${spec}" >/dev/null 2>&1; then
-    v2k_log "INFO: creating RBD image ${spec} size_bytes=${size_bytes} size_mib=${size_mib}"
-    rbd create "${spec}" --size "${size_mib}" >/dev/null \
-      || v2k_die "rbd create failed: ${spec} size_mib=${size_mib}"
+    v2k_log "INFO: creating RBD image ${spec} size_bytes=${size_bytes} size_mb=${size_mb}"
+    rbd create "${spec}" --size "${size_mb}" >/dev/null \
+      || v2k_die "rbd create failed: ${spec} size_mb=${size_mb}"
     return 0
   fi
 
@@ -292,15 +306,15 @@ v2k_rbd_ensure_image() {
   cur="$(rbd info "${spec}" 2>/dev/null | awk -F': ' '/^size /{print $2}' | awk '{print $1}' || true)"
   if [[ -n "${cur}" && "${cur}" =~ ^[0-9]+$ ]]; then
     if [[ "${cur}" -lt "${size_bytes}" ]]; then
-      v2k_log "INFO: resizing RBD image ${spec} from ${cur} to ${size_bytes} bytes size_mib=${size_mib}"
-      rbd resize "${spec}" --size "${size_mib}" >/dev/null \
-        || v2k_die "rbd resize failed: ${spec} size_mib=${size_mib}"
+      v2k_log "INFO: resizing RBD image ${spec} from ${cur} to ${size_bytes} bytes size_mb=${size_mb}"
+      rbd resize "${spec}" --size "${size_mb}" >/dev/null \
+        || v2k_die "rbd resize failed: ${spec} size_mb=${size_mb}"
     fi
   fi
 }
 
 # ---------- Public API ----------
-# prepare_target_device --kind <file-qcow2|file-raw|rbd|block-device> --path <...> [--rbd-uri rbd:pool/image] [--nbd-dev /dev/nbdX]
+# prepare_target_device --kind <file-qcow2|file-raw|rbd|rbd-mapped|block-device> --path <...> [--rbd-uri rbd:pool/image] [--nbd-dev /dev/nbdX]
 #
 # stdout: target_blockdev
 # exports:
@@ -379,7 +393,7 @@ prepare_target_device() {
       ;;
 
     rbd)
-      # path: rbd:pool/image (recommended). --rbd-uri can override the full URI.
+      # Sync path: attach the RBD image through qemu-nbd without host-side rbd map.
       format="${format:-raw}"
       [[ "$format" == "raw" ]] || v2k_die "rbd requires format=raw"
       if [[ -n "${rbd_uri}" ]]; then
@@ -390,9 +404,46 @@ prepare_target_device() {
         rbd_uri="rbd:${path}"
       fi
 
+      v2k_modprobe_nbd
+      local dev
+      if [[ -n "${nbd_dev}" ]]; then
+        dev="${nbd_dev}"
+      else
+        v2k_lock_nbd
+        dev="$(v2k_nbd_alloc)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
+      fi
+
+      if command -v rbd >/dev/null 2>&1; then
+        v2k_rbd_ensure_image "$rbd_uri" "${size_bytes}"
+      else
+        v2k_rbd_precheck "$rbd_uri"
+      fi
+
+      v2k_qemu_nbd_disconnect "$dev"
+      v2k_qemu_nbd_connect "raw" "$rbd_uri" "$dev"
+      [[ -z "${nbd_dev}" ]] && v2k_unlock_nbd
+
+      V2K_TARGET_BLOCKDEV="$dev"
+      V2K_TARGET_CLEANUP_CMD="v2k_qemu_nbd_disconnect '$dev'"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
+      ;;
+
+    rbd-mapped)
+      # Cutover/bootstrap path: create a host-side rbd map and keep a stable /dev/rbd/<pool>/<image> path.
+      format="${format:-raw}"
+      [[ "$format" == "raw" ]] || v2k_die "rbd-mapped requires format=raw"
+      if [[ -n "${rbd_uri}" ]]; then
+        :
+      elif [[ "${path}" == rbd:* ]]; then
+        rbd_uri="${path}"
+      else
+        rbd_uri="rbd:${path}"
+      fi
+
       command -v rbd >/dev/null 2>&1 || v2k_die "rbd CLI not found; cannot prepare ${rbd_uri}"
 
-      # RBD targets are mapped on the host and then treated as block devices.
       v2k_rbd_ensure_image "$rbd_uri" "${size_bytes}"
       V2K_TARGET_BLOCKDEV="$(v2k_rbd_map "$rbd_uri")"
       blockdev --getsize64 "${V2K_TARGET_BLOCKDEV}" >/dev/null 2>&1 || \
