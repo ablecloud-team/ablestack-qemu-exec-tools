@@ -2454,6 +2454,14 @@ v2k_cmd_cutover() {
     fi
   fi
 
+  # WinPE may trigger host-side auto-unmap on guest shutdown. Re-prepare persistent RBD maps before the final boot.
+  if [[ "${winpe_bootstrap}" -eq 1 ]]; then
+    if ! v2k_cutover_prepare_rbd_mappings "${V2K_MANIFEST}"; then
+      echo "Failed to re-prepare persistent RBD mappings after WinPE shutdown." >&2
+      exit 67
+    fi
+  fi
+
   # Start VM after WinPE bootstrap (or immediately if WinPE skipped)
   if [[ "${start_vm}" -eq 1 ]]; then
     v2k_target_start_vm "${V2K_MANIFEST}"
