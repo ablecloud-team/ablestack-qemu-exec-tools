@@ -7,3 +7,30 @@
 
 # Shell scripts: LF
 *.sh text eol=lf
+
+# Common binary artifacts: do not treat as text
+*.gz binary
+*.zip binary
+*.7z binary
+*.xz binary
+*.bz2 binary
+*.iso binary
+*.img binary
+*.qcow2 binary
+*.vmdk binary
+*.exe binary
+*.msi binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.jar binary
+*.war binary
+*.ear binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
