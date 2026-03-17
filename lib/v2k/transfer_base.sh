@@ -179,8 +179,12 @@ v2k_transfer_base_one() {
       # Direct file output: ensure format is honored (qcow2/raw)
       out_target="${target_path}"
       out_fmt="${fmt}"
+    elif [[ "${st}" == "rbd" ]]; then
+      # RBD base sync writes directly to the image URI instead of using a mapped block device.
+      out_target="${target_path}"
+      out_fmt="raw"
     else
-      # block/rbd -> blockdev and raw stream
+      # block -> blockdev and raw stream
       target_blockdev="$(prepare_target_device --kind "${kind}" --path "${target_path}" --size-bytes "${size_bytes}")"
       cleanup_cmd="${V2K_TARGET_CLEANUP_CMD:-:}"
       out_target="${target_blockdev}"
@@ -199,6 +203,9 @@ v2k_transfer_base_one() {
     # - V2K_BASE_METHOD=convert : qemu-img convert
     # - V2K_BASE_METHOD=nbdcopy : nbdcopy
     base_method="${V2K_BASE_METHOD:-nbdcopy}"
+    if [[ "${st}" == "rbd" ]]; then
+      base_method="qemu-img"
+    fi
 
     # normalize: trim + lowercase (whitespace/newline 방�?)
     base_method="$(echo -n "${base_method}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"

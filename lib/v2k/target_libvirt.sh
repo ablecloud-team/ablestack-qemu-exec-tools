@@ -78,6 +78,50 @@ _v2k_disk_bus_from_controller_type() {
   esac
 }
 
+_v2k_rbd_dev_path_from_uri() {
+  local rbd_uri="$1"
+  local spec="${rbd_uri#rbd:}"
+  printf '/dev/rbd/%s\n' "${spec}"
+}
+
+_v2k_target_disk_xml() {
+  local manifest="$1" idx="$2"
+  local path bus dev st
+  path="$(jq -r ".disks[$idx].transfer.target_path" "${manifest}")"
+  bus="$(_v2k_disk_bus_from_controller_type "$(jq -r ".disks[$idx].controller.type // empty" "${manifest}")")"
+  dev="sd$(_v2k_letter "$idx")"
+  st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
+
+  if [[ "${st}" == "rbd" ]]; then
+    local block_path serial
+    block_path="$(jq -r ".runtime.rbd.mapped[.disks[$idx].disk_id].dev_path // empty" "${manifest}" 2>/dev/null || true)"
+    if [[ -z "${block_path}" ]]; then
+      block_path="$(_v2k_rbd_dev_path_from_uri "${path}")"
+    fi
+    serial="$(printf ''%s'' "${path#rbd:}" | tr -cd ''[:alnum:]'' | cut -c1-20)"
+    [[ -n "${serial}" ]] || serial="rbd${idx}"
+    cat <<EOF
+    <disk type='block' device='disk'>
+      <driver name='qemu' type='raw' cache='none' io='io_uring' discard='unmap'/>
+      <source dev='$(_v2k_escape_xml "${block_path}")' index='${idx}'/>
+      <target dev='${dev}' bus='${bus}'/>
+      <serial>${serial}</serial>
+      <alias name='scsi0-0-0-${idx}'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='${idx}'/>
+    </disk>
+EOF
+    return 0
+  fi
+
+  cat <<EOF
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' cache='none' io='io_uring'/>
+      <source file='$(_v2k_escape_xml "${path}")'/>
+      <target dev='${dev}' bus='${bus}'/>
+    </disk>
+EOF
+}
+
 # ---------------------------------------------------------------------
 # ABLESTACK OVMF resolver (FIXED, NO JSON)
 # ---------------------------------------------------------------------
@@ -164,7 +208,7 @@ v2k_target_generate_libvirt_xml() {
     local vars_path="${fw[2]:-}"
     local vars_fmt="${fw[3]:-}"
 
-    # ë°©ì–´(?„ìˆ˜): ë¹„ì–´?ˆìœ¼ë©?ì¦‰ì‹œ ?¤íŒ¨
+    # Guard: fail immediately if any OVMF field is empty.
     if [[ -z "${code_path}" || -z "${code_fmt}" || -z "${vars_path}" || -z "${vars_fmt}" ]]; then
       echo "OVMF pick returned empty fields: code_path='${code_path}' code_fmt='${code_fmt}' vars_path='${vars_path}' vars_fmt='${vars_fmt}'" >&2
       return 41
@@ -201,17 +245,8 @@ v2k_target_generate_libvirt_xml() {
   count="$(jq -r '.disks | length' "${manifest}")"
 
   for ((i=0;i<count;i++)); do
-    local path bus dev
-    path="$(jq -r ".disks[$i].transfer.target_path" "${manifest}")"
-    bus="$(_v2k_disk_bus_from_controller_type "$(jq -r ".disks[$i].controller.type // empty" "${manifest}")")"
-    dev="sd$(_v2k_letter "$i")"
-
     disks_xml+="
-    <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2' cache='none' io='io_uring'/>
-      <source file='$(_v2k_escape_xml "${path}")'/>
-      <target dev='${dev}' bus='${bus}'/>
-    </disk>"
+$(_v2k_target_disk_xml "${manifest}" "$i")"
   done
 
   local iface_xml=""
@@ -303,24 +338,24 @@ v2k_target_set_uefi_secureboot() {
     code="${base}/OVMF_CODE.fd"
     vars="${base}/OVMF_VARS.fd"
     secure_attr="no"
-    firmware_block=""  # WinPE?? firmware feature block ?œê±°(ê°€???¸í™˜??ì¢‹ìŒ)
+    firmware_block=""  # Remove the firmware feature block for the temporary WinPE boot path.
   fi
 
   [[ -f "${code}" ]] || { echo "Missing OVMF code: ${code}" >&2; return 1; }
   [[ -f "${vars}" ]] || { echo "Missing OVMF vars: ${vars}" >&2; return 1; }
 
-  # 1) <loader> ?„ì „ ?œê±°
+  # 1) Remove the existing <loader> block.
   perl -0777 -pe "s#<loader[^>]*>[^<]*</loader>##s" \
     "${tmp}.in" > "${tmp}.mid"
 
-  # 2) <firmware> ë¸”ë¡???„ì „ ?œê±° (?¨ì•„?ˆìœ¼ë©?on/off ë¶ˆì¼ì¹˜ì˜ ê·¼ë³¸ ?ì¸)
+  # 2) Remove the existing <firmware> block to avoid on/off mismatches.
   perl -0777 -i -pe "s#<firmware>.*?</firmware>\s*##s" "${tmp}.mid"
 
-  # 3) <type> ?¤ì— loader + (?„ìš” ?? firmware block ?½ì…
+  # 3) Insert the loader and, if needed, the firmware block after <type>.
   perl -0777 -i -pe "s#(<type[^>]*>[^<]*</type>)#\$1\n    <loader readonly='yes' type='pflash' format='qcow2' secure='${secure_attr}'>${code}</loader>${firmware_block}#s" \
     "${tmp}.mid"
 
-  # 4) nvram ?•ê·œ??(template/format ?¼ê? ? ì?)
+  # 4) Normalize the nvram template and format attributes.
   perl -0777 -i -pe "s#<nvram[^>]*>#<nvram template='${vars}' templateFormat='qcow2' format='qcow2'>#s" \
     "${tmp}.mid"
 
@@ -342,11 +377,11 @@ v2k_target_set_boot_cdrom_only() {
 
   _v2k_trace_cmd "virsh-dumpxml-boot" virsh dumpxml "${vm}" > "${tmp}.in"
 
-  # 1) ê¸°ì¡´ <boot .../> ?„ë? ?œê±°
+  # 1) Remove any existing <boot .../> entries.
   perl -0777 -pe "s#\s*<boot[^>]*/>\s*##sg" "${tmp}.in" > "${tmp}.mid"
 
-  # 2) <os> ?´ë???<boot dev='cdrom'/> 1ê°œë§Œ ?½ì…
-  #    - <type ...> ë°”ë¡œ ?¤ì— ?£ëŠ”??
+  # 2) Insert exactly one <boot dev='cdrom'/> entry under <os>.
+  #    - Place it immediately after <type ...>.
   perl -0777 -i -pe "s#(<os[^>]*>\s*<type[^>]*>[^<]*</type>)#\$1\n    <boot dev='cdrom'/>#s" \
     "${tmp}.mid"
 
@@ -365,10 +400,10 @@ v2k_target_set_boot_hd() {
 
   _v2k_trace_cmd "virsh-dumpxml-boot" virsh dumpxml "${vm}" > "${tmp}.in"
 
-  # 1) ê¸°ì¡´ <boot .../> ?„ë? ?œê±°
+  # 1) Remove any existing <boot .../> entries.
   perl -0777 -pe "s#\s*<boot[^>]*/>\s*##sg" "${tmp}.in" > "${tmp}.mid"
 
-  # 2) <os> ?´ë???<boot dev='hd'/> 1ê°œë§Œ ?½ì…
+  # 2) Insert exactly one <boot dev='hd'/> entry under <os>.
   perl -0777 -i -pe "s#(<os[^>]*>\s*<type[^>]*>[^<]*</type>)#\$1\n    <boot dev='hd'/>#s" \
     "${tmp}.mid"
 
@@ -441,7 +476,7 @@ v2k_target_wait_shutdown() {
   done
 }
 
-# CDROM ?„ë³´: sdv..sdz -> sdaa..sdaz -> sdba..sdbz (?•ë°©??
+# CDROM candidates: sdv..sdz -> sdaa..sdaz -> sdba..sdbz (extend as needed)
 _v2k_target_gen_dev_candidates_cdrom() {
   local c b
   for c in v w x y z; do echo "sd${c}"; done
@@ -449,7 +484,7 @@ _v2k_target_gen_dev_candidates_cdrom() {
   for b in {a..z}; do echo "sdb${b}"; done
 }
 
-# virsh dumpxml?ì„œ ?„ì¬ ?¬ìš©ì¤?target dev ëª©ë¡ ì¶”ì¶œ
+# Extract the currently used target dev names from virsh dumpxml.
 _v2k_target_list_used_devs_from_xml() {
   local vm="$1"
   virsh dumpxml "${vm}" 2>/dev/null \
@@ -457,7 +492,7 @@ _v2k_target_list_used_devs_from_xml() {
     | sort -u
 }
 
-# ?´ë²ˆ run?ì„œ ?´ë? ? ë‹¹??cdrom dev ê¸°ë¡ ?Œì¼(?¤í”„ ë°˜ì˜ ì§€?°ë„ ë°©ì–´)
+# Per-run allocation record for chosen cdrom target dev names.
 _v2k_target_cdrom_alloc_file() {
   local vm="$1"
   echo "${V2K_WORKDIR:-/tmp}/artifacts/.cdrom_devs.${vm}.txt"
@@ -474,7 +509,7 @@ _v2k_target_pick_free_cdrom_dev() {
   used_xml="$(_v2k_target_list_used_devs_from_xml "${vm}" || true)"
   used_run="$(cat "${alloc_file}" 2>/dev/null || true)"
 
-  # ??ëª©ë¡ ?©ì³??membership ê²€??
+  # Merge both sources and test membership against the combined set.
   used_all="$(printf "%s\n%s\n" "${used_xml}" "${used_run}" | sed '/^$/d' | sort -u)"
 
   while read -r dev; do
@@ -502,7 +537,7 @@ v2k_target_attach_cdrom() {
     return 3
   }
 
-  # ??SATAë¡?ê°•ì œ (?œë¼?´ë²„ ì¤‘ë¦½) + persistent
+  # Force SATA for neutrality across guests and keep the attach persistent.
   _v2k_trace_cmd "virsh-attach-disk-cdrom" \
     virsh attach-disk "${vm}" "${iso}" "${dev}" \
       --type cdrom --mode readonly --persistent --targetbus sata >/dev/null

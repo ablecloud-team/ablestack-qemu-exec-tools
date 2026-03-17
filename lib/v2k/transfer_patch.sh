@@ -147,14 +147,14 @@ v2k_transfer_patch_one() {
     fi
 
     # ---- resources we must cleanup even on failure ----
-    local src_dev="" dst_dev="" sock="" pidfile="" nbdlog=""
+    local src_dev="" dst_dev="" sock="" pidfile="" nbdlog="" target_cleanup_cmd=""
 
     cleanup() {
       set +e
 
       # Detach target first (flush writes)
       if [[ -n "${dst_dev}" ]]; then
-        if [[ "${kind}" != "block-device" ]]; then
+        if [[ "${kind}" == "file-qcow2" || "${kind}" == "file-raw" ]]; then
           v2k_nbd_disconnect "${dst_dev}" >/dev/null 2>&1 || true
         else
           [[ -b "${dst_dev}" ]] && blockdev --flushbufs "${dst_dev}" >/dev/null 2>&1 || true
@@ -182,7 +182,10 @@ v2k_transfer_patch_one() {
       [[ -n "${pidfile}" ]] && rm -f "${pidfile}" >/dev/null 2>&1 || true
 
       [[ -n "${src_dev}" ]] && v2k_nbd_free "${src_dev}" >/dev/null 2>&1 || true
-      if [[ -n "${dst_dev}" && "${kind}" != "block-device" ]]; then
+      if [[ -n "${target_cleanup_cmd}" ]]; then
+        eval "${target_cleanup_cmd}" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "${dst_dev}" && ( "${kind}" == "file-qcow2" || "${kind}" == "file-raw" ) ]]; then
         v2k_nbd_free "${dst_dev}" >/dev/null 2>&1 || true
       fi
     }
@@ -193,6 +196,8 @@ v2k_transfer_patch_one() {
     src_dev="$(v2k_nbd_alloc)"
     if [[ "${kind}" == "block-device" ]]; then
       dst_dev="${target_path}"
+    elif [[ "${kind}" == "rbd" ]]; then
+      dst_dev=""
     else
       dst_dev="$(v2k_nbd_alloc)"
     fi
@@ -210,8 +215,10 @@ v2k_transfer_patch_one() {
 
       # Detach/destroy in reverse order
       nbd-client -d "${src_dev}" >/dev/null 2>&1 || true
-      if [[ "${kind}" != "block-device" ]]; then
+      if [[ "${kind}" == "file-qcow2" || "${kind}" == "file-raw" ]]; then
         v2k_nbd_disconnect "${dst_dev}" >/dev/null 2>&1 || true
+      elif [[ -n "${dst_dev}" ]]; then
+        [[ -b "${dst_dev}" ]] && blockdev --flushbufs "${dst_dev}" >/dev/null 2>&1 || true
       fi
       v2k_nbd_disconnect "${src_dev}" >/dev/null 2>&1 || true
 
@@ -219,7 +226,10 @@ v2k_transfer_patch_one() {
       rm -f "${sock}" >/dev/null 2>&1 || true
 
       v2k_nbd_free "${src_dev}" >/dev/null 2>&1 || true
-      if [[ "${kind}" != "block-device" ]]; then
+      if [[ -n "${target_cleanup_cmd}" ]]; then
+        eval "${target_cleanup_cmd}" >/dev/null 2>&1 || true
+      fi
+      if [[ "${kind}" == "file-qcow2" || "${kind}" == "file-raw" ]]; then
         v2k_nbd_free "${dst_dev}" >/dev/null 2>&1 || true
       fi
     }
@@ -322,7 +332,13 @@ v2k_transfer_patch_one() {
 
     # Map target to dst_dev
     if [[ "${kind}" != "block-device" ]]; then
-      prepare_target_device --kind "${kind}" --path "${target_path}" --nbd-dev "${dst_dev}" --size-bytes "${size_bytes}" >/dev/null
+      local -a target_prepare_args=(--kind "${kind}" --path "${target_path}" --size-bytes "${size_bytes}")
+      if [[ -n "${dst_dev}" ]]; then
+        target_prepare_args+=(--nbd-dev "${dst_dev}")
+      fi
+      prepare_target_device "${target_prepare_args[@]}" >/dev/null
+      dst_dev="${V2K_TARGET_BLOCKDEV:-${dst_dev}}"
+      target_cleanup_cmd="${V2K_TARGET_CLEANUP_CMD:-}"
       udevadm settle >/dev/null 2>&1 || true
       sleep 1
     fi

@@ -46,6 +46,9 @@ Key options:
 | --vm | VMware VM |
 | --vcenter | vCenter |
 | --dst | Destination |
+| --target-format | `qcow2` / `raw` |
+| --target-storage | `file` / `block` / `rbd` |
+| --target-map-json | block / rbd 대상 디스크 매핑 JSON |
 | --shutdown | manual / guest / poweroff |
 | --split | full / phase1 / phase2 |
 | --incr-interval | Increment interval |
@@ -55,6 +58,18 @@ Key options:
 
 ```bash
 ablestack_v2k init --vm <VM> --vcenter <VC> --dst <DST>
+```
+
+RBD 예시:
+
+```bash
+ablestack_v2k init \
+  --vm <VM> \
+  --vcenter <VC> \
+  --dst <DST> \
+  --target-format raw \
+  --target-storage rbd \
+  --target-map-json '{"scsi0:0":"rbd:rbd/vm-disk0"}'
 ```
 
 ## snapshot / sync
@@ -69,6 +84,13 @@ ablestack_v2k sync base|incr|final
 ```bash
 ablestack_v2k cutover --shutdown guest --start
 ```
+
+RBD cutover 시 참고:
+
+- cutover 직전에 `rbd map`으로 `/dev/rbd/<pool>/<image>`를 준비
+- libvirt XML은 `<disk type='block'>`로 생성
+- mapped 경로는 `manifest.runtime.rbd.mapped`에 기록
+- VM 기동 이후 활성 RBD map은 자동 unmap하지 않음
 
 ## cleanup
 

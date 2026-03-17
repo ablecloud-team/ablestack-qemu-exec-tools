@@ -24,6 +24,13 @@ if "%NOW_UTC%"=="" set "NOW_UTC=unknown-time"
 REM Wait policy for VirtIO ISO attach (host will attach after WinPE boot)
 set "WAIT_TIMEOUT_SEC=300"
 set "WAIT_INTERVAL_SEC=5"
+if "%WAIT_TIMEOUT_SEC%"=="" set "WAIT_TIMEOUT_SEC=300"
+if "%WAIT_INTERVAL_SEC%"=="" set "WAIT_INTERVAL_SEC=5"
+
+REM WinPE does not always provide TEMP/TMP in a usable state.
+if "%TEMP%"=="" set "TEMP=X:\Temp"
+if "%TMP%"=="" set "TMP=%TEMP%"
+if not exist "%TEMP%" mkdir "%TEMP%" >nul 2>&1
 
 REM Shutdown policy:
 REM - Default: shutdown (release behavior)
@@ -51,6 +58,7 @@ call :wait_for_virtio
 if "%VIRTIO_DRIVE%"=="" (
   call :log_file "[bootstrap] ERROR: VirtIO ISO not found after waiting."
   call :fail_and_shutdown "VirtIO ISO not found (timeout)"
+  exit /b 1
 )
 call :log_file "[bootstrap] VIRTIO_DRIVE=%VIRTIO_DRIVE% VIRTIO_ROOT=%VIRTIO_ROOT%"
 
@@ -67,6 +75,7 @@ if "%OS_DRIVE%"=="" (
 if "%OS_DRIVE%"=="" (
   call :log_file "[bootstrap] ERROR: OS drive not found even after drvload/letter assignment."
   call :fail_and_shutdown "OS drive not found"
+  exit /b 1
 )
 
 REM Promote logs/markers to OS volume
@@ -93,6 +102,7 @@ if "%OSID%"=="" (
 if "%OSID%"=="" (
   call :log_file "[bootstrap] ERROR: Could not determine OSID under VirtIO ISO."
   call :fail_and_shutdown "OSID not found in VirtIO ISO"
+  exit /b 1
 )
 
 call :log_file "[bootstrap] Selected OSID=%OSID%"
@@ -147,6 +157,7 @@ set /a "ELAPSED=0"
 
 :wait_loop
 call :find_virtio_root_wrapper
+call :log_file "[bootstrap] find_virtio_root result: DRIVE=%VIRTIO_DRIVE% ROOT=%VIRTIO_ROOT%"
 if not "%VIRTIO_DRIVE%"=="" (
   call :log_file "[bootstrap] VirtIO ISO detected: %VIRTIO_DRIVE%"
   goto :eof
@@ -165,7 +176,8 @@ REM Force rescan to pick up newly attached CDROM/volumes
   echo exit
 ) | diskpart >> "%LOG_FILE%" 2>>&1
 
-ping -n %WAIT_INTERVAL_SEC% >nul
+timeout /t %WAIT_INTERVAL_SEC% /nobreak >nul 2>&1
+if errorlevel 1 ping -n %WAIT_INTERVAL_SEC% 127.0.0.1 >nul
 set /a "ELAPSED+=WAIT_INTERVAL_SEC"
 goto :wait_loop
 
@@ -186,60 +198,33 @@ goto :eof
 set "VIRTIO_DRIVE="
 set "VIRTIO_ROOT="
 for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
-  if exist "%%D:\vioscsi\"  goto :virtio_found_%%D
-  if exist "%%D:\viostor\"  goto :virtio_found_%%D
-  if exist "%%D:\vioserial\" goto :virtio_found_%%D
-  if exist "%%D:\NetKVM\"   goto :virtio_found_%%D
-  if exist "%%D:\Balloon\"  goto :virtio_found_%%D
+  if exist "%%D:\vioscsi\" (
+    set "VIRTIO_DRIVE=%%D:"
+    set "VIRTIO_ROOT=%%D:\"
+    goto :eof
+  )
+  if exist "%%D:\viostor\" (
+    set "VIRTIO_DRIVE=%%D:"
+    set "VIRTIO_ROOT=%%D:\"
+    goto :eof
+  )
+  if exist "%%D:\vioserial\" (
+    set "VIRTIO_DRIVE=%%D:"
+    set "VIRTIO_ROOT=%%D:\"
+    goto :eof
+  )
+  if exist "%%D:\NetKVM\" (
+    set "VIRTIO_DRIVE=%%D:"
+    set "VIRTIO_ROOT=%%D:\"
+    goto :eof
+  )
+  if exist "%%D:\Balloon\" (
+    set "VIRTIO_DRIVE=%%D:"
+    set "VIRTIO_ROOT=%%D:\"
+    goto :eof
+  )
 )
 goto :eof
-
-:virtio_found_C
-set "VIRTIO_DRIVE=C:" & set "VIRTIO_ROOT=C:\" & goto :eof
-:virtio_found_D
-set "VIRTIO_DRIVE=D:" & set "VIRTIO_ROOT=D:\" & goto :eof
-:virtio_found_E
-set "VIRTIO_DRIVE=E:" & set "VIRTIO_ROOT=E:\" & goto :eof
-:virtio_found_F
-set "VIRTIO_DRIVE=F:" & set "VIRTIO_ROOT=F:\" & goto :eof
-:virtio_found_G
-set "VIRTIO_DRIVE=G:" & set "VIRTIO_ROOT=G:\" & goto :eof
-:virtio_found_H
-set "VIRTIO_DRIVE=H:" & set "VIRTIO_ROOT=H:\" & goto :eof
-:virtio_found_I
-set "VIRTIO_DRIVE=I:" & set "VIRTIO_ROOT=I:\" & goto :eof
-:virtio_found_J
-set "VIRTIO_DRIVE=J:" & set "VIRTIO_ROOT=J:\" & goto :eof
-:virtio_found_K
-set "VIRTIO_DRIVE=K:" & set "VIRTIO_ROOT=K:\" & goto :eof
-:virtio_found_L
-set "VIRTIO_DRIVE=L:" & set "VIRTIO_ROOT=L:\" & goto :eof
-:virtio_found_M
-set "VIRTIO_DRIVE=M:" & set "VIRTIO_ROOT=M:\" & goto :eof
-:virtio_found_N
-set "VIRTIO_DRIVE=N:" & set "VIRTIO_ROOT=N:\" & goto :eof
-:virtio_found_O
-set "VIRTIO_DRIVE=O:" & set "VIRTIO_ROOT=O:\" & goto :eof
-:virtio_found_P
-set "VIRTIO_DRIVE=P:" & set "VIRTIO_ROOT=P:\" & goto :eof
-:virtio_found_Q
-set "VIRTIO_DRIVE=Q:" & set "VIRTIO_ROOT=Q:\" & goto :eof
-:virtio_found_R
-set "VIRTIO_DRIVE=R:" & set "VIRTIO_ROOT=R:\" & goto :eof
-:virtio_found_S
-set "VIRTIO_DRIVE=S:" & set "VIRTIO_ROOT=S:\" & goto :eof
-:virtio_found_T
-set "VIRTIO_DRIVE=T:" & set "VIRTIO_ROOT=T:\" & goto :eof
-:virtio_found_U
-set "VIRTIO_DRIVE=U:" & set "VIRTIO_ROOT=U:\" & goto :eof
-:virtio_found_V
-set "VIRTIO_DRIVE=V:" & set "VIRTIO_ROOT=V:\" & goto :eof
-:virtio_found_W
-set "VIRTIO_DRIVE=W:" & set "VIRTIO_ROOT=W:\" & goto :eof
-:virtio_found_Y
-set "VIRTIO_DRIVE=Y:" & set "VIRTIO_ROOT=Y:\" & goto :eof
-:virtio_found_Z
-set "VIRTIO_DRIVE=Z:" & set "VIRTIO_ROOT=Z:\" & goto :eof
 
 REM ------------------------
 REM Functions

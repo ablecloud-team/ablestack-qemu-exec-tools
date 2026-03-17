@@ -9,13 +9,26 @@
 ```json
 {
   "schema": "ablestack-v2k/manifest-v1",
-  "run_id": "...",
-  "vm": "...",
-  "target_storage_type": "file|block|rbd",
-  "target_format": "qcow2|raw",
+  "run": {
+    "run_id": "...",
+    "created_at": "...",
+    "workdir": "..."
+  },
+  "source": {
+    "type": "vmware",
+    "vm": {}
+  },
+  "target": {
+    "type": "kvm",
+    "format": "qcow2|raw",
+    "storage": {
+      "type": "file|block|rbd",
+      "map": {}
+    }
+  },
   "disks": [],
   "phases": {},
-  "timestamps": {}
+  "runtime": {}
 }
 ```
 
@@ -26,13 +39,13 @@
 | 필드 | 설명 |
 |-----|-----|
 | schema | manifest 스키마 버전 |
-| run_id | 실행 ID |
-| vm | VMware VM 식별자 |
-| target_storage_type | 대상 스토리지 타입 |
-| target_format | 디스크 포맷 |
+| run.run_id | 실행 ID |
+| source.vm | VMware VM 식별자/메타데이터 |
+| target.storage.type | 대상 스토리지 타입 |
+| target.format | 디스크 포맷 |
 | disks | 디스크 매핑 정보 |
 | phases | 단계별 상태 |
-| timestamps | 단계별 시간 기록 |
+| runtime | 실행 중 상태 및 관측 정보 |
 
 ---
 
@@ -40,18 +53,46 @@
 
 ```json
 {
-  "init": "done",
-  "cbt": "done",
-  "base_sync": "done",
-  "incr_sync": "running",
-  "final_sync": "pending",
-  "cutover": "pending"
+  "init": { "done": true, "ts": "..." },
+  "base_sync": { "done": true, "ts": "..." },
+  "incr_sync": { "done": false, "ts": "" },
+  "final_sync": { "done": false, "ts": "" },
+  "cutover": { "done": false, "ts": "" }
 }
 ```
 
 ---
 
-## resume ?�작
+## runtime.rbd.mapped
 
-- `--resume` ?�션 ??manifest 기반?�로 미완�??�계부???�개
-- ?�료 ?�계???�실?�되지 ?�음
+`target.storage.type=rbd`인 경우 cutover 직전 host-side persistent map 경로를 runtime에 기록합니다.
+
+```json
+{
+  "runtime": {
+    "rbd": {
+      "mapped": {
+        "scsi0:0": {
+          "uri": "rbd:rbd/vmA-disk0",
+          "dev_path": "/dev/rbd/rbd/vmA-disk0",
+          "mapped": true,
+          "ts": "2026-03-11T12:00:00+09:00"
+        }
+      }
+    }
+  }
+}
+```
+
+용도:
+
+- cutover 시 실제 block device 경로 추적
+- libvirt XML 생성 시 mapped path 우선 사용
+- status / 장애 분석 시 현재 매핑 상태 확인
+
+---
+
+## resume 동작
+
+- `--resume` 옵션은 manifest 기반으로 미완료 단계를 재개합니다.
+- 완료된 단계는 다시 실행하지 않습니다.

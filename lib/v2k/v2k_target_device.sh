@@ -18,7 +18,7 @@
 # Target device preparation for VMware->KVM pipeline
 # - file-qcow2 : qemu-nbd attach -> /dev/nbdX
 # - file-raw   : qemu-nbd attach -> /dev/nbdX (engine unification)
-# - rbd-raw    : qemu-nbd attach (rbd:pool/image) -> /dev/nbdX
+# - rbd-raw    : host-side rbd map -> /dev/rbd/<pool>/<image>
 # - block-dev  : direct device (/dev/sdf etc), strict safety checks
 #
 
@@ -115,10 +115,20 @@ v2k_qemu_nbd_connect() {
   rm -f "$err" || true
   udevadm settle >/dev/null 2>&1 || true
 
-  blockdev --getsize64 "$dev" >/dev/null 2>&1 || {
-    v2k_qemu_nbd_disconnect "$dev"
-    v2k_die "qemu-nbd attach succeeded but blockdev size read failed: $dev (uri=$uri)"
-  }
+  local size_bytes check_tries=0 check_max=30
+  while true; do
+    size_bytes="$(blockdev --getsize64 "$dev" 2>/dev/null || echo 0)"
+    if [[ "${size_bytes}" =~ ^[0-9]+$ && "${size_bytes}" -gt 0 ]]; then
+      break
+    fi
+    check_tries=$((check_tries+1))
+    if [[ "${check_tries}" -ge "${check_max}" ]]; then
+      v2k_qemu_nbd_disconnect "$dev"
+      v2k_die "qemu-nbd attach succeeded but block device size is still zero: $dev (uri=$uri)"
+    fi
+    udevadm settle >/dev/null 2>&1 || true
+    sleep 0.2
+  done
 }
 
 # ---------- safety checks for direct block device ----------
@@ -127,54 +137,54 @@ v2k_assert_block_device_safe() {
 
   [[ -b "$dev" ]] || v2k_die "target block device not found: $dev"
 
-  # 0) ë°˜ë“œ??'whole disk'ë§??ˆìš© (partition/dm/loop ??ê±°ë?)
+  # 0) Require a whole-disk target only; reject partitions, dm, and loop devices.
   local dtype
   dtype="$(lsblk -dn -o TYPE "$dev" 2>/dev/null || true)"
   if [[ "$dtype" != "disk" ]]; then
     v2k_die "target must be a whole disk device (TYPE=disk). got TYPE=${dtype} dev=${dev}"
   fi
 
-  # 1) ë§ˆìš´???¬ë? ì²´í¬ (?”ë°”?´ìŠ¤ ?ì²´ ?ëŠ” ?Œí‹°??
+  # 1) Refuse a target device that is currently mounted.
   if findmnt -rn -S "$dev" >/dev/null 2>&1; then
     v2k_die "target device is mounted: $dev"
   fi
 
-  # 2) lsblkë¡??ì‹ ?Œí‹°??ë§ˆìš´?¸í¬?¸íŠ¸ ?•ì¸
+  # 2) Inspect child partitions and mountpoints via lsblk.
   local out
   out="$(lsblk -nr -o NAME,TYPE,MOUNTPOINT "$dev" 2>/dev/null || true)"
 
-  # mountpointê°€ ?˜ë‚˜?¼ë„ ?ˆìœ¼ë©??¤íŒ¨
+  # If any mountpoint exists on the device tree, fail.
   if echo "$out" | awk '$3 != "" { exit 0 } END { exit 1 }'; then
     v2k_die "target device or its partitions are mounted: $dev"
   fi
 
-  # 3) ?Œí‹°??ì¡´ìž¬ ??ì°¨ë‹¨ (?µì§¸ ?”ë°”?´ìŠ¤ë§??ˆìš©)
+  # 3) Reject devices that already contain partitions for safety.
   if lsblk -nr -o NAME "$dev" | tail -n +2 | grep -q .; then
     v2k_die "target device has partitions; refuse for safety: $dev (wipe/replace disk required)"
   fi
 
-  # 4) holders(?ìœ„ dm/raid ?±ì´ ?¡ê³  ?ˆëŠ”ì§€) ì²´í¬
+  # 4) Reject devices with holders such as dm, mdraid, or similar stacks.
   local base
   base="$(basename "$dev")"
   if [[ -d "/sys/class/block/${base}/holders" ]] && find "/sys/class/block/${base}/holders" -mindepth 1 -maxdepth 1 | read -r _; then
     v2k_die "target device has holders (in use by dm/raid/etc): $dev"
   fi
 
-  # 5) swap ?¬ìš© ì¤‘ì´ë©??¤íŒ¨
+  # 5) Reject devices currently used as swap.
   if command -v swapon >/dev/null 2>&1; then
     if swapon --noheadings --raw --output=NAME 2>/dev/null | awk '{print $1}' | grep -qx "$dev"; then
       v2k_die "target device is used as swap: $dev"
     fi
   fi
 
-  # 6) mdraid ë©¤ë²„ ?œê·¸?ˆì²˜ ?ì?
+  # 6) Reject devices that look like mdraid members.
   if command -v mdadm >/dev/null 2>&1; then
     if mdadm --examine "$dev" >/dev/null 2>&1; then
       v2k_die "target device looks like mdraid member: $dev"
     fi
   fi
 
-  # 7) LVM PV ?¬ë?
+  # 7) Reject devices already registered as LVM physical volumes.
   if command -v pvs >/dev/null 2>&1; then
     if pvs --noheadings -o pv_name 2>/dev/null \
       | awk '{gsub(/^[ \t]+|[ \t]+$/,""); print}' \
@@ -183,8 +193,8 @@ v2k_assert_block_device_safe() {
     fi
   fi
 
-  # 8) blkid ?œê·¸?ˆì²˜ê°€ ?ˆìœ¼ë©?ê¸°ë³¸ ì°¨ë‹¨ (FS/RAID/LUKS ??
-  #    ?? --force-block-device ?¬ìš© ??=V2K_FORCE_BLOCK_DEVICE=1) ??ì²´í¬ë§??ˆì™¸ ?ˆìš©
+  # 8) Reject existing blkid signatures such as FS, RAID, or LUKS by default.
+  #    Only the blkid signature check can be bypassed with V2K_FORCE_BLOCK_DEVICE=1.
   local force="${V2K_FORCE_BLOCK_DEVICE:-0}"
 
   if command -v blkid >/dev/null 2>&1; then
@@ -197,7 +207,7 @@ v2k_assert_block_device_safe() {
     fi
   fi
 
-  # 9) ?„ë¡œ?¸ìŠ¤ ?ìœ  ?ì? (?´ë ¤?ˆìœ¼ë©?ì°¨ë‹¨)
+  # 9) Reject devices opened by other processes.
   if command -v fuser >/dev/null 2>&1; then
     if fuser "$dev" >/dev/null 2>&1; then
       v2k_die "target device is opened by some process (fuser): $dev"
@@ -210,17 +220,57 @@ v2k_assert_block_device_safe() {
     fi
   fi
 
-  # 10) ìµœì†Œ ?¬ê¸° ì¡°íšŒ ê°€?¥í•´????(?ŒìŠ¤ size ë¹„êµ???¸ì¶œ?ê? ?˜í–‰)
+  # 10) Confirm the target size can be read before use.
   blockdev --getsize64 "$dev" >/dev/null 2>&1 || v2k_die "cannot read size of $dev"
+}
+
+
+v2k_rbd_dev_path() {
+  local rbd_uri="$1"
+  local spec="${rbd_uri#rbd:}"
+  printf '/dev/rbd/%s\n' "${spec}"
+}
+
+v2k_rbd_map() {
+  local rbd_uri="$1"
+  local spec="${rbd_uri#rbd:}"
+  local stable_path map_out mapped_dev
+
+  command -v rbd >/dev/null 2>&1 || v2k_die "rbd CLI not found; cannot map ${rbd_uri}"
+
+  stable_path="$(v2k_rbd_dev_path "${rbd_uri}")"
+  if [[ -b "${stable_path}" ]]; then
+    mapped_dev="$(readlink -f "${stable_path}" 2>/dev/null || true)"
+    [[ -n "${mapped_dev}" && -b "${mapped_dev}" ]] || mapped_dev="${stable_path}"
+    echo "${mapped_dev}"
+    return 0
+  fi
+
+  if ! map_out="$(rbd map "${spec}" 2>&1)"; then
+    v2k_die "rbd map failed: ${spec} :: ${map_out}"
+  fi
+  udevadm settle >/dev/null 2>&1 || true
+
+  mapped_dev="$(printf '%s' "${map_out}" | tail -n1 | tr -d '\r')"
+  [[ -n "${mapped_dev}" && -b "${mapped_dev}" ]] || v2k_die "rbd map completed but mapped device is missing: ${spec} :: ${map_out}"
+  [[ -b "${stable_path}" ]] || v2k_die "rbd map completed but stable path is missing: ${stable_path} :: ${map_out}"
+  echo "${mapped_dev}"
+}
+
+v2k_rbd_unmap() {
+  local dev_path="$1"
+  [[ -n "${dev_path}" ]] || return 0
+  [[ -b "${dev_path}" ]] || return 0
+  rbd unmap "${dev_path}" >/dev/null 2>&1 || true
 }
 
 v2k_rbd_precheck() {
   local rbd_uri="$1"   # rbd:pool/image
   local spec="${rbd_uri#rbd:}"  # pool/image
 
-  # rbd CLIê°€ ?ˆìœ¼ë©?? ì œ ?•ì¸(?†ìœ¼ë©??¤í‚µ)
+  # If the rbd CLI is available, verify the image can be queried.
   if command -v rbd >/dev/null 2>&1; then
-    # ì¡´ìž¬/ê¶Œí•œ/?´ëŸ¬?¤í„° ?‘ê·¼???•ì¸
+    # Validate existence, permissions, and cluster connectivity.
     if ! rbd info "$spec" >/dev/null 2>&1; then
       v2k_die "RBD precheck failed: rbd info ${spec} (check ceph.conf/keyring/permissions or image existence)"
     fi
@@ -233,42 +283,45 @@ v2k_rbd_precheck() {
 v2k_rbd_ensure_image() {
   local rbd_uri="$1" size_bytes="$2"
   local spec="${rbd_uri#rbd:}"  # pool/image
+  local size_mb cur
 
   [[ -n "${size_bytes}" && "${size_bytes}" != "0" ]] || {
     v2k_die "RBD ensure requires --size-bytes (got empty/0) for ${rbd_uri}"
   }
 
-  command -v rbd >/dev/null 2>&1 || return 0  # keep current behavior if rbd CLI absent
+  command -v rbd >/dev/null 2>&1 || return 0
+
+  size_mb="$(( (size_bytes + 1024*1024 - 1) / (1024*1024) ))"
+  [[ "${size_mb}" -gt 0 ]] || size_mb=1
 
   # If not exists -> create
   if ! rbd info "${spec}" >/dev/null 2>&1; then
-    # rbd CLI expects size in bytes with --size (supports suffix too, but bytes is safest)
-    v2k_log "INFO: creating RBD image ${spec} size_bytes=${size_bytes}"
-    rbd create "${spec}" --size "${size_bytes}" >/dev/null
+    v2k_log "INFO: creating RBD image ${spec} size_bytes=${size_bytes} size_mb=${size_mb}"
+    rbd create "${spec}" --size "${size_mb}" >/dev/null \
+      || v2k_die "rbd create failed: ${spec} size_mb=${size_mb}"
     return 0
   fi
 
   # Exists -> ensure size >= requested
-  local cur
   cur="$(rbd info "${spec}" 2>/dev/null | awk -F': ' '/^size /{print $2}' | awk '{print $1}' || true)"
-  # cur is typically bytes; if parsing fails, skip resize
   if [[ -n "${cur}" && "${cur}" =~ ^[0-9]+$ ]]; then
     if [[ "${cur}" -lt "${size_bytes}" ]]; then
-      v2k_log "INFO: resizing RBD image ${spec} from ${cur} to ${size_bytes} bytes"
-      rbd resize "${spec}" --size "${size_bytes}" >/dev/null
+      v2k_log "INFO: resizing RBD image ${spec} from ${cur} to ${size_bytes} bytes size_mb=${size_mb}"
+      rbd resize "${spec}" --size "${size_mb}" >/dev/null \
+        || v2k_die "rbd resize failed: ${spec} size_mb=${size_mb}"
     fi
   fi
 }
 
 # ---------- Public API ----------
-# prepare_target_device --kind <file-qcow2|file-raw|rbd|block-device> --path <...> [--rbd-uri rbd:pool/image] [--nbd-dev /dev/nbdX]
+# prepare_target_device --kind <file-qcow2|file-raw|rbd|rbd-mapped|block-device> --path <...> [--rbd-uri rbd:pool/image] [--nbd-dev /dev/nbdX]
 #
 # stdout: target_blockdev
 # exports:
 #   V2K_TARGET_BLOCKDEV
 #   V2K_TARGET_CLEANUP_CMD (eval-able)
 prepare_target_device() {
-  local kind="" path="" rbd_uri="" format="" nbd_dev="" size_bytes=""
+  local kind="" path="" rbd_uri="" format="" nbd_dev="" size_bytes="" register_cleanup=1
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -278,6 +331,7 @@ prepare_target_device() {
       --format) format="$2"; shift 2 ;; # optional override
       --nbd-dev) nbd_dev="$2"; shift 2 ;;
       --size-bytes) size_bytes="$2"; shift 2 ;; # for rbd create/resize
+      --no-register-cleanup) register_cleanup=0; shift 1 ;;
       *) v2k_die "prepare_target_device: unknown arg: $1" ;;
     esac
   done
@@ -309,7 +363,9 @@ prepare_target_device() {
 
       V2K_TARGET_BLOCKDEV="$dev"
       V2K_TARGET_CLEANUP_CMD="v2k_qemu_nbd_disconnect '$dev'"
-      v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
       ;;
 
     file-raw)
@@ -331,11 +387,13 @@ prepare_target_device() {
 
       V2K_TARGET_BLOCKDEV="$dev"
       V2K_TARGET_CLEANUP_CMD="v2k_qemu_nbd_disconnect '$dev'"
-      v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
       ;;
 
     rbd)
-      # path: rbd:pool/image (ê¶Œìž¥/?œì?). ?¹ì? --rbd-urië¡?rbd:... ?„ì²´ ì§€??ê°€??
+      # Sync path: attach the RBD image through qemu-nbd without host-side rbd map.
       format="${format:-raw}"
       [[ "$format" == "raw" ]] || v2k_die "rbd requires format=raw"
       if [[ -n "${rbd_uri}" ]]; then
@@ -352,11 +410,9 @@ prepare_target_device() {
         dev="${nbd_dev}"
       else
         v2k_lock_nbd
-        dev="$(v2k_nbc_alloc)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
+        dev="$(v2k_nbd_alloc)" || { v2k_unlock_nbd; v2k_die "no free /dev/nbdX"; }
       fi
 
-      # If host can talk to ceph, proactively prepare the image (create/resize).
-      # This aligns with file-qcow2/raw behavior where we prepare targets.
       if command -v rbd >/dev/null 2>&1; then
         v2k_rbd_ensure_image "$rbd_uri" "${size_bytes}"
       else
@@ -369,9 +425,35 @@ prepare_target_device() {
 
       V2K_TARGET_BLOCKDEV="$dev"
       V2K_TARGET_CLEANUP_CMD="v2k_qemu_nbd_disconnect '$dev'"
-      v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
       ;;
 
+    rbd-mapped)
+      # Cutover/bootstrap path: create a host-side rbd map and keep a stable /dev/rbd/<pool>/<image> path.
+      format="${format:-raw}"
+      [[ "$format" == "raw" ]] || v2k_die "rbd-mapped requires format=raw"
+      if [[ -n "${rbd_uri}" ]]; then
+        :
+      elif [[ "${path}" == rbd:* ]]; then
+        rbd_uri="${path}"
+      else
+        rbd_uri="rbd:${path}"
+      fi
+
+      command -v rbd >/dev/null 2>&1 || v2k_die "rbd CLI not found; cannot prepare ${rbd_uri}"
+
+      v2k_rbd_ensure_image "$rbd_uri" "${size_bytes}"
+      V2K_TARGET_BLOCKDEV="$(v2k_rbd_map "$rbd_uri")"
+      blockdev --getsize64 "${V2K_TARGET_BLOCKDEV}" >/dev/null 2>&1 || \
+        v2k_die "cannot read mapped rbd device size: ${V2K_TARGET_BLOCKDEV}"
+
+      V2K_TARGET_CLEANUP_CMD="v2k_rbd_unmap '${V2K_TARGET_BLOCKDEV}'"
+      if [[ "${register_cleanup}" -eq 1 ]]; then
+        v2k_register_cleanup_cmd "${V2K_TARGET_CLEANUP_CMD}"
+      fi
+      ;;
     block-device)
       # direct device like /dev/sdf
       v2k_assert_block_device_safe "$path"

@@ -51,14 +51,14 @@
 
 ## 3. 사전 환경 변수 및 인증 파일 준비
 
-### 3.1 vCenter (GOVC) ?�경 변??
+### 3.1 vCenter (GOVC) 환경 변수
 
 ```bash
 # vCenter API / Snapshot / CBT 관리용
 source examples/v2k/govc.env.example
 ```
 
-?�함 ??��:
+포함 변수:
 
 - `GOVC_URL`
 - `GOVC_USERNAME`
@@ -67,29 +67,29 @@ source examples/v2k/govc.env.example
 
 ---
 
-### 3.2 ESXi (VDDK) ?�증 ?�일 ?�성
+### 3.2 ESXi (VDDK) 인증 파일 생성
 
-VDDK??**ESXi ?�스?�에 직접 ?�속**?�여 ?�스???�이?��? ?�는??
+VDDK는 **ESXi 호스트에 직접 접속**하여 디스크를 읽어오는데 사용한다.
 
 ```bash
 # examples/v2k/vddk.cred
 VDDK_USER="root"
 VDDK_PASSWORD="********"
 
-# (?�택) ?�속 주소 override
-# 지????manifest??.source.vddk.server �?기록??
+# (선택) 접속 주소 override
+# 지정하면 manifest의 .source.vddk.server 에 기록됨
 # VDDK_SERVER="10.10.10.21"
 ```
 
-보안 ?�책:
+보안 정책:
 
-- init ??workdir�?복사
+- init 시 workdir로 복사
 - 권한: `600`
-- manifest?�는 **경로�?기록** (비�?번호 ?�??????
+- manifest에는 **경로만 기록** (비밀번호는 저장하지 않음)
 
 ---
 
-### 3.3 기�? ?�수 ?�경 변??
+### 3.3 기본 필수 환경 변수
 
 ```bash
 export VMNAME="vmA"
@@ -100,20 +100,40 @@ export VDDK_CRED="./examples/v2k/vddk.cred"
 
 ---
 
-## 4. Init ?�계 (Inventory + Manifest ?�성)
+## 4. Init 단계 (Inventory + Manifest 생성)
 
 ```bash
 sudo ablestack_v2k init   --vm "${VMNAME}"   --vcenter "${GOVC_URL}"   --dst "${DST}"   --vddk-cred-file "${VDDK_CRED}"
 ```
 
-Init ?�계?�서 ?�동 ?�행?�는 ?�업:
+Init 단계에서 자동 수행되는 작업:
 
-- VM inventory ?�집
-- ?�행 중인 ESXi host ?�색
-- ESXi management IP ?�동 결정
-- manifest.json ?�성
-- `vddk.cred`�?workdir�??�전?�게 복사
-- `.source.vddk.*`, `.source.esxi_*` ?�드 구성
+- VM inventory 수집
+- 실행 중인 ESXi host 탐색
+- ESXi management IP 자동 결정
+- manifest.json 생성
+- `vddk.cred`를 workdir에 안전하게 복사
+- `.source.vddk.*`, `.source.esxi_*` 필드 구성
+
+### 4.1 RBD 대상 초기화 예시
+
+```bash
+sudo ablestack_v2k init \
+  --vm "${VMNAME}" \
+  --vcenter "${GOVC_URL}" \
+  --dst "${DST}" \
+  --vddk-cred-file "${VDDK_CRED}" \
+  --target-format raw \
+  --target-storage rbd \
+  --target-map-json '{"scsi0:0":"rbd:rbd/'"${VMNAME}"'-disk0"}'
+```
+
+RBD 대상 운영 시:
+
+- 입력 매핑은 `rbd:pool/image` 형식 사용
+- 실제 실행 시 호스트에서 `rbd map` 수행
+- cutover 직전 persistent map을 만들고 `/dev/rbd/<pool>/<image>`를 libvirt에 전달
+- host에는 사전에 `ceph.conf` / keyring 설정이 준비되어 있어야 함
 
 ---
 
@@ -133,34 +153,41 @@ sudo ablestack_v2k --workdir <workdir> snapshot base
 sudo ablestack_v2k --workdir <workdir> sync base --jobs 4
 ```
 
-- Base sync???�체 ?�스???�송
-- 가???�래 걸리므�??�간/?�부???�간?� 권장
+- Base sync는 전체 디스크를 전송
+- 시간이 오래 걸리므로 야간/오프피크 시간대 권장
 
 ---
 
-## 7. Incremental Loop (?�무 �?반복)
+## 7. Incremental Loop (업무 중 반복)
 
 ```bash
 sudo ablestack_v2k --workdir <workdir> snapshot incr
 sudo ablestack_v2k --workdir <workdir> sync incr --jobs 4
 ```
 
-컷오�??�단 기�?:
+컷오버 판단 기준:
 
-- incr 변경량??충분??감소
-- 마�?�?incr sync ?�간???�용 범위 ?�내
+- incr 변경량이 충분히 감소
+- 마지막 incr sync 시간이 허용 범위 이내
 
 ---
 
 ## 8. Cutover (Shutdown + Final Sync)
 
-1) VMware VM 종료 (?�영???�인)
+1. VMware VM 종료 (운영자 확인)
 
-2) Cutover ?�행
+2. Cutover 실행
 
 ```bash
 sudo ablestack_v2k --workdir <workdir> cutover --define-only --start
 ```
+
+RBD cutover 시 추가 확인:
+
+- final sync 이후 cutover 직전에 persistent `rbd map` 생성
+- 생성 경로는 `manifest.runtime.rbd.mapped[*].dev_path`에 기록
+- libvirt XML은 `<disk type='block'>`와 `/dev/rbd/<pool>/<image>`를 사용
+- VM 기동 이후 활성 RBD map은 자동 unmap하지 않음
 
 ---
 
@@ -180,20 +207,26 @@ sudo ablestack_v2k --workdir <workdir> cleanup --keep-workdir
 
 ---
 
-## 11. ?�러블슈??(VDDK 중심)
+## 11. 트러블슈팅 (VDDK 중심)
 
-### VDDK ?�증 ?�패
+### VDDK 인증 실패
 
-- `vddk.cred`??`VDDK_USER / VDDK_PASSWORD` ?�인
-- ESXi Lockdown Mode ?��? ?�인
-- `.source.vddk.server` ?�선 ?�용 ?��? ?�인
+- `vddk.cred`의 `VDDK_USER / VDDK_PASSWORD` 확인
+- ESXi Lockdown Mode 여부 확인
+- `.source.vddk.server` 우선 사용 여부 확인
 - fallback: `.source.esxi_host`
 
-### govc ?�류
+### govc 오류
 
-- `GOVC_*` ?�경 변???�인
+- `GOVC_*` 환경 변수 확인
 
-### ?�능 ?�슈
+### 성능 이슈
 
 - `--jobs` 조정
-- ?�트?�크 병목 ?�인
+- 네트워크 병목 확인
+
+### RBD 관련 확인 사항
+
+- `rbd map <pool>/<image>`가 호스트에서 정상 동작하는지 확인
+- `/dev/rbd/<pool>/<image>` 경로가 생성되는지 확인
+- cutover 전후 `manifest.runtime.rbd.mapped` 값 확인
