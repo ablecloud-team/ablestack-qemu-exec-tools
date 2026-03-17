@@ -572,14 +572,11 @@ v2k_fleet_calculate_detailed_status() {
     if [[ "${is_base_done}" == "true" || "${force_full_display}" -eq 1 ]]; then
       vm_current_phys=${vm_total_phys}
     else
-      local target_p b block_s
-      while IFS= read -r target_p; do
-        if [[ -f "${target_p}" ]]; then
-          b=$(stat -c '%b' "${target_p}" 2>/dev/null || echo 0)
-          block_s=$(stat -c '%B' "${target_p}" 2>/dev/null || echo 512)
-          vm_current_phys=$((vm_current_phys + (b * block_s)))
-        fi
-      done < <(jq -r '.disks[].transfer.target_path' "${manifest}")
+      local did
+      while IFS= read -r did; do
+        [[ -n "${did}" ]] || continue
+        vm_current_phys=$((vm_current_phys + $(v2k_fleet_disk_used_bytes "${manifest}" "${did}") ))
+      done < <(jq -r '.disks[].disk_id // empty' "${manifest}" 2>/dev/null || true)
     fi
   else
     # Delta Mode
@@ -1295,11 +1292,17 @@ v2k_fleet_used_bytes_rbd() {
   local spec="$1" # e.g. rbd:pool/image
   command -v rbd >/dev/null 2>&1 || { echo 0; return 0; }
   local img="${spec#rbd:}"
-  # try json output first
   local used
   used="$(rbd du --format json "${img}" 2>/dev/null | jq -r '
-      .images[0] // {} | (.used_size // .used_bytes // .used // 0)
+      if (.images? | type) == "array" then
+        (.images | map(.used_size // .used_bytes // .used // 0) | add // 0)
+      else
+        (.used_size // .used_bytes // .used // .stats.used_size // 0)
+      end
     ' 2>/dev/null || echo 0)"
+  if [[ ! "${used}" =~ ^[0-9]+$ ]]; then
+    used="$(rbd du "${img}" 2>/dev/null | awk 'NR>1 {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' || echo 0)"
+  fi
   [[ "${used}" =~ ^[0-9]+$ ]] || used=0
   echo "${used}"
 }
