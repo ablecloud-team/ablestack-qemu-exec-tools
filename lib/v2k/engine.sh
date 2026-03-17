@@ -917,13 +917,9 @@ v2k_linux_bootstrap_one() {
           fi
       done
 
-      # 2. Force-remove stale rl-* mappings that commonly appear on Rocky Linux.
-      # While the global lock is held, visible rl-* mappings are treated as stale for this bootstrap session.
-      # Clearing them here prevents name collisions with the guest mappings we are about to activate.
-      for dm_path in /dev/mapper/rl-*; do
-          [[ -e "${dm_path}" ]] || continue
-          dmsetup remove --force "${dm_path}" >/dev/null 2>&1 || true
-      done
+      # 2. Do not sweep global rl-* mappings here; that can impact other concurrent VMs.
+      #    Device-mapper cleanup must stay scoped to holders of the current bootstrap NBD only.
+      : # intentionally no global /dev/mapper/rl-* cleanup
     fi
 
     # [STEP 3] Remove Reservation Lock
@@ -971,7 +967,7 @@ v2k_linux_bootstrap_one() {
       # We use a filter that accepts NBDs so LVM *looks* for them,
       # finds nothing, and updates the cache to "missing".
       # --------------------------------------------------------
-      local refresh_cfg="devices { filter=[ \"a|^/dev/nbd|\", \"r|.*|\" ] }"
+      local refresh_cfg="devices { filter=[ \"a|^/dev/${bn}(p[0-9]+)?$|\", \"r|.*|\" ] }"
       lvm pvscan --config "${refresh_cfg}" --cache >/dev/null 2>&1 || true
       # --------------------------------------------------------
     fi
@@ -1029,16 +1025,37 @@ v2k_linux_bootstrap_one() {
   
   # ------------------------------------------------------------
   # [SAFE PRE-FLIGHT CLEANUP]
-  # Remove zombies and their DM holders.
+  # Only inspect the bootstrap-reserved NBD range to avoid interfering with sync jobs.
   # ------------------------------------------------------------
   v2k_event INFO "linux_bootstrap" "" "preflight_safe_cleanup" "{}"
-  
-  for z_nbd_path in /sys/class/block/nbd*; do
-      # e.g., /sys/class/block/nbd0
-      local z_bn="$(basename "${z_nbd_path}")"
+
+  local bootstrap_range bootstrap_start bootstrap_end
+  bootstrap_range="${V2K_LINUX_BOOTSTRAP_NBD_RANGE:-8-15}"
+  bootstrap_start="${bootstrap_range%-*}"
+  bootstrap_end="${bootstrap_range#*-}"
+  [[ "${bootstrap_start}" =~ ^[0-9]+$ && "${bootstrap_end}" =~ ^[0-9]+$ ]] || { bootstrap_start=8; bootstrap_end=15; }
+
+  local bootstrap_alt=''
+  local bootstrap_i
+  for ((bootstrap_i=bootstrap_start; bootstrap_i<=bootstrap_end; bootstrap_i++)); do
+      [[ -n "${bootstrap_alt}" ]] && bootstrap_alt+="|"
+      bootstrap_alt+="nbd${bootstrap_i}"
+
+      local z_bn="nbd${bootstrap_i}"
+      local z_nbd_path="/sys/class/block/${z_bn}"
       local z_dev="/dev/${z_bn}"
       local z_pid_file="${z_nbd_path}/pid"
-      
+      local z_lock_dir z_lock_owner
+      z_lock_dir="${V2K_NBD_LOCK_ROOT}/${z_bn}.lock.d"
+      if [[ -d "${z_lock_dir}" ]]; then
+          z_lock_owner="$(cat "${z_lock_dir}/pid" 2>/dev/null || true)"
+          if [[ -n "${z_lock_owner}" && "${z_lock_owner}" != "$$" ]]; then
+              v2k_event INFO "linux_bootstrap" "" "preflight_skip_reserved_nbd" "{\"nbd\":\"${z_bn}\",\"owner\":\"${z_lock_owner}\"}"
+              continue
+          fi
+      fi
+      [[ -d "${z_nbd_path}" ]] || continue
+
       # 1. Check if active process exists
       if [[ -f "${z_pid_file}" ]]; then
           local z_pid
@@ -1069,10 +1086,9 @@ v2k_linux_bootstrap_one() {
           qemu-nbd -d "${z_dev}" >/dev/null 2>&1 || true
       fi
   done
-  
-  # 4. Global Cache Refresh (Pre-flight)
-  # Ensure we start with a clean slate regarding NBDs.
-  local pre_refresh_cfg="devices { filter=[ \"a|^/dev/nbd|\", \"r|.*|\" ] }"
+
+  # 4. Bootstrap-range cache refresh only.
+  local pre_refresh_cfg="devices { filter=[ \"a|^/dev/(${bootstrap_alt})(p[0-9]+)?$|\", \"r|.*|\" ] }"
   lvm pvscan --config "${pre_refresh_cfg}" --cache >/dev/null 2>&1 || true
   
   udevadm settle >/dev/null 2>&1 || true
