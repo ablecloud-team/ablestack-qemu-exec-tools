@@ -140,6 +140,8 @@ hangctl_action_handle_confirmed_vm() {
   hangctl_log_event "action" "incident.start" "ok" "${vm}" "${incident_id}" "" \
     "reason=${reason} domstate=${domstate} stuck_sec=${stuck_sec} qmp_status=${qmp_status} policy=${HANGCTL_POLICY} dry_run=${HANGCTL_DRY_RUN}"
 
+  hangctl_storage_guard_vm_volumes "${vm}" "${incident_id}" "${reason}" || true
+
   # Commit 09: pre-action evidence + memory dump + analysis (soft-gated)
   hangctl_collect_evidence_pre_action "${vm}" "${incident_id}" "${reason}" "${domstate}" "${stuck_sec}" "${qmp_status}" || true
 

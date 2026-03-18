@@ -12,10 +12,12 @@ BuildArch:      noarch
 BuildRequires:  systemd-rpm-macros
 Requires:       bash
 Requires:       coreutils
+Requires:       device-mapper
 Requires:       findutils
 Requires:       jq
 Requires:       libvirt-client
 Requires:       systemd
+Requires:       util-linux
 
 # systemd scriptlet ordering/requires must be in preamble (NOT in prep/install script sections)
 %{?systemd_requires}

@@ -101,6 +101,7 @@ hangctl_cmd_run() {
 
   _cmd_out="$(cat "${tmp_out}" 2>/dev/null || true)"
   _cmd_err="$(cat "${tmp_err}" 2>/dev/null || true)"
+  _cmd_rc="${_rc}"
   return "${_rc}"
 }
 

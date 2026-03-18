@@ -47,6 +47,7 @@ _load_libs() {
   [[ -f "${LIBDIR}/hangctl/config.sh"  ]] || _die_load "missing: ${LIBDIR}/hangctl/config.sh"
   [[ -f "${LIBDIR}/hangctl/logging.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/logging.sh"
   [[ -f "${LIBDIR}/hangctl/libvirt_wrap.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/libvirt_wrap.sh"
+  [[ -f "${LIBDIR}/hangctl/storage_guard.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/storage_guard.sh"
   [[ -f "${LIBDIR}/hangctl/state_cache.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/state_cache.sh"
   [[ -f "${LIBDIR}/hangctl/detect.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/detect.sh"
   [[ -f "${LIBDIR}/hangctl/evidence.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/evidence.sh"
@@ -60,6 +61,8 @@ _load_libs() {
   source "${LIBDIR}/hangctl/logging.sh"
   # shellcheck source=/dev/null
   source "${LIBDIR}/hangctl/libvirt_wrap.sh"
+  # shellcheck source=/dev/null
+  source "${LIBDIR}/hangctl/storage_guard.sh"
   # shellcheck source=/dev/null
   source "${LIBDIR}/hangctl/state_cache.sh"
   # shellcheck source=/dev/null
