@@ -215,6 +215,25 @@ else
   echo "skip ftctl default config install: ${FTCTL_DEFAULT_CONF_SRC}"
 fi
 
+FTCTL_CLUSTER_CONF_SRC="etc/ablestack-vm-ftctl-cluster.conf"
+FTCTL_CLUSTER_CONF_DST="/etc/ablestack/ablestack-vm-ftctl-cluster.conf"
+FTCTL_CLUSTER_HOSTS_DST="/etc/ablestack/ftctl-cluster.d/hosts"
+
+if [[ -f "${FTCTL_CLUSTER_CONF_SRC}" ]]; then
+  echo "ftctl cluster config install check: ${FTCTL_CLUSTER_CONF_DST}"
+  sudo mkdir -p "$(dirname "${FTCTL_CLUSTER_CONF_DST}")"
+  sudo mkdir -p "${FTCTL_CLUSTER_HOSTS_DST}"
+  if [[ -f "${FTCTL_CLUSTER_CONF_DST}" ]]; then
+    echo "   existing cluster config kept: ${FTCTL_CLUSTER_CONF_DST}"
+  else
+    sudo cp -a "${FTCTL_CLUSTER_CONF_SRC}" "${FTCTL_CLUSTER_CONF_DST}"
+    sudo chmod 644 "${FTCTL_CLUSTER_CONF_DST}" 2>/dev/null || true
+    echo "   installed: ${FTCTL_CLUSTER_CONF_DST}"
+  fi
+else
+  echo "skip ftctl cluster config install: ${FTCTL_CLUSTER_CONF_SRC}"
+fi
+
 mkdir -p "${LIB_TARGET}/payload"
 if [[ -d "$PAYLOAD_SRC" ]]; then
   # 전체 payload 복사 수행

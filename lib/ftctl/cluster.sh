@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------
+# Copyright 2026 ABLECLOUD
+# ---------------------------------------------------------------------
+
+FTCTL_CLUSTER_NAME=""
+FTCTL_LOCAL_HOST_ID=""
+FTCTL_CLUSTER_HOST_RECORDS=()
+
+ftctl_cluster_reset() {
+  FTCTL_CLUSTER_NAME=""
+  FTCTL_LOCAL_HOST_ID=""
+  FTCTL_CLUSTER_HOST_RECORDS=()
+}
+
+ftctl_cluster__global_path() {
+  echo "${FTCTL_CLUSTER_CONFIG}"
+}
+
+ftctl_cluster__host_path() {
+  local host_id="${1-}"
+  echo "${FTCTL_CLUSTER_HOSTS_DIR}/${host_id}.conf"
+}
+
+ftctl_cluster__validate_id() {
+  local field="${1-}"
+  local value="${2-}"
+  [[ "${value}" =~ ^[A-Za-z0-9_.-]+$ ]] && return 0
+  echo "ERROR: ${field} has invalid value: ${value}" >&2
+  return 2
+}
+
+ftctl_cluster__validate_role() {
+  local role="${1-}"
+  case "${role}" in
+    primary|secondary|observer|generic) return 0 ;;
+    *)
+      echo "ERROR: FTCTL_HOST_ROLE has invalid value: ${role}" >&2
+      return 2
+      ;;
+  esac
+}
+
+ftctl_cluster__validate_addr() {
+  local field="${1-}"
+  local value="${2-}"
+  [[ -n "${value}" ]] || {
+    echo "ERROR: ${field} is required" >&2
+    return 2
+  }
+  if [[ "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    return 0
+  fi
+  if [[ "${value}" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    return 0
+  fi
+  echo "ERROR: ${field} has invalid address value: ${value}" >&2
+  return 2
+}
+
+ftctl_cluster__validate_libvirt_uri() {
+  local value="${1-}"
+  [[ -n "${value}" ]] || {
+    echo "ERROR: FTCTL_HOST_LIBVIRT_URI is required" >&2
+    return 2
+  }
+  [[ "${value}" =~ ^qemu(\+ssh)?:// ]] && return 0
+  echo "ERROR: FTCTL_HOST_LIBVIRT_URI must start with qemu:// or qemu+ssh://" >&2
+  return 2
+}
+
+ftctl_cluster_load() {
+  local file host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+  ftctl_cluster_reset
+
+  if [[ -f "$(ftctl_cluster__global_path)" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$(ftctl_cluster__global_path)"
+    set +a
+  fi
+
+  FTCTL_CLUSTER_NAME="${FTCTL_CLUSTER_NAME:-}"
+  FTCTL_LOCAL_HOST_ID="${FTCTL_LOCAL_HOST_ID:-}"
+
+  shopt -s nullglob
+  for file in "${FTCTL_CLUSTER_HOSTS_DIR}"/*.conf; do
+    host_id=""
+    role=""
+    mgmt_ip=""
+    libvirt_uri=""
+    blockcopy_ip=""
+    xcolo_ctrl=""
+    xcolo_data=""
+    unset FTCTL_HOST_ID FTCTL_HOST_ROLE FTCTL_HOST_MANAGEMENT_IP FTCTL_HOST_LIBVIRT_URI \
+      FTCTL_HOST_BLOCKCOPY_REPLICATION_IP FTCTL_HOST_XCOLO_CONTROL_IP FTCTL_HOST_XCOLO_DATA_IP
+    set -a
+    # shellcheck source=/dev/null
+    source "${file}"
+    set +a
+    host_id="${FTCTL_HOST_ID:-}"
+    role="${FTCTL_HOST_ROLE:-generic}"
+    mgmt_ip="${FTCTL_HOST_MANAGEMENT_IP:-}"
+    libvirt_uri="${FTCTL_HOST_LIBVIRT_URI:-}"
+    blockcopy_ip="${FTCTL_HOST_BLOCKCOPY_REPLICATION_IP:-}"
+    xcolo_ctrl="${FTCTL_HOST_XCOLO_CONTROL_IP:-}"
+    xcolo_data="${FTCTL_HOST_XCOLO_DATA_IP:-}"
+    [[ -n "${host_id}" ]] || continue
+    FTCTL_CLUSTER_HOST_RECORDS+=("${host_id}|${role}|${mgmt_ip}|${libvirt_uri}|${blockcopy_ip}|${xcolo_ctrl}|${xcolo_data}")
+  done
+  shopt -u nullglob
+}
+
+ftctl_cluster_validate_global() {
+  [[ -n "${FTCTL_CLUSTER_NAME}" ]] || {
+    echo "ERROR: FTCTL_CLUSTER_NAME is required" >&2
+    return 2
+  }
+  ftctl_cluster__validate_id "FTCTL_CLUSTER_NAME" "${FTCTL_CLUSTER_NAME}" || return 2
+  [[ -n "${FTCTL_LOCAL_HOST_ID}" ]] || {
+    echo "ERROR: FTCTL_LOCAL_HOST_ID is required" >&2
+    return 2
+  }
+  ftctl_cluster__validate_id "FTCTL_LOCAL_HOST_ID" "${FTCTL_LOCAL_HOST_ID}" || return 2
+}
+
+ftctl_cluster_validate_host_fields() {
+  local host_id="${1-}"
+  local role="${2-}"
+  local mgmt_ip="${3-}"
+  local libvirt_uri="${4-}"
+  local blockcopy_ip="${5-}"
+  local xcolo_ctrl="${6-}"
+  local xcolo_data="${7-}"
+
+  ftctl_cluster__validate_id "FTCTL_HOST_ID" "${host_id}" || return 2
+  ftctl_cluster__validate_role "${role}" || return 2
+  ftctl_cluster__validate_addr "FTCTL_HOST_MANAGEMENT_IP" "${mgmt_ip}" || return 2
+  ftctl_cluster__validate_libvirt_uri "${libvirt_uri}" || return 2
+  ftctl_cluster__validate_addr "FTCTL_HOST_BLOCKCOPY_REPLICATION_IP" "${blockcopy_ip}" || return 2
+  ftctl_cluster__validate_addr "FTCTL_HOST_XCOLO_CONTROL_IP" "${xcolo_ctrl}" || return 2
+  ftctl_cluster__validate_addr "FTCTL_HOST_XCOLO_DATA_IP" "${xcolo_data}" || return 2
+}
+
+ftctl_cluster_write_global() {
+  local cluster_name="${1-}"
+  local local_host_id="${2-}"
+  local path tmp
+
+  ftctl_cluster__validate_id "FTCTL_CLUSTER_NAME" "${cluster_name}" || return 2
+  ftctl_cluster__validate_id "FTCTL_LOCAL_HOST_ID" "${local_host_id}" || return 2
+
+  path="$(ftctl_cluster__global_path)"
+  ftctl_ensure_dir "$(dirname "${path}")" "0755"
+  tmp="$(mktemp -t ftctl.cluster.XXXXXX)"
+  cat > "${tmp}" <<EOF
+FTCTL_CLUSTER_NAME="${cluster_name}"
+FTCTL_LOCAL_HOST_ID="${local_host_id}"
+EOF
+  mv -f "${tmp}" "${path}"
+  chmod 0644 "${path}" 2>/dev/null || true
+
+  FTCTL_CLUSTER_NAME="${cluster_name}"
+  FTCTL_LOCAL_HOST_ID="${local_host_id}"
+  ftctl_log_event "config" "cluster.global.write" "ok" "" "" \
+    "cluster=${cluster_name} local_host=${local_host_id}"
+}
+
+ftctl_cluster_upsert_host() {
+  local host_id="${1-}"
+  local role="${2-}"
+  local mgmt_ip="${3-}"
+  local libvirt_uri="${4-}"
+  local blockcopy_ip="${5-}"
+  local xcolo_ctrl="${6-}"
+  local xcolo_data="${7-}"
+  local path tmp
+
+  ftctl_cluster_validate_host_fields "${host_id}" "${role}" "${mgmt_ip}" "${libvirt_uri}" "${blockcopy_ip}" "${xcolo_ctrl}" "${xcolo_data}" || return 2
+
+  path="$(ftctl_cluster__host_path "${host_id}")"
+  ftctl_ensure_dir "$(dirname "${path}")" "0755"
+  tmp="$(mktemp -t ftctl.cluster.host.XXXXXX)"
+  cat > "${tmp}" <<EOF
+FTCTL_HOST_ID="${host_id}"
+FTCTL_HOST_ROLE="${role}"
+FTCTL_HOST_MANAGEMENT_IP="${mgmt_ip}"
+FTCTL_HOST_LIBVIRT_URI="${libvirt_uri}"
+FTCTL_HOST_BLOCKCOPY_REPLICATION_IP="${blockcopy_ip}"
+FTCTL_HOST_XCOLO_CONTROL_IP="${xcolo_ctrl}"
+FTCTL_HOST_XCOLO_DATA_IP="${xcolo_data}"
+EOF
+  mv -f "${tmp}" "${path}"
+  chmod 0644 "${path}" 2>/dev/null || true
+  ftctl_log_event "config" "cluster.host.upsert" "ok" "" "" \
+    "host_id=${host_id} role=${role} management_ip=${mgmt_ip}"
+}
+
+ftctl_cluster_remove_host() {
+  local host_id="${1-}"
+  local path
+
+  ftctl_cluster__validate_id "FTCTL_HOST_ID" "${host_id}" || return 2
+  path="$(ftctl_cluster__host_path "${host_id}")"
+  if [[ -f "${path}" ]]; then
+    rm -f "${path}"
+    ftctl_log_event "config" "cluster.host.remove" "ok" "" "" "host_id=${host_id}"
+  else
+    ftctl_log_event "config" "cluster.host.remove" "skip" "" "" "host_id=${host_id}"
+  fi
+}
+
+ftctl_cluster_host_list_text() {
+  local record host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+  ftctl_cluster_load
+  for record in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
+    host_id="${record%%|*}"
+    record="${record#*|}"
+    role="${record%%|*}"
+    record="${record#*|}"
+    mgmt_ip="${record%%|*}"
+    record="${record#*|}"
+    libvirt_uri="${record%%|*}"
+    record="${record#*|}"
+    blockcopy_ip="${record%%|*}"
+    record="${record#*|}"
+    xcolo_ctrl="${record%%|*}"
+    xcolo_data="${record##*|}"
+    printf '%s role=%s management_ip=%s libvirt_uri=%s blockcopy_ip=%s xcolo_control_ip=%s xcolo_data_ip=%s\n' \
+      "${host_id}" "${role}" "${mgmt_ip}" "${libvirt_uri}" "${blockcopy_ip}" "${xcolo_ctrl}" "${xcolo_data}"
+  done
+}
+
+ftctl_cluster_host_list_json() {
+  local first="1"
+  local record host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+  ftctl_cluster_load
+  printf '['
+  for record in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
+    host_id="${record%%|*}"
+    record="${record#*|}"
+    role="${record%%|*}"
+    record="${record#*|}"
+    mgmt_ip="${record%%|*}"
+    record="${record#*|}"
+    libvirt_uri="${record%%|*}"
+    record="${record#*|}"
+    blockcopy_ip="${record%%|*}"
+    record="${record#*|}"
+    xcolo_ctrl="${record%%|*}"
+    xcolo_data="${record##*|}"
+    if [[ "${first}" == "1" ]]; then
+      first="0"
+    else
+      printf ','
+    fi
+    printf '{"host_id":"%s","role":"%s","management_ip":"%s","libvirt_uri":"%s","blockcopy_replication_ip":"%s","xcolo_control_ip":"%s","xcolo_data_ip":"%s"}' \
+      "${host_id}" "${role}" "${mgmt_ip}" "${libvirt_uri}" "${blockcopy_ip}" "${xcolo_ctrl}" "${xcolo_data}"
+  done
+  printf ']\n'
+}
+
+ftctl_cluster_show() {
+  local json="${1-0}"
+  ftctl_cluster_load
+  if [[ "${json}" == "1" ]]; then
+    printf '{"cluster_name":"%s","local_host_id":"%s","hosts":' "${FTCTL_CLUSTER_NAME}" "${FTCTL_LOCAL_HOST_ID}"
+    ftctl_cluster_host_list_json
+    printf '}\n'
+  else
+    printf 'cluster=%s local_host=%s hosts_dir=%s\n' \
+      "${FTCTL_CLUSTER_NAME}" "${FTCTL_LOCAL_HOST_ID}" "${FTCTL_CLUSTER_HOSTS_DIR}"
+    ftctl_cluster_host_list_text
+  fi
+}

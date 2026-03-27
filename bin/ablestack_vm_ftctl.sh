@@ -28,6 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CLI_COMMAND=""
+CLI_ACTION=""
 CLI_VM=""
 CLI_MODE=""
 CLI_PEER=""
@@ -37,6 +38,15 @@ CLI_POLICY=""
 CLI_DRY_RUN=""
 CLI_JSON="0"
 CLI_FORCE="0"
+CLI_CLUSTER_NAME=""
+CLI_LOCAL_HOST_ID=""
+CLI_HOST_ID=""
+CLI_ROLE=""
+CLI_MANAGEMENT_IP=""
+CLI_LIBVIRT_URI=""
+CLI_BLOCKCOPY_IP=""
+CLI_XCOLO_CONTROL_IP=""
+CLI_XCOLO_DATA_IP=""
 
 FTCTL_LIB_BASE=""
 
@@ -72,6 +82,7 @@ ftctl_load_libs() {
     state.sh
     profile.sh
     inventory.sh
+    cluster.sh
     blockcopy.sh
     xcolo.sh
     fencing.sh
@@ -98,6 +109,8 @@ ftctl_load_libs() {
   source "${FTCTL_LIB_BASE}/ftctl/profile.sh"
   # shellcheck source=/dev/null
   source "${FTCTL_LIB_BASE}/ftctl/inventory.sh"
+  # shellcheck source=/dev/null
+  source "${FTCTL_LIB_BASE}/ftctl/cluster.sh"
   # shellcheck source=/dev/null
   source "${FTCTL_LIB_BASE}/ftctl/blockcopy.sh"
   # shellcheck source=/dev/null
@@ -127,6 +140,7 @@ Commands:
   resume-protection  Resume reconciliation for a VM
   check              Probe VM/profile/peer reachability
   health             Check local libvirt health only
+  config             Manage cluster/host inventory
 
 Global options:
   -h, --help         Show help
@@ -140,6 +154,25 @@ Global options:
       --dry-run      Do not perform actions
       --json         JSON output where supported
       --force        Acknowledge risky transition commands
+      --cluster-name NAME
+      --local-host-id ID
+      --host-id ID
+      --role ROLE
+      --management-ip ADDR
+      --libvirt-uri URI
+      --blockcopy-ip ADDR
+      --xcolo-control-ip ADDR
+      --xcolo-data-ip ADDR
+
+Config actions:
+  ablestack_vm_ftctl config init-cluster --cluster-name <name> --local-host-id <id>
+  ablestack_vm_ftctl config set-local-host --local-host-id <id>
+  ablestack_vm_ftctl config show [--json]
+  ablestack_vm_ftctl config host-upsert --host-id <id> --role <role> \
+    --management-ip <addr> --libvirt-uri <uri> --blockcopy-ip <addr> \
+    --xcolo-control-ip <addr> --xcolo-data-ip <addr>
+  ablestack_vm_ftctl config host-remove --host-id <id>
+  ablestack_vm_ftctl config host-list [--json]
 EOF
 }
 
@@ -158,13 +191,22 @@ parse_args() {
         print_version
         exit "${EXIT_OK}"
         ;;
-      protect|status|reconcile|failover|failback|pause-protection|resume-protection|check|health)
+      protect|status|reconcile|failover|failback|pause-protection|resume-protection|check|health|config)
         [[ -z "${CLI_COMMAND}" ]] || {
           echo "ERROR: multiple commands specified" >&2
           exit "${EXIT_USAGE}"
         }
         CLI_COMMAND="$1"
         shift
+        ;;
+      init-cluster|set-local-host|show|host-upsert|host-remove|host-list)
+        if [[ "${CLI_COMMAND}" == "config" && -z "${CLI_ACTION}" ]]; then
+          CLI_ACTION="$1"
+          shift
+        else
+          echo "ERROR: unexpected token: $1" >&2
+          exit "${EXIT_USAGE}"
+        fi
         ;;
       --vm)
         CLI_VM="${2-}"
@@ -202,6 +244,42 @@ parse_args() {
         CLI_FORCE="1"
         shift
         ;;
+      --cluster-name)
+        CLI_CLUSTER_NAME="${2-}"
+        shift 2
+        ;;
+      --local-host-id)
+        CLI_LOCAL_HOST_ID="${2-}"
+        shift 2
+        ;;
+      --host-id)
+        CLI_HOST_ID="${2-}"
+        shift 2
+        ;;
+      --role)
+        CLI_ROLE="${2-}"
+        shift 2
+        ;;
+      --management-ip)
+        CLI_MANAGEMENT_IP="${2-}"
+        shift 2
+        ;;
+      --libvirt-uri)
+        CLI_LIBVIRT_URI="${2-}"
+        shift 2
+        ;;
+      --blockcopy-ip)
+        CLI_BLOCKCOPY_IP="${2-}"
+        shift 2
+        ;;
+      --xcolo-control-ip)
+        CLI_XCOLO_CONTROL_IP="${2-}"
+        shift 2
+        ;;
+      --xcolo-data-ip)
+        CLI_XCOLO_DATA_IP="${2-}"
+        shift 2
+        ;;
       *)
         echo "ERROR: unknown argument: $1" >&2
         exit "${EXIT_USAGE}"
@@ -215,6 +293,7 @@ apply_common_config() {
   ftctl_config_load_file "${FTCTL_CONFIG_PATH}"
   ftctl_config_apply_cli "${CLI_CONFIG_PATH}" "${CLI_POLICY}" "${CLI_DRY_RUN}"
   ftctl_config_load_file "${FTCTL_CONFIG_PATH}"
+  ftctl_config_finalize_paths
   ftctl_ensure_runtime_dirs
   ftctl_lock_acquire_or_exit
 }
@@ -235,16 +314,95 @@ require_mode() {
 
 dispatch() {
   case "${CLI_COMMAND}" in
+    config)
+      case "${CLI_ACTION}" in
+        init-cluster)
+          [[ -n "${CLI_CLUSTER_NAME}" && -n "${CLI_LOCAL_HOST_ID}" ]] || {
+            echo "ERROR: config init-cluster requires --cluster-name and --local-host-id" >&2
+            exit "${EXIT_USAGE}"
+          }
+          ftctl_cluster_write_global "${CLI_CLUSTER_NAME}" "${CLI_LOCAL_HOST_ID}"
+          ftctl_cluster_show "${CLI_JSON}"
+          ;;
+        set-local-host)
+          ftctl_cluster_load
+          [[ -n "${FTCTL_CLUSTER_NAME}" ]] || {
+            echo "ERROR: cluster is not initialized. Run: ablestack_vm_ftctl config init-cluster ..." >&2
+            exit "${EXIT_RUNTIME}"
+          }
+          [[ -n "${CLI_LOCAL_HOST_ID}" ]] || {
+            echo "ERROR: config set-local-host requires --local-host-id" >&2
+            exit "${EXIT_USAGE}"
+          }
+          ftctl_cluster_write_global "${FTCTL_CLUSTER_NAME}" "${CLI_LOCAL_HOST_ID}"
+          ftctl_cluster_show "${CLI_JSON}"
+          ;;
+        show)
+          ftctl_cluster_show "${CLI_JSON}"
+          ;;
+        host-upsert)
+          [[ -n "${CLI_HOST_ID}" ]] || {
+            echo "ERROR: config host-upsert requires --host-id" >&2
+            exit "${EXIT_USAGE}"
+          }
+          [[ -n "${CLI_ROLE}" ]] || CLI_ROLE="generic"
+          [[ -n "${CLI_MANAGEMENT_IP}" ]] || {
+            echo "ERROR: config host-upsert requires --management-ip" >&2
+            exit "${EXIT_USAGE}"
+          }
+          [[ -n "${CLI_LIBVIRT_URI}" ]] || {
+            echo "ERROR: config host-upsert requires --libvirt-uri" >&2
+            exit "${EXIT_USAGE}"
+          }
+          [[ -n "${CLI_BLOCKCOPY_IP}" ]] || {
+            echo "ERROR: config host-upsert requires --blockcopy-ip" >&2
+            exit "${EXIT_USAGE}"
+          }
+          [[ -n "${CLI_XCOLO_CONTROL_IP}" ]] || {
+            echo "ERROR: config host-upsert requires --xcolo-control-ip" >&2
+            exit "${EXIT_USAGE}"
+          }
+          [[ -n "${CLI_XCOLO_DATA_IP}" ]] || {
+            echo "ERROR: config host-upsert requires --xcolo-data-ip" >&2
+            exit "${EXIT_USAGE}"
+          }
+          ftctl_cluster_upsert_host "${CLI_HOST_ID}" "${CLI_ROLE}" "${CLI_MANAGEMENT_IP}" \
+            "${CLI_LIBVIRT_URI}" "${CLI_BLOCKCOPY_IP}" "${CLI_XCOLO_CONTROL_IP}" "${CLI_XCOLO_DATA_IP}"
+          ftctl_cluster_show "${CLI_JSON}"
+          ;;
+        host-remove)
+          [[ -n "${CLI_HOST_ID}" ]] || {
+            echo "ERROR: config host-remove requires --host-id" >&2
+            exit "${EXIT_USAGE}"
+          }
+          ftctl_cluster_remove_host "${CLI_HOST_ID}"
+          ftctl_cluster_show "${CLI_JSON}"
+          ;;
+        host-list)
+          if [[ "${CLI_JSON}" == "1" ]]; then
+            ftctl_cluster_host_list_json
+          else
+            ftctl_cluster_host_list_text
+          fi
+          ;;
+        *)
+          echo "ERROR: config requires one of: init-cluster, set-local-host, show, host-upsert, host-remove, host-list" >&2
+          exit "${EXIT_USAGE}"
+          ;;
+      esac
+      ;;
     protect)
       require_vm
       require_mode
       ftctl_profile_load_vm "${CLI_VM}"
       ftctl_profile_apply_cli "${CLI_VM}" "${CLI_MODE}" "${CLI_PEER}" "${CLI_PROFILE}"
+      ftctl_profile_validate "${CLI_VM}"
       ftctl_orchestrator_protect "${CLI_VM}"
       ;;
     status)
       if [[ -n "${CLI_VM}" ]]; then
         ftctl_profile_load_vm "${CLI_VM}"
+        ftctl_profile_validate "${CLI_VM}"
       fi
       ftctl_state_print_status "${CLI_VM}" "${CLI_JSON}"
       ;;
@@ -258,6 +416,7 @@ dispatch() {
         exit "${EXIT_USAGE}"
       }
       ftctl_profile_load_vm "${CLI_VM}"
+      ftctl_profile_validate "${CLI_VM}"
       ftctl_failover_request "${CLI_VM}" "manual"
       ;;
     failback)
@@ -267,21 +426,25 @@ dispatch() {
         exit "${EXIT_USAGE}"
       }
       ftctl_profile_load_vm "${CLI_VM}"
+      ftctl_profile_validate "${CLI_VM}"
       ftctl_failback_request "${CLI_VM}" "manual"
       ;;
     pause-protection)
       require_vm
       ftctl_profile_load_vm "${CLI_VM}"
+      ftctl_profile_validate "${CLI_VM}"
       ftctl_state_pause_vm "${CLI_VM}"
       ;;
     resume-protection)
       require_vm
       ftctl_profile_load_vm "${CLI_VM}"
+      ftctl_profile_validate "${CLI_VM}"
       ftctl_state_resume_vm "${CLI_VM}"
       ;;
     check)
       require_vm
       ftctl_profile_load_vm "${CLI_VM}"
+      ftctl_profile_validate "${CLI_VM}"
       ftctl_orchestrator_check_vm "${CLI_VM}" "${CLI_JSON}"
       ;;
     health)

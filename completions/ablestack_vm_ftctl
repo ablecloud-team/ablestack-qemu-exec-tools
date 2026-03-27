@@ -12,12 +12,16 @@ _ablestack_vm_ftctl()
   local -a commands=(
     protect status reconcile failover failback
     pause-protection resume-protection check health
+    config
   )
 
   local -a global_opts=(
     -h --help -V --version
     --vm --mode --peer --profile --config --policy
     --dry-run --json --force
+    --cluster-name --local-host-id --host-id --role
+    --management-ip --libvirt-uri --blockcopy-ip
+    --xcolo-control-ip --xcolo-data-ip
   )
 
   case "${prev}" in
@@ -29,7 +33,11 @@ _ablestack_vm_ftctl()
       COMPREPLY=( $(compgen -f -- "${cur}") )
       return 0
       ;;
-    --vm|--peer|--profile|--policy)
+    --role)
+      COMPREPLY=( $(compgen -W "primary secondary observer generic" -- "${cur}") )
+      return 0
+      ;;
+    --vm|--peer|--profile|--policy|--cluster-name|--local-host-id|--host-id|--management-ip|--libvirt-uri|--blockcopy-ip|--xcolo-control-ip|--xcolo-data-ip)
       return 0
       ;;
   esac
@@ -38,7 +46,7 @@ _ablestack_vm_ftctl()
   local i=1
   while (( i < cword )); do
     case "${words[i]}" in
-      --vm|--mode|--peer|--profile|--config|--policy)
+      --vm|--mode|--peer|--profile|--config|--policy|--cluster-name|--local-host-id|--host-id|--role|--management-ip|--libvirt-uri|--blockcopy-ip|--xcolo-control-ip|--xcolo-data-ip)
         ((i+=2))
         continue
         ;;
@@ -81,6 +89,9 @@ _ablestack_vm_ftctl()
       ;;
     health)
       COMPREPLY=( $(compgen -W "--config --policy --json" -- "${cur}") )
+      ;;
+    config)
+      COMPREPLY=( $(compgen -W "init-cluster set-local-host show host-upsert host-remove host-list --config --policy --json --cluster-name --local-host-id --host-id --role --management-ip --libvirt-uri --blockcopy-ip --xcolo-control-ip --xcolo-data-ip" -- "${cur}") )
       ;;
     *)
       COMPREPLY=()
