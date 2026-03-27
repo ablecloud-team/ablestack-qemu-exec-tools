@@ -16,9 +16,27 @@ ftctl_failover_request() {
   ftctl_fencing_execute "${vm}" "${reason}" || fence_rc=$?
   case "${fence_rc}" in
     0)
-      ftctl_state_set "${vm}" "last_error=fencing_complete_start_pending"
+      if ! ftctl_standby_activate "${vm}"; then
+        ftctl_state_set "${vm}" \
+          "protection_state=error" \
+          "last_error=standby_activate_failed"
+        ftctl_log_event "failover" "failover.request" "fail" "${vm}" "" \
+          "reason=${reason} failover_count=${count} standby=activate_failed"
+        return 1
+      fi
+      if ! ftctl_verify_standby_boot "${vm}"; then
+        ftctl_state_set "${vm}" \
+          "protection_state=error" \
+          "last_error=standby_verify_failed"
+        ftctl_log_event "failover" "failover.request" "fail" "${vm}" "" \
+          "reason=${reason} failover_count=${count} standby=verify_failed"
+        return 1
+      fi
+      ftctl_state_set "${vm}" \
+        "protection_state=failed_over" \
+        "last_error="
       ftctl_log_event "failover" "failover.request" "ok" "${vm}" "" \
-        "reason=${reason} failover_count=${count} fencing=complete"
+        "reason=${reason} failover_count=${count} fencing=complete standby=running"
       ;;
     3)
       ftctl_state_set "${vm}" "last_error=manual_fencing_required"
@@ -44,9 +62,20 @@ ftctl_failover_request() {
 ftctl_failback_request() {
   local vm="${1-}"
   local reason="${2-manual}"
+  if ! ftctl_verify_failback_ready "${vm}"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "last_error=failback_precheck_failed"
+    return 1
+  fi
   ftctl_state_set "${vm}" \
     "protection_state=failing_back" \
-    "last_error=skeleton_failback_pending"
-  ftctl_log_event "failback" "failback.request" "skip" "${vm}" "" \
-    "reason=${reason}"
+    "last_error=reverse_sync_pending"
+  if ! ftctl_blockcopy_start_reverse_sync "${vm}"; then
+    ftctl_log_event "failback" "failback.request" "fail" "${vm}" "" \
+      "reason=${reason} reverse_sync=failed"
+    return 1
+  fi
+  ftctl_log_event "failback" "failback.request" "ok" "${vm}" "" \
+    "reason=${reason} reverse_sync=started"
 }

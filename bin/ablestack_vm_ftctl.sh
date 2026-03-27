@@ -84,6 +84,7 @@ ftctl_load_libs() {
     inventory.sh
     cluster.sh
     blockcopy.sh
+    standby.sh
     xcolo.sh
     fencing.sh
     failover.sh
@@ -113,6 +114,8 @@ ftctl_load_libs() {
   source "${FTCTL_LIB_BASE}/ftctl/cluster.sh"
   # shellcheck source=/dev/null
   source "${FTCTL_LIB_BASE}/ftctl/blockcopy.sh"
+  # shellcheck source=/dev/null
+  source "${FTCTL_LIB_BASE}/ftctl/standby.sh"
   # shellcheck source=/dev/null
   source "${FTCTL_LIB_BASE}/ftctl/xcolo.sh"
   # shellcheck source=/dev/null
