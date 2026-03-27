@@ -26,6 +26,7 @@ PAYLOAD_SRC="payload"
 LIB_SRC="lib"
 BIN_SRC="bin"
 SYSTEMD_UNIT_DIR="/etc/systemd/system"
+COMPLETIONS_TARGET="/usr/share/bash-completion/completions"
 
 ISO_DEFAULT_DIR="/usr/share/ablestack/tools"   # ISO가 존재해야 하는 기본 디렉터리 (vm_autoinstall에서 ISO_PATH_DEFAULT로 참조) - 설치 시 생성 및 안내
 ISO_DEFAULT_PATH="${ISO_DEFAULT_DIR}/ablestack-qemu-exec-tools.iso"
@@ -87,10 +88,10 @@ fi
 
 if [[ "$INSTALL_MODE" == "HOST" ]]; then
   # ABLESTACK Host: 최소 구성으로 설치
-  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
+  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "ablestack_vm_ftctl.sh" "v2k_test_install.sh")
 else
   # 일반 VM: 자체 구성으로 설치
-  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
+  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "ablestack_vm_ftctl.sh" "v2k_test_install.sh")
 fi
 
 for script in "${BIN_SCRIPTS[@]}"; do
@@ -124,6 +125,19 @@ if [[ -d "$LIB_SRC" ]]; then
   find "$LIB_TARGET" -type f \( -name "*.service" -o -name "*.ps1" \) -exec chmod 644 {} \; 2>/dev/null || true
 else
   echo "⚠️  라이브러리 소스 디렉터리 미존재: $LIB_SRC"
+fi
+
+if [[ -d "completions" ]]; then
+  echo "bash completion install path: ${COMPLETIONS_TARGET}"
+  sudo mkdir -p "${COMPLETIONS_TARGET}"
+  if [[ -f "completions/ablestack_vm_ftctl" ]]; then
+    sudo cp -a "completions/ablestack_vm_ftctl" "${COMPLETIONS_TARGET}/ablestack_vm_ftctl"
+    sudo chmod 644 "${COMPLETIONS_TARGET}/ablestack_vm_ftctl" 2>/dev/null || true
+  fi
+  if [[ -f "completions/ablestack_v2k" ]]; then
+    sudo cp -a "completions/ablestack_v2k" "${COMPLETIONS_TARGET}/ablestack_v2k"
+    sudo chmod 644 "${COMPLETIONS_TARGET}/ablestack_v2k" 2>/dev/null || true
+  fi
 fi
 
 #
@@ -167,6 +181,40 @@ else
 fi
 
 echo "페이로드 설치 경로: ${LIB_TARGET}/payload"
+FTCTL_DEFAULT_CONF_SRC="etc/ablestack-vm-ftctl.conf"
+FTCTL_DEFAULT_CONF_DST="/etc/ablestack/ablestack-vm-ftctl.conf"
+FTCTL_UNIT_SRC_DIR="${LIB_SRC}/ftctl/systemd"
+
+if [[ -d "${FTCTL_UNIT_SRC_DIR}" ]]; then
+  echo "ftctl systemd unit install: ${SYSTEMD_UNIT_DIR}"
+  sudo mkdir -p "${SYSTEMD_UNIT_DIR}"
+  if ls "${FTCTL_UNIT_SRC_DIR}"/*.service >/dev/null 2>&1; then
+    sudo cp -a "${FTCTL_UNIT_SRC_DIR}"/*.service "${SYSTEMD_UNIT_DIR}/"
+    sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.service 2>/dev/null || true
+  fi
+  if ls "${FTCTL_UNIT_SRC_DIR}"/*.timer >/dev/null 2>&1; then
+    sudo cp -a "${FTCTL_UNIT_SRC_DIR}"/*.timer "${SYSTEMD_UNIT_DIR}/"
+    sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.timer 2>/dev/null || true
+  fi
+  sudo systemctl daemon-reload 2>/dev/null || true
+else
+  echo "skip ftctl systemd unit install: ${FTCTL_UNIT_SRC_DIR}"
+fi
+
+if [[ -f "${FTCTL_DEFAULT_CONF_SRC}" ]]; then
+  echo "ftctl default config install check: ${FTCTL_DEFAULT_CONF_DST}"
+  sudo mkdir -p "$(dirname "${FTCTL_DEFAULT_CONF_DST}")"
+  if [[ -f "${FTCTL_DEFAULT_CONF_DST}" ]]; then
+    echo "   existing config kept: ${FTCTL_DEFAULT_CONF_DST}"
+  else
+    sudo cp -a "${FTCTL_DEFAULT_CONF_SRC}" "${FTCTL_DEFAULT_CONF_DST}"
+    sudo chmod 644 "${FTCTL_DEFAULT_CONF_DST}" 2>/dev/null || true
+    echo "   installed: ${FTCTL_DEFAULT_CONF_DST}"
+  fi
+else
+  echo "skip ftctl default config install: ${FTCTL_DEFAULT_CONF_SRC}"
+fi
+
 mkdir -p "${LIB_TARGET}/payload"
 if [[ -d "$PAYLOAD_SRC" ]]; then
   # 전체 payload 복사 수행

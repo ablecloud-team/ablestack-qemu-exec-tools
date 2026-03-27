@@ -57,6 +57,15 @@ install:
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(BIN_DIR)/install_ablestack_qemu_exec_tools; fi
 	install -d $(LIB_TARGET)
 	cp -a lib/* $(LIB_TARGET)/
+	@if [ -f completions/ablestack_v2k ] || [ -f completions/ablestack_vm_ftctl ]; then \
+		install -d $(COMPLETIONS_TARGET); \
+	fi
+	@if [ -f completions/ablestack_v2k ]; then \
+		install -m 0644 completions/ablestack_v2k $(COMPLETIONS_TARGET)/ablestack_v2k; \
+	fi
+	@if [ -f completions/ablestack_vm_ftctl ]; then \
+		install -m 0644 completions/ablestack_vm_ftctl $(COMPLETIONS_TARGET)/ablestack_vm_ftctl; \
+	fi
 	@echo "Installed to $(INSTALL_PREFIX)"
 
 ##### ------------------------------------------------------------

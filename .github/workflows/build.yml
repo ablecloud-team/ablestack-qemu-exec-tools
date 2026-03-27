@@ -10,74 +10,76 @@ permissions:
   contents: write
 
 # NOTE (WinPE ISO)
-# - WinPE ISO는 별도 워크플로우(WinPE Core/Test/Release)에서 생성/관리되는 것이 기본이다.
-# - build.yml에서 "사전 준비된 WinPE ISO"가 리포지터리에 미리 존재하거나
-#   또는 별도 워크플로우의 아티팩트로 준비된 경우에만 통합 ISO를 포함한다.
-# - 별도로 통합 ISO 빌드를 실패해도 패키지 생성하고 "미포함"으로 진행한다.
+# - WinPE ISO???곌랙?х뙴???怨뚯씩???夷??WinPE Core/Test/Release)???????諛댁뎽/??㉱?洹먮맧????롪퍒????リ옇???????
+# - build.yml?????"????繞벿뮻???э쭕?WinPE ISO"?띠럾? ?洹먮뿫竊쀧춯?뼿??⑤틲遊??亦껋꼶梨???브퀡?????삵깴??#   ???裕??곌랙?х뙴???怨뚯씩???夷??⑥щ꺄 ?熬곥굥堉??釉띾콦??繞벿뮻???э쭕??롪퍔?????異????? ISO???????類ｋ펲.
+# - ?곌랙?х뙴袁ｌ뿉????? ISO ????キ?꾨ご????덉넮?????????뺟춯?뼿 ??諛댁뎽???겶?"亦껋꼶梨며뙴????怨쀬Ŧ 嶺뚯쉳?듸쭛??類ｋ펲.
 
 jobs:
   # ======================================================================
-  # 1) RPM BUILD (Rocky 9 + 10 병행)
+  # 1) RPM BUILD (Rocky 9 + 10 ?곌랜理묕쭛?
   # ======================================================================
   build-rpm:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os_version: [9, 10]
     container:
-      image: rockylinux/rockylinux:${{ matrix.os_version }}
+      image: rockylinux/rockylinux:9
       options: --user 0
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install build deps
+      - name: Install build deps (Rocky 9.6 vault)
         run: |
-          set -e
-          # 만약 Rocky 10.1 이후 rpm-sequoia + OpenSSL 조합이 바뀌면
-          # 컨테이너 베이스에 이미 설치된 라이브러리 버전이 맞지 않는 경우가 있어
-          # 그래서 distro-sync로 rpm / openssl 계열의 리포 상태를 맞춘다.
-          dnf -y distro-sync
+          set -euo pipefail
+          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
+          [rocky-vault-9.6-baseos]
+          name=Rocky Linux 9.6 - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
 
-          # 빌드에 필요한 의존성 설치
-          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
+          [rocky-vault-9.6-appstream]
+          name=Rocky Linux 9.6 - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-crb]
+          name=Rocky Linux 9.6 - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
+
+          dnf clean all
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Build RPM
         run: make rpm
 
-      - name: Create RPM repo (with dependencies) for Rocky ${{ matrix.os_version }}
+      - name: Create RPM repo (with dependencies) for Rocky 9.6
         run: |
-          set -e
-          WORKDIR="repo/rpm-rocky${{ matrix.os_version }}"
+          set -euo pipefail
+          WORKDIR="repo/rpm-rocky9.6"
           mkdir -p "$WORKDIR"
-
-          # 본체 RPM 복사
           cp rpmbuild/RPMS/*/*.rpm "$WORKDIR"/
 
           echo "[INFO] Downloading runtime dependencies..."
-          # spec의 Requires를 기반으로 존재하는 모든 것을 모아둠
-          dnf download --resolve --alldeps \
+          dnf --disablerepo="*" --enablerepo="rocky-vault-9.6-*" download --resolve --alldeps \
             --destdir="$WORKDIR" \
             bash jq libvirt-client cloud-init || true
 
           echo "[INFO] Creating repo metadata..."
           createrepo_c "$WORKDIR"
 
-          # 아티팩트 디렉터리 정리
           mkdir -p release/rpm
           mv repo release/rpm/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpm-package-${{ matrix.os_version }}
+          name: rpm-package-9.6
           path: release/rpm/**
-
-  # ======================================================================
-  # 1-A) HANGCTL RPM BUILD (Rocky 9 only)
-  #  - 목표: Rocky9 ABLESTACK Host에서만 설치되도록 spec(%pre 가서 반영
-  #  - build.yml에서는 "빌드/리포 구성/배포"를 담당 (가정은 spec에서 처리)
-  # ======================================================================
   build-hangctl-rpm:
     runs-on: ubuntu-latest
     container:
@@ -88,11 +90,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install build deps (hangctl)
+      - name: Install build deps (hangctl, Rocky 9.6 vault)
         run: |
-          set -e
-          dnf -y distro-sync
-          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c systemd-rpm-macros systemd
+          set -euo pipefail
+          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
+          [rocky-vault-9.6-baseos]
+          name=Rocky Linux 9.6 - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-appstream]
+          name=Rocky Linux 9.6 - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-crb]
+          name=Rocky Linux 9.6 - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
+          dnf clean all
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install make rpm-build tar git dnf-plugins-core createrepo_c systemd-rpm-macros systemd
 
       - name: Build HANGCTL RPM (ablestack_vm_hangctl.spec)
         shell: bash
@@ -102,8 +124,7 @@ jobs:
           SPEC="rpm/ablestack_vm_hangctl.spec"
           test -f "${SPEC}" || (echo "[ERR] Missing spec: ${SPEC}" >&2; exit 2)
 
-          # VERSION / RELEASE를 repo 루트의 VERSION 파일에서 일괄적으로 사용
-          VERSION="$(. ./VERSION; printf "%s" "$VERSION" | tr -d '\r\n[:space:]')"
+          # VERSION / RELEASE??repo ?猷먮쳜???VERSION ???逾?????????깼??⑤챷紐드슖?????          VERSION="$(. ./VERSION; printf "%s" "$VERSION" | tr -d '\r\n[:space:]')"
           RELEASE="$(. ./VERSION; printf "%s" "$RELEASE" | tr -d '\r\n[:space:]')"
           GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
 
@@ -111,9 +132,7 @@ jobs:
 
           mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
-          # tarball 이름이 spec의 Source0 규칙에 맞춰야 함
-          # 기존 패키지와 동일하게 'spec 파일 basename'의 prefix를 사용
-          # (예 ablestack_vm_hangctl-<version>.tar.gz)
+          # tarball ???藥??spec??Source0 ?잙?裕???嶺뚮씮??????          # ?リ옇???????뺟춯?뼿?? ???됰뎄???우벟 'spec ???逾?basename'??prefix??????          # (??ablestack_vm_hangctl-<version>.tar.gz)
           NAME_HANGCTL="ablestack_vm_hangctl"
           TMP_TGZ="$(mktemp /tmp/${NAME_HANGCTL}-${VERSION}.tar.gz.XXXXXX)"
           tar czf "${TMP_TGZ}" \
@@ -143,15 +162,14 @@ jobs:
           echo "[INFO] Built RPM(s):"
           ls -lah build/rpm-hangctl || true
 
-      - name: Create HANGCTL RPM repo (Rocky 9)
+      - name: Create HANGCTL RPM repo (Rocky 9.6)
         shell: bash
         run: |
           set -euo pipefail
-          WORKDIR="repo/hangctl-rpm-rocky9"
+          WORKDIR="repo/hangctl-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
 
-          # hangctl RPM 복사
-          cp -v build/rpm-hangctl/*.rpm "$WORKDIR"/
+          # hangctl RPM ?곌랜踰딀쾮?          cp -v build/rpm-hangctl/*.rpm "$WORKDIR"/
 
           echo "[INFO] Creating repo metadata..."
           createrepo_c "$WORKDIR"
@@ -165,7 +183,7 @@ jobs:
           path: release/hangctl-rpm/**
           
   # ======================================================================
-  # 1-B) V2K RPM BUILD (별도 경로, 기존 빌드 프로세스 손상 금지)
+  # 1-B) V2K RPM BUILD (?곌랙?х뙴??롪퍔?δ빳? ?リ옇???????キ??熬곣뫁夷?筌뤾쑬裕????留??ル??)
   # ======================================================================
   build-v2k-rpm:
     runs-on: ubuntu-latest
@@ -182,10 +200,9 @@ jobs:
           set -euo pipefail
 
           # ======================================================================
-          # Rocky 9.6 vault 고정 (AirGap 집합)
-          # - 기존 rocky.repo의 mirrorlist를 고정 baseurl로 변경
-          # - releasever=9.6만으로는 해결 안됨 (baseurl이 바뀌어야 함)
-          # - 따라서 9.6 vault baseurl을 가진 repo를 "직접" 생성
+          # Rocky 9.6 vault ??μ쪠??(AirGap 嶺뚯쉶理묌뜮?)
+          # - ?リ옇???rocky.repo??mirrorlist????μ쪠??baseurl???곌떠???          # - releasever=9.6嶺뚮씭????뿉?類ｋ츎 ???㏉뜖 ???덉? (baseurl???꾩룆?????????
+          # - ??⑤벡逾??9.6 vault baseurl???띠럾?嶺?repo??"嶺뚯쉳??? ??諛댁뎽
           # ======================================================================
           cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
           [rocky-vault-9.6-baseos]
@@ -210,9 +227,8 @@ jobs:
           dnf clean all
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
 
-          # curl 충돌 회피: curl-minimal vs curl
-          # - 컨테이너 베이스에 curl-minimal이 깔린 경우, 필요 시 allowerasing으로 처리
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
+          # curl ?寃몃쳳????怨뺣룛: curl-minimal vs curl
+          # - ???쳜???????뺢퀣伊????고뱺 curl-minimal??濚밸Ŧ????롪퍔??? ?熬곣뫗????allowerasing??怨쀬Ŧ 嶺뚳퐣瑗??          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
             --allowerasing ca-certificates curl-minimal || true
 
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
@@ -222,10 +238,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 핵심: rocky.repo를 "rewrite"하는 대신
-          # rocky.repo의 mirrorlist를 고정 baseurl로 변경하는 케이스가 있어
-          # mirrorlist를 주석 처리하면 "baseurl 없음"으로 dnf가 즉시 실패한다.
-          # 따라서 9.6 vault baseurl을 가진 repo 파일을 별도로 생성해서 사용한다.
+          # ???堉? rocky.repo??"rewrite"??濡ル츎 ????          # rocky.repo??mirrorlist????μ쪠??baseurl???곌떠??롪퍔??????댟??怨룸츩?띠럾? ???곗꽑
+          # mirrorlist???낅슣?섋땻?嶺뚳퐣瑗???濡?듆 "baseurl ??怨몃쾳"??怨쀬Ŧ dnf?띠럾? 嶺뚯빖留?????덉넮??類ｋ펲.
+          # ??⑤벡逾??9.6 vault baseurl???띠럾?嶺?repo ???逾???곌랙?х뙴袁ｌ뿉???諛댁뎽??怨댄맋 ?????類ｋ펲.
 
           cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
           [rocky-vault-9.6-baseos]
@@ -250,19 +265,19 @@ jobs:
           echo "[INFO] Enabled repos (vault 9.6):"
           grep -nE '^\[|^baseurl=' /etc/yum.repos.d/rocky-vault-9.6.repo
 
-          # vault repo만으로 캐시 생성
+          # vault repo嶺뚮씭????뿉?嶺?흮????諛댁뎽
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
 
-          # EPEL을 build-time only (nbd 패키지 목적) 로기적으로 구성하기 위해
-          # vault repo만으로는 캐시 생성 시 epel-release 패키지를 'dnf install'로 찾을 수 없음(No match).
-          #     그래서 EPEL bootstrap rpm의 URL을 직접 다운로드한다.
-          #     (빌드/릴리즈 계열에서만 임시로 사용하고, 결과 rpm에 ISO에 포함)
+          # EPEL??build-time only (nbd ????뺟춯?뼿 嶺뚮ㅄ維?? ?β돦裕꾤뵳??⑤챷紐드슖???뚮봽????얄뵛 ?熬곥굥??
+          # vault repo嶺뚮씭????뿉?類ｋ츎 嶺?흮????諛댁뎽 ??epel-release ????뺟춯?뼿??'dnf install'??嶺뚢돦堉??????怨몃쾳(No match).
+          #     ?잙갭梨???EPEL bootstrap rpm??URL??嶺뚯쉳??????깅뮧?β돦裕녻キ??類ｋ펲.
+          #     (????キ??源??怨살????ｌ뫒?????ｇ춯??熬곣뫖六삣슖???????겶? ?롪퍒???rpm??ISO??????
           EPEL_RPM_URL="https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
           echo "[INFO] Installing EPEL release RPM: ${EPEL_RPM_URL}"
           curl -fL -o /tmp/epel-release.rpm "${EPEL_RPM_URL}"
           rpm -Uvh --nosignature /tmp/epel-release.rpm
 
-          # EPEL repo id 자동 감지(epel/epel-9/epel-next 케이스 모두 고려)
+          # EPEL repo id ???吏??띠룆흮?(epel/epel-9/epel-next ??댟??怨룸츩 嶺뚮ㅄ維筌???μ쪚??
           EPEL_REPO_ID="$(dnf repolist all 2>/dev/null | awk 'tolower($1) ~ /^epel/ {print $1; exit}')"
           if [[ -z "${EPEL_REPO_ID}" ]]; then
             echo "[ERR] EPEL repo id not found after installing epel-release." >&2
@@ -272,14 +287,13 @@ jobs:
           echo "[INFO] Detected EPEL repo id: ${EPEL_REPO_ID}"
           echo "EPEL_REPO_ID=${EPEL_REPO_ID}" >> "$GITHUB_ENV"
 
-          # vault + epel 캐시 생성(필요한 repo만)
+          # vault + epel 嶺?흮????諛댁뎽(?熬곣뫗???repo嶺?
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*","${EPEL_REPO_ID}" makecache          
 
       - name: Build V2K RPM (separate path)
         run: |
           set -e
-          # NOTE: 기존 make rpm 경로를 분리하여 V2K 용 패키지를 사용해야 함
-          #       (예 make v2k-rpm)
+          # NOTE: ?リ옇???make rpm ?롪퍔?δ빳?꾨ご??釉뚯뫊???琉우뿰 V2K ??????뺟춯?뼿???????怨룻뒍 ??          #       (??make v2k-rpm)
           make v2k-rpm
  
       - name: Verify ablestack_v2k rpm contains bash completion
@@ -297,14 +311,14 @@ jobs:
           WORKDIR="release/v2k/v2k-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
 
-          # V2K 본체 RPM 수집 (프로젝트 출력 경로에 맞춰 필요 시 조정)
+          # V2K ?곌랜梨루뙼?RPM ??瑜곸뗄 (?熬곣뫁夷??釉띾콦 ?怨쀫츊???롪퍔?δ빳??嶺뚮씮????熬곣뫗?????브퀗???
           find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack_v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
 
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
-          # --- 9.6 고정 (중요: 9.7 입력 차단) ---
+          # --- 9.6 ??μ쪠??(繞벿살탳?? 9.7 ???놁졑 嶺뚢뼰維?? ---
           : "${EPEL_REPO_ID:?EPEL_REPO_ID is not set. Configure step must export it to GITHUB_ENV}"
-          # 옵션 문자에 의존하지 말고, 배열로 전달(파싱 정확도)
+          # ???????쒖굣?????琉돠??? 嶺뚮씭횧?? ?꾩룄?ｈ굢?몄뿉??熬곣뫀堉????堉??筌먐쇰꼪??
           DNF_COMMON_OPTS=(
             --releasever=9.6
             --disablerepo=*
@@ -312,11 +326,10 @@ jobs:
             --setopt=install_weak_deps=False
           )
 
-          # ablestack-v2k.spec의 Requires를 동일하게 처리 (8개)
-          # ceph-common: rbd CLI 사용(생성/존재 확인) 목적
-          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
+          # ablestack-v2k.spec??Requires?????됰뎄???우벟 嶺뚳퐣瑗??(8??
+          # ceph-common: rbd CLI ??????諛댁뎽/?브퀡????筌먦끉逾? 嶺뚮ㅄ維??          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
 
-          # baseline 파일(ABLestack 9.6 호스트에서 rpm -qa 기반으로 생성된 커밋)
+          # baseline ???逾?ABLestack 9.6 ?筌뤾쑬裕?筌뤾쑬???rpm -qa ?リ옇?↑??怨쀬Ŧ ??諛댁뎽????ｋ걞??
           BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
           if [[ ! -f "${BASELINE_FILE}" ]]; then
             echo "[ERR] Missing baseline file: ${BASELINE_FILE}" >&2
@@ -326,27 +339,24 @@ jobs:
           fi
 
           echo "[INFO] Sanity check: required pkgs availability (repo view)"
-          # nbd/nbdkit/qemu-img가 repo에서 보이지 않으면 즉시 실패해야 하는 이유: 문제 조기 차단)
+          # nbd/nbdkit/qemu-img?띠럾? repo??????곌랜??醫묒?? ???곷さ嶺?嶺뚯빖留?????덉넮??怨룻뒍 ??濡ル츎 ??怨?: ??쒖굣???브퀗?쀧뵳?嶺뚢뼰維??
           dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available ${REQ_PKGS} >/dev/null
 
-          # Requires 존재하는 것으로 출력 (패키지명만, 중복 제거)
-          # dnf-plugins-core의 repoquery 사용
-          dnf -y "${DNF_COMMON_OPTS[@]}" install dnf-plugins-core >/dev/null
+          # Requires ?브퀡????濡ル츎 ?롪퍒????뿉??怨쀫츊??(????뺟춯?뼿嶺뚮ㅏ援앭퐲? 繞벿살탮????蹂ㅽ깴)
+          # dnf-plugins-core??repoquery ????          dnf -y "${DNF_COMMON_OPTS[@]}" install dnf-plugins-core >/dev/null
           dnf -q "${DNF_COMMON_OPTS[@]}" repoquery \
             --requires --resolve --recursive \
             --qf '%{name}' \
             ${REQ_PKGS} | sort -u > /tmp/v2k_dep_closure.txt
 
-          # (중요) Direct requires와 baseline subtract를 무조건 반드시 해야 함
-          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
+          # (繞벿살탳?? Direct requires?? baseline subtract????쒕샍??롮퀪??꾩룇瑗띈キ????怨룻뒍 ??          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
 
 
-          # baseline에 없는 패키지 제외 (있는 것만 다운로드)
+          # baseline?????⑸츎 ????뺟춯?뼿 ??戮곕뇶 (???덈츎 ?롪퍒?볟퐲????깅뮧?β돦裕녻キ?
           sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
           comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
 
-          # (중요) Direct requires와 baseline subtract를 무조건 반드시 해야 함
-          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
+          # (繞벿살탳?? Direct requires?? baseline subtract????쒕샍??롮퀪??꾩룇瑗띈キ????怨룻뒍 ??          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
 
           # baseline subtract (closure - baseline)
           sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
@@ -360,19 +370,17 @@ jobs:
           head -n 50 /tmp/v2k_to_download_candidate.txt || true
 
           echo "[INFO] Filtering candidate list by repo availability (STRICT)..."
-          # ⚠️ 주의: $(cat ...) 대신 xargs로 처리해야 하는 이유: 파일 내용이 너무 길거나 빈값으로 repo 전체가 깨지는 경우가 있다.
-          # xargs로만 repo에 존재하는 패키지를 필터링함
-          : > /tmp/v2k_to_download_avail.txt
+          # ??ル쵑???낅슣??? $(cat ...) ????xargs??嶺뚳퐣瑗???怨룻뒍 ??濡ル츎 ??怨?: ???逾???怨몃뮔???????ル?뉑뤃?????껇??怨쀬Ŧ repo ?熬곣뫕?ζ뤆?쎛 濚밸?維????롪퍔???泥? ???덈펲.
+          # xargs?β돦裕녶퐲?repo???브퀡????濡ル츎 ????뺟춯?뼿???熬곥굤?꿰춯?삳궞??          : > /tmp/v2k_to_download_avail.txt
           cat /tmp/v2k_to_download_candidate.txt \
             | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
             | sort -u > /tmp/v2k_to_download_avail.txt
 
-          # langpack 관련 방지(완제 제거) - 필요 없으므로 과감히 제외
+          # langpack ??㉱???꾩렮維?(?熬곣뫗????蹂ㅽ깴) - ?熬곣뫗????怨몃さ亦껋깢?????λ닁?????戮곕뇶
           grep -vE '^glibc-all-langpacks$|^glibc-langpack-' /tmp/v2k_to_download_avail.txt \
             | sort -u > /tmp/v2k_to_download.txt
 
-          # missing(보고 있었는데 repo에 없는 것) 로깅
-          comm -23 /tmp/v2k_to_download_candidate.txt /tmp/v2k_to_download_avail.txt > /tmp/v2k_missing_in_repo.txt
+          # missing(?곌랜?????????븐뼔??repo?????⑸츎 ?? ?β돦裕??          comm -23 /tmp/v2k_to_download_candidate.txt /tmp/v2k_to_download_avail.txt > /tmp/v2k_missing_in_repo.txt
           if [[ -s /tmp/v2k_missing_in_repo.txt ]]; then
             echo "[WARN] Missing in enabled repos (skipped):"
             head -n 50 /tmp/v2k_missing_in_repo.txt || true
@@ -382,15 +390,14 @@ jobs:
           echo "[INFO] Final to-download sample (first 50):"
           head -n 50 /tmp/v2k_to_download.txt || true
 
-          # 최종 방어: nbd/nbdkit/qemu-img가 반드시 있어야 함
-          for p in nbd nbdkit qemu-img; do
+          # 嶺뚣끉裕뉏펺??꾩렮維쀥젆? nbd/nbdkit/qemu-img?띠럾? ?꾩룇瑗띈キ?????곗꽑????          for p in nbd nbdkit qemu-img; do
             if ! grep -qx "$p" /tmp/v2k_to_download.txt && ! grep -qx "$p" /tmp/v2k_baseline.txt; then
               echo "[ERR] Required package '$p' is neither in baseline nor in final download list." >&2
               exit 2
             fi
           done
 
-          # download (기본적으로 exclude 걸어주지만 에러에 대비해서 중복 제거하도록 처리함)
+          # download (?リ옇????⑤챷紐드슖?exclude 濾곌쑬梨룟젆湲댄떊??嶺????????????들뜮??繞벿살탮????蹂ㅽ깴??濡レ┣??嶺뚳퐣瑗???
           if [[ -s /tmp/v2k_to_download.txt ]]; then
             xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
           else
@@ -435,17 +442,14 @@ jobs:
           set -e
           sudo apt-get update -y
 
-          # ISO를 위한 로컬 APT 리포 생성 공간
-          mkdir -p repo/pool
+          # ISO???熬곥굥由??β돦裕뉛쭚?APT ?洹먮뿫竊???諛댁뎽 ??ㅻ???          mkdir -p repo/pool
           find build/deb -type f -name "*.deb" -exec cp {} repo/pool/ \;
 
           cd repo/pool
 
           echo "[INFO] Starting dependency collection..."
-          # 한번에 처리할 패키지 이름 기억
-          seen_pkgs=""
-          # 각 .deb의 추가되는 동안 반복
-          new_pkgs=1
+          # ??類ㅼ벐??嶺뚳퐣瑗???????뺟춯?뼿 ???藥??リ옇?ｅ젆?          seen_pkgs=""
+          # ??.deb???怨뺣뼺???濡ル츎 ???덊닱 ?꾩룇瑗??          new_pkgs=1
           while [ "$new_pkgs" -eq 1 ]; do
             new_pkgs=0
             for deb in *.deb; do
@@ -456,7 +460,7 @@ jobs:
               fi
               seen_pkgs="$seen_pkgs $P"
 
-              # Depends 파싱: 콤마 분리, 버전/괄호 제거, 또는|를 공백으로 큰, :any 제거
+              # Depends ???堉? ?袁좊걞壤??釉뚯뫊?? ?뺢퀗?????㏃뫓????蹂ㅽ깴, ???裕?????ㅻ쾳揶??怨쀬Ŧ ?? :any ??蹂ㅽ깴
               DEPS=$(dpkg-deb -f "$deb" Depends | \
                      tr ',' '\n'          | \
                      sed -E 's/\(.*\)//g' | \
@@ -469,7 +473,7 @@ jobs:
 
               for dep in $DEPS; do
                 [ -n "$dep" ] || continue
-                # 이미 pool에 같은 패키지가 다운로드된 경우에는 건너뜀
+                # ???? pool???띠룇?? ????뺟춯?뼿?띠럾? ???깅뮧?β돦裕녻キ???롪퍔?????裕?濾곌쑬????
                 if ls -1 ${dep}_*.deb >/dev/null 2>&1; then
                   continue
                 fi
@@ -486,11 +490,11 @@ jobs:
           echo "[INFO] Total pool count: $(ls -1 *.deb | wc -l)"
 
           cd ../..
-          # 인덱스 생성 (repo 루트에서 실행해야 Filename 경로가 pool/ 로 맞음)
+          # ?筌뤾퍓?????諛댁뎽 (repo ?猷먮쳜?????????덈뺄??怨룻뒍 Filename ?롪퍔?δ빳?귥쾸? pool/ ??嶺뚮씮???
           mkdir -p repo/dists/stable/main/binary-amd64
           ( cd repo && dpkg-scanpackages pool /dev/null | gzip -9c > dists/stable/main/binary-amd64/Packages.gz )
 
-          # 배포판 설정을 정리
+          # ?꾩룄?х뙴?????깆젧???筌먲퐘遊?
           mv repo "deb-ubuntu${{ matrix.os_version }}"
           mkdir -p release/deb
           mv deb-ubuntu${{ matrix.os_version }} release/deb/
@@ -525,7 +529,7 @@ jobs:
           path: windows/msi/out/*
 
   # ======================================================================
-  # 4) RELEASE + ISO CREATION (VirtIO 통합 포함)
+  # 4) RELEASE + ISO CREATION (VirtIO ???? ????
   # ======================================================================
   release:
     needs: [build-rpm, build-hangctl-rpm, build-deb, build-windows, build-v2k-rpm]
@@ -535,9 +539,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # workflow_run에서 기본 브랜치로 checkout하므로
-          # WinPE Release Build가 빌드한 파일 커밋으로 고정
-          ref: ${{ github.event.workflow_run.head_sha }}
+          # workflow_run??????リ옇?????곗뒧?戮ャ럦?濡?Ŧ checkout?????          # WinPE Release Build?띠럾? ????キ?????逾???ｋ걞???怨쀬Ŧ ??μ쪠??          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Resolve tag from workflow_run
         shell: bash
@@ -554,8 +556,7 @@ jobs:
           fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
-      # dist/ 아래에 모든 아티팩트 다운로드
-      - uses: actions/download-artifact@v4
+      # dist/ ?熬곣뫁???嶺뚮ㅄ維獄??熬곥굥堉??釉띾콦 ???깅뮧?β돦裕녻キ?      - uses: actions/download-artifact@v4
         with:
           path: dist
 
@@ -568,8 +569,8 @@ jobs:
           mkdir -p release/winpe
 
           echo "[INFO] Downloading WinPE ISO assets for tag: ${RELEASE_TAG}"
-          # WinPE workflow가 dist/*.iso 와 SHA256SUMS를 릴리즈에 붙여놓았으므로 여기서 가져옴
-          # 파일명이 고정되지 않을 수 있으므로 패턴으로 수집
+          # WinPE workflow?띠럾? dist/*.iso ?? SHA256SUMS???源??怨살???고뱺 ?釉먮듌??癰?由???????????띠럾??筌뤾쑴湲?
+          # ???逾х춯琉욧턂????μ쪠???? ???곷굵 ?????깅さ亦껋깢?????????怨쀬Ŧ ??瑜곸뗄
           gh release download "${RELEASE_TAG}" \
             -p "*winpe*.iso" \
             -p "SHA256SUMS" \
@@ -590,10 +591,10 @@ jobs:
       - name: Collect artifacts into structured dirs
         run: |
           set -e
-          mkdir -p release/rpm release/deb release/msi release/assets/v2k/wheels release/v2k
+          mkdir -p release/rpm release/deb release/msi release/assets/v2k/wheels release/v2k release/completions
 
-          echo "모두 Collecting RPM repos..."
-          for ver in 9 10; do
+          echo "嶺뚮ㅄ維筌?Collecting RPM repos..."
+          for ver in 9.6; do
             SRC_DIR=$(find dist -type d -path "*/rpm-package-${ver}/release/rpm/repo/rpm-rocky${ver}" | head -n 1)
             if [ -d "$SRC_DIR" ]; then
               echo "[INFO] Found $SRC_DIR"
@@ -611,20 +612,28 @@ jobs:
             fi
           done
 
-          echo "모두 Collecting HANGCTL RPM repo (Rocky 9)..."
+          echo "嶺뚮ㅄ維筌?Collecting HANGCTL RPM repo (Rocky 9)..."
           HANGCTL_DIR="$(find dist -type d \( \
-                          -path "*/hangctl-rpm-package/release/hangctl-rpm/repo/hangctl-rpm-rocky9" -o \
-                          -path "*/hangctl-rpm-package/repo/hangctl-rpm-rocky9" \
+                          -path "*/hangctl-rpm-package/release/hangctl-rpm/repo/hangctl-rpm-rocky9.6" -o \
+                          -path "*/hangctl-rpm-package/repo/hangctl-rpm-rocky9.6" \
                         \) | head -n 1 || true)"
           if [[ -n "${HANGCTL_DIR}" && -d "${HANGCTL_DIR}" ]]; then
             echo "[INFO] Found ${HANGCTL_DIR}"
-            mkdir -p release/rpm/hangctl-rpm-rocky9
-            cp -r "${HANGCTL_DIR}/." release/rpm/hangctl-rpm-rocky9/
+            mkdir -p release/rpm/hangctl-rpm-rocky9.6
+            cp -r "${HANGCTL_DIR}/." release/rpm/hangctl-rpm-rocky9.6/
           else
             echo "[WARN] No HANGCTL RPM repo found (hangctl-rpm-package)."
           fi
 
-          echo "모두 Collecting DEB repos..."
+          echo "[INFO] Staging bash completion files..."
+          if [[ -f completions/ablestack_v2k ]]; then
+            cp -f completions/ablestack_v2k release/completions/
+          fi
+          if [[ -f completions/ablestack_vm_ftctl ]]; then
+            cp -f completions/ablestack_vm_ftctl release/completions/
+          fi
+
+          echo "嶺뚮ㅄ維筌?Collecting DEB repos..."
           for ver in 22.04 24.04; do
             SRC_DIR=$(find dist -type d \( \
                         -path "*/deb-package-${ver}/release/deb/deb-ubuntu${ver}" -o \
@@ -639,7 +648,7 @@ jobs:
             fi
           done
 
-          echo "모두 Collecting MSI artifacts..."
+          echo "嶺뚮ㅄ維筌?Collecting MSI artifacts..."
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
 
       - name: Collect V2K RPM repo (Rocky 9.6) into ISO tree
@@ -674,10 +683,8 @@ jobs:
           set -euo pipefail
           python3 -m pip download -d release/assets/v2k/wheels "pyvmomi==8.0.3.0.1"
 
-      # VirtIO Windows Stable ISO 다운로드 "amd64 드라이버 + guest tools(qemu-ga 포함)" 추출
-      # - 중첩 ISO 금지
-      # - DISM/WinPE에서 바로 INF 경로 지정 가능
-      # - 용량 감소(amd64 only)
+      # VirtIO Windows Stable ISO ???깅뮧?β돦裕녻キ?"amd64 ??類ㅻ뎄?????+ guest tools(qemu-ga ????" ?怨뺣뾼??      # - 繞벿살탳??ISO ?ル??
+      # - DISM/WinPE??????꾩룆?餓?INF ?롪퍔?δ빳?嶺뚯솘????띠럾???      # - ??紐꾩럸 ?띠룆흮??amd64 only)
       - name: Download & extract VirtIO (amd64-only + guest tools)
         run: |
           set -e
@@ -685,10 +692,8 @@ jobs:
           curl -fL -o dist/virtio-win.iso \
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 
-          # 1) DISM을 위한 핵심 드라이버 디렉터리를 amd64로 추출
-          #    (VirtIO ISO 버전에 따라 w11/2k22/2k19 등 폴더명이 바뀌므로 amd64 경로로 일괄 처리함)
-          #    7z의 와일드카드 리턴을 활용하여 */amd64/* 패턴으로 추출함
-          7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
+          # 1) DISM???熬곥굥由????堉???類ㅻ뎄???????븐뼚???⑤틲遊??amd64???怨뺣뾼??          #    (VirtIO ISO ?뺢퀗??????⑤벡逾?w11/2k22/2k19 ??????臾뺤춻??곷턄 ?꾩룆??????amd64 ?롪퍔?δ빳?껋뿉?????깼 嶺뚳퐣瑗???
+          #    7z??????怨뺢덧?곸궠?獄??洹먮뿪?????戮곕뮔??琉우뿰 */amd64/* ??????怨쀬Ŧ ?怨뺣뾼???          7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
             "viostor/*/amd64/*" \
             "vioscsi/*/amd64/*" \
             "NetKVM/*/amd64/*" \
@@ -699,12 +704,11 @@ jobs:
             "vioinput/*/amd64/*" \
             "vioser/*/amd64/*" || true
 
-          # 2) Guest tools(qemu-ga 포함): exe/msi를 루트 또는 특정 위치에서 찾아서 포함
-          #    - 가능한 모든 것을 포함(장점 선택 가능)
+          # 2) Guest tools(qemu-ga ????: exe/msi???猷먮쳜?????裕??獄????熬곣뫚??????嶺뚢돦堉싮뇡??????          #    - ?띠럾??繞③뇡?嶺뚮ㅄ維獄??롪퍒?????????????ルㅎ臾??띠럾???
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-guest-tools.exe" || true
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-gt-*.msi" || true
 
-          # 3) release/virtio에 복사 (존재하는 것만)
+          # 3) release/virtio???곌랜踰딀쾮?(?브퀡????濡ル츎 ?롪퍒?볟퐲?
           for d in viostor vioscsi NetKVM Balloon qemupciserial viorng pvpanic vioinput vioser; do
             if [[ -d "dist/virtio-src/${d}" ]]; then
               mkdir -p "release/virtio/${d}"
@@ -714,8 +718,7 @@ jobs:
           if [[ -f "dist/virtio-src/virtio-win-guest-tools.exe" ]]; then
             cp -a "dist/virtio-src/virtio-win-guest-tools.exe" "release/virtio/"
           fi
-          # MSI의 버전으로 파일명이 바뀌므로 glob 복사
-          shopt -s nullglob
+          # MSI???뺢퀗????怨쀬Ŧ ???逾х춯琉욧턂???꾩룆??????glob ?곌랜踰딀쾮?          shopt -s nullglob
           for m in dist/virtio-src/virtio-win-gt-*.msi; do
             cp -a "$m" "release/virtio/"
           done
@@ -732,9 +735,9 @@ jobs:
           set -euo pipefail
           mkdir -p release/winpe
 
-          # 우선순위
-          #  1) 별도 워크플로우의 아티팩트(dist) 에서 winpe*.iso
-          #  2) 리포지터리에 미리 준비된 파일(assets/winpe/*.iso 또는 winpe/*.iso)
+          # ??⑥ろ맖??戮곕쭊
+          #  1) ?곌랙?х뙴???怨뚯씩???夷??⑥щ꺄 ?熬곥굥堉??釉띾콦(dist) ?????winpe*.iso
+          #  2) ?洹먮뿫竊쀧춯?뼿??⑤틲遊??亦껋꼶梨??繞벿뮻???э쭕????逾?assets/winpe/*.iso ???裕?winpe/*.iso)
           WINPE_ISO=""
           WINPE_ISO="$(find dist -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
           if [[ -z "$WINPE_ISO" ]]; then
@@ -757,7 +760,7 @@ jobs:
             echo "         * winpe/*.iso"
           fi
 
-      # Windows 설치 스크립트 생성 (루트: install.ps1/install.bat)
+      # Windows ???노뭵 ???꾩씩?源?????諛댁뎽 (?猷먮쳜?? install.ps1/install.bat)
       - name: Create Windows installer scripts
         shell: bash
         run: |
@@ -816,26 +819,24 @@ jobs:
                   [string]$Message = "ABLESTACK tools installation is complete. The system needs to reboot.",
                   [string]$Title   = "ABLESTACK",
                   [int]   $Options = 0x0,     # 0x0: OK only / 0x4: Yes/No ??
-                  [int]   $TimeoutSeconds = 60  # 사용자 입력 최대 대기 시간 (초)
+                  [int]   $TimeoutSeconds = 60  # ????????놁졑 嶺뚣끉裕? ??????蹂?뜟 (??
               )
 
               $shell = New-Object -ComObject WScript.Shell
 
-              # 두 번째 호출에서만 사용자에게 물어보는 이유
-              # 반환값:
-              #   -1 : 시간 초과됨
-              #    1 : OK
-              #    6 : Yes (0x4 옵션에서)              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
+              # ???뺢퀡????筌뤾쑵?????ｇ춯????????좈뇦???좊닔?됯????????怨?
+              # ?꾩룇瑗??㏃쾸?
+              #   -1 : ??蹂?뜟 ?貫????              #    1 : OK
+              #    6 : Yes (0x4 ?????????              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
 
               if ($result -eq -1 -or $result -eq 1 -or $result -eq 6) {
                   Write-Host "Prompt_Reboot: user accepted or no response within timeout. Rebooting..."
-                  # 시스템을 바로 재부팅 (원래 의도대로)
+                  # ??戮?츩??戮곕굵 ?꾩룆?餓??????(???????濡レ┣????
                   Restart-Computer -Force
-                  # MSI CustomAction에서는 여기서 끝나고, 실제로는 여기까지 실행되지 않음
+                  # MSI CustomAction?????????????硫몃룎?? ???깆젷?β돦裕?????깃꼍??? ???덈뺄??? ???곷쾳
                   #   msiexec /i ... /norestart + REBOOT=ReallySuppress
-                  # 그러고 시스템 재부팅/종료를 별도 관리자 스크립트에서 처리하는 것도 가능하지 않음
-                  # 지금 구조에서는 Restart-Computer 방식이 적합함
-              }
+                  # ?잙갭梨??????戮?츩?????????リ턁筌앸?紐??곌랙?х뙴???㉱?洹먮봿?????꾩씩?源???????嶺뚳퐣瑗???濡ル츎 ?롪퍒?볡뙴??띠럾??繞③뇡?彛? ???곷쾳
+                  # 嶺뚯솘?????뚮벣???????Restart-Computer ?꾩렮維?????⑤갭???              }
               else {
                   Write-Host "Prompt_Reboot: user canceled reboot (result = $result)."
               }
@@ -918,8 +919,7 @@ jobs:
             # Completion message
             if ($global:rebootNeeded) {
               Prompt_Reboot "ABLESTACK tools installation completed. Reboot now?" "ABLESTACK" 0x0 30
-              # 그렇지 않으면 30초만 기다리고 자동으로 진행함
-            } else {
+              # ?잙갭梨?猿볦?? ???곷さ嶺?30?貫?꾢퐲??リ옇??濡㏓뎨??????吏??怨쀬Ŧ 嶺뚯쉳?듸쭛??            } else {
               Show-Info "Installation completed successfully. No reboot is required."
             }
           }
@@ -942,7 +942,7 @@ jobs:
             exit /b 1
           )
           
-          REM --- 설치 차례 ---
+          REM --- ???노뭵 嶺뚢뼰維? ---
           mkdir "C:\ProgramData\AbleStack" 2>nul
           echo ok> "C:\ProgramData\AbleStack\autoinstall.done"
           echo [OK] Installation finished.
@@ -956,8 +956,7 @@ jobs:
           ==================================================
           Contents
             - RPM repos:
-                rpm/rpm-rocky9
-                rpm/rpm-rocky10
+                rpm/rpm-rocky9.6
             - DEB repos:
                 deb/deb-ubuntu22.04
                 deb/deb-ubuntu24.04
@@ -966,6 +965,10 @@ jobs:
                 virtio/ (VirtIO Windows drivers + Guest Tools from stable-virtio)
             - Universal installer:
                 install-linux.sh
+                uninstall-linux.sh
+            - Shell completions:
+                completions/ablestack_v2k
+                completions/ablestack_vm_ftctl
             - Windows installers:
                 install.bat / install.ps1
             - V2K (ABLESTACK Host add-on):
@@ -985,6 +988,7 @@ jobs:
           Linux
             1) mount -o loop ablestack-qemu-exec-tools-<VERSION>.iso /mnt
             2) cd /mnt && sudo ./install-linux.sh
+            3) remove with sudo ./uninstall-linux.sh
           EOF
 
       - name: Create install-linux.sh (V2K add-on for ABLESTACK; keep existing flows)
@@ -1010,7 +1014,17 @@ jobs:
               rocky|rhel|centos|almalinux|fedora)
                   echo "[INFO] Detected RPM-based system ($DISTRO $MAJOR_VERSION)"
                   REPO_FILE=/etc/yum.repos.d/ablestack-qemu-exec-tools.repo
-                  REPO_PATH=$(realpath "$ISO_MNT/rpm/rpm-rocky$MAJOR_VERSION")
+                  REPO_PATH=""
+                  for cand in "$ISO_MNT/rpm/rpm-rocky${VERSION_ID}" "$ISO_MNT/rpm/rpm-rocky${MAJOR_VERSION}"; do
+                      if [[ -d "${cand}" ]]; then
+                          REPO_PATH="$(realpath "${cand}")"
+                          break
+                      fi
+                  done
+                  if [[ -z "${REPO_PATH}" ]]; then
+                      echo "[ERROR] RPM repo not found in ISO for ${DISTRO} ${VERSION_ID}"
+                      exit 1
+                  fi
                   sudo tee "$REPO_FILE" >/dev/null <<EOR
           [ablestack-qemu-exec-tools]
           name=ablestack-qemu-exec-tools
@@ -1024,14 +1038,20 @@ jobs:
                   sudo dnf clean all
 
                   # ======================================================================
-                  # HANGCTL add-on (ABLESTACK Host only, Rocky 9 only)
+                  # HANGCTL add-on (ABLESTACK Host only, Rocky 9.6 preferred)
                   #  - Install ablestack_vm_hangctl from ISO local repo
                   #  - If not ABLESTACK host / not Rocky9 -> skip
                   # ======================================================================
                   if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${MAJOR_VERSION:-}" == "9" ]]; then
                       echo "[INFO] ABLESTACK Host on Rocky 9 detected. Installing HANGCTL add-on..."
 
-                      HANGCTL_REPO_DIR="${ISO_MNT}/rpm/hangctl-rpm-rocky9"
+                      HANGCTL_REPO_DIR=""
+                      for cand in "${ISO_MNT}/rpm/hangctl-rpm-rocky${VERSION_ID}" "${ISO_MNT}/rpm/hangctl-rpm-rocky${MAJOR_VERSION}" "${ISO_MNT}/rpm/hangctl-rpm-rocky9.6"; do
+                          if [[ -d "${cand}" ]]; then
+                              HANGCTL_REPO_DIR="${cand}"
+                              break
+                          fi
+                      done
                       if [[ -d "${HANGCTL_REPO_DIR}" ]]; then
                           HANGCTL_REPO_FILE=/etc/yum.repos.d/ablestack-vm-hangctl.repo
                           sudo tee "${HANGCTL_REPO_FILE}" >/dev/null <<-EOH
@@ -1213,8 +1233,8 @@ jobs:
                           echo "[WARN] pyvmomi wheels dir not found in ISO: ${WHEEL_DIR}"
                       fi
 
-                      # 5) WinPE ISO 배치 (에어갭 환경에서 드라이버 주입/복구용)
-                      # - 통합 ISO에 winpe/*.iso 가 포함된 경우에만 설치
+                      # 5) WinPE ISO ?꾩룄???(????졿뤆????삵렱???????類ㅻ뎄??????낅슣????곌랜踰???
+                      # - ???? ISO??winpe/*.iso ?띠럾? ??????롪퍔?????異????노뭵
                       WINPE_SRC_DIR="${ISO_MNT}/winpe"
                       WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
                       WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
@@ -1251,7 +1271,18 @@ jobs:
                   ;;
           esac
 
-          # --- 설치 차례 ---
+          if [[ -d "${ISO_MNT}/completions" ]]; then
+              echo "[INFO] Installing bash completion files from ISO..."
+              sudo mkdir -p /usr/share/bash-completion/completions
+              if [[ -f "${ISO_MNT}/completions/ablestack_v2k" ]]; then
+                  sudo install -m 0644 "${ISO_MNT}/completions/ablestack_v2k" /usr/share/bash-completion/completions/ablestack_v2k
+              fi
+              if [[ -f "${ISO_MNT}/completions/ablestack_vm_ftctl" ]]; then
+                  sudo install -m 0644 "${ISO_MNT}/completions/ablestack_vm_ftctl" /usr/share/bash-completion/completions/ablestack_vm_ftctl
+              fi
+          fi
+
+          # --- ???노뭵 嶺뚢뼰維? ---
           mkdir -p /var/lib/ablestack
           echo ok > /var/lib/ablestack/autoinstall.done
           echo "[INFO] Installation complete."
@@ -1262,6 +1293,75 @@ jobs:
         run: |
           set -e
           bash -n release/install-linux.sh
+
+      - name: Create uninstall-linux.sh
+        run: |
+          cat <<'EOF' > release/uninstall-linux.sh
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          echo "[INFO] ABLESTACK QEMU Exec Tools Uninstaller"
+
+          if [[ -f /etc/os-release ]]; then
+            . /etc/os-release
+            DISTRO="${ID:-unknown}"
+            MAJOR_VERSION="$(echo "${VERSION_ID:-0}" | cut -d'.' -f1)"
+          else
+            echo "[ERROR] Cannot detect distribution!"
+            exit 1
+          fi
+
+          remove_path_if_exists() {
+            local path="${1-}"
+            [[ -n "${path}" && -e "${path}" ]] || return 0
+            sudo rm -rf "${path}"
+          }
+
+          case "${DISTRO}" in
+            rocky|rhel|centos|almalinux|fedora)
+              echo "[INFO] Detected RPM-based system (${DISTRO} ${VERSION_ID:-unknown})"
+              sudo dnf -y remove ablestack_v2k ablestack_vm_hangctl ablestack-qemu-exec-tools || true
+              sudo dnf clean all || true
+              ;;
+            ubuntu|debian)
+              echo "[INFO] Detected DEB-based system (${DISTRO} ${VERSION_ID:-unknown})"
+              sudo apt-get -y remove ablestack-qemu-exec-tools || true
+              sudo apt-get -y autoremove || true
+              ;;
+            *)
+              echo "[ERROR] Unsupported distribution: ${DISTRO}"
+              exit 1
+              ;;
+          esac
+
+          remove_path_if_exists /etc/profile.d/v2k-vddk.sh
+          remove_path_if_exists /usr/share/ablestack/v2k
+          remove_path_if_exists /usr/share/bash-completion/completions/ablestack_v2k
+          remove_path_if_exists /usr/share/bash-completion/completions/ablestack_vm_ftctl
+
+          if [[ -L /opt/vmware-vix-disklib-distrib ]]; then
+            sudo rm -f /opt/vmware-vix-disklib-distrib
+          fi
+          if [[ -x /usr/local/bin/govc ]]; then
+            sudo rm -f /usr/local/bin/govc
+          fi
+
+          if compgen -G "/opt/VMware-vix-disklib-*" >/dev/null 2>&1; then
+            for d in /opt/VMware-vix-disklib-*; do
+              [[ -e "${d}" ]] || continue
+              sudo rm -rf "${d}"
+            done
+          fi
+
+          sudo rm -f /var/lib/ablestack/autoinstall.done || true
+          echo "[INFO] Uninstall complete."
+          EOF
+          chmod +x release/uninstall-linux.sh
+
+      - name: Sanity check generated uninstall-linux.sh
+        run: |
+          set -e
+          bash -n release/uninstall-linux.sh
 
       - name: Generate release notes (changelog)
         run: |
@@ -1275,10 +1375,10 @@ jobs:
           echo "${DESC}" >> release_notes.md
           echo >> release_notes.md
 
-          # 태그 정보 보강 (직접 몰라도 됨)
+          # ??蹂μ쟽 ?筌먲퐢沅??곌랜???(嶺뚯쉳???嶺뚮ㅎ??????
           git fetch --tags --force || true
 
-          # 직전 태그 찾기 (없으면 최초 릴리즈로 간주)
+          # 嶺뚯쉳?????蹂μ쟽 嶺뚢돦堉먪뵳?(??怨몃さ嶺?嶺뚣끉裕???源??怨살???됱Ŧ ?띠룄?당쳥?
           PREV_TAG="$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)"
 
           if [ -z "$PREV_TAG" ]; then
@@ -1292,24 +1392,115 @@ jobs:
           echo "===== Generated release_notes.md ====="
           cat release_notes.md
 
-      - name: Generate ISO
+      - name: Generate OS-specific ISOs
+        shell: bash
         run: |
+          set -euo pipefail
           VERSION="${RELEASE_TAG}"
-          mkisofs -o ABLESTACK-Tools-${VERSION}.iso \
-            -V "ABLESTACK-Tools" \
-            -r -J release
-          mkdir -p build/iso
-          mv ABLESTACK-Tools-${VERSION}.iso build/iso/
-          ls -lh build/iso
+
+          mkdir -p build/iso/rocky build/iso/ubuntu build/iso/windows
+          rm -rf build/iso-staging
+          mkdir -p build/iso-staging/rocky build/iso-staging/ubuntu build/iso-staging/windows
+
+          cat <<'EOF' > build/iso-staging/rocky/README.txt
+          ABLESTACK QEMU Exec Tools Offline ISO
+          Target OS: Rocky Linux / ABLESTACK Host
+
+          Contents
+            - rpm/rpm-rocky9.6
+            - rpm/hangctl-rpm-rocky9.6
+            - v2k/v2k-rpm-rocky9.6
+            - assets/
+            - winpe/
+            - completions/
+            - install-linux.sh
+            - uninstall-linux.sh
+          EOF
+
+          cat <<'EOF' > build/iso-staging/ubuntu/README.txt
+          ABLESTACK QEMU Exec Tools Offline ISO
+          Target OS: Ubuntu
+
+          Contents
+            - deb/deb-ubuntu22.04
+            - deb/deb-ubuntu24.04
+            - completions/
+            - install-linux.sh
+            - uninstall-linux.sh
+          EOF
+
+          cat <<'EOF' > build/iso-staging/windows/README.txt
+          ABLESTACK QEMU Exec Tools Offline ISO
+          Target OS: Windows
+
+          Contents
+            - msi/
+            - virtio/
+            - install.bat
+            - install.ps1
+          EOF
+
+          mkdir -p build/iso-staging/rocky/rpm build/iso-staging/rocky/v2k build/iso-staging/rocky/completions
+          cp -a release/rpm/rpm-rocky9.6 build/iso-staging/rocky/rpm/
+          if [[ -d release/rpm/hangctl-rpm-rocky9.6 ]]; then
+            cp -a release/rpm/hangctl-rpm-rocky9.6 build/iso-staging/rocky/rpm/
+          fi
+          if [[ -d release/v2k/v2k-rpm-rocky9.6 ]]; then
+            cp -a release/v2k/v2k-rpm-rocky9.6 build/iso-staging/rocky/v2k/
+          fi
+          if [[ -d release/assets ]]; then
+            cp -a release/assets build/iso-staging/rocky/
+          fi
+          if [[ -d release/winpe ]]; then
+            cp -a release/winpe build/iso-staging/rocky/
+          fi
+          if [[ -d release/completions ]]; then
+            cp -a release/completions/. build/iso-staging/rocky/completions/
+          fi
+          cp -a release/install-linux.sh build/iso-staging/rocky/
+          cp -a release/uninstall-linux.sh build/iso-staging/rocky/
+
+          mkdir -p build/iso-staging/ubuntu/deb build/iso-staging/ubuntu/completions
+          cp -a release/deb/. build/iso-staging/ubuntu/deb/
+          if [[ -d release/completions ]]; then
+            cp -a release/completions/. build/iso-staging/ubuntu/completions/
+          fi
+          cp -a release/install-linux.sh build/iso-staging/ubuntu/
+          cp -a release/uninstall-linux.sh build/iso-staging/ubuntu/
+
+          mkdir -p build/iso-staging/windows/msi build/iso-staging/windows/virtio
+          if [[ -d release/msi ]]; then
+            cp -a release/msi/. build/iso-staging/windows/msi/
+          fi
+          if [[ -d release/virtio ]]; then
+            cp -a release/virtio/. build/iso-staging/windows/virtio/
+          fi
+          cp -a release/install.bat build/iso-staging/windows/
+          cp -a release/install.ps1 build/iso-staging/windows/
+
+          mkisofs -o "build/iso/rocky/ABLESTACK-Tools-rocky-${VERSION}.iso" \
+            -V "ABLESTACK-Rocky" \
+            -r -J build/iso-staging/rocky
+
+          mkisofs -o "build/iso/ubuntu/ABLESTACK-Tools-ubuntu-${VERSION}.iso" \
+            -V "ABLESTACK-Ubuntu" \
+            -r -J build/iso-staging/ubuntu
+
+          mkisofs -o "build/iso/windows/ABLESTACK-Tools-windows-${VERSION}.iso" \
+            -V "ABLESTACK-Windows" \
+            -r -J build/iso-staging/windows
+
+          find build/iso -type f -name '*.iso' -ls
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # workflow_run 트리거에서는 tag_name을 명시해야 릴리즈가 제대로 생성됨
-          tag_name: ${{ env.RELEASE_TAG }}
+          # workflow_run ?筌뤾봇遊뷸ㅀ袁㏉ｈ굢??類ｋ츎 tag_name??嶺뚮ㅏ援???怨룻뒍 ?源??怨살??? ???????諛댁뎽??          tag_name: ${{ env.RELEASE_TAG }}
           body_path: release_notes.md
           files: |
-            build/iso/*.iso
-            release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
-            release/rpm/hangctl-rpm-rocky9/*.rpm
+            build/iso/rocky/*.iso
+            build/iso/ubuntu/*.iso
+            build/iso/windows/*.iso
+            release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm
+            release/rpm/hangctl-rpm-rocky9.6/*.rpm
             release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm

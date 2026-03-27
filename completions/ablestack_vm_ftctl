@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2207
+# ---------------------------------------------------------------------
+# Copyright 2026 ABLECLOUD
+# ---------------------------------------------------------------------
+
+_ablestack_vm_ftctl()
+{
+  local cur prev words cword
+  _init_completion -n : || return
+
+  local -a commands=(
+    protect status reconcile failover failback
+    pause-protection resume-protection check health
+  )
+
+  local -a global_opts=(
+    -h --help -V --version
+    --vm --mode --peer --profile --config --policy
+    --dry-run --json --force
+  )
+
+  case "${prev}" in
+    --mode)
+      COMPREPLY=( $(compgen -W "ha dr ft" -- "${cur}") )
+      return 0
+      ;;
+    --config)
+      COMPREPLY=( $(compgen -f -- "${cur}") )
+      return 0
+      ;;
+    --vm|--peer|--profile|--policy)
+      return 0
+      ;;
+  esac
+
+  local cmd=""
+  local i=1
+  while (( i < cword )); do
+    case "${words[i]}" in
+      --vm|--mode|--peer|--profile|--config|--policy)
+        ((i+=2))
+        continue
+        ;;
+      --dry-run|--json|--force|-h|--help|-V|--version)
+        ((i+=1))
+        continue
+        ;;
+      -*)
+        ((i+=1))
+        continue
+        ;;
+      *)
+        cmd="${words[i]}"
+        break
+        ;;
+    esac
+  done
+
+  if [[ -z "${cmd}" ]]; then
+    if [[ "${cur}" == -* ]]; then
+      COMPREPLY=( $(compgen -W "${global_opts[*]}" -- "${cur}") )
+    else
+      COMPREPLY=( $(compgen -W "${commands[*]}" -- "${cur}") )
+    fi
+    return 0
+  fi
+
+  case "${cmd}" in
+    protect)
+      COMPREPLY=( $(compgen -W "--vm --mode --peer --profile --config --policy --dry-run --json" -- "${cur}") )
+      ;;
+    status|reconcile|check)
+      COMPREPLY=( $(compgen -W "--vm --config --policy --dry-run --json" -- "${cur}") )
+      ;;
+    failover|failback)
+      COMPREPLY=( $(compgen -W "--vm --config --policy --json --force" -- "${cur}") )
+      ;;
+    pause-protection|resume-protection)
+      COMPREPLY=( $(compgen -W "--vm --config --policy" -- "${cur}") )
+      ;;
+    health)
+      COMPREPLY=( $(compgen -W "--config --policy --json" -- "${cur}") )
+      ;;
+    *)
+      COMPREPLY=()
+      ;;
+  esac
+}
+
+complete -F _ablestack_vm_ftctl ablestack_vm_ftctl
