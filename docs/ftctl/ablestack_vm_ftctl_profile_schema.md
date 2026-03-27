@@ -60,6 +60,9 @@
     - `peer-virsh-destroy`
     - `ipmi`
     - `redfish`
+- `FTCTL_PROFILE_FENCING_SSH_USER`
+  - 기본값: 글로벌 설정의 `FTCTL_FENCING_SSH_USER`
+  - 예: `root`
 - `FTCTL_PROFILE_TRANSPORT_TOLERANCE_SEC`
   - 기본값: 글로벌 설정의 `FTCTL_TRANSIENT_NET_GRACE_SEC`
   - unsigned integer
@@ -178,3 +181,4 @@ FTCTL_PROFILE_XCOLO_NBD_ENDPOINT="tcp:10.10.20.21:10809"
 - `disk_map=auto`는 Step 2에서 실제 inventory discovery와 연결한다.
 - `network_map=inherit`는 Step 5에서 standby domain network attach와 연결한다.
 - `fencing_policy` 실제 provider 구현은 Step 4에서 진행한다.
+- `manual-block` 정책은 `ablestack_vm_ftctl fence-confirm --vm <vm>`로 수동 확인할 수 있다.

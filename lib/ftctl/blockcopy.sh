@@ -202,3 +202,24 @@ ftctl_blockcopy_rearm() {
   ftctl_log_event "rearm" "blockcopy.rearm" "skip" "${vm}" "" \
     "reason=skeleton rearm_count=${count}"
 }
+
+ftctl_blockcopy_refresh_and_classify() {
+  local vm="${1-}"
+  local rc=0
+  ftctl_blockcopy_refresh_vm_jobs "${vm}" || rc=$?
+  case "${rc}" in
+    0)
+      if [[ "$(ftctl_state_get "${vm}" "transport_state" 2>/dev/null || true)" == "mirroring" ]]; then
+        return 0
+      fi
+      return 11
+      ;;
+    *)
+      ftctl_state_set "${vm}" \
+        "protection_state=degraded" \
+        "transport_state=lost" \
+        "last_error=blockcopy_refresh_failed"
+      return 12
+      ;;
+  esac
+}

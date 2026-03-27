@@ -20,6 +20,24 @@ ftctl_now_iso8601() {
   date +"%Y-%m-%dT%H:%M:%S%z" | sed -E 's/([0-9]{2})([0-9]{2})$/\1:\2/'
 }
 
+ftctl_now_epoch() {
+  date +%s
+}
+
+ftctl_iso_to_epoch() {
+  local iso="${1-}"
+  [[ -n "${iso}" ]] || return 1
+  date -d "${iso}" +%s 2>/dev/null
+}
+
+ftctl_elapsed_since_iso() {
+  local iso="${1-}"
+  local ts now
+  ts="$(ftctl_iso_to_epoch "${iso}")" || return 1
+  now="$(ftctl_now_epoch)"
+  echo $((now - ts))
+}
+
 ftctl_rand_id() {
   if [[ -r /proc/sys/kernel/random/uuid ]]; then
     head -c 8 /proc/sys/kernel/random/uuid

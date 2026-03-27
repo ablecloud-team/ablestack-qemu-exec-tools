@@ -58,6 +58,8 @@ ftctl_state_init_vm() {
     "last_healthy_ts=$(ftctl_now_iso8601)" \
     "last_sync_ts=" \
     "last_rearm_ts=" \
+    "transport_loss_since=" \
+    "last_reconcile_ts=" \
     "last_error="
 }
 
@@ -110,6 +112,15 @@ ftctl_state_resume_vm() {
   local vm="${1-}"
   ftctl_state_set "${vm}" "admin_state=active"
   ftctl_log_event "state" "protection.resume" "ok" "${vm}" "" "admin_state=active"
+}
+
+ftctl_state_get_elapsed_key_sec() {
+  local vm="${1-}"
+  local key="${2-}"
+  local value
+  value="$(ftctl_state_get "${vm}" "${key}" 2>/dev/null || true)"
+  [[ -n "${value}" ]] || return 1
+  ftctl_elapsed_since_iso "${value}"
 }
 
 ftctl_state_emit_json() {

@@ -136,6 +136,8 @@ Commands:
   reconcile          Keep or re-arm replication state
   failover           Start failover workflow
   failback           Start failback workflow
+  fence-confirm      Mark manual fencing as completed
+  fence-clear        Clear fencing state
   pause-protection   Pause reconciliation for a VM
   resume-protection  Resume reconciliation for a VM
   check              Probe VM/profile/peer reachability
@@ -191,7 +193,7 @@ parse_args() {
         print_version
         exit "${EXIT_OK}"
         ;;
-      protect|status|reconcile|failover|failback|pause-protection|resume-protection|check|health|config)
+      protect|status|reconcile|failover|failback|fence-confirm|fence-clear|pause-protection|resume-protection|check|health|config)
         [[ -z "${CLI_COMMAND}" ]] || {
           echo "ERROR: multiple commands specified" >&2
           exit "${EXIT_USAGE}"
@@ -428,6 +430,18 @@ dispatch() {
       ftctl_profile_load_vm "${CLI_VM}"
       ftctl_profile_validate "${CLI_VM}"
       ftctl_failback_request "${CLI_VM}" "manual"
+      ;;
+    fence-confirm)
+      require_vm
+      ftctl_profile_load_vm "${CLI_VM}"
+      ftctl_profile_validate "${CLI_VM}"
+      ftctl_fencing_manual_confirm "${CLI_VM}"
+      ;;
+    fence-clear)
+      require_vm
+      ftctl_profile_load_vm "${CLI_VM}"
+      ftctl_profile_validate "${CLI_VM}"
+      ftctl_fencing_clear "${CLI_VM}"
       ;;
     pause-protection)
       require_vm

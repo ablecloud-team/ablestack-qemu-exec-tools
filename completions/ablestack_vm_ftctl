@@ -10,7 +10,7 @@ _ablestack_vm_ftctl()
   _init_completion -n : || return
 
   local -a commands=(
-    protect status reconcile failover failback
+    protect status reconcile failover failback fence-confirm fence-clear
     pause-protection resume-protection check health
     config
   )
@@ -83,6 +83,9 @@ _ablestack_vm_ftctl()
       ;;
     failover|failback)
       COMPREPLY=( $(compgen -W "--vm --config --policy --json --force" -- "${cur}") )
+      ;;
+    fence-confirm|fence-clear)
+      COMPREPLY=( $(compgen -W "--vm --config --policy" -- "${cur}") )
       ;;
     pause-protection|resume-protection)
       COMPREPLY=( $(compgen -W "--vm --config --policy" -- "${cur}") )

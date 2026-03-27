@@ -260,6 +260,102 @@ ftctl_cluster_host_list_json() {
   printf ']\n'
 }
 
+ftctl_cluster_find_record_by_libvirt_uri() {
+  local uri="${1-}"
+  local out_var="${2}"
+  local record
+  ftctl_cluster_load
+  for record in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
+    if [[ "${record}" == *"|${uri}|"* ]]; then
+      printf -v "${out_var}" '%s' "${record}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ftctl_cluster_find_record_by_host_id() {
+  local host_id="${1-}"
+  local out_var="${2}"
+  local record
+  ftctl_cluster_load
+  for record in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
+    if [[ "${record%%|*}" == "${host_id}" ]]; then
+      printf -v "${out_var}" '%s' "${record}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ftctl_cluster_parse_record() {
+  local record="${1-}"
+  local host_id_var="${2}"
+  local role_var="${3}"
+  local mgmt_ip_var="${4}"
+  local libvirt_uri_var="${5}"
+  local blockcopy_ip_var="${6}"
+  local xcolo_ctrl_var="${7}"
+  local xcolo_data_var="${8}"
+  local host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+
+  host_id="${record%%|*}"
+  record="${record#*|}"
+  role="${record%%|*}"
+  record="${record#*|}"
+  mgmt_ip="${record%%|*}"
+  record="${record#*|}"
+  libvirt_uri="${record%%|*}"
+  record="${record#*|}"
+  blockcopy_ip="${record%%|*}"
+  record="${record#*|}"
+  xcolo_ctrl="${record%%|*}"
+  xcolo_data="${record##*|}"
+
+  printf -v "${host_id_var}" '%s' "${host_id}"
+  printf -v "${role_var}" '%s' "${role}"
+  printf -v "${mgmt_ip_var}" '%s' "${mgmt_ip}"
+  printf -v "${libvirt_uri_var}" '%s' "${libvirt_uri}"
+  printf -v "${blockcopy_ip_var}" '%s' "${blockcopy_ip}"
+  printf -v "${xcolo_ctrl_var}" '%s' "${xcolo_ctrl}"
+  printf -v "${xcolo_data_var}" '%s' "${xcolo_data}"
+}
+
+ftctl_cluster_find_peer_record_for_vm() {
+  local out_var="${1}"
+  local record out_record
+
+  if ftctl_cluster_find_record_by_libvirt_uri "${FTCTL_PROFILE_SECONDARY_URI}" out_record; then
+    printf -v "${out_var}" '%s' "${out_record}"
+    return 0
+  fi
+
+  ftctl_cluster_load
+  for record in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
+    if [[ "${record%%|*}" != "${FTCTL_LOCAL_HOST_ID}" ]]; then
+      printf -v "${out_var}" '%s' "${record}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ftctl_cluster_probe_management_reachability() {
+  local mgmt_ip="${1-}"
+  local timeout_sec="${2-1}"
+  local out err rc
+  [[ -n "${mgmt_ip}" ]] || return 2
+  out=""
+  err=""
+  rc=0
+  if command -v ping >/dev/null 2>&1; then
+    ftctl_cmd_run "${timeout_sec}" out err rc -- ping -c 1 -W "${timeout_sec}" "${mgmt_ip}" || true
+    : "${out}${err}"
+    return "${rc}"
+  fi
+  return 2
+}
+
 ftctl_cluster_show() {
   local json="${1-0}"
   ftctl_cluster_load
