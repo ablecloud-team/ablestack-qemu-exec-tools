@@ -20,6 +20,8 @@ V2K_SPEC = rpm/$(V2K_NAME).spec
 
 HANGCTL_NAME = ablestack_vm_hangctl
 HANGCTL_SPEC = rpm/$(HANGCTL_NAME).spec
+FTCTL_NAME = ablestack_vm_ftctl
+FTCTL_SPEC = rpm/$(FTCTL_NAME).spec
 
 # Read VERSION file
 VERSION := $(shell . ./VERSION; printf "%s" "$$VERSION" | tr -d '\r\n[:space:]')
@@ -43,7 +45,7 @@ DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 DEB_COMPLETIONS_DIR = $(DEB_BUILD_DIR)/usr/share/bash-completion/completions
 
-.PHONY: all install uninstall rpm v2k-rpm hangctl-rpm deb windows clean
+.PHONY: all install uninstall rpm v2k-rpm hangctl-rpm ftctl-rpm deb windows clean
 
 all:
 	@echo "Available targets: install, uninstall, rpm, deb, windows, clean"
@@ -54,6 +56,8 @@ install:
 	install -d $(BIN_DIR)
 	install -m 0755 bin/vm_exec.sh $(BIN_DIR)/vm_exec
 	install -m 0755 bin/agent_policy_fix.sh $(BIN_DIR)/agent_policy_fix
+	@if [ -f bin/ablestack_vm_ftctl.sh ]; then install -m 0755 bin/ablestack_vm_ftctl.sh $(BIN_DIR)/ablestack_vm_ftctl; fi
+	@if [ -f bin/ablestack_vm_ftctl_selftest.sh ]; then install -m 0755 bin/ablestack_vm_ftctl_selftest.sh $(BIN_DIR)/ablestack_vm_ftctl_selftest; fi
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(BIN_DIR)/install_ablestack_qemu_exec_tools; fi
 	install -d $(LIB_TARGET)
 	cp -a lib/* $(LIB_TARGET)/
@@ -193,6 +197,39 @@ hangctl-rpm:
 	cp rpmbuild_hangctl/RPMS/noarch/*.rpm build/rpm-hangctl/ 2>/dev/null || true
 	cp rpmbuild_hangctl/RPMS/*/*.rpm build/rpm-hangctl/ 2>/dev/null || true
 	@echo "HANGCTL RPM package created: build/rpm-hangctl/"
+
+ftctl-rpm:
+	@echo "Building FTCTL RPM (isolated)..."
+	@test -f "$(FTCTL_SPEC)" || (echo "[ERR] Missing spec: $(FTCTL_SPEC)" >&2; exit 2)
+	@test -f "completions/$(FTCTL_NAME)" || (echo "[ERR] Missing completion file: completions/$(FTCTL_NAME)" >&2; exit 2)
+
+	@mkdir -p rpmbuild_ftctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+	@TMP_TGZ="$$(mktemp /tmp/$(FTCTL_NAME)-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,$(FTCTL_NAME)-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./rpmbuild_ftctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild_ftctl/SOURCES/$(FTCTL_NAME)-$(VERSION).tar.gz"
+
+	@cp $(FTCTL_SPEC) rpmbuild_ftctl/SPECS/
+
+	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild_ftctl" \
+	         --define "version $(VERSION)" \
+	         --define "release $(RELEASE)" \
+	         --define "githash $(GIT_HASH)" \
+	         rpmbuild_ftctl/SPECS/$(FTCTL_NAME).spec
+
+	mkdir -p build/rpm-ftctl
+	cp rpmbuild_ftctl/RPMS/noarch/*.rpm build/rpm-ftctl/ 2>/dev/null || true
+	cp rpmbuild_ftctl/RPMS/*/*.rpm build/rpm-ftctl/ 2>/dev/null || true
+	@echo "FTCTL RPM package created: build/rpm-ftctl/"
 
 v2k-rpm:
 	@echo "Building V2K RPM (isolated)..."
