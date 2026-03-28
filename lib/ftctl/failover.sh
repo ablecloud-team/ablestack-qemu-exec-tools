@@ -8,7 +8,9 @@ ftctl_failover_request() {
   local reason="${2-manual}"
   local count
   local fence_rc
+  local mode
   count="$(ftctl_state_increment "${vm}" "failover_count")"
+  mode="$(ftctl_state_get "${vm}" "mode" 2>/dev/null || echo "")"
   ftctl_state_set "${vm}" \
     "protection_state=failing_over" \
     "last_error=skeleton_failover_pending"
@@ -16,6 +18,21 @@ ftctl_failover_request() {
   ftctl_fencing_execute "${vm}" "${reason}" || fence_rc=$?
   case "${fence_rc}" in
     0)
+      if [[ "${mode}" == "ft" ]]; then
+        if ! ftctl_xcolo_failover "${vm}"; then
+          ftctl_state_set "${vm}" \
+            "protection_state=error" \
+            "last_error=xcolo_failover_failed"
+          ftctl_log_event "failover" "failover.request" "fail" "${vm}" "" \
+            "reason=${reason} failover_count=${count} xcolo=failover_failed"
+          return 1
+        fi
+        ftctl_state_set "${vm}" "last_error="
+        ftctl_log_event "failover" "failover.request" "ok" "${vm}" "" \
+          "reason=${reason} failover_count=${count} fencing=complete xcolo=running"
+        return 0
+      fi
+
       if ! ftctl_standby_activate "${vm}"; then
         ftctl_state_set "${vm}" \
           "protection_state=error" \

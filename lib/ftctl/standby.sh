@@ -14,6 +14,17 @@ ftctl_standby_generated_xml_path() {
   printf '%s\n' "${FTCTL_XML_BACKUP_DIR}/$(ftctl_state_vm_key "${vm}")/standby.generated.xml"
 }
 
+ftctl_primary_generated_xml_path() {
+  local vm="${1-}"
+  local primary
+  primary="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
+  if [[ -n "${primary}" ]]; then
+    printf '%s\n' "$(dirname "${primary}")/primary.generated.xml"
+    return 0
+  fi
+  printf '%s\n' "${FTCTL_XML_BACKUP_DIR}/$(ftctl_state_vm_key "${vm}")/primary.generated.xml"
+}
+
 ftctl_standby_blockcopy_records() {
   local vm="${1-}"
   local out_array_name="${2}"
@@ -85,6 +96,62 @@ tree.write(xml_path, encoding="unicode")
 PY
 }
 
+ftctl_xml_apply_qemu_commandline() {
+  local xml_path="${1-}"
+  local args_string="${2-}"
+
+  command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: python3 is required for qemu:commandline XML rewrite" >&2
+    return 2
+  }
+
+  XML_PATH="${xml_path}" QEMU_ARGS="${args_string}" python3 - <<'PY'
+import os
+import xml.etree.ElementTree as ET
+
+xml_path = os.environ["XML_PATH"]
+args_raw = os.environ.get("QEMU_ARGS", "")
+args = [a for a in args_raw.split(";") if a]
+
+if not args:
+    raise SystemExit(0)
+
+qemu_ns = "http://libvirt.org/schemas/domain/qemu/1.0"
+ET.register_namespace("qemu", qemu_ns)
+
+tree = ET.parse(xml_path)
+root = tree.getroot()
+
+qcmd = root.find(f"{{{qemu_ns}}}commandline")
+if qcmd is not None:
+    root.remove(qcmd)
+
+qcmd = ET.Element(f"{{{qemu_ns}}}commandline")
+for arg in args:
+    node = ET.SubElement(qcmd, f"{{{qemu_ns}}}arg")
+    node.set("value", arg)
+root.append(qcmd)
+
+tree.write(xml_path, encoding="unicode")
+PY
+}
+
+ftctl_standby_materialize_primary_xml() {
+  local vm="${1-}"
+  local primary_xml generated
+
+  primary_xml="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
+  [[ -n "${primary_xml}" && -f "${primary_xml}" ]] || return 1
+
+  generated="$(ftctl_primary_generated_xml_path "${vm}")"
+  ftctl_ensure_dir "$(dirname "${generated}")" "0755"
+  cp -f "${primary_xml}" "${generated}"
+  if [[ "${FTCTL_PROFILE_MODE}" == "ft" && -n "${FTCTL_PROFILE_XCOLO_QEMU_ARGS_PRIMARY}" ]]; then
+    ftctl_xml_apply_qemu_commandline "${generated}" "${FTCTL_PROFILE_XCOLO_QEMU_ARGS_PRIMARY}"
+  fi
+  ftctl_state_set "${vm}" "primary_xml_generated=${generated}"
+}
+
 ftctl_standby_materialize_xml() {
   local vm="${1-}"
   local seed out_path
@@ -121,6 +188,10 @@ ftctl_standby_materialize_xml() {
     attr="$(ftctl_standby__source_attr_for_dest "${dest}")"
     ftctl_standby__rewrite_xml "${out_path}" "${target}" "${dest}" "${attr}"
   done
+
+  if [[ "${FTCTL_PROFILE_MODE}" == "ft" && -n "${FTCTL_PROFILE_XCOLO_QEMU_ARGS_SECONDARY}" ]]; then
+    ftctl_xml_apply_qemu_commandline "${out_path}" "${FTCTL_PROFILE_XCOLO_QEMU_ARGS_SECONDARY}"
+  fi
 
   ftctl_state_set "${vm}" \
     "standby_xml_generated=${out_path}" \
