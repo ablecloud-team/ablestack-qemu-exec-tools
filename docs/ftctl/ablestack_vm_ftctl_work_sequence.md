@@ -181,7 +181,21 @@ Completed items:
   - `docs/ftctl/ablestack_vm_ftctl_iso_guide.md`
   - Apache 2.0 header fixes in FTCTL-related sources and supporting scripts
 
-### Step 12. PR preparation
+### Step 12. Real-Environment Integration Testing
+
+- Status: `pending`
+- Goal:
+  - run integrated HA/DR/FT tests on real ABLESTACK/libvirt/QEMU hosts
+  - validate VM image type coverage
+  - validate backend storage type coverage
+  - validate operational runbook against real behavior
+- Expected output:
+  - real-environment test report
+  - pass/fail matrix by image type
+  - pass/fail matrix by storage backend
+  - list of defects / gaps / mitigations
+
+### Step 13. PR preparation
 
 - Status: `pending`
 - Goal:
@@ -194,9 +208,9 @@ Completed items:
 
 ## 5. Next Work
 
-- Next priority: `Step 12. PR preparation`
+- Next priority: `Step 12. Real-Environment Integration Testing`
+- Follow-up after real-environment testing: `Step 13. PR preparation`
 - Follow-up after PR prep: `final review`
-- Follow-up after final review: `PR creation`
 
 ## 6. Update Rule
 
