@@ -230,6 +230,8 @@ ftctl_blockcopy_refresh_vm_jobs() {
       "transport_state=copying" \
       "last_sync_ts=$(ftctl_now_iso8601)"
   fi
+
+  return "${rc_any}"
 }
 
 ftctl_blockcopy_plan_protect() {
@@ -300,7 +302,13 @@ ftctl_blockcopy_plan_protect() {
   done
 
   ftctl_blockcopy_state_write "${vm}" "${records[@]}"
-  ftctl_blockcopy_refresh_vm_jobs "${vm}"
+  if ! ftctl_blockcopy_refresh_vm_jobs "${vm}"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "transport_state=failed" \
+      "last_error=blockcopy_job_query_failed"
+    return 1
+  fi
   ftctl_standby_prepare "${vm}"
 }
 

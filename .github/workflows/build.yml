@@ -10,12 +10,12 @@ permissions:
   contents: write
 
 # NOTE (WinPE ISO)
-# NOTE (WinPE ISO)
-# - WinPE ISOs are managed by the dedicated WinPE Core/Test/Release workflows.
-# - This workflow optionally downloads the release WinPE ISO and bundles it into the final ISO set.
+# - WinPE ISO artifacts are produced by the dedicated WinPE release workflows.
+# - This workflow optionally downloads the released WinPE ISO and bundles it into the final release artifacts.
+# - If the WinPE ISO is unavailable, packaging continues without it.
 # - If the WinPE ISO is not available, packaging continues without it.
 jobs:
-  # ======================================================================
+  # 1) RPM BUILD (Rocky 9.6)
   # 1) RPM BUILD (Rocky 9.6)
   # ======================================================================
   build-rpm:
@@ -123,7 +123,7 @@ jobs:
 
           SPEC="rpm/ablestack_vm_hangctl.spec"
           test -f "${SPEC}" || (echo "[ERR] Missing spec: ${SPEC}" >&2; exit 2)
-
+          # Read VERSION / RELEASE from the repository VERSION file
           VERSION="$(. ./VERSION; printf "%s" "$VERSION" | tr -d '\r\n[:space:]')"
           RELEASE="$(. ./VERSION; printf "%s" "$RELEASE" | tr -d '\r\n[:space:]')"
           GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
@@ -131,7 +131,7 @@ jobs:
           echo "[INFO] VERSION=${VERSION} RELEASE=${RELEASE} GIT_HASH=${GIT_HASH}"
 
           mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-
+          # Pack sources to a tarball matching the spec Source0 name
           # Pack sources to a tarball that matches the spec Source0 name
           NAME_HANGCTL="ablestack_vm_hangctl"
           TMP_TGZ="$(mktemp /tmp/${NAME_HANGCTL}-${VERSION}.tar.gz.XXXXXX)"
@@ -168,7 +168,7 @@ jobs:
           set -euo pipefail
           WORKDIR="repo/hangctl-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
-
+          # Copy built hangctl RPMs into the local repository
           cp -v build/rpm-hangctl/*.rpm "$WORKDIR"/
 
           echo "[INFO] Creating repo metadata..."
@@ -244,7 +244,7 @@ jobs:
           path: release/ftctl-rpm/**
 
           
-  # ======================================================================
+  # 1-C) V2K RPM BUILD (isolated from other RPM build paths)
   # 1-C) V2K RPM BUILD (isolated path to avoid overlap with other RPM jobs)
   # ======================================================================
   build-v2k-rpm:
@@ -261,9 +261,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ======================================================================
           # Pin build dependencies to Rocky Linux 9.6 vault for deterministic inputs
-          # The workflow uses explicit vault repositories instead of mirrorlist rewriting.
+          # Create explicit vault repository definitions instead of relying on mirrorlist rewriting.
+          # This keeps the container build inputs stable.
           # This avoids mismatched release/baseurl behavior in containers.
           cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
           [rocky-vault-9.6-baseos]
@@ -287,8 +287,8 @@ jobs:
 
           dnf clean all
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
-
-          # Handle curl/curl-minimal replacement in the Rocky container image
+          # Handle curl vs curl-minimal replacement in the Rocky container image
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
             --allowerasing ca-certificates curl-minimal || true
 
@@ -298,9 +298,9 @@ jobs:
       - name: Configure Rocky 9.6 vault repos + enable EPEL (build-time only)
         run: |
           set -euo pipefail
-
-          # Recreate Rocky Linux 9.6 vault repo definitions and enable EPEL for build-time dependencies
-          # This avoids relying on mutable mirrorlist behavior during workflow execution.
+          # Recreate Rocky Linux 9.6 vault repos and enable EPEL for build-time dependencies
+          # Avoid mutable mirrorlist behavior inside the CI container.
+          # Reuse the same repo family later for repoquery and download.
           # The same repo family is reused for repoquery and dependency download.
 
           cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
@@ -327,10 +327,10 @@ jobs:
           grep -nE '^\[|^baseurl=' /etc/yum.repos.d/rocky-vault-9.6.repo
 
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
-
           # Enable EPEL only for build-time dependencies such as nbd-related packages
-          # Install the EPEL release package directly because it may not be resolvable from vault-only repos.
-          # Detect the effective EPEL repo id after installation.
+          # Install epel-release directly because it may not resolve from vault-only repos.
+          # Detect the active EPEL repo id after installation.
+          # Use that detected repo id for later repoquery/download steps.
           # Use the detected repo id for later repoquery and download steps.
           EPEL_RPM_URL="https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
           echo "[INFO] Installing EPEL release RPM: ${EPEL_RPM_URL}"
@@ -389,7 +389,7 @@ jobs:
           # Runtime package closure follows the V2K RPM Requires set
           REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
 
-          # Use a baseline package list from an ABLESTACK 9.6 host
+          # Baseline package list captured from an ABLESTACK 9.6 host
           BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
           if [[ ! -f "${BASELINE_FILE}" ]]; then
             echo "[ERR] Missing baseline file: ${BASELINE_FILE}" >&2
@@ -430,7 +430,7 @@ jobs:
           head -n 50 /tmp/v2k_to_download_candidate.txt || true
 
           echo "[INFO] Filtering candidate list by repo availability (STRICT)..."
-          # Filter candidates by repo availability in strict mode
+          # Filter candidate package names by repository availability in strict mode
           : > /tmp/v2k_to_download_avail.txt
           cat /tmp/v2k_to_download_candidate.txt \
             | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
@@ -455,7 +455,7 @@ jobs:
               exit 2
             fi
           done
-
+          # Download the final package set
           # Download the final package set
           if [[ -s /tmp/v2k_to_download.txt ]]; then
             xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
@@ -531,7 +531,7 @@ jobs:
 
               for dep in $DEPS; do
                 [ -n "$dep" ] || continue
-                # Download the dependency only if it is not already in repo/pool.
+                # Download the dependency only if it is not already present in repo/pool
                 if ls -1 ${dep}_*.deb >/dev/null 2>&1; then
                   continue
                 fi
@@ -548,11 +548,11 @@ jobs:
           echo "[INFO] Total pool count: $(ls -1 *.deb | wc -l)"
 
           cd ../..
-
+          # Generate repository metadata using repo/pool as the package source
           mkdir -p repo/dists/stable/main/binary-amd64
           ( cd repo && dpkg-scanpackages pool /dev/null | gzip -9c > dists/stable/main/binary-amd64/Packages.gz )
 
-
+          # Build the final DEB repository structure
           mv repo "deb-ubuntu${{ matrix.os_version }}"
           mkdir -p release/deb
           mv deb-ubuntu${{ matrix.os_version }} release/deb/
@@ -754,7 +754,7 @@ jobs:
           python3 -m pip download -d release/assets/v2k/wheels "pyvmomi==8.0.3.0.1"
 
       # VirtIO Windows payload (amd64 drivers and guest tools)
-      # Extract only the required payloads used by the Windows installer and WinPE flow.
+      # Extract only the payloads required by the Windows installer and WinPE flow.
       - name: Download & extract VirtIO (amd64-only + guest tools)
         run: |
           set -e
@@ -805,8 +805,8 @@ jobs:
           set -euo pipefail
           mkdir -p release/winpe
 
-          # Search for an existing WinPE ISO from artifacts, assets, or local winpe paths
-          # If none is found, continue without bundling WinPE into the final ISO set.
+          # Search for an existing WinPE ISO in artifacts, assets, or local winpe paths
+          # If not found, continue without bundling WinPE into the final ISO set.
           WINPE_ISO=""
           WINPE_ISO="$(find dist -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
           if [[ -z "$WINPE_ISO" ]]; then
@@ -829,7 +829,7 @@ jobs:
             echo "         * winpe/*.iso"
           fi
 
-      # Windows installer scripts (install.ps1/install.bat)
+      # Windows installer script generation (install.ps1 / install.bat)
       - name: Create Windows installer scripts
         shell: bash
         run: |
@@ -893,7 +893,7 @@ jobs:
 
               $shell = New-Object -ComObject WScript.Shell
 
-              # Popup result values:
+              # Popup return values:
               #   -1 = timeout
               #    1 = OK
               $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
@@ -902,8 +902,8 @@ jobs:
                   Write-Host "Prompt_Reboot: user accepted or no response within timeout. Rebooting..."
                   # Force reboot after user confirmation or timeout.
                   Restart-Computer -Force
-                  # MSI installs use /norestart and REBOOT=ReallySuppress, so reboot is done here.
-                  }
+                  # MSI installs use /norestart and REBOOT=ReallySuppress; reboot is handled here.
+              }
               else {
                   Write-Host "Prompt_Reboot: user canceled reboot (result = $result)."
               }
@@ -1337,8 +1337,8 @@ jobs:
                           echo "[WARN] pyvmomi wheels dir not found in ISO: ${WHEEL_DIR}"
                       fi
 
-                      # 5) Optional WinPE ISO staging for Windows bootstrap scenarios
-                      # - Include the first matching winpe*.iso found under the supported paths.
+                      # Optional WinPE ISO staging for Windows bootstrap scenarios
+                      # Include the first matching winpe ISO found under supported paths.
                       WINPE_SRC_DIR="${ISO_MNT}/winpe"
                       WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
                       WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
@@ -1480,7 +1480,7 @@ jobs:
           echo >> release_notes.md
 
           # Build three OS-specific ISOs from staged release content
-          git fetch --tags --force || true
+          # Each ISO contains only the payload relevant to that operating system.
 
           # Each ISO contains only the payload relevant to that operating system.
           PREV_TAG="$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)"

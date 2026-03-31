@@ -143,6 +143,23 @@ ftctl_inventory_detect_domain_persistence() {
   fi
 
   value="$(awk -F: 'tolower($1) ~ /persistent/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${out}")"
+  if [[ -z "${value}" || "${value}" == "unknown" ]]; then
+    out=""
+    err=""
+    rc=0
+    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" dumpxml --inactive "${vm}" || true
+    if [[ "${rc}" == "0" ]]; then
+      value="yes"
+    else
+      out=""
+      err=""
+      rc=0
+      ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domuuid "${vm}" || true
+      if [[ "${rc}" == "0" ]]; then
+        value="no"
+      fi
+    fi
+  fi
   [[ -n "${value}" ]] || value="unknown"
   printf -v "${out_var}" '%s' "${value}"
 }
