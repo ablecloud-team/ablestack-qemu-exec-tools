@@ -42,7 +42,8 @@ ftctl_cmd_run() {
   local tmp_out tmp_err
   tmp_out="$(mktemp -t ftctl.out.XXXXXX)"
   tmp_err="$(mktemp -t ftctl.err.XXXXXX)"
-  trap 'rm -f "${tmp_out}" "${tmp_err}" 2>/dev/null || true' RETURN
+  # shellcheck disable=SC2064
+  trap "rm -f -- '${tmp_out}' '${tmp_err}' 2>/dev/null || true" RETURN
 
   if command -v timeout >/dev/null 2>&1; then
     timeout --preserve-status "${timeout_sec}" "$@" >"${tmp_out}" 2>"${tmp_err}" || _rc=$?
@@ -54,6 +55,8 @@ ftctl_cmd_run() {
 
   _out="$(cat "${tmp_out}" 2>/dev/null || true)"
   _err="$(cat "${tmp_err}" 2>/dev/null || true)"
+  trap - RETURN
+  rm -f -- "${tmp_out}" "${tmp_err}" 2>/dev/null || true
   return "${_rc}"
 }
 
