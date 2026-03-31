@@ -97,12 +97,19 @@ ftctl_blockcopy_start_job() {
   local dest="${4-}"
   local format="${5-}"
   local force_reuse="${6-0}"
+  local persistence="${7-unknown}"
+  local out_var="${8-}"
+  local err_var="${9-}"
+  local rc_var="${10-}"
   local out err rc
   local args=()
 
   args=(-c "${uri}" blockcopy "${vm}" "${target}" "${dest}")
   if [[ -n "${format}" ]]; then
-    args+=("${format}")
+    args+=(--format "${format}")
+  fi
+  if [[ "${persistence}" == "yes" ]]; then
+    args+=(--transient-job)
   fi
   args+=(--wait --verbose)
   if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
@@ -120,6 +127,15 @@ ftctl_blockcopy_start_job() {
   rc=0
   ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- "${args[@]}" || true
   : "${out}${err}"
+  if [[ -n "${out_var}" ]]; then
+    printf -v "${out_var}" '%s' "${out}"
+  fi
+  if [[ -n "${err_var}" ]]; then
+    printf -v "${err_var}" '%s' "${err}"
+  fi
+  if [[ -n "${rc_var}" ]]; then
+    printf -v "${rc_var}" '%s' "${rc}"
+  fi
   return "${rc}"
 }
 
@@ -222,7 +238,6 @@ ftctl_blockcopy_plan_protect() {
   local line target source format dest
   local xml_bundle_dir primary_xml_backup standby_xml_seed persistence
   local out err rc
-  local args=()
   local records=()
   local sync_flag="0"
 
@@ -246,25 +261,24 @@ ftctl_blockcopy_plan_protect() {
     format="${line##*|}"
     dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
     ftctl_ensure_dir "$(dirname "${dest}")" "0755"
-
-    args=(-c "${FTCTL_PROFILE_PRIMARY_URI}" blockcopy "${vm}" "${target}" "${dest}")
-    if [[ -n "${format}" ]]; then
-      args+=("${format}")
-    fi
-    args+=(--wait --verbose)
     if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
-      args+=(--synchronous-writes)
       sync_flag="1"
     fi
-    if ftctl_profile_lookup_map_value "${FTCTL_PROFILE_DISK_MAP}" "${target}" >/dev/null 2>&1; then
-      args+=(--reuse-external)
-    fi
-    if [[ "${FTCTL_BLOCKCOPY_BANDWIDTH_MIB}" =~ ^[1-9][0-9]*$ ]]; then
-      args+=("${FTCTL_BLOCKCOPY_BANDWIDTH_MIB}")
-    fi
 
+    out=""
+    err=""
     rc=0
-    ftctl_blockcopy_start_job "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" "${target}" "${dest}" "${format}" "0" || rc=$?
+    ftctl_blockcopy_start_job \
+      "${FTCTL_PROFILE_PRIMARY_URI}" \
+      "${vm}" \
+      "${target}" \
+      "${dest}" \
+      "${format}" \
+      "0" \
+      "${persistence}" \
+      out \
+      err \
+      rc || true
     if [[ "${rc}" != "0" ]]; then
       ftctl_state_set "${vm}" \
         "protection_state=error" \
@@ -272,6 +286,11 @@ ftctl_blockcopy_plan_protect() {
         "last_error=blockcopy_start_failed_${target}"
       ftctl_log_event "mirror" "blockcopy.protect" "fail" "${vm}" "${rc}" \
         "target=${target} dest=${dest}"
+      if [[ -n "${err}" ]]; then
+        echo "ERROR: blockcopy start failed for ${vm}:${target}: ${err}" >&2
+      else
+        echo "ERROR: blockcopy start failed for ${vm}:${target} rc=${rc}" >&2
+      fi
       return "${rc}"
     fi
 
@@ -290,7 +309,9 @@ ftctl_blockcopy_rearm() {
   local count
   local records=()
   local record target source dest format rc_any=0
+  local persistence out err rc
   count="$(ftctl_state_increment "${vm}" "rearm_count")"
+  persistence="$(ftctl_state_get "${vm}" "primary_persistence" 2>/dev/null || echo "unknown")"
   ftctl_state_set "${vm}" \
     "protection_state=rearming" \
     "transport_state=rearm_pending" \
@@ -315,10 +336,25 @@ ftctl_blockcopy_rearm() {
     format="${record%%|*}"
     : "${source}"
     ftctl_blockcopy_abort_job "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" "${target}"
-    if ! ftctl_blockcopy_start_job "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" "${target}" "${dest}" "${format}" "1"; then
+    out=""
+    err=""
+    rc=0
+    ftctl_blockcopy_start_job \
+      "${FTCTL_PROFILE_PRIMARY_URI}" \
+      "${vm}" \
+      "${target}" \
+      "${dest}" \
+      "${format}" \
+      "1" \
+      "${persistence}" \
+      out \
+      err \
+      rc || true
+    if [[ "${rc}" != "0" ]]; then
       rc_any=1
       ftctl_log_event "rearm" "blockcopy.rearm.start" "fail" "${vm}" "" \
         "target=${target} dest=${dest}"
+      [[ -n "${err}" ]] && echo "ERROR: blockcopy rearm failed for ${vm}:${target}: ${err}" >&2
     else
       ftctl_log_event "rearm" "blockcopy.rearm.start" "ok" "${vm}" "" \
         "target=${target} dest=${dest} rearm_count=${count}"
@@ -364,6 +400,7 @@ ftctl_blockcopy_prepare_reverse_sync_plan() {
 ftctl_blockcopy_start_reverse_sync() {
   local vm="${1-}"
   local path line target source dest format rc_any=0
+  local persistence out err rc
 
   ftctl_blockcopy_prepare_reverse_sync_plan "${vm}" || {
     ftctl_state_set "${vm}" "last_error=reverse_sync_plan_failed"
@@ -372,6 +409,7 @@ ftctl_blockcopy_start_reverse_sync() {
 
   path="$(ftctl_blockcopy_reverse_state_path "${vm}")"
   [[ -f "${path}" ]] || return 1
+  persistence="$(ftctl_state_get "${vm}" "primary_persistence" 2>/dev/null || echo "unknown")"
 
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
@@ -382,10 +420,25 @@ ftctl_blockcopy_start_reverse_sync() {
     dest="${line%%|*}"
     format="${line##*|}"
     : "${source}"
-    if ! ftctl_blockcopy_start_job "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" "${target}" "${dest}" "${format}" "1"; then
+    out=""
+    err=""
+    rc=0
+    ftctl_blockcopy_start_job \
+      "${FTCTL_PROFILE_SECONDARY_URI}" \
+      "${vm}" \
+      "${target}" \
+      "${dest}" \
+      "${format}" \
+      "1" \
+      "${persistence}" \
+      out \
+      err \
+      rc || true
+    if [[ "${rc}" != "0" ]]; then
       rc_any=1
       ftctl_log_event "failback" "reverse_sync.start" "fail" "${vm}" "" \
         "target=${target} dest=${dest}"
+      [[ -n "${err}" ]] && echo "ERROR: reverse sync start failed for ${vm}:${target}: ${err}" >&2
     else
       ftctl_log_event "failback" "reverse_sync.start" "ok" "${vm}" "" \
         "target=${target} dest=${dest}"

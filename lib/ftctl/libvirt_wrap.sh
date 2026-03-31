@@ -78,7 +78,7 @@ ftctl_virsh() {
   local rc_var="${4}"
   shift 4
   [[ "${1-}" == "--" ]] && shift
-  ftctl_cmd_run "${timeout_sec}" "${out_var}" "${err_var}" "${rc_var}" -- virsh "$@" || return $?
+  ftctl_cmd_run "${timeout_sec}" "${out_var}" "${err_var}" "${rc_var}" -- env LC_ALL=C LANG=C virsh "$@" || return $?
 }
 
 ftctl_local_health() {
