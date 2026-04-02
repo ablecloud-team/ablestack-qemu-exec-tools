@@ -133,6 +133,11 @@ ftctl_inventory_detect_domain_persistence() {
   local out_var="${2}"
   local out err rc value
 
+  if [[ "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "yes" || "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "no" ]]; then
+    printf -v "${out_var}" '%s' "${FTCTL_PROFILE_DOMAIN_PERSISTENCE}"
+    return 0
+  fi
+
   out=""
   err=""
   rc=0

@@ -111,7 +111,6 @@ ftctl_blockcopy_start_job() {
   if [[ "${persistence}" == "yes" ]]; then
     args+=(--transient-job)
   fi
-  args+=(--wait --verbose)
   if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
     args+=(--synchronous-writes)
   fi
@@ -197,6 +196,32 @@ ftctl_blockcopy_job_query() {
   printf -v "${ready_var}" '%s' "${ready}"
 }
 
+ftctl_blockcopy_wait_for_job_visibility() {
+  local vm="${1-}"
+  local target="${2-}"
+  local state_var="${3}"
+  local ready_var="${4}"
+  local tries="${5-5}"
+  local state ready rc=0
+
+  state="unknown"
+  ready="unknown"
+  while ((tries > 0)); do
+    if ftctl_blockcopy_job_query "${vm}" "${target}" state ready; then
+      printf -v "${state_var}" '%s' "${state}"
+      printf -v "${ready_var}" '%s' "${ready}"
+      return 0
+    fi
+    rc=$?
+    sleep 1
+    tries=$((tries - 1))
+  done
+
+  printf -v "${state_var}" '%s' "${state}"
+  printf -v "${ready_var}" '%s' "${ready}"
+  return "${rc}"
+}
+
 ftctl_blockcopy_refresh_vm_jobs() {
   local vm="${1-}"
   local disks=()
@@ -245,7 +270,7 @@ ftctl_blockcopy_plan_protect() {
   local disks=()
   local line target source format dest
   local xml_bundle_dir primary_xml_backup standby_xml_seed persistence
-  local out err rc
+  local out err rc job_state ready
   local records=()
   local sync_flag="0"
 
@@ -302,19 +327,25 @@ ftctl_blockcopy_plan_protect() {
       return "${rc}"
     fi
 
-    records+=("${target}|${source}|${dest}|${format}|started|unknown")
+    job_state="unknown"
+    ready="unknown"
+    if ! ftctl_blockcopy_wait_for_job_visibility "${vm}" "${target}" job_state ready 5; then
+      ftctl_state_set "${vm}" \
+        "protection_state=error" \
+        "transport_state=failed" \
+        "last_error=blockcopy_job_query_failed"
+      ftctl_log_event "mirror" "blockcopy.query" "fail" "${vm}" "" \
+        "target=${target} dest=${dest}"
+      return 1
+    fi
+
+    records+=("${target}|${source}|${dest}|${format}|${job_state}|${ready}")
     ftctl_log_event "mirror" "blockcopy.start" "ok" "${vm}" "" \
       "target=${target} dest=${dest} format=${format} sync_writes=${sync_flag}"
   done
 
   ftctl_blockcopy_state_write "${vm}" "${records[@]}"
-  if ! ftctl_blockcopy_refresh_vm_jobs "${vm}"; then
-    ftctl_state_set "${vm}" \
-      "protection_state=error" \
-      "transport_state=failed" \
-      "last_error=blockcopy_job_query_failed"
-    return 1
-  fi
+  ftctl_blockcopy_refresh_vm_jobs "${vm}" || true
   ftctl_standby_prepare "${vm}"
 }
 
