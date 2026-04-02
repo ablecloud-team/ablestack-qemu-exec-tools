@@ -16,7 +16,7 @@ This document is the execution-order source of truth for `ablestack_vm_ftctl`.
 ## 3. Current Summary
 
 - Branch: `feature/vm-ha-dr-ft`
-- Current phase: `Step 11 done, Step 12 ready`
+- Current phase: `Step 12 in progress`
 
 Completed items:
 
@@ -183,7 +183,7 @@ Completed items:
 
 ### Step 12. Real-Environment Integration Testing
 
-- Status: `pending`
+- Status: `in_progress`
 - Goal:
   - run integrated HA/DR/FT tests on real ABLESTACK/libvirt/QEMU hosts
   - validate VM image type coverage
@@ -194,6 +194,11 @@ Completed items:
   - pass/fail matrix by image type
   - pass/fail matrix by storage backend
   - list of defects / gaps / mitigations
+- Progress:
+  - `HA-IMG01-ST01`: `PASS`
+- Follow-up improvements discovered during real-environment testing:
+  - HA protect success detection should prioritize runtime `virsh dumpxml` mirror metadata when `virsh blockjob --info` is empty or incomplete.
+  - `virsh domblklist --details` should be treated as a secondary indicator because it may continue to show the original source path while an active mirror element exists in runtime XML.
 
 ### Step 13. PR preparation
 

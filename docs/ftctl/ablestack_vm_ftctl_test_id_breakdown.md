@@ -76,7 +76,7 @@ Recommended execution order:
 
 | Test ID | Image | Storage | Priority | Purpose | Status |
 |---|---|---|---|---|---|
-| `HA-IMG01-ST01` | `IMG01` | `ST01` | mandatory | HA baseline Linux qcow2 on local qcow2 | pending |
+| `HA-IMG01-ST01` | `IMG01` | `ST01` | mandatory | HA baseline Linux qcow2 on local qcow2 | pass |
 | `HA-IMG02-ST02` | `IMG02` | `ST02` | mandatory | HA baseline Linux raw on local raw | pending |
 | `HA-IMG03-ST01` | `IMG03` | `ST01` | mandatory | HA baseline Windows qcow2 | pending |
 | `HA-IMG04-ST02` | `IMG04` | `ST02` | recommended | HA Windows raw | pending |
@@ -156,3 +156,12 @@ Every `Test ID` should end with:
 - actual result
 - evidence path or log excerpt
 - pass/fail/block reason
+
+## 12. Current Follow-Up Notes
+
+- `HA-IMG01-ST01`
+  - Result: `PASS`
+  - Observation:
+    - In the tested ABLESTACK/libvirt/QEMU environment, `virsh dumpxml` mirror metadata was a more reliable confirmation signal than `virsh blockjob --info` or `virsh domblklist --details`.
+  - Follow-up improvement:
+    - Update HA protect observability logic to prioritize runtime XML `<mirror ...>` inspection when blockjob visibility is incomplete.
