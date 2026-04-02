@@ -177,14 +177,20 @@ ftctl_blockcopy_job_query() {
   err=""
   rc=0
   ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" blockjob "${vm}" "${target}" --info || true
-  if [[ "${rc}" != "0" ]]; then
+  if [[ "${rc}" != "0" ]] || grep -qi "no current block job" <<< "${out}${err}"; then
     printf -v "${state_var}" '%s' "unknown"
     printf -v "${ready_var}" '%s' "unknown"
+    [[ "${rc}" == "0" ]] && rc=4
     return "${rc}"
   fi
 
   state="$(awk -F: 'tolower($1) ~ /state/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${out}")"
   ready="$(awk -F: 'tolower($1) ~ /ready/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${out}")"
+  if [[ -z "${state}" && -z "${ready}" ]]; then
+    printf -v "${state_var}" '%s' "unknown"
+    printf -v "${ready_var}" '%s' "unknown"
+    return 5
+  fi
   [[ -n "${state}" ]] || state="unknown"
   [[ -n "${ready}" ]] || ready="unknown"
   printf -v "${state_var}" '%s' "${state}"

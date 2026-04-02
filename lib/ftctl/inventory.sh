@@ -136,6 +136,15 @@ ftctl_inventory_detect_domain_persistence() {
   out=""
   err=""
   rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" dumpxml --inactive "${vm}" >/dev/null 2>&1 || true
+  if [[ "${rc}" == "0" ]]; then
+    printf -v "${out_var}" '%s' "yes"
+    return 0
+  fi
+
+  out=""
+  err=""
+  rc=0
   ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" dominfo "${vm}" || true
   if [[ "${rc}" != "0" ]]; then
     printf -v "${out_var}" '%s' "unknown"
@@ -147,17 +156,9 @@ ftctl_inventory_detect_domain_persistence() {
     out=""
     err=""
     rc=0
-    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" dumpxml --inactive "${vm}" || true
+    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domuuid "${vm}" || true
     if [[ "${rc}" == "0" ]]; then
-      value="yes"
-    else
-      out=""
-      err=""
-      rc=0
-      ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domuuid "${vm}" || true
-      if [[ "${rc}" == "0" ]]; then
-        value="no"
-      fi
+      value="no"
     fi
   fi
   [[ -n "${value}" ]] || value="unknown"
