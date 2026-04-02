@@ -279,6 +279,9 @@ ftctl_blockcopy_plan_protect() {
   standby_xml_seed=""
   persistence="unknown"
   ftctl_inventory_backup_domain_xml "${vm}" xml_bundle_dir primary_xml_backup standby_xml_seed persistence
+  if [[ "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "yes" || "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "no" ]]; then
+    persistence="${FTCTL_PROFILE_DOMAIN_PERSISTENCE}"
+  fi
   ftctl_state_set "${vm}" \
     "xml_bundle_dir=${xml_bundle_dir}" \
     "primary_xml_backup=${primary_xml_backup}" \

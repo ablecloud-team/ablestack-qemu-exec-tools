@@ -219,6 +219,10 @@ ftctl_standby_prepare() {
   ftctl_standby_materialize_xml "${vm}"
   generated_xml="$(ftctl_state_get "${vm}" "standby_xml_generated" 2>/dev/null || true)"
   persistence="$(ftctl_state_get "${vm}" "primary_persistence" 2>/dev/null || echo "unknown")"
+  if [[ "${persistence}" == "unknown" && ( "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "yes" || "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "no" ) ]]; then
+    persistence="${FTCTL_PROFILE_DOMAIN_PERSISTENCE}"
+    ftctl_state_set "${vm}" "primary_persistence=${persistence}"
+  fi
 
   if [[ "${persistence}" != "yes" ]]; then
     ftctl_state_set "${vm}" "standby_state=prepared-transient"
@@ -263,6 +267,10 @@ ftctl_standby_activate() {
     return 2
   }
   persistence="$(ftctl_state_get "${vm}" "primary_persistence" 2>/dev/null || echo "unknown")"
+  if [[ "${persistence}" == "unknown" && ( "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "yes" || "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "no" ) ]]; then
+    persistence="${FTCTL_PROFILE_DOMAIN_PERSISTENCE}"
+    ftctl_state_set "${vm}" "primary_persistence=${persistence}"
+  fi
 
   if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
     ftctl_state_set "${vm}" \
