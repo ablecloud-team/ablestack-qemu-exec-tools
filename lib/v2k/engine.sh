@@ -1652,15 +1652,17 @@ v2k_restore_runtime_env_from_workdir() {
 
   govc_env="${workdir}/govc.env"
   if [[ -f "${govc_env}" ]]; then
-    v2k_source_kv_env "${govc_env}"
+    v2k_source_kv_env "${govc_env}" || true
     export GOVC_URL GOVC_USERNAME GOVC_PASSWORD GOVC_INSECURE
   fi
 
   vddk_cred="${workdir}/vddk.cred"
   if [[ -f "${vddk_cred}" ]]; then
     export V2K_VDDK_CRED_FILE="${vddk_cred}"
+    set +u
     # shellcheck disable=SC1090
-    source "${vddk_cred}"
+    source "${vddk_cred}" || true
+    set -u
     [[ -n "${VDDK_USER-}" ]] && export V2K_VDDK_USER="${VDDK_USER}"
     [[ -n "${VDDK_SERVER-}" ]] && export V2K_VDDK_SERVER="${VDDK_SERVER}"
     [[ -n "${VDDK_THUMBPRINT-}" ]] && export V2K_VDDK_THUMBPRINT="${VDDK_THUMBPRINT}"
