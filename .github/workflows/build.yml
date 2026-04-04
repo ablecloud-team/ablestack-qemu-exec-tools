@@ -10,13 +10,13 @@ permissions:
   contents: write
 
 # NOTE (WinPE ISO)
-# - WinPE ISO?? ????WinPE Core/Test/Release)? ?/?? ?.
-# - build.yml? "?  WinPE ISO" ??? ???#   ?  ??? ??? ? ? ISO???.
-# - ?? ISO ??? ? ?? "??? ?.
+# - WinPE ISO images are built and managed by dedicated WinPE workflows.
+# - This workflow only packages a prebuilt WinPE ISO when one is already available.
+# - If no WinPE ISO is available, the rest of the release still proceeds.
 
 jobs:
   # ======================================================================
-  # 1) RPM BUILD (Rocky 9 + 10 )
+  # 1) RPM BUILD (Rocky 9 and 10)
   # ======================================================================
   build-rpm:
     runs-on: ubuntu-latest
@@ -34,12 +34,10 @@ jobs:
       - name: Install build deps
         run: |
           set -e
-          #  Rocky 10.1 ? rpm-sequoia + OpenSSL ??
-          # ? ? ?? ???????? ?  ?
-          # ??distro-sync?rpm / openssl ?? ????
+          # Keep RPM/OpenSSL packages aligned with the container base image.
           dnf -y distro-sync
 
-          # ?????????
+          # Install build requirements.
           dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Build RPM
@@ -51,18 +49,19 @@ jobs:
           WORKDIR="repo/rpm-rocky${{ matrix.os_version }}"
           mkdir -p "$WORKDIR"
 
-          #  RPM 
+          # Copy the built RPM artifacts.
           cp rpmbuild/RPMS/*/*.rpm "$WORKDIR"/
 
           echo "[INFO] Downloading runtime dependencies..."
-          # spec??Requires?? ?   ??          dnf download --resolve --alldeps \
+          # Download runtime dependencies declared by the package.
+          dnf download --resolve --alldeps \
             --destdir="$WORKDIR" \
             bash jq libvirt-client cloud-init || true
 
           echo "[INFO] Creating repo metadata..."
           createrepo_c "$WORKDIR"
 
-          # ?? ?? ?
+          # Arrange the artifact directory.
           mkdir -p release/rpm
           mv repo release/rpm/
 
@@ -287,18 +286,19 @@ jobs:
 
       - name: Create V2K RPM repo (offline) for ABLESTACK (Rocky 9.6)
         run: |
-          set -e
+          set -euo pipefail
           WORKDIR="release/v2k/v2k-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
 
-          # V2K  RPM ? (??  ?? ? ??)
-          find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack_v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
+          # Collect V2K RPM outputs while avoiding files already inside WORKDIR.
+          find . -type f -name "*.rpm" \
+            ! -path "./${WORKDIR}/*" \
+            \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack_v2k*.rpm" \) \
+            -exec cp -v {} "$WORKDIR"/ \;
 
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
-          # --- 9.6  (: 9.7 ? ) ---
           : "${EPEL_REPO_ID:?EPEL_REPO_ID is not set. Configure step must export it to GITHUB_ENV}"
-          # ? ????? , ??(? ???
           DNF_COMMON_OPTS=(
             --releasever=9.6
             --disablerepo=*
@@ -306,11 +306,17 @@ jobs:
             --setopt=install_weak_deps=False
           )
 
-          # ablestack-v2k.spec??Requires???  (8?
-          # ceph-common: rbd CLI ?(?/ ?) 
-          REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
+          REQ_PKGS=(
+            jq
+            python3
+            openssl
+            nbd
+            nbdkit
+            nbdkit-vddk-plugin
+            qemu-img
+            libvirt-client
+          )
 
-          # baseline ?(ABLestack 9.6 ????rpm -qa ? ???)
           BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
           if [[ ! -f "${BASELINE_FILE}" ]]; then
             echo "[ERR] Missing baseline file: ${BASELINE_FILE}" >&2
@@ -320,27 +326,15 @@ jobs:
           fi
 
           echo "[INFO] Sanity check: required pkgs availability (repo view)"
-          # nbd/nbdkit/qemu-img repo?  ?? ?? ? ?:   )
-          dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available ${REQ_PKGS} >/dev/null
+          dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available "${REQ_PKGS[@]}" >/dev/null
 
-          # Requires ? ? (?,  ?)
-          # dnf-plugins-core??repoquery ?
           dnf -y "${DNF_COMMON_OPTS[@]}" install dnf-plugins-core >/dev/null
           dnf -q "${DNF_COMMON_OPTS[@]}" repoquery \
             --requires --resolve --recursive \
             --qf '%{name}' \
-            ${REQ_PKGS} | sort -u > /tmp/v2k_dep_closure.txt
+            "${REQ_PKGS[@]}" | sed '/^$/d' | sort -u > /tmp/v2k_dep_closure.txt
 
-          # () Direct requires? baseline subtract????? ??          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
-
-
-          # baseline??? ? ? (?  ?)
-          sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
-          comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
-
-          # () Direct requires? baseline subtract????? ??          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
-
-          # baseline subtract (closure - baseline)
+          printf '%s\n' "${REQ_PKGS[@]}" | sed '/^$/d' | sort -u > /tmp/v2k_must_have.txt
           sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
           comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
 
@@ -352,18 +346,15 @@ jobs:
           head -n 50 /tmp/v2k_to_download_candidate.txt || true
 
           echo "[INFO] Filtering candidate list by repo availability (STRICT)..."
-          # ? : $(cat ...) ???xargs?? ? ?: ? ???? ??? repo ? ??? ?.
-          # xargs repo??? ???
           : > /tmp/v2k_to_download_avail.txt
           cat /tmp/v2k_to_download_candidate.txt \
             | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
             | sort -u > /tmp/v2k_to_download_avail.txt
 
-          # langpack ???(? ?) - ? ?????
+          # Drop language pack expansions from the final download set.
           grep -vE '^glibc-all-langpacks$|^glibc-langpack-' /tmp/v2k_to_download_avail.txt \
             | sort -u > /tmp/v2k_to_download.txt
 
-          # missing( ?? repo??? ? 
           comm -23 /tmp/v2k_to_download_candidate.txt /tmp/v2k_to_download_avail.txt > /tmp/v2k_missing_in_repo.txt
           if [[ -s /tmp/v2k_missing_in_repo.txt ]]; then
             echo "[WARN] Missing in enabled repos (skipped):"
@@ -374,14 +365,14 @@ jobs:
           echo "[INFO] Final to-download sample (first 50):"
           head -n 50 /tmp/v2k_to_download.txt || true
 
-          #  : nbd/nbdkit/qemu-img ???????          for p in nbd nbdkit qemu-img; do
+          # Safety check: key packages must exist either in the baseline or in the download list.
+          for p in nbd nbdkit qemu-img; do
             if ! grep -qx "$p" /tmp/v2k_to_download.txt && ! grep -qx "$p" /tmp/v2k_baseline.txt; then
               echo "[ERR] Required package '$p' is neither in baseline nor in final download list." >&2
               exit 2
             fi
           done
 
-          # download (??exclude ???????? ?????
           if [[ -s /tmp/v2k_to_download.txt ]]; then
             xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
           else
@@ -664,9 +655,7 @@ jobs:
             cp -a assets/v2k/wheels release/assets/v2k/
           fi
 
-      # VirtIO Windows Stable ISO ? "amd64 ?? + guest tools(qemu-ga ?)" 
-      # -  ISO ?
-      # - DISM/WinPE?  INF  ????      # - ? (amd64 only)
+      # Download the stable VirtIO Windows ISO and extract amd64 drivers plus guest tools.
       - name: Download & extract VirtIO (amd64-only + guest tools)
         run: |
           set -e
@@ -674,9 +663,8 @@ jobs:
           curl -fL -o dist/virtio-win.iso \
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 
-          # 1) DISM??? ? ?? ???amd64?
-          #    (VirtIO ISO ??? w11/2k22/2k19 ??? ??amd64 ?? ??
-          #    7z???? ???? */amd64/* ?? ??          7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
+          # Extract amd64 driver trees for DISM and WinPE-based injection.
+          7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
             "viostor/*/amd64/*" \
             "vioscsi/*/amd64/*" \
             "NetKVM/*/amd64/*" \
@@ -687,12 +675,11 @@ jobs:
             "vioinput/*/amd64/*" \
             "vioser/*/amd64/*" || true
 
-          # 2) Guest tools(qemu-ga ?): exe/msi? ? ? ?? ???
-          #    - ?   ?(? ? ??
+          # Extract guest tools packages such as qemu-ga installers.
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-guest-tools.exe" || true
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-gt-*.msi" || true
 
-          # 3) release/virtio?? (? )
+          # Copy extracted assets into the release tree.
           for d in viostor vioscsi NetKVM Balloon qemupciserial viorng pvpanic vioinput vioser; do
             if [[ -d "dist/virtio-src/${d}" ]]; then
               mkdir -p "release/virtio/${d}"
