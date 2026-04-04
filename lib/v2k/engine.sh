@@ -1637,6 +1637,36 @@ v2k_load_runtime_flags_from_manifest() {
     "{\"enabled\":${force},\"source\":\"manifest\",\"manifest\":\"${V2K_MANIFEST}\"}"
 }
 
+v2k_restore_runtime_env_from_workdir() {
+  local workdir=""
+  local govc_env=""
+  local vddk_cred=""
+
+  if [[ -n "${V2K_WORKDIR:-}" && -d "${V2K_WORKDIR}" ]]; then
+    workdir="${V2K_WORKDIR}"
+  elif [[ -n "${V2K_MANIFEST:-}" ]]; then
+    workdir="$(dirname "${V2K_MANIFEST}")"
+  fi
+
+  [[ -n "${workdir}" && -d "${workdir}" ]] || return 0
+
+  govc_env="${workdir}/govc.env"
+  if [[ -f "${govc_env}" ]]; then
+    v2k_source_kv_env "${govc_env}"
+    export GOVC_URL GOVC_USERNAME GOVC_PASSWORD GOVC_INSECURE
+  fi
+
+  vddk_cred="${workdir}/vddk.cred"
+  if [[ -f "${vddk_cred}" ]]; then
+    export V2K_VDDK_CRED_FILE="${vddk_cred}"
+    # shellcheck disable=SC1090
+    source "${vddk_cred}"
+    [[ -n "${VDDK_USER-}" ]] && export V2K_VDDK_USER="${VDDK_USER}"
+    [[ -n "${VDDK_SERVER-}" ]] && export V2K_VDDK_SERVER="${VDDK_SERVER}"
+    [[ -n "${VDDK_THUMBPRINT-}" ]] && export V2K_VDDK_THUMBPRINT="${VDDK_THUMBPRINT}"
+  fi
+}
+
 v2k_cmd_init() {
   local vm="" vcenter="" dst="" mode="govc" cred_file=""
 
@@ -1809,6 +1839,7 @@ v2k_cmd_init() {
 v2k_cmd_cbt() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local action="${1:-}"
   case "${action}" in
     enable)
@@ -1833,6 +1864,7 @@ v2k_cmd_cbt() {
 v2k_cmd_snapshot() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local which="${1:-}" name=""
   local safe_mode=0
   shift || true
@@ -2001,6 +2033,7 @@ v2k_cmd_sync() {
 
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local which="${1:-}" jobs=1 coalesce_gap=$((64*1024)) chunk=$((4*1024*1024))
   shift || true
   while [[ $# -gt 0 ]]; do
@@ -2088,6 +2121,7 @@ v2k_cmd_sync() {
 v2k_cmd_verify() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local mode="quick" samples=64
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2134,6 +2168,7 @@ v2k_cutover_prepare_rbd_mappings() {
 v2k_cmd_cutover() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local shutdown="guest" define_only=0 start_vm=0
   local safe_mode=0
   local winpe_bootstrap=1
@@ -2516,6 +2551,7 @@ v2k_cmd_cutover() {
 v2k_cmd_cleanup() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local keep_snapshots=0 keep_workdir=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2555,6 +2591,7 @@ v2k_cmd_cleanup() {
 v2k_cmd_status() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local summary
   summary="$(v2k_manifest_status_summary "${V2K_MANIFEST}" "${V2K_EVENTS_LOG:-}")"
   v2k_json_or_text_ok "status" "${summary}" "${summary}"
