@@ -208,8 +208,10 @@ v2k_vmware_load_cred_file() {
   local file="$1"
   [[ -f "${file}" ]] || { echo "cred-file not found: ${file}" >&2; exit 2; }
   # expected format: KEY=VALUE lines (GOVC_URL/GOVC_USERNAME/GOVC_PASSWORD/GOVC_INSECURE)
+  set -a
   # shellcheck disable=SC1090
   source "${file}"
+  set +a
 }
 
 v2k_require_govc_env() {
@@ -217,6 +219,7 @@ v2k_require_govc_env() {
   : "${GOVC_USERNAME:?missing GOVC_USERNAME}"
   : "${GOVC_PASSWORD:?missing GOVC_PASSWORD}"
   : "${GOVC_INSECURE:=1}"
+  export GOVC_URL GOVC_USERNAME GOVC_PASSWORD GOVC_INSECURE
 }
 
 v2k_is_ipv4() {
@@ -237,8 +240,8 @@ v2k_vmware_inventory_json() {
   v2k_require_govc_env
 
   local vm_info dev_info
-  local host_moref host_name hostinfo_json
-  local esxi_mgmt_ip esxi_thumbprint
+  local host_moref="" host_name="" hostinfo_json=""
+  local esxi_mgmt_ip="" esxi_thumbprint=""
 
   vm_info="$(v2k_govc vm.info -json "${vm}")"
   dev_info="$(v2k_govc device.info -json -vm "${vm}")"
@@ -252,9 +255,6 @@ v2k_vmware_inventory_json() {
   )"
 
   # 2) host.infoë¡?management IP + thumbprint ì¶”ì¶œ (DNS ?˜ì¡´ ?œê±°)
-  esxi_mgmt_ip=""
-  esxi_thumbprint=""
-  hostinfo_json=""
 
   # 2-1) MoRef ?°ì„  ì¡°íšŒ
   if [[ -n "${host_moref}" && "${host_moref}" != "null" ]]; then
