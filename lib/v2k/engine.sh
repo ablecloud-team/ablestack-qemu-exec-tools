@@ -1771,6 +1771,18 @@ v2k_cmd_init() {
   v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
   v2k_compat_resolve_profile "${V2K_COMPAT_PROFILE:-auto}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 0
 
+  # If init was given only a govc credential file, derive a VDDK credential file
+  # so follow-up base/incremental sync commands can reuse the same workdir.
+  if [[ -z "${vddk_cred_file}" && -n "${GOVC_USERNAME:-}" && -n "${GOVC_PASSWORD:-}" ]]; then
+    vddk_cred_file="${V2K_WORKDIR}/vddk.auto.cred"
+    cat > "${vddk_cred_file}" <<EOF
+VDDK_USER=${GOVC_USERNAME}
+VDDK_PASSWORD=${GOVC_PASSWORD}
+VDDK_SERVER=${vcenter}
+EOF
+    chmod 600 "${vddk_cred_file}" 2>/dev/null || true
+  fi
+
   # (FIX) Persist VDDK cred file into workdir (productization) AFTER workdir exists
   if [[ -n "${vddk_cred_file}" ]]; then
     local vddk_saved="${V2K_WORKDIR}/vddk.cred"
