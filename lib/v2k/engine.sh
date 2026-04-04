@@ -1663,10 +1663,18 @@ v2k_restore_runtime_env_from_workdir() {
     # shellcheck disable=SC1090
     source "${vddk_cred}" || true
     set -u
-    [[ -n "${VDDK_USER-}" ]] && export V2K_VDDK_USER="${VDDK_USER}"
-    [[ -n "${VDDK_SERVER-}" ]] && export V2K_VDDK_SERVER="${VDDK_SERVER}"
-    [[ -n "${VDDK_THUMBPRINT-}" ]] && export V2K_VDDK_THUMBPRINT="${VDDK_THUMBPRINT}"
+    if [[ -n "${VDDK_USER-}" ]]; then
+      export V2K_VDDK_USER="${VDDK_USER}"
+    fi
+    if [[ -n "${VDDK_SERVER-}" ]]; then
+      export V2K_VDDK_SERVER="${VDDK_SERVER}"
+    fi
+    if [[ -n "${VDDK_THUMBPRINT-}" ]]; then
+      export V2K_VDDK_THUMBPRINT="${VDDK_THUMBPRINT}"
+    fi
   fi
+
+  return 0
 }
 
 v2k_cmd_init() {
