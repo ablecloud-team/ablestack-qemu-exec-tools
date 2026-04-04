@@ -106,10 +106,6 @@ can_run_unprivileged() {
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 repo_root() {
-  if [[ -n "${REPO_ROOT_OVERRIDE}" ]]; then
-    printf '%s' "${REPO_ROOT_OVERRIDE}"
-    return 0
-  fi
   local here
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   (cd "${here}/.." && pwd)
@@ -118,6 +114,28 @@ repo_root() {
 repo_compat_root() {
   local root="$1"
   printf '%s/share/ablestack/v2k/compat' "${root}"
+}
+
+asset_repo_root() {
+  if [[ -n "${REPO_ROOT_OVERRIDE}" ]]; then
+    printf '%s' "${REPO_ROOT_OVERRIDE}"
+    return 0
+  fi
+  repo_root
+}
+
+profile_def_root() {
+  local repo_root_path="$1"
+  local installed_root="${COMPAT_ROOT}"
+  local source_root
+  source_root="$(repo_compat_root "${repo_root_path}")"
+
+  if [[ -d "${installed_root}" ]] && find "${installed_root}" -mindepth 2 -maxdepth 2 -name profile.json | grep -q .; then
+    printf '%s' "${installed_root}"
+    return 0
+  fi
+
+  printf '%s' "${source_root}"
 }
 
 os_id() {
@@ -570,13 +588,14 @@ install_profile_assets() {
 }
 
 main() {
-  local root compat_repo_root id
+  local root asset_root compat_repo_root id
   root="$(repo_root)"
-  compat_repo_root="$(repo_compat_root "${root}")"
+  asset_root="$(asset_repo_root)"
+  compat_repo_root="$(profile_def_root "${root}")"
   id="$(os_id)"
 
   if [[ "${LIST_PROFILES}" -eq 1 ]]; then
-    list_profiles "${root}" "${compat_repo_root}" "${COMPAT_ROOT}"
+    list_profiles "${asset_root}" "${compat_repo_root}" "${COMPAT_ROOT}"
     exit 0
   fi
 
@@ -584,8 +603,9 @@ main() {
     require_root
   fi
 
-  echo "[INFO] Repo root: ${root}"
-  echo "[INFO] Sample compat root: ${compat_repo_root}"
+  echo "[INFO] Source repo root: ${root}"
+  echo "[INFO] Asset repo root: ${asset_root}"
+  echo "[INFO] Profile definition root: ${compat_repo_root}"
   echo "[INFO] Install compat root: ${COMPAT_ROOT}"
   echo "[INFO] OS ID: ${id}"
 
@@ -629,7 +649,7 @@ main() {
   if [[ "${INSTALL_ASSETS}" -eq 1 ]]; then
     local profile
     for profile in "${profiles_to_process[@]}"; do
-      install_profile_assets "${root}" "${compat_repo_root}" "${COMPAT_ROOT}" "${profile}"
+      install_profile_assets "${asset_root}" "${compat_repo_root}" "${COMPAT_ROOT}" "${profile}"
     done
     if [[ "${WRITE_PROFILED}" -eq 1 ]]; then
       write_profiled_env "${COMPAT_ROOT}"
