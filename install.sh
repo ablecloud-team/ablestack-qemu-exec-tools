@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
-# install.sh - ablestack-qemu-exec-tools 설치 스크립트 (개발/소스 설치용)
-# (dev/source install 용)
+# install.sh - Development/source installer for ablestack-qemu-exec-tools
 #
 # Copyright 2025 ABLECLOUD
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-# You may not use this file except in compliance with the License.
+# you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
@@ -17,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+set -euo pipefail
 
 INSTALL_PREFIX="/usr/local"
 BIN_DIR="${INSTALL_PREFIX}/bin"
@@ -25,191 +24,202 @@ LIB_TARGET="${INSTALL_PREFIX}/lib/ablestack-qemu-exec-tools"
 PAYLOAD_SRC="payload"
 LIB_SRC="lib"
 BIN_SRC="bin"
+SHARE_SRC="share"
 SYSTEMD_UNIT_DIR="/etc/systemd/system"
 
-ISO_DEFAULT_DIR="/usr/share/ablestack/tools"   # ISO가 존재해야 하는 기본 디렉터리 (vm_autoinstall에서 ISO_PATH_DEFAULT로 참조) - 설치 시 생성 및 안내
+ISO_DEFAULT_DIR="/usr/share/ablestack/tools"
 ISO_DEFAULT_PATH="${ISO_DEFAULT_DIR}/ablestack-qemu-exec-tools.iso"
+COMPAT_TARGET_ROOT="/usr/share/ablestack/v2k/compat"
 
-# ABLESTACK Host 감지
 is_ablestack_host() {
-  if [[ -f /etc/os-release ]]; then
-    if grep -q '^PRETTY_NAME="ABLESTACK' /etc/os-release; then
-      return 0
-    fi
+  if [[ -f /etc/os-release ]] && grep -q '^PRETTY_NAME="ABLESTACK' /etc/os-release; then
+    return 0
   fi
   return 1
 }
 
-if is_ablestack_host; then
-  echo "ABLESTACK Host 환경 감지됨: 서비스용 모드로 설치합니다."
-  INSTALL_MODE="HOST"
-else
-  echo "일반 Linux VM 환경 감지됨: 자체 구성 모드로 설치합니다."
-  INSTALL_MODE="VM"
-fi
-
-echo "ablestack-qemu-exec-tools 설치를 시작합니다.."
-
-# 0) 필수/권장 존재 여부 (부족시 설치 중단보다는 경고)
-MISSING=()
-
 need_cmd() {
-  local c="$1"
-  command -v "$c" >/dev/null 2>&1 || MISSING+=("$c")
+  local cmd="$1"
+  command -v "${cmd}" >/dev/null 2>&1 || MISSING+=("${cmd}")
 }
 
-# 필수 명령어
-need_cmd jq
-need_cmd virsh
+install_bin_links() {
+  local scripts=("$@")
+  local script src target
 
-# 게스트 인젝션 관련 권장(자체 기능 필요)
-# NOTE: hangctl의 서비스 운영 구성에서 이들 권장 구성 업무를 무시하게 설치 가능
-#       (존재 여부에 따라 개별 충족)
-need_cmd virt-inspector
-need_cmd virt-copy-in
-need_cmd virt-customize
-need_cmd virt-win-reg
+  for script in "${scripts[@]}"; do
+    src="${BIN_SRC}/${script}"
+    target="${BIN_DIR}/${script%.sh}"
+    if [[ -f "${src}" ]]; then
+      echo "Linking executable: ${target} -> $(pwd)/${src}"
+      mkdir -p "$(dirname "${target}")"
+      ln -sf "$(pwd)/${src}" "${target}"
+      chmod +x "${src}"
+    else
+      echo "Skipping missing executable: ${src}"
+    fi
+  done
+}
 
-# 선택(그러나 detach나 XML 조작에 필요)
-# need_cmd virt-xml   # 권장이나 강제 아님
+install_lib_tree() {
+  echo "Installing library tree: ${LIB_TARGET}"
+  mkdir -p "${LIB_TARGET}"
 
-if ((${#MISSING[@]})); then
-  echo "다음 명령이 필요합니다: ${MISSING[*]}"
-  echo "   Rocky 9 에서 dnf -y install jq libvirt-client libguestfs-tools virt-install"
-  exit 1
-fi
-
-# 1) 실행 파일 설치
-#    - vm_exec.sh / agent_policy_fix.sh / cloud_init_auto.sh (기존)
-#    - vm_autoinstall.sh (규칙)
-#    링크 생성 시 .sh 확장자 제거 (vm_exec, agent_policy_fix, cloud_init_auto, vm_autoinstall)
-#    ABLESTACK Host 에서 vm_exec, vm_autoinstall 등 호출
-
-if [[ "$INSTALL_MODE" == "HOST" ]]; then
-  # ABLESTACK Host: 최소 구성으로 설치
-  BIN_SCRIPTS=("vm_exec.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
-else
-  # 일반 VM: 자체 구성으로 설치
-  BIN_SCRIPTS=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
-fi
-
-for script in "${BIN_SCRIPTS[@]}"; do
-  src="${BIN_SRC}/${script}"
-  target="${BIN_DIR}/${script%.sh}"  # .sh 확장자 제거
-  if [[ -f "$src" ]]; then
-    echo "실행 파일 링크 생성: $target -> $(pwd)/$src"
-    mkdir -p "$(dirname "$target")"
-    ln -sf "$(pwd)/$src" "$target"
-    chmod +x "$src"
+  if [[ -d "${LIB_SRC}" ]]; then
+    cp -a "${LIB_SRC}/"* "${LIB_TARGET}/" 2>/dev/null || true
+    find "${LIB_TARGET}" -type f -name "*.sh" -exec chmod 755 {} \;
+    find "${LIB_TARGET}" -type f \( -name "*.service" -o -name "*.ps1" \) -exec chmod 644 {} \; 2>/dev/null || true
   else
-    echo "⚠️  실행 파일 없음(건너뜀): $src"
+    echo "Skipping missing library source directory: ${LIB_SRC}"
   fi
-done
+}
 
-# 2) 라이브러리 및 페이로드 설치
-#    - lib/*  -> ${LIB_TARGET}/
-#    - payload/* -> ${LIB_TARGET}/payload/
-#    (게스트 인젝션 스크립트가 payload를 참조)
-
-echo "라이브러리 설치 경로: ${LIB_TARGET}"
-mkdir -p "$LIB_TARGET"
-if [[ -d "$LIB_SRC" ]]; then
-  # 파일 복사
-  cp -a "$LIB_SRC/"* "$LIB_TARGET/" 2>/dev/null || true
-
-  # 모든 스크립트 실행 권한 부여(lib/*.sh, lib/**/**/*.sh)
-  find "$LIB_TARGET" -type f -name "*.sh" -exec chmod 755 {} \;
-
-  # (참고) 바이너리 PS1 등은 실행권한 필요 없음. 기본권한으로 보장
-  find "$LIB_TARGET" -type f \( -name "*.service" -o -name "*.ps1" \) -exec chmod 644 {} \; 2>/dev/null || true
-else
-  echo "⚠️  라이브러리 소스 디렉터리 미존재: $LIB_SRC"
-fi
-
-#
-# 2.1) hangctl 관련 시스템 서비스/타이머 유닛 및 기본 설정 설치
-#   - unit: lib/hangctl/systemd/*.service|*.timer -> /etc/systemd/system/
-#   - config(default): etc/ablestack-vm-hangctl.conf -> /etc/ablestack/ablestack-vm-hangctl.conf (noreplace)
-#   - enable/start 여부는 아님(운영 책무에 따라 결정)
-HANGCTL_DEFAULT_CONF_SRC="etc/ablestack-vm-hangctl.conf"
-HANGCTL_DEFAULT_CONF_DST="/etc/ablestack/ablestack-vm-hangctl.conf"
-HANGCTL_UNIT_SRC_DIR="${LIB_SRC}/hangctl/systemd"
-
-if [[ -d "${HANGCTL_UNIT_SRC_DIR}" ]]; then
-  echo "hangctl systemd unit 설치: ${SYSTEMD_UNIT_DIR}"
-  sudo mkdir -p "${SYSTEMD_UNIT_DIR}"
-  # service/timer 복사
-  if ls "${HANGCTL_UNIT_SRC_DIR}"/*.service >/dev/null 2>&1; then
-    sudo cp -a "${HANGCTL_UNIT_SRC_DIR}"/*.service "${SYSTEMD_UNIT_DIR}/"
-    sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.service 2>/dev/null || true
+install_compat_tree() {
+  local compat_src="${SHARE_SRC}/ablestack/v2k/compat"
+  if [[ ! -d "${compat_src}" ]]; then
+    echo "Skipping missing compatibility profile tree: ${compat_src}"
+    return 0
   fi
-  if ls "${HANGCTL_UNIT_SRC_DIR}"/*.timer >/dev/null 2>&1; then
-    sudo cp -a "${HANGCTL_UNIT_SRC_DIR}"/*.timer "${SYSTEMD_UNIT_DIR}/"
-    sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.timer 2>/dev/null || true
-  fi
-  sudo systemctl daemon-reload 2>/dev/null || true
-else
-  echo "⚠️  hangctl systemd unit 소스 디렉터리 미존재(건너뜀): ${HANGCTL_UNIT_SRC_DIR}"
-fi
 
-if [[ -f "${HANGCTL_DEFAULT_CONF_SRC}" ]]; then
-  echo "hangctl 기본 설정 설치(존재 확인): ${HANGCTL_DEFAULT_CONF_DST}"
-  sudo mkdir -p "$(dirname "${HANGCTL_DEFAULT_CONF_DST}")"
-  if [[ -f "${HANGCTL_DEFAULT_CONF_DST}" ]]; then
-    echo "   기존 설정 존재: ${HANGCTL_DEFAULT_CONF_DST} (덮어쓰지 않음)"
+  echo "Installing compatibility profile tree: ${COMPAT_TARGET_ROOT}"
+  sudo mkdir -p "$(dirname "${COMPAT_TARGET_ROOT}")"
+  sudo rm -rf "${COMPAT_TARGET_ROOT}"
+  sudo cp -a "${compat_src}" "${COMPAT_TARGET_ROOT}"
+
+  sudo find "${COMPAT_TARGET_ROOT}" -type f \( -path '*/bin/govc' -o -path '*/venv/bin/python3' \) -exec chmod 755 {} \; 2>/dev/null || true
+}
+
+install_hangctl_units() {
+  local conf_src="etc/ablestack-vm-hangctl.conf"
+  local conf_dst="/etc/ablestack/ablestack-vm-hangctl.conf"
+  local unit_src_dir="${LIB_SRC}/hangctl/systemd"
+
+  if [[ -d "${unit_src_dir}" ]]; then
+    echo "Installing hangctl systemd units into ${SYSTEMD_UNIT_DIR}"
+    sudo mkdir -p "${SYSTEMD_UNIT_DIR}"
+    if ls "${unit_src_dir}"/*.service >/dev/null 2>&1; then
+      sudo cp -a "${unit_src_dir}"/*.service "${SYSTEMD_UNIT_DIR}/"
+      sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.service 2>/dev/null || true
+    fi
+    if ls "${unit_src_dir}"/*.timer >/dev/null 2>&1; then
+      sudo cp -a "${unit_src_dir}"/*.timer "${SYSTEMD_UNIT_DIR}/"
+      sudo chmod 644 "${SYSTEMD_UNIT_DIR}"/*.timer 2>/dev/null || true
+    fi
+    sudo systemctl daemon-reload 2>/dev/null || true
   else
-    sudo cp -a "${HANGCTL_DEFAULT_CONF_SRC}" "${HANGCTL_DEFAULT_CONF_DST}"
-    sudo chmod 644 "${HANGCTL_DEFAULT_CONF_DST}" 2>/dev/null || true
-    echo "   설치 완료: ${HANGCTL_DEFAULT_CONF_DST}"
+    echo "Skipping missing hangctl systemd directory: ${unit_src_dir}"
   fi
-else
-  echo "⚠️  hangctl 기본 설정 템플릿 없음(건너뜀): ${HANGCTL_DEFAULT_CONF_SRC}"
-fi
 
-echo "페이로드 설치 경로: ${LIB_TARGET}/payload"
-mkdir -p "${LIB_TARGET}/payload"
-if [[ -d "$PAYLOAD_SRC" ]]; then
-  # 전체 payload 복사 수행
-  rsync -a "$PAYLOAD_SRC/"" " "${LIB_TARGET}/payload/" 2>/dev/null || cp -a "$PAYLOAD_SRC/"* "${LIB_TARGET}/payload/" 2>/dev/null || true
-else
-  echo "⚠️  페이로드 소스 디렉터리 미존재: $PAYLOAD_SRC"
-fi
+  if [[ -f "${conf_src}" ]]; then
+    echo "Installing default hangctl config if absent: ${conf_dst}"
+    sudo mkdir -p "$(dirname "${conf_dst}")"
+    if [[ -f "${conf_dst}" ]]; then
+      echo "Keeping existing config: ${conf_dst}"
+    else
+      sudo cp -a "${conf_src}" "${conf_dst}"
+      sudo chmod 644 "${conf_dst}" 2>/dev/null || true
+      echo "Installed config: ${conf_dst}"
+    fi
+  else
+    echo "Skipping missing hangctl config template: ${conf_src}"
+  fi
+}
 
-# 3) ISO 기본 경로 확인/생성 및 안내
-echo "ISO 기본 경로 확인: ${ISO_DEFAULT_DIR}"
-mkdir -p "${ISO_DEFAULT_DIR}"
-if [[ -f "${ISO_DEFAULT_PATH}" ]]; then
-  echo "   ISO 존재: ${ISO_DEFAULT_PATH}"
-else
-  echo "   ⚠️  ISO가 없습니다: ${ISO_DEFAULT_PATH}"
-  echo "      - GitHub Actions 출력물을 이 경로에 배치하거나"
-  echo "      - 다른 경로를 사용할 경우 vm_autoinstall에서 환경변수 ISO_PATH_DEFAULT를 지정하세요."
-fi
+install_payload_tree() {
+  echo "Installing payload tree: ${LIB_TARGET}/payload"
+  mkdir -p "${LIB_TARGET}/payload"
+  if [[ -d "${PAYLOAD_SRC}" ]]; then
+    rsync -a "${PAYLOAD_SRC}/" "${LIB_TARGET}/payload/" 2>/dev/null || \
+      cp -a "${PAYLOAD_SRC}/"* "${LIB_TARGET}/payload/" 2>/dev/null || true
+  else
+    echo "Skipping missing payload source directory: ${PAYLOAD_SRC}"
+  fi
+}
 
-# 4) 환경 설정 파일 생성
-PROFILE_D="/etc/profile.d/ablestack-qemu-exec-tools.sh"
-echo "환경설정 파일: ${PROFILE_D}"
-cat <<EOF | sudo tee "${PROFILE_D}" >/dev/null
-# ablestack-qemu-exec-tools env (hint)
+ensure_iso_path() {
+  echo "Ensuring ISO default directory exists: ${ISO_DEFAULT_DIR}"
+  mkdir -p "${ISO_DEFAULT_DIR}"
+  if [[ -f "${ISO_DEFAULT_PATH}" ]]; then
+    echo "ISO already present: ${ISO_DEFAULT_PATH}"
+  else
+    echo "ISO not found: ${ISO_DEFAULT_PATH}"
+    echo "Place the generated ISO there, or override ISO_PATH_DEFAULT in your shell environment."
+  fi
+}
+
+write_profile_env() {
+  local profile_d="/etc/profile.d/ablestack-qemu-exec-tools.sh"
+  echo "Writing environment profile: ${profile_d}"
+  cat <<EOF | sudo tee "${profile_d}" >/dev/null
+# ablestack-qemu-exec-tools environment
 export ABLESTACK_QEMU_EXEC_TOOLS_HOME="${LIB_TARGET}"
 export ISO_PATH_DEFAULT="${ISO_DEFAULT_PATH}"
+export V2K_COMPAT_ROOT="${COMPAT_TARGET_ROOT}"
 EOF
+}
 
-echo "설치 완료!"
+print_summary() {
+  cat <<EOF
 
-echo ""
-echo "사용 예시:"
-echo "  vm_autoinstall <domain>     # ISO 기반 게스트 자동 설치 (vm_autoinstall.sh)"
-echo "  vm_exec                      # 게스트 시스템 명령 실행(QGA 필요)"
-echo ""
-echo "  ablestack_vm_hangctl health  # libvirtd 상태 점검"
-echo "  ablestack_vm_hangctl scan    # VM hang 스캔 (domstate 및 QMP 기반)"
-echo ""
-echo "systemd(개발 설치 시 유닛으로 배치, enable후 시동):"
-echo "  systemctl enable --now ablestack-vm-hangctl.timer"
-echo "  systemctl status ablestack-vm-hangctl.timer --no-pager -l"
-echo ""
-echo "참고:"
-echo "  - 게스트 인젝션 스크립트는 ${LIB_TARGET}/payload/* 에서 사용합니다."
-echo "  - ISO는 ${ISO_DEFAULT_PATH} 에 존재해야 합니다."
-echo "  - Windows: ISO 루트에 install.bat 실행 / Linux: install-linux.sh 실행"
+Installation complete.
+
+Examples:
+  vm_autoinstall <domain>        ISO-based guest autoinstall
+  vm_exec                        Execute guest commands through QGA
+  ablestack_vm_hangctl health    Check hangctl health
+  ablestack_vm_hangctl scan      Scan VMs for hang conditions
+
+Systemd:
+  systemctl enable --now ablestack-vm-hangctl.timer
+  systemctl status ablestack-vm-hangctl.timer --no-pager -l
+
+Notes:
+  - Guest-injection scripts use payloads from ${LIB_TARGET}/payload
+  - The default ISO path is ${ISO_DEFAULT_PATH}
+  - Compatibility profiles are installed under ${COMPAT_TARGET_ROOT}
+EOF
+}
+
+main() {
+  local install_mode
+  local bin_scripts=()
+  MISSING=()
+
+  if is_ablestack_host; then
+    echo "ABLESTACK host detected. Installing host-oriented command set."
+    install_mode="HOST"
+  else
+    echo "Generic Linux environment detected. Installing full command set."
+    install_mode="VM"
+  fi
+
+  need_cmd jq
+  need_cmd virsh
+  need_cmd virt-inspector
+  need_cmd virt-copy-in
+  need_cmd virt-customize
+  need_cmd virt-win-reg
+
+  if ((${#MISSING[@]})); then
+    echo "Missing required commands: ${MISSING[*]}" >&2
+    echo "Recommended on Rocky 9: dnf -y install jq libvirt-client libguestfs-tools virt-install" >&2
+    exit 1
+  fi
+
+  if [[ "${install_mode}" == "HOST" ]]; then
+    bin_scripts=("vm_exec.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
+  else
+    bin_scripts=("vm_exec.sh" "agent_policy_fix.sh" "cloud_init_auto.sh" "vm_autoinstall.sh" "ablestack_v2k.sh" "ablestack_vm_hangctl.sh" "v2k_test_install.sh")
+  fi
+
+  install_bin_links "${bin_scripts[@]}"
+  install_lib_tree
+  install_compat_tree
+  install_hangctl_units
+  install_payload_tree
+  ensure_iso_path
+  write_profile_env
+  print_summary
+}
+
+main "$@"

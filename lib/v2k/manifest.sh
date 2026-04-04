@@ -19,6 +19,10 @@
 
 set -euo pipefail
 
+V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+# shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+
 # Manifest helpers
 # - manifest.json is the source of truth for pipeline steps
 # - Use jq to mutate (atomic write)
@@ -118,6 +122,16 @@ v2k_manifest_init() {
   vddk_user="${V2K_VDDK_USER-}"
   vddk_cred_file="${V2K_VDDK_CRED_FILE-}"
 
+  local compat_requested_profile compat_selected_profile compat_detected_vcenter_version
+  local compat_root compat_govc_bin compat_python_bin compat_vddk_libdir
+  compat_requested_profile="${V2K_COMPAT_PROFILE:-auto}"
+  compat_selected_profile="${V2K_COMPAT_SELECTED_PROFILE-}"
+  compat_detected_vcenter_version="${V2K_COMPAT_DETECTED_VCENTER_VERSION-}"
+  compat_root="${V2K_COMPAT_ROOT-}"
+  compat_govc_bin="${V2K_GOVC_BIN-}"
+  compat_python_bin="${V2K_PYTHON_BIN-}"
+  compat_vddk_libdir="${VDDK_LIBDIR-}"
+
   # Optional env overrides (set by engine.sh from CLI options)
   # - V2K_TARGET_FORMAT: qcow2|raw
   # - V2K_TARGET_STORAGE_TYPE: file|block|rbd
@@ -184,6 +198,13 @@ v2k_manifest_init() {
     --arg vddk_thumbprint "${vddk_thumbprint}" \
     --arg vddk_user "${vddk_user}" \
     --arg vddk_cred_file "${vddk_cred_file}" \
+    --arg compat_requested_profile "${compat_requested_profile}" \
+    --arg compat_selected_profile "${compat_selected_profile}" \
+    --arg compat_detected_vcenter_version "${compat_detected_vcenter_version}" \
+    --arg compat_root "${compat_root}" \
+    --arg compat_govc_bin "${compat_govc_bin}" \
+    --arg compat_python_bin "${compat_python_bin}" \
+    --arg compat_vddk_libdir "${compat_vddk_libdir}" \
     --arg vmhash "${vmhash}" \
     --argjson storage_map "${map_compact}" \
     '
@@ -291,6 +312,17 @@ v2k_manifest_init() {
             thumbprint: (if ($vddk_thumbprint|length) > 0 then $vddk_thumbprint else "" end),
             user: (if ($vddk_user|length) > 0 then $vddk_user else "" end),
             cred_file: (if ($vddk_cred_file|length) > 0 then $vddk_cred_file else "" end)
+          },
+          compat: {
+            requested_profile: (if ($compat_requested_profile|length) > 0 then $compat_requested_profile else "auto" end),
+            selected_profile: (if ($compat_selected_profile|length) > 0 then $compat_selected_profile else "" end),
+            detected_vcenter_version: (if ($compat_detected_vcenter_version|length) > 0 then $compat_detected_vcenter_version else "" end),
+            compat_root: (if ($compat_root|length) > 0 then $compat_root else "" end),
+            tools: {
+              govc_bin: (if ($compat_govc_bin|length) > 0 then $compat_govc_bin else "" end),
+              python_bin: (if ($compat_python_bin|length) > 0 then $compat_python_bin else "" end),
+              vddk_libdir: (if ($compat_vddk_libdir|length) > 0 then $compat_vddk_libdir else "" end)
+            }
           }
         },
         target: {
@@ -322,7 +354,94 @@ v2k_manifest_init() {
           last_error:{code:0,reason:"",ts:""}
         }
       }
-    ' > "${manifest}"
+  ' > "${manifest}"
+}
+
+v2k_manifest_get_compat_requested_profile() {
+  local manifest="$1"
+  jq -r '.source.compat.requested_profile // "auto"' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_get_compat_selected_profile() {
+  local manifest="$1"
+  jq -r '.source.compat.selected_profile // empty' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_get_compat_detected_vcenter_version() {
+  local manifest="$1"
+  jq -r '.source.compat.detected_vcenter_version // empty' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_get_compat_root() {
+  local manifest="$1"
+  jq -r '.source.compat.compat_root // empty' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_get_compat_govc_bin() {
+  local manifest="$1"
+  jq -r '.source.compat.tools.govc_bin // empty' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_get_compat_python_bin() {
+  local manifest="$1"
+  jq -r '.source.compat.tools.python_bin // empty' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_get_compat_vddk_libdir() {
+  local manifest="$1"
+  jq -r '.source.compat.tools.vddk_libdir // empty' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_set_compat_requested_profile() {
+  local manifest="$1" requested_profile="${2:-auto}"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg requested_profile "${requested_profile}" '
+    .source = (.source // {}) |
+    .source.compat = (.source.compat // {}) |
+    .source.compat.requested_profile = $requested_profile
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+v2k_manifest_set_compat_selected_profile() {
+  local manifest="$1" selected_profile="${2:-}"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg selected_profile "${selected_profile}" '
+    .source = (.source // {}) |
+    .source.compat = (.source.compat // {}) |
+    .source.compat.selected_profile = $selected_profile
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+v2k_manifest_set_compat_detected_vcenter_version() {
+  local manifest="$1" detected_version="${2:-}"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg detected_version "${detected_version}" '
+    .source = (.source // {}) |
+    .source.compat = (.source.compat // {}) |
+    .source.compat.detected_vcenter_version = $detected_version
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+v2k_manifest_set_compat_tool_paths() {
+  local manifest="$1" compat_root="${2:-}" govc_bin="${3:-}" python_bin="${4:-}" vddk_libdir="${5:-}"
+  local tmp
+  tmp="$(mktemp)"
+  jq \
+    --arg compat_root "${compat_root}" \
+    --arg govc_bin "${govc_bin}" \
+    --arg python_bin "${python_bin}" \
+    --arg vddk_libdir "${vddk_libdir}" '
+    .source = (.source // {}) |
+    .source.compat = (.source.compat // {}) |
+    .source.compat.compat_root = $compat_root |
+    .source.compat.tools = (.source.compat.tools // {}) |
+    .source.compat.tools.govc_bin = $govc_bin |
+    .source.compat.tools.python_bin = $python_bin |
+    .source.compat.tools.vddk_libdir = $vddk_libdir
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 
 v2k_manifest_phase_done() {
@@ -556,6 +675,7 @@ v2k_manifest_status_summary() {
     | {
         run:.run,
         vm:.source.vm,
+        compat:(.source.compat // {}),
         phases:.phases,
         disks:(.disks|map({
           disk_id:.disk_id,
@@ -610,7 +730,7 @@ v2k_manifest_fetch_and_save_base_change_ids() {
     disk_id="$(jq -r ".disks[$i].disk_id" "${manifest}")"
     
     # --change-id "*"를 넘겨 현재 시점의 Change ID(new_change_id)만 받아온다.
-    json_out="$(python3 "${py_script}" --vm "${vm_name}" --snapshot "${snap_name}" --disk-id "${disk_id}" --change-id "*" 2>/dev/null || true)"
+    json_out="$(v2k_python "${py_script}" --vm "${vm_name}" --snapshot "${snap_name}" --disk-id "${disk_id}" --change-id "*" 2>/dev/null || true)"
     new_id="$(echo "${json_out}" | jq -r '.new_change_id // empty')"
 
     if [[ -n "${new_id}" && "${new_id}" != "null" ]]; then

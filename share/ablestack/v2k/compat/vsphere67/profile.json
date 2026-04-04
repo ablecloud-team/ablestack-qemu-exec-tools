@@ -1,0 +1,27 @@
+{
+  "schema": "ablestack-v2k/compat-profile-v1",
+  "id": "vsphere67",
+  "label": "vSphere 6.7 through 7.0 compatibility profile",
+  "supported_vcenter": {
+    "min": "6.7",
+    "max": "7.0",
+    "versions": [
+      "6.7",
+      "7.0"
+    ]
+  },
+  "toolchain": {
+    "govc": "bin/govc",
+    "python": "venv/bin/python3",
+    "vddk_libdir": "vddk"
+  },
+  "sdk": {
+    "govc_version": "sample-wrapper-mid",
+    "pyvmomi_version": "sample-wrapper-mid",
+    "vddk_version": "7.0.x-family"
+  },
+  "selection_rules": {
+    "priority": 20,
+    "notes": "Use for vCenter 6.7 and early 7.0 deployments."
+  }
+}

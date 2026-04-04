@@ -10,14 +10,13 @@ permissions:
   contents: write
 
 # NOTE (WinPE ISO)
-# - WinPE ISO는 별도 워크플로우(WinPE Core/Test/Release)에서 생성/관리되는 것이 기본이다.
-# - build.yml에서 "사전 준비된 WinPE ISO"가 리포지터리에 미리 존재하거나
-#   또는 별도 워크플로우의 아티팩트로 준비된 경우에만 통합 ISO를 포함한다.
-# - 별도로 통합 ISO 빌드를 실패해도 패키지 생성하고 "미포함"으로 진행한다.
+# - WinPE ISO?? ????WinPE Core/Test/Release)? ?/?? ?.
+# - build.yml? "?  WinPE ISO" ??? ???#   ?  ??? ??? ? ? ISO???.
+# - ?? ISO ??? ? ?? "??? ?.
 
 jobs:
   # ======================================================================
-  # 1) RPM BUILD (Rocky 9 + 10 병행)
+  # 1) RPM BUILD (Rocky 9 + 10 )
   # ======================================================================
   build-rpm:
     runs-on: ubuntu-latest
@@ -35,12 +34,12 @@ jobs:
       - name: Install build deps
         run: |
           set -e
-          # 만약 Rocky 10.1 이후 rpm-sequoia + OpenSSL 조합이 바뀌면
-          # 컨테이너 베이스에 이미 설치된 라이브러리 버전이 맞지 않는 경우가 있어
-          # 그래서 distro-sync로 rpm / openssl 계열의 리포 상태를 맞춘다.
+          #  Rocky 10.1 ? rpm-sequoia + OpenSSL ??
+          # ? ? ?? ???????? ?  ?
+          # ??distro-sync?rpm / openssl ?? ????
           dnf -y distro-sync
 
-          # 빌드에 필요한 의존성 설치
+          # ?????????
           dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Build RPM
@@ -52,19 +51,18 @@ jobs:
           WORKDIR="repo/rpm-rocky${{ matrix.os_version }}"
           mkdir -p "$WORKDIR"
 
-          # 본체 RPM 복사
+          #  RPM 
           cp rpmbuild/RPMS/*/*.rpm "$WORKDIR"/
 
           echo "[INFO] Downloading runtime dependencies..."
-          # spec의 Requires를 기반으로 존재하는 모든 것을 모아둠
-          dnf download --resolve --alldeps \
+          # spec??Requires?? ?   ??          dnf download --resolve --alldeps \
             --destdir="$WORKDIR" \
             bash jq libvirt-client cloud-init || true
 
           echo "[INFO] Creating repo metadata..."
           createrepo_c "$WORKDIR"
 
-          # 아티팩트 디렉터리 정리
+          # ?? ?? ?
           mkdir -p release/rpm
           mv repo release/rpm/
 
@@ -75,8 +73,8 @@ jobs:
 
   # ======================================================================
   # 1-A) HANGCTL RPM BUILD (Rocky 9 only)
-  #  - 목표: Rocky9 ABLESTACK Host에서만 설치되도록 spec(%pre 가서 반영
-  #  - build.yml에서는 "빌드/리포 구성/배포"를 담당 (가정은 spec에서 처리)
+  #  - : Rocky9 ABLESTACK Host?????spec(%pre ??
+  #  - build.yml???"/ /"?? (?? spec? )
   # ======================================================================
   build-hangctl-rpm:
     runs-on: ubuntu-latest
@@ -102,7 +100,7 @@ jobs:
           SPEC="rpm/ablestack_vm_hangctl.spec"
           test -f "${SPEC}" || (echo "[ERR] Missing spec: ${SPEC}" >&2; exit 2)
 
-          # VERSION / RELEASE를 repo 루트의 VERSION 파일에서 일괄적으로 사용
+          # VERSION / RELEASE?repo ??VERSION ?? ????
           VERSION="$(. ./VERSION; printf "%s" "$VERSION" | tr -d '\r\n[:space:]')"
           RELEASE="$(. ./VERSION; printf "%s" "$RELEASE" | tr -d '\r\n[:space:]')"
           GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
@@ -111,9 +109,8 @@ jobs:
 
           mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
-          # tarball 이름이 spec의 Source0 규칙에 맞춰야 함
-          # 기존 패키지와 동일하게 'spec 파일 basename'의 prefix를 사용
-          # (예 ablestack_vm_hangctl-<version>.tar.gz)
+          # tarball ???spec??Source0 ??????          #  ?? ?? 'spec ? basename'??prefix??
+          # (??ablestack_vm_hangctl-<version>.tar.gz)
           NAME_HANGCTL="ablestack_vm_hangctl"
           TMP_TGZ="$(mktemp /tmp/${NAME_HANGCTL}-${VERSION}.tar.gz.XXXXXX)"
           tar czf "${TMP_TGZ}" \
@@ -150,7 +147,7 @@ jobs:
           WORKDIR="repo/hangctl-rpm-rocky9"
           mkdir -p "$WORKDIR"
 
-          # hangctl RPM 복사
+          # hangctl RPM 
           cp -v build/rpm-hangctl/*.rpm "$WORKDIR"/
 
           echo "[INFO] Creating repo metadata..."
@@ -165,7 +162,7 @@ jobs:
           path: release/hangctl-rpm/**
           
   # ======================================================================
-  # 1-B) V2K RPM BUILD (별도 경로, 기존 빌드 프로세스 손상 금지)
+  # 1-B) V2K RPM BUILD ( ,   ?? ? ?)
   # ======================================================================
   build-v2k-rpm:
     runs-on: ubuntu-latest
@@ -182,10 +179,9 @@ jobs:
           set -euo pipefail
 
           # ======================================================================
-          # Rocky 9.6 vault 고정 (AirGap 집합)
-          # - 기존 rocky.repo의 mirrorlist를 고정 baseurl로 변경
-          # - releasever=9.6만으로는 해결 안됨 (baseurl이 바뀌어야 함)
-          # - 따라서 9.6 vault baseurl을 가진 repo를 "직접" 생성
+          # Rocky 9.6 vault  (AirGap )
+          # -  rocky.repo??mirrorlist? baseurl??          # - releasever=9.6 ? ? (baseurl??????
+          # - ???9.6 vault baseurl???repo?"" ?
           # ======================================================================
           cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
           [rocky-vault-9.6-baseos]
@@ -210,8 +206,8 @@ jobs:
           dnf clean all
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
 
-          # curl 충돌 회피: curl-minimal vs curl
-          # - 컨테이너 베이스에 curl-minimal이 깔린 경우, 필요 시 allowerasing으로 처리
+          # curl  ?: curl-minimal vs curl
+          # - ? ? curl-minimal?? , ? ??allowerasing? 
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
             --allowerasing ca-certificates curl-minimal || true
 
@@ -222,10 +218,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 핵심: rocky.repo를 "rewrite"하는 대신
-          # rocky.repo의 mirrorlist를 고정 baseurl로 변경하는 케이스가 있어
-          # mirrorlist를 주석 처리하면 "baseurl 없음"으로 dnf가 즉시 실패한다.
-          # 따라서 9.6 vault baseurl을 가진 repo 파일을 별도로 생성해서 사용한다.
+          # ?: rocky.repo?"rewrite"? ???          # rocky.repo??mirrorlist? baseurl???? ?
+          # mirrorlist? ? "baseurl ?"? dnf  ??.
+          # ???9.6 vault baseurl???repo ?????? ??.
 
           cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
           [rocky-vault-9.6-baseos]
@@ -250,19 +245,19 @@ jobs:
           echo "[INFO] Enabled repos (vault 9.6):"
           grep -nE '^\[|^baseurl=' /etc/yum.repos.d/rocky-vault-9.6.repo
 
-          # vault repo만으로 캐시 생성
+          # vault repo? ?
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
 
-          # EPEL을 build-time only (nbd 패키지 목적) 로기적으로 구성하기 위해
-          # vault repo만으로는 캐시 생성 시 epel-release 패키지를 'dnf install'로 찾을 수 없음(No match).
-          #     그래서 EPEL bootstrap rpm의 URL을 직접 다운로드한다.
-          #     (빌드/릴리즈 계열에서만 임시로 사용하고, 결과 rpm에 ISO에 포함)
+          # EPEL??build-time only (nbd ? ) ??? ?
+          # vault repo  ? ??epel-release ??'dnf install'? ???(No match).
+          #     ??EPEL bootstrap rpm??URL?? ??.
+          #     (/???????,  rpm??ISO???)
           EPEL_RPM_URL="https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
           echo "[INFO] Installing EPEL release RPM: ${EPEL_RPM_URL}"
           curl -fL -o /tmp/epel-release.rpm "${EPEL_RPM_URL}"
           rpm -Uvh --nosignature /tmp/epel-release.rpm
 
-          # EPEL repo id 자동 감지(epel/epel-9/epel-next 케이스 모두 고려)
+          # EPEL repo id ? ?(epel/epel-9/epel-next ?  )
           EPEL_REPO_ID="$(dnf repolist all 2>/dev/null | awk 'tolower($1) ~ /^epel/ {print $1; exit}')"
           if [[ -z "${EPEL_REPO_ID}" ]]; then
             echo "[ERR] EPEL repo id not found after installing epel-release." >&2
@@ -272,14 +267,13 @@ jobs:
           echo "[INFO] Detected EPEL repo id: ${EPEL_REPO_ID}"
           echo "EPEL_REPO_ID=${EPEL_REPO_ID}" >> "$GITHUB_ENV"
 
-          # vault + epel 캐시 생성(필요한 repo만)
+          # vault + epel  ?(???repo?
           dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*","${EPEL_REPO_ID}" makecache          
 
       - name: Build V2K RPM (separate path)
         run: |
           set -e
-          # NOTE: 기존 make rpm 경로를 분리하여 V2K 용 패키지를 사용해야 함
-          #       (예 make v2k-rpm)
+          # NOTE:  make rpm ?? V2K ?????? ??          #       (??make v2k-rpm)
           make v2k-rpm
  
       - name: Verify ablestack_v2k rpm contains bash completion
@@ -297,14 +291,14 @@ jobs:
           WORKDIR="release/v2k/v2k-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
 
-          # V2K 본체 RPM 수집 (프로젝트 출력 경로에 맞춰 필요 시 조정)
+          # V2K  RPM ? (??  ?? ? ??)
           find . -type f -name "*.rpm" \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack_v2k*.rpm" \) -exec cp -v {} "$WORKDIR"/ \;
 
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
-          # --- 9.6 고정 (중요: 9.7 입력 차단) ---
+          # --- 9.6  (: 9.7 ? ) ---
           : "${EPEL_REPO_ID:?EPEL_REPO_ID is not set. Configure step must export it to GITHUB_ENV}"
-          # 옵션 문자에 의존하지 말고, 배열로 전달(파싱 정확도)
+          # ? ????? , ??(? ???
           DNF_COMMON_OPTS=(
             --releasever=9.6
             --disablerepo=*
@@ -312,11 +306,11 @@ jobs:
             --setopt=install_weak_deps=False
           )
 
-          # ablestack-v2k.spec의 Requires를 동일하게 처리 (8개)
-          # ceph-common: rbd CLI 사용(생성/존재 확인) 목적
+          # ablestack-v2k.spec??Requires???  (8?
+          # ceph-common: rbd CLI ?(?/ ?) 
           REQ_PKGS="jq python3 openssl nbd nbdkit nbdkit-vddk-plugin qemu-img libvirt-client"
 
-          # baseline 파일(ABLestack 9.6 호스트에서 rpm -qa 기반으로 생성된 커밋)
+          # baseline ?(ABLestack 9.6 ????rpm -qa ? ???)
           BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
           if [[ ! -f "${BASELINE_FILE}" ]]; then
             echo "[ERR] Missing baseline file: ${BASELINE_FILE}" >&2
@@ -326,27 +320,25 @@ jobs:
           fi
 
           echo "[INFO] Sanity check: required pkgs availability (repo view)"
-          # nbd/nbdkit/qemu-img가 repo에서 보이지 않으면 즉시 실패해야 하는 이유: 문제 조기 차단)
+          # nbd/nbdkit/qemu-img repo?  ?? ?? ? ?:   )
           dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available ${REQ_PKGS} >/dev/null
 
-          # Requires 존재하는 것으로 출력 (패키지명만, 중복 제거)
-          # dnf-plugins-core의 repoquery 사용
+          # Requires ? ? (?,  ?)
+          # dnf-plugins-core??repoquery ?
           dnf -y "${DNF_COMMON_OPTS[@]}" install dnf-plugins-core >/dev/null
           dnf -q "${DNF_COMMON_OPTS[@]}" repoquery \
             --requires --resolve --recursive \
             --qf '%{name}' \
             ${REQ_PKGS} | sort -u > /tmp/v2k_dep_closure.txt
 
-          # (중요) Direct requires와 baseline subtract를 무조건 반드시 해야 함
-          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
+          # () Direct requires? baseline subtract????? ??          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
 
 
-          # baseline에 없는 패키지 제외 (있는 것만 다운로드)
+          # baseline??? ? ? (?  ?)
           sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
           comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
 
-          # (중요) Direct requires와 baseline subtract를 무조건 반드시 해야 함
-          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
+          # () Direct requires? baseline subtract????? ??          printf '%s\n' ${REQ_PKGS} | sort -u > /tmp/v2k_must_have.txt
 
           # baseline subtract (closure - baseline)
           sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
@@ -360,18 +352,18 @@ jobs:
           head -n 50 /tmp/v2k_to_download_candidate.txt || true
 
           echo "[INFO] Filtering candidate list by repo availability (STRICT)..."
-          # ⚠️ 주의: $(cat ...) 대신 xargs로 처리해야 하는 이유: 파일 내용이 너무 길거나 빈값으로 repo 전체가 깨지는 경우가 있다.
-          # xargs로만 repo에 존재하는 패키지를 필터링함
+          # ? : $(cat ...) ???xargs?? ? ?: ? ???? ??? repo ? ??? ?.
+          # xargs repo??? ???
           : > /tmp/v2k_to_download_avail.txt
           cat /tmp/v2k_to_download_candidate.txt \
             | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
             | sort -u > /tmp/v2k_to_download_avail.txt
 
-          # langpack 관련 방지(완제 제거) - 필요 없으므로 과감히 제외
+          # langpack ???(? ?) - ? ?????
           grep -vE '^glibc-all-langpacks$|^glibc-langpack-' /tmp/v2k_to_download_avail.txt \
             | sort -u > /tmp/v2k_to_download.txt
 
-          # missing(보고 있었는데 repo에 없는 것) 로깅
+          # missing( ?? repo??? ? 
           comm -23 /tmp/v2k_to_download_candidate.txt /tmp/v2k_to_download_avail.txt > /tmp/v2k_missing_in_repo.txt
           if [[ -s /tmp/v2k_missing_in_repo.txt ]]; then
             echo "[WARN] Missing in enabled repos (skipped):"
@@ -382,15 +374,14 @@ jobs:
           echo "[INFO] Final to-download sample (first 50):"
           head -n 50 /tmp/v2k_to_download.txt || true
 
-          # 최종 방어: nbd/nbdkit/qemu-img가 반드시 있어야 함
-          for p in nbd nbdkit qemu-img; do
+          #  : nbd/nbdkit/qemu-img ???????          for p in nbd nbdkit qemu-img; do
             if ! grep -qx "$p" /tmp/v2k_to_download.txt && ! grep -qx "$p" /tmp/v2k_baseline.txt; then
               echo "[ERR] Required package '$p' is neither in baseline nor in final download list." >&2
               exit 2
             fi
           done
 
-          # download (기본적으로 exclude 걸어주지만 에러에 대비해서 중복 제거하도록 처리함)
+          # download (??exclude ???????? ?????
           if [[ -s /tmp/v2k_to_download.txt ]]; then
             xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
           else
@@ -435,16 +426,16 @@ jobs:
           set -e
           sudo apt-get update -y
 
-          # ISO를 위한 로컬 APT 리포 생성 공간
+          # ISO??  APT  ? 
           mkdir -p repo/pool
           find build/deb -type f -name "*.deb" -exec cp {} repo/pool/ \;
 
           cd repo/pool
 
           echo "[INFO] Starting dependency collection..."
-          # 한번에 처리할 패키지 이름 기억
+          # ?????? ? 
           seen_pkgs=""
-          # 각 .deb의 추가되는 동안 반복
+          # ?.deb???? ? 
           new_pkgs=1
           while [ "$new_pkgs" -eq 1 ]; do
             new_pkgs=0
@@ -456,7 +447,7 @@ jobs:
               fi
               seen_pkgs="$seen_pkgs $P"
 
-              # Depends 파싱: 콤마 분리, 버전/괄호 제거, 또는|를 공백으로 큰, :any 제거
+              # Depends ?:  , / ?, ?|?? ?? :any ?
               DEPS=$(dpkg-deb -f "$deb" Depends | \
                      tr ',' '\n'          | \
                      sed -E 's/\(.*\)//g' | \
@@ -469,7 +460,7 @@ jobs:
 
               for dep in $DEPS; do
                 [ -n "$dep" ] || continue
-                # 이미 pool에 같은 패키지가 다운로드된 경우에는 건너뜀
+                # ?? pool??? ? ???? ?
                 if ls -1 ${dep}_*.deb >/dev/null 2>&1; then
                   continue
                 fi
@@ -486,11 +477,11 @@ jobs:
           echo "[INFO] Total pool count: $(ls -1 *.deb | wc -l)"
 
           cd ../..
-          # 인덱스 생성 (repo 루트에서 실행해야 Filename 경로가 pool/ 로 맞음)
+          # ???? (repo ? ?? Filename  pool/ ?)
           mkdir -p repo/dists/stable/main/binary-amd64
           ( cd repo && dpkg-scanpackages pool /dev/null | gzip -9c > dists/stable/main/binary-amd64/Packages.gz )
 
-          # 배포판 설정을 정리
+          # ??????
           mv repo "deb-ubuntu${{ matrix.os_version }}"
           mkdir -p release/deb
           mv deb-ubuntu${{ matrix.os_version }} release/deb/
@@ -525,7 +516,7 @@ jobs:
           path: windows/msi/out/*
 
   # ======================================================================
-  # 4) RELEASE + ISO CREATION (VirtIO 통합 포함)
+  # 4) RELEASE + ISO CREATION (VirtIO ? ?)
   # ======================================================================
   release:
     needs: [build-rpm, build-hangctl-rpm, build-deb, build-windows, build-v2k-rpm]
@@ -535,8 +526,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # workflow_run에서 기본 브랜치로 checkout하므로
-          # WinPE Release Build가 빌드한 파일 커밋으로 고정
+          # workflow_run?   checkout???          # WinPE Release Build ??? ? 
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Resolve tag from workflow_run
@@ -554,7 +544,7 @@ jobs:
           fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
-      # dist/ 아래에 모든 아티팩트 다운로드
+      # dist/ ??? ?? ?
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -568,8 +558,8 @@ jobs:
           mkdir -p release/winpe
 
           echo "[INFO] Downloading WinPE ISO assets for tag: ${RELEASE_TAG}"
-          # WinPE workflow가 dist/*.iso 와 SHA256SUMS를 릴리즈에 붙여놓았으므로 여기서 가져옴
-          # 파일명이 고정되지 않을 수 있으므로 패턴으로 수집
+          # WinPE workflow dist/*.iso ? SHA256SUMS? ????????
+          # ? ?? ? ?????? ?
           gh release download "${RELEASE_TAG}" \
             -p "*winpe*.iso" \
             -p "SHA256SUMS" \
@@ -592,7 +582,7 @@ jobs:
           set -e
           mkdir -p release/rpm release/deb release/msi release/assets/v2k/wheels release/v2k
 
-          echo "모두 Collecting RPM repos..."
+          echo " Collecting RPM repos..."
           for ver in 9 10; do
             SRC_DIR=$(find dist -type d -path "*/rpm-package-${ver}/release/rpm/repo/rpm-rocky${ver}" | head -n 1)
             if [ -d "$SRC_DIR" ]; then
@@ -611,7 +601,7 @@ jobs:
             fi
           done
 
-          echo "모두 Collecting HANGCTL RPM repo (Rocky 9)..."
+          echo " Collecting HANGCTL RPM repo (Rocky 9)..."
           HANGCTL_DIR="$(find dist -type d \( \
                           -path "*/hangctl-rpm-package/release/hangctl-rpm/repo/hangctl-rpm-rocky9" -o \
                           -path "*/hangctl-rpm-package/repo/hangctl-rpm-rocky9" \
@@ -624,7 +614,7 @@ jobs:
             echo "[WARN] No HANGCTL RPM repo found (hangctl-rpm-package)."
           fi
 
-          echo "모두 Collecting DEB repos..."
+          echo " Collecting DEB repos..."
           for ver in 22.04 24.04; do
             SRC_DIR=$(find dist -type d \( \
                         -path "*/deb-package-${ver}/release/deb/deb-ubuntu${ver}" -o \
@@ -639,7 +629,7 @@ jobs:
             fi
           done
 
-          echo "모두 Collecting MSI artifacts..."
+          echo " Collecting MSI artifacts..."
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
 
       - name: Collect V2K RPM repo (Rocky 9.6) into ISO tree
@@ -660,24 +650,23 @@ jobs:
           # Preserve repodata/ and all rpm files
           cp -a "${SRC_DIR}/." release/v2k/v2k-rpm-rocky9.6/
 
-      - name: Stage V2K assets from repo ./assets into ISO (govc, VDDK)
+      - name: Stage V2K assets from repo ./assets into ISO
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release/assets
+          mkdir -p release/assets release/assets/compat release/assets/v2k
           cp -v assets/govc_Linux_x86_64.tar.gz release/assets/ || true
           cp -v assets/VMware-vix-disklib-*.tar.gz release/assets/ || true
+          if [[ -d assets/compat ]]; then
+            cp -a assets/compat/. release/assets/compat/
+          fi
+          if [[ -d assets/v2k/wheels ]]; then
+            cp -a assets/v2k/wheels release/assets/v2k/
+          fi
 
-      - name: Prepare pyvmomi offline wheels (Air-Gap)
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m pip download -d release/assets/v2k/wheels "pyvmomi==8.0.3.0.1"
-
-      # VirtIO Windows Stable ISO 다운로드 "amd64 드라이버 + guest tools(qemu-ga 포함)" 추출
-      # - 중첩 ISO 금지
-      # - DISM/WinPE에서 바로 INF 경로 지정 가능
-      # - 용량 감소(amd64 only)
+      # VirtIO Windows Stable ISO ? "amd64 ?? + guest tools(qemu-ga ?)" 
+      # -  ISO ?
+      # - DISM/WinPE?  INF  ????      # - ? (amd64 only)
       - name: Download & extract VirtIO (amd64-only + guest tools)
         run: |
           set -e
@@ -685,10 +674,9 @@ jobs:
           curl -fL -o dist/virtio-win.iso \
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 
-          # 1) DISM을 위한 핵심 드라이버 디렉터리를 amd64로 추출
-          #    (VirtIO ISO 버전에 따라 w11/2k22/2k19 등 폴더명이 바뀌므로 amd64 경로로 일괄 처리함)
-          #    7z의 와일드카드 리턴을 활용하여 */amd64/* 패턴으로 추출함
-          7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
+          # 1) DISM??? ? ?? ???amd64?
+          #    (VirtIO ISO ??? w11/2k22/2k19 ??? ??amd64 ?? ??
+          #    7z???? ???? */amd64/* ?? ??          7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
             "viostor/*/amd64/*" \
             "vioscsi/*/amd64/*" \
             "NetKVM/*/amd64/*" \
@@ -699,12 +687,12 @@ jobs:
             "vioinput/*/amd64/*" \
             "vioser/*/amd64/*" || true
 
-          # 2) Guest tools(qemu-ga 포함): exe/msi를 루트 또는 특정 위치에서 찾아서 포함
-          #    - 가능한 모든 것을 포함(장점 선택 가능)
+          # 2) Guest tools(qemu-ga ?): exe/msi? ? ? ?? ???
+          #    - ?   ?(? ? ??
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-guest-tools.exe" || true
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-gt-*.msi" || true
 
-          # 3) release/virtio에 복사 (존재하는 것만)
+          # 3) release/virtio?? (? )
           for d in viostor vioscsi NetKVM Balloon qemupciserial viorng pvpanic vioinput vioser; do
             if [[ -d "dist/virtio-src/${d}" ]]; then
               mkdir -p "release/virtio/${d}"
@@ -714,7 +702,7 @@ jobs:
           if [[ -f "dist/virtio-src/virtio-win-guest-tools.exe" ]]; then
             cp -a "dist/virtio-src/virtio-win-guest-tools.exe" "release/virtio/"
           fi
-          # MSI의 버전으로 파일명이 바뀌므로 glob 복사
+          # MSI??? ? ??glob 
           shopt -s nullglob
           for m in dist/virtio-src/virtio-win-gt-*.msi; do
             cp -a "$m" "release/virtio/"
@@ -732,9 +720,9 @@ jobs:
           set -euo pipefail
           mkdir -p release/winpe
 
-          # 우선순위
-          #  1) 별도 워크플로우의 아티팩트(dist) 에서 winpe*.iso
-          #  2) 리포지터리에 미리 준비된 파일(assets/winpe/*.iso 또는 winpe/*.iso)
+          # ??
+          #  1)  ??? ??(dist) ? winpe*.iso
+          #  2) ???  ?(assets/winpe/*.iso ? winpe/*.iso)
           WINPE_ISO=""
           WINPE_ISO="$(find dist -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
           if [[ -z "$WINPE_ISO" ]]; then
@@ -757,7 +745,7 @@ jobs:
             echo "         * winpe/*.iso"
           fi
 
-      # Windows 설치 스크립트 생성 (루트: install.ps1/install.bat)
+      # Windows ? ? ? (: install.ps1/install.bat)
       - name: Create Windows installer scripts
         shell: bash
         run: |
@@ -816,26 +804,24 @@ jobs:
                   [string]$Message = "ABLESTACK tools installation is complete. The system needs to reboot.",
                   [string]$Title   = "ABLESTACK",
                   [int]   $Options = 0x0,     # 0x0: OK only / 0x4: Yes/No ??
-                  [int]   $TimeoutSeconds = 60  # 사용자 입력 최대 대기 시간 (초)
+                  [int]   $TimeoutSeconds = 60  # ???? ? ??? (?
               )
 
               $shell = New-Object -ComObject WScript.Shell
 
-              # 두 번째 호출에서만 사용자에게 물어보는 이유
-              # 반환값:
-              #   -1 : 시간 초과됨
-              #    1 : OK
-              #    6 : Yes (0x4 옵션에서)              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
+              # ?? ?????? ?
+              # ?
+              #   -1 : ? ??              #    1 : OK
+              #    6 : Yes (0x4 ??)              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
 
               if ($result -eq -1 -or $result -eq 1 -or $result -eq 6) {
                   Write-Host "Prompt_Reboot: user accepted or no response within timeout. Rebooting..."
-                  # 시스템을 바로 재부팅 (원래 의도대로)
+                  # ??  ????(? ???
                   Restart-Computer -Force
-                  # MSI CustomAction에서는 여기서 끝나고, 실제로는 여기까지 실행되지 않음
+                  # MSI CustomAction???????? ? ?? ??? ?
                   #   msiexec /i ... /norestart + REBOOT=ReallySuppress
-                  # 그러고 시스템 재부팅/종료를 별도 관리자 스크립트에서 처리하는 것도 가능하지 않음
-                  # 지금 구조에서는 Restart-Computer 방식이 적합함
-              }
+                  # ?????????  ?? ?  ? ?
+                  # ????Restart-Computer ?????              }
               else {
                   Write-Host "Prompt_Reboot: user canceled reboot (result = $result)."
               }
@@ -918,8 +904,7 @@ jobs:
             # Completion message
             if ($global:rebootNeeded) {
               Prompt_Reboot "ABLESTACK tools installation completed. Reboot now?" "ABLESTACK" 0x0 30
-              # 그렇지 않으면 30초만 기다리고 자동으로 진행함
-            } else {
+              #  ??30  ?? ??            } else {
               Show-Info "Installation completed successfully. No reboot is required."
             }
           }
@@ -942,7 +927,7 @@ jobs:
             exit /b 1
           )
           
-          REM --- 설치 차례 ---
+          REM --- ? ? ---
           mkdir "C:\ProgramData\AbleStack" 2>nul
           echo ok> "C:\ProgramData\AbleStack\autoinstall.done"
           echo [OK] Installation finished.
@@ -1088,133 +1073,23 @@ jobs:
                           echo "[WARN] V2K RPM repo not found in ISO: ${V2K_REPO_DIR}"
                       fi
 
-                      # 2) govc from ISO assets
-                      GOVC_TGZ="${ISO_MNT}/assets/govc_Linux_x86_64.tar.gz"
-                      if [[ -f "${GOVC_TGZ}" ]]; then
-                          echo "[INFO] Installing govc from asset: ${GOVC_TGZ}"
-                          tmp="$(mktemp -d)"
-                          tar -xzf "${GOVC_TGZ}" -C "${tmp}"
-                          bin="${tmp}/govc"
-                          if [[ ! -f "${bin}" ]]; then
-                              bin="$(find "${tmp}" -maxdepth 3 -type f -name govc | head -n1 || true)"
-                          fi
-                          if [[ -f "${bin}" ]]; then
-                              sudo install -m 0755 "${bin}" /usr/local/bin/govc
-                              echo "[OK] govc installed to /usr/local/bin/govc"
-                          else
-                              echo "[WARN] govc binary not found inside ${GOVC_TGZ}"
-                          fi
-                          rm -rf "${tmp}"
+                      # 2) Install compatibility profile assets from ISO
+                      V2K_INSTALLER_BIN="$(command -v v2k_test_install.sh || true)"
+                      if [[ -x "${V2K_INSTALLER_BIN}" ]]; then
+                          echo "[INFO] Installing V2K compatibility profiles from ISO assets..."
+                          sudo "${V2K_INSTALLER_BIN}" \
+                            --repo-root "${ISO_MNT}" \
+                            --skip-install \
+                            --install-assets \
+                            --install-profile all \
+                            --validate-profile all
                       else
-                          echo "[WARN] govc asset not found: ${GOVC_TGZ}"
+                          echo "[WARN] v2k_test_install.sh not found after ablestack_v2k installation."
+                          echo "[WARN] Skipping compatibility profile asset installation."
                       fi
 
-                      # 3) VMware VDDK from ISO assets (NO ldconfig)
-                      VDDK_TGZ="$(ls -1 "${ISO_MNT}"/assets/VMware-vix-disklib-*.tar.gz 2>/dev/null | sort | tail -n1 || true)"
-                      if [[ -n "${VDDK_TGZ}" ]]; then
-                          echo "[INFO] Installing VMware VDDK from asset: ${VDDK_TGZ}"
-                          sudo mkdir -p /opt
-                          tmp="$(mktemp -d)"
-                          tar -xzf "${VDDK_TGZ}" -C "${tmp}"
-                          distrib="$(find "${tmp}" -maxdepth 2 -type d \( -iname 'vmware-vix-disklib-distrib' -o -iname 'VMware-vix-disklib-distrib' \) | head -n1 || true)"
-                          if [[ -z "${distrib}" ]]; then
-                              distrib="$(find "${tmp}" -maxdepth 2 -type d -iname '*disklib*distrib*' | head -n1 || true)"
-                          fi
-                          if [[ -n "${distrib}" && -d "${distrib}" ]]; then
-                              base_name="$(basename "${VDDK_TGZ}" .tar.gz)"
-                              base_name="${base_name// /_}"
-                              dest_versioned="/opt/${base_name}"
-                              sudo rm -rf "${dest_versioned}" >/dev/null 2>&1 || true
-                              sudo cp -a "${distrib}" "${dest_versioned}"
-                              sudo ln -sfn "${dest_versioned}" /opt/vmware-vix-disklib-distrib
-                              echo "[OK] VDDK installed to ${dest_versioned} (symlink: /opt/vmware-vix-disklib-distrib)"
-                              echo "[INFO] NOTE: ablestack_v2k should pass VDDK libdir to nbdkit at runtime."
-
-                              # write_profiled_env() from v2k_test_install.sh
-                              # - DO NOT run ldconfig / DO NOT touch global linker paths
-                              # - Just export default VDDK_LIBDIR for ablestack_v2k runtime
-                              VDDK_LIBDIR="/opt/vmware-vix-disklib-distrib"
-                              PROFILED_FILE="/etc/profile.d/v2k-vddk.sh"
-                              sudo tee "${PROFILED_FILE}" >/dev/null <<EOP
-          # Generated by install-linux.sh (V2K add-on)
-          export VDDK_LIBDIR="${VDDK_LIBDIR}"
-          EOP
-                              sudo chmod 0644 "${PROFILED_FILE}"
-                              # best-effort source for current session (non-fatal)
-                              # shellcheck disable=SC1090
-                              source "${PROFILED_FILE}" || true
-                              echo "[OK] Wrote VDDK_LIBDIR default to ${PROFILED_FILE}"
-                          else
-                              echo "[WARN] Could not locate VDDK distrib directory in ${VDDK_TGZ}"
-                          fi
-                          rm -rf "${tmp}"
-                      else
-                          echo "[WARN] VDDK asset not found: ${ISO_MNT}/assets/VMware-vix-disklib-*.tar.gz"
-                      fi
-
-                      # 4) pyvmomi (offline wheels)
-                      WHEEL_DIR="${ISO_MNT}/assets/v2k/wheels"
-                      if [[ -d "${WHEEL_DIR}" ]]; then
-                          echo "[INFO] Installing pyvmomi from offline wheels: ${WHEEL_DIR}"
-
-                          # 4-A) Try system-wide install first (best for sys.path compatibility)
-                          if python3 -m pip --version >/dev/null 2>&1; then
-                              if sudo python3 -m pip install --no-index --find-links "${WHEEL_DIR}" pyvmomi; then
-                                  echo "[OK] pyvmomi installed into system site-packages (python3 -m pip)."
-                              else
-                                  echo "[WARN] System-wide pip install failed. Falling back to venv + .pth link."
-                              fi
-                          else
-                              echo "[WARN] System pip not available. Falling back to venv + .pth link."
-                          fi
-
-                          # 4-B) If still not importable, install into dedicated venv and link into system via .pth
-                          if ! python3 -c 'import pyVmomi' >/dev/null 2>&1; then
-                              sudo mkdir -p /usr/share/ablestack/v2k
-                              if [[ ! -d /usr/share/ablestack/v2k/venv ]]; then
-                                  if ! sudo python3 -m venv /usr/share/ablestack/v2k/venv >/dev/null 2>&1; then
-                                      echo "[WARN] python3 venv creation failed. Ensure python3 is installed."
-                                  fi
-                              fi
-
-                              if [[ -x /usr/share/ablestack/v2k/venv/bin/pip ]]; then
-                                  sudo /usr/share/ablestack/v2k/venv/bin/pip install --no-index --find-links "${WHEEL_DIR}" pyvmomi || true
-                                  echo "[INFO] pyvmomi installed into venv: /usr/share/ablestack/v2k/venv"
-                              else
-                                  echo "[WARN] venv pip not found; pyvmomi venv install skipped."
-                              fi
-
-                              # Create .pth file to add venv site-packages to system python sys.path
-                              if python3 -c 'import sys,sysconfig; print(sysconfig.get_paths()["purelib"])' >/dev/null 2>&1; then
-                                  SYS_PURELIB="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
-                                  PYVER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-                                  VENV_SITE="/usr/share/ablestack/v2k/venv/lib/python${PYVER}/site-packages"
-                                  if [[ -d "${SYS_PURELIB}" && -d "${VENV_SITE}" ]]; then
-                                      PTH_FILE="${SYS_PURELIB}/ablestack-v2k.pth"
-                                      echo "${VENV_SITE}" | sudo tee "${PTH_FILE}" >/dev/null
-                                      sudo chmod 0644 "${PTH_FILE}"
-                                      echo "[OK] Linked venv site-packages into system python via: ${PTH_FILE}"
-                                  else
-                                      echo "[WARN] Cannot create .pth link (missing dirs): SYS_PURELIB=${SYS_PURELIB}, VENV_SITE=${VENV_SITE}"
-                                  fi
-                              else
-                                  echo "[WARN] sysconfig purelib detection failed; .pth link skipped."
-                              fi
-                          fi
-
-                          # Final verification
-                          if python3 -c 'import pyVmomi; import pyVim' >/dev/null 2>&1; then
-                              echo "[OK] pyvmomi import check passed (system python3)."
-                          else
-                              echo "[WARN] pyvmomi still not importable by system python3."
-                              echo "       You can run: python3 -c 'import sys; print(sys.path)' for diagnostics."
-                          fi
-                      else
-                          echo "[WARN] pyvmomi wheels dir not found in ISO: ${WHEEL_DIR}"
-                      fi
-
-                      # 5) WinPE ISO 배치 (에어갭 환경에서 드라이버 주입/복구용)
-                      # - 통합 ISO에 winpe/*.iso 가 포함된 경우에만 설치
+                      # 5) WinPE ISO  (???? ?? /??
+                      # - ? ISO??winpe/*.iso  ???? ?
                       WINPE_SRC_DIR="${ISO_MNT}/winpe"
                       WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
                       WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
@@ -1251,7 +1126,7 @@ jobs:
                   ;;
           esac
 
-          # --- 설치 차례 ---
+          # --- ? ? ---
           mkdir -p /var/lib/ablestack
           echo ok > /var/lib/ablestack/autoinstall.done
           echo "[INFO] Installation complete."
@@ -1275,10 +1150,10 @@ jobs:
           echo "${DESC}" >> release_notes.md
           echo >> release_notes.md
 
-          # 태그 정보 보강 (직접 몰라도 됨)
+          # ? ?  ( ????
           git fetch --tags --force || true
 
-          # 직전 태그 찾기 (없으면 최초 릴리즈로 간주)
+          #  ?  (??  )
           PREV_TAG="$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)"
 
           if [ -z "$PREV_TAG" ]; then
@@ -1305,8 +1180,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # workflow_run 트리거에서는 tag_name을 명시해야 릴리즈가 제대로 생성됨
-          tag_name: ${{ env.RELEASE_TAG }}
+          # workflow_run ?? tag_name??? ? ??????          tag_name: ${{ env.RELEASE_TAG }}
           body_path: release_notes.md
           files: |
             build/iso/*.iso

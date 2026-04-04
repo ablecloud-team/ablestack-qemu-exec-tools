@@ -25,6 +25,8 @@ V2K_NBD_LOCK_ROOT="/var/lock/ablestack-v2k/reservations"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+# shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
@@ -1640,6 +1642,7 @@ v2k_cmd_init() {
 
   # New: VDDK(ESXi) auth (separated from GOVC/vCenter)
   local vddk_cred_file=""
+  local compat_profile="${V2K_COMPAT_PROFILE:-auto}"
 
   # New: target override options (CLI -> env)
   local target_format="" target_storage="" target_map_json=""
@@ -1653,6 +1656,7 @@ v2k_cmd_init() {
       --mode) mode="${2:-}"; shift 2;;
       --cred-file) cred_file="${2:-}"; shift 2;;
       --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;;
+      --compat-profile) compat_profile="${2:-}"; shift 2;;
 
       # --- new options ---
       --target-format) target_format="${2:-}"; shift 2;;
@@ -1671,6 +1675,8 @@ v2k_cmd_init() {
   if [[ -n "${cred_file}" ]]; then
     v2k_vmware_load_cred_file "${cred_file}"
   fi
+
+  export V2K_COMPAT_PROFILE="${compat_profile:-auto}"
 
   # Persist the VDDK credential file only after workdir creation is complete.
   # The older flow could run before V2K_WORKDIR was ready and hit empty or invalid paths.
@@ -1732,6 +1738,9 @@ v2k_cmd_init() {
     export V2K_EVENTS_LOG
   fi
 
+  v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
+  v2k_compat_resolve_profile "${V2K_COMPAT_PROFILE:-auto}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 0
+
   # (FIX) Persist VDDK cred file into workdir (productization) AFTER workdir exists
   if [[ -n "${vddk_cred_file}" ]]; then
     local vddk_saved="${V2K_WORKDIR}/vddk.cred"
@@ -1777,13 +1786,18 @@ v2k_cmd_init() {
 
   # Log init start with target overrides for observability
   v2k_event INFO "init" "" "phase_start" \
-    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\"}"
+    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
 
   local inv_json
   inv_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter}")"
 
   # Build manifest using inventory json + target settings (from env)
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}"
+  v2k_manifest_set_compat_requested_profile "${V2K_MANIFEST}" "${V2K_COMPAT_PROFILE:-auto}"
+  v2k_manifest_set_compat_selected_profile "${V2K_MANIFEST}" "${V2K_COMPAT_SELECTED_PROFILE:-}"
+  v2k_manifest_set_compat_detected_vcenter_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_VCENTER_VERSION:-}"
+  v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}"
+  v2k_compat_write_env "${V2K_WORKDIR}" || true
 
   v2k_event INFO "init" "" "phase_done" "{\"manifest\":\"${V2K_MANIFEST}\",\"workdir\":\"${V2K_WORKDIR}\"}"
 

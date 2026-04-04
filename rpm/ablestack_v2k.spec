@@ -55,6 +55,10 @@ install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k
 cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev/null || :
 
+# Compatibility profiles (sample/default layout)
+mkdir -p %{buildroot}/usr/share/ablestack/v2k
+cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/ 2>/dev/null || :
+
 # Bash completion (standard location)
 mkdir -p %{buildroot}%{_datadir}/bash-completion/completions
 install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/completions/%{name}
@@ -66,6 +70,7 @@ install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/comp
 %license LICENSE
 /usr/local/bin/ablestack_v2k
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
+/usr/share/ablestack/v2k/compat/*
 %{_datadir}/bash-completion/completions/%{name}
 
 %changelog

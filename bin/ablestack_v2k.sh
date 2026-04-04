@@ -21,6 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=/dev/null
+source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+# shellcheck source=/dev/null
 source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/engine.sh"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
@@ -55,10 +57,16 @@ v2k_resolve_vddk_libdir() {
   fi
 }
 
+v2k_compat_bootstrap_env "" "" || true
 v2k_resolve_vddk_libdir
 
 # Optional diagnostics
 if [[ "${V2K_DEBUG_ENV:-0}" -eq 1 ]]; then
+  echo "[DEBUG] V2K_COMPAT_ROOT='${V2K_COMPAT_ROOT-}'" >&2
+  echo "[DEBUG] V2K_COMPAT_PROFILE='${V2K_COMPAT_PROFILE-}'" >&2
+  echo "[DEBUG] V2K_COMPAT_SELECTED_PROFILE='${V2K_COMPAT_SELECTED_PROFILE-}'" >&2
+  echo "[DEBUG] V2K_GOVC_BIN='${V2K_GOVC_BIN-}'" >&2
+  echo "[DEBUG] V2K_PYTHON_BIN='${V2K_PYTHON_BIN-}'" >&2
   echo "[DEBUG] VDDK_LIBDIR='${VDDK_LIBDIR-}'" >&2
 fi
 
@@ -112,6 +120,7 @@ Run options (exactly parsed by orchestrator.sh):
   --password <pass>                   vCenter password (optional shortcut)
   --cred-file <file>                  govc env file (preferred)
   --vddk-cred-file <file>             VDDK cred file (for nbdkit/vddk plugin)
+  --compat-profile <id|auto>          Compatibility profile to activate
   --insecure <0|1>                    govc insecure (default: V2K_RUN_DEFAULT_INSECURE or 1)
 
   # Pipeline policy
@@ -168,6 +177,7 @@ Options:
   --mode <govc>                       Init mode (default: govc)
   --cred-file <file>                  govc env file
   --vddk-cred-file <file>             VDDK cred file (for nbdkit/vddk plugin)
+  --compat-profile <id|auto>          Compatibility profile to activate
   --target-format qcow2|raw
   --target-storage file|block|rbd
   --target-map-json <json>            Disk mapping JSON (required for block/rbd)
@@ -260,6 +270,13 @@ govc (common):
 VDDK:
   VDDK_LIBDIR                          VDDK distrib root (no auto /lib64 append)
   V2K_DEBUG_ENV=1                       Print resolved VDDK_LIBDIR diagnostics
+
+Compatibility runtime:
+  V2K_COMPAT_ROOT=<path>               Compatibility profile root
+  V2K_COMPAT_PROFILE=<id|auto>         Requested compatibility profile
+  V2K_COMPAT_SELECTED_PROFILE=<id>     Activated compatibility profile
+  V2K_GOVC_BIN=<path>                  Resolved govc binary path
+  V2K_PYTHON_BIN=<path>                Resolved python3 binary path
 
 run defaults (orchestrator):
   V2K_RUN_DEFAULT_SHUTDOWN
@@ -374,11 +391,17 @@ v2k_set_paths \
   "${MANIFEST}" \
   "${EVENTS_LOG}"
 
+v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
+v2k_resolve_vddk_libdir
+
 # [NEW] Ensure NBD module is loaded (Auto-recovery after reboot)
 if ! lsmod | grep -q "^nbd"; then
     v2k_event INFO "linux_bootstrap" "" "loading_nbd_module" "{}"
-    modprobe nbd max_part=16
-    udevadm settle
+    if modprobe nbd max_part=16 >/dev/null 2>&1; then
+      udevadm settle >/dev/null 2>&1 || true
+    else
+      v2k_event WARN "linux_bootstrap" "" "nbd_module_load_failed" "{\"note\":\"continuing; commands that require nbd may fail later\"}"
+    fi
 fi
 
 case "${CMD}" in
