@@ -1062,6 +1062,9 @@ jobs:
 
                       # 2) Install compatibility profile assets from ISO
                       V2K_INSTALLER_BIN="$(command -v v2k_test_install.sh || true)"
+                      if [[ -z "${V2K_INSTALLER_BIN}" && -x "${ISO_MNT}/bin/v2k_test_install.sh" ]]; then
+                          V2K_INSTALLER_BIN="${ISO_MNT}/bin/v2k_test_install.sh"
+                      fi
                       if [[ -x "${V2K_INSTALLER_BIN}" ]]; then
                           echo "[INFO] Installing V2K compatibility profiles from ISO assets..."
                           sudo "${V2K_INSTALLER_BIN}" \

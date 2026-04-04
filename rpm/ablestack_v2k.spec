@@ -50,6 +50,7 @@ Assets such as VDDK and govc are handled by the offline ISO installer.
 # Binaries (explicit path: /usr/local/bin)
 mkdir -p %{buildroot}/usr/local/bin
 install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
+install -m 0755 bin/v2k_test_install.sh %{buildroot}/usr/local/bin/v2k_test_install.sh
 
 # Libraries (explicit path: /usr/local/lib/ablestack-qemu-exec-tools/v2k)
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k
@@ -69,6 +70,7 @@ install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/comp
 
 %license LICENSE
 /usr/local/bin/ablestack_v2k
+/usr/local/bin/v2k_test_install.sh
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
 /usr/share/ablestack/v2k/compat/*
 %{_datadir}/bash-completion/completions/%{name}
