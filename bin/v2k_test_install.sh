@@ -130,6 +130,11 @@ profile_def_root() {
   local source_root
   source_root="$(repo_compat_root "${repo_root_path}")"
 
+  if [[ -d "${source_root}" ]] && find "${source_root}" -mindepth 2 -maxdepth 2 -name profile.json | grep -q .; then
+    printf '%s' "${source_root}"
+    return 0
+  fi
+
   if [[ -d "${installed_root}" ]] && find "${installed_root}" -mindepth 2 -maxdepth 2 -name profile.json | grep -q .; then
     printf '%s' "${installed_root}"
     return 0
@@ -348,11 +353,21 @@ install_profile_template() {
   local compat_repo_root="$1" compat_install_root="$2" profile="$3"
   local src="${compat_repo_root}/${profile}"
   local dst="${compat_install_root}/${profile}"
+  local src_real="" dst_real=""
 
   [[ -f "${src}/profile.json" ]] || {
     echo "[ERR] Sample profile definition missing: ${src}/profile.json" >&2
     exit 2
   }
+
+  src_real="$(readlink -f "${src}" 2>/dev/null || printf '%s' "${src}")"
+  dst_real="$(readlink -f "${dst}" 2>/dev/null || printf '%s' "${dst}")"
+  if [[ "${src_real}" == "${dst_real}" ]]; then
+    mkdir -p "${dst}"
+    [[ -f "${dst}/bin/govc" ]] && chmod 0755 "${dst}/bin/govc" 2>/dev/null || true
+    [[ -f "${dst}/venv/bin/python3" ]] && chmod 0755 "${dst}/venv/bin/python3" 2>/dev/null || true
+    return 0
+  fi
 
   rm -rf "${dst}"
   mkdir -p "${compat_install_root}"

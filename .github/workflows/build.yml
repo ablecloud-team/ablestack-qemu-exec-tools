@@ -645,7 +645,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release/assets release/assets/compat release/assets/v2k
+          mkdir -p release/assets release/assets/compat release/assets/v2k release/share/ablestack/v2k
           cp -v assets/govc_Linux_x86_64.tar.gz release/assets/ || true
           cp -v assets/VMware-vix-disklib-*.tar.gz release/assets/ || true
           if [[ -d assets/compat ]]; then
@@ -653,6 +653,9 @@ jobs:
           fi
           if [[ -d assets/v2k/wheels ]]; then
             cp -a assets/v2k/wheels release/assets/v2k/
+          fi
+          if [[ -d share/ablestack/v2k/compat ]]; then
+            cp -a share/ablestack/v2k/compat release/share/ablestack/v2k/
           fi
 
       # Download the stable VirtIO Windows ISO and extract amd64 drivers plus guest tools.
