@@ -95,6 +95,216 @@ ftctl_blockcopy_remote_nbd_secondary_path() {
   printf '%s\n' "${path}"
 }
 
+ftctl_blockcopy_parse_ssh_target_from_uri() {
+  local uri="${1-}"
+  local host_var="${2}"
+  local user_var="${3}"
+  local rest host user
+
+  [[ "${uri}" == qemu+ssh://* ]] || {
+    echo "ERROR: remote-nbd requires qemu+ssh secondary URI" >&2
+    return 2
+  }
+  rest="${uri#qemu+ssh://}"
+  rest="${rest%%/*}"
+  if [[ "${rest}" == *"@"* ]]; then
+    user="${rest%@*}"
+    host="${rest#*@}"
+  else
+    user="${FTCTL_PROFILE_FENCING_SSH_USER}"
+    host="${rest}"
+  fi
+  [[ -n "${host}" ]] || {
+    echo "ERROR: could not parse remote host from URI: ${uri}" >&2
+    return 2
+  }
+  [[ -n "${user}" ]] || user="root"
+  printf -v "${host_var}" '%s' "${host}"
+  printf -v "${user_var}" '%s' "${user}"
+}
+
+ftctl_blockcopy_source_virtual_size_bytes() {
+  local source_path="${1-}"
+  local out_var="${2}"
+  local out err rc size
+
+  out=""
+  err=""
+  rc=0
+  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- qemu-img info --output=json "${source_path}" || true
+  if [[ "${rc}" != "0" ]]; then
+    return "${rc}"
+  fi
+  size="$(python3 - <<'PY' "${out}"
+import json, sys
+obj = json.loads(sys.argv[1])
+print(obj.get("virtual-size", ""))
+PY
+)" || return 1
+  [[ "${size}" =~ ^[0-9]+$ ]] || return 1
+  printf -v "${out_var}" '%s' "${size}"
+}
+
+ftctl_blockcopy_disk_bus_from_xml() {
+  local xml_path="${1-}"
+  local target="${2-}"
+  local out_var="${3}"
+  local bus
+
+  bus="$(python3 - <<'PY' "${xml_path}" "${target}"
+import sys
+import xml.etree.ElementTree as ET
+xml_path, target = sys.argv[1], sys.argv[2]
+tree = ET.parse(xml_path)
+root = tree.getroot()
+for disk in root.findall("./devices/disk"):
+    t = disk.find("target")
+    if t is not None and t.get("dev") == target:
+        print(t.get("bus", "virtio"))
+        break
+else:
+    print("virtio")
+PY
+)" || return 1
+  printf -v "${out_var}" '%s' "${bus}"
+}
+
+ftctl_blockcopy_remote_nbd_dest_xml_path() {
+  local vm="${1-}"
+  local target="${2-}"
+  printf '%s\n' "${FTCTL_RUN_DIR}/xml/$(ftctl_state_vm_key "${vm}")-${target}-remote-nbd.xml"
+}
+
+ftctl_blockcopy_build_remote_nbd_dest_xml() {
+  local vm="${1-}"
+  local target="${2-}"
+  local format="${3-}"
+  local export_addr="${4-}"
+  local export_port="${5-}"
+  local export_name="${6-}"
+  local source_xml="${7-}"
+  local out_path_var="${8}"
+  local out_path bus
+
+  out_path="$(ftctl_blockcopy_remote_nbd_dest_xml_path "${vm}" "${target}")"
+  ftctl_ensure_dir "$(dirname "${out_path}")" "0755"
+  bus="virtio"
+  if [[ -n "${source_xml}" && -f "${source_xml}" ]]; then
+    ftctl_blockcopy_disk_bus_from_xml "${source_xml}" "${target}" bus || true
+  fi
+  cat > "${out_path}" <<EOF
+<disk type='network' device='disk'>
+  <driver name='qemu' type='${format}'/>
+  <source protocol='nbd' name='${export_name}'>
+    <host name='${export_addr}' port='${export_port}' transport='tcp'/>
+  </source>
+  <target dev='${target}' bus='${bus}'/>
+</disk>
+EOF
+  printf -v "${out_path_var}" '%s' "${out_path}"
+}
+
+ftctl_blockcopy_remote_exec() {
+  local host="${1-}"
+  local user="${2-}"
+  local out_var="${3}"
+  local err_var="${4}"
+  local rc_var="${5}"
+  shift 5
+  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" "${out_var}" "${err_var}" "${rc_var}" -- \
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout="${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
+    "${user}@${host}" "$@"
+}
+
+ftctl_blockcopy_remote_nbd_prepare_target() {
+  local vm="${1-}"
+  local target="${2-}"
+  local source="${3-}"
+  local format="${4-}"
+  local secondary_path="${5-}"
+  local export_name="${6-}"
+  local host user size out err rc pid_file remote_cmd
+
+  ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_SECONDARY_URI}" host user || return 2
+  ftctl_blockcopy_source_virtual_size_bytes "${source}" size || {
+    echo "ERROR: could not determine source virtual size for ${source}" >&2
+    return 2
+  }
+
+  pid_file="/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid"
+  remote_cmd=$(cat <<EOF
+set -euo pipefail
+mkdir -p "$(dirname "${secondary_path}")" /run/ablestack-vm-ftctl
+if [[ ! -f "${secondary_path}" ]]; then
+  qemu-img create -f "${format}" "${secondary_path}" "${size}"
+fi
+if [[ -f "${pid_file}" ]]; then
+  oldpid="\$(cat "${pid_file}" 2>/dev/null || true)"
+  if [[ -n "\${oldpid}" ]] && kill -0 "\${oldpid}" >/dev/null 2>&1; then
+    kill "\${oldpid}" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+  rm -f "${pid_file}"
+fi
+qemu-nbd --fork --persistent --shared=8 \
+  --bind "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" \
+  --port "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" \
+  --export-name "${export_name}" \
+  --format "${format}" \
+  --pid-file "${pid_file}" \
+  "${secondary_path}"
+EOF
+)
+
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
+  : "${out}${err}"
+  [[ "${rc}" == "0" ]] || {
+    [[ -n "${err}" ]] && echo "ERROR: remote-nbd prepare failed: ${err}" >&2
+    return "${rc}"
+  }
+}
+
+ftctl_blockcopy_start_remote_nbd_job() {
+  local uri="${1-}"
+  local vm="${2-}"
+  local target="${3-}"
+  local format="${4-}"
+  local persistence="${5-unknown}"
+  local xml_path="${6-}"
+  local out_var="${7-}"
+  local err_var="${8-}"
+  local rc_var="${9-}"
+  local out err rc
+  local args=()
+
+  args=(-c "${uri}" blockcopy "${vm}" "${target}" --xml "${xml_path}")
+  if [[ "${persistence}" == "yes" ]]; then
+    args+=(--transient-job)
+  fi
+  if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
+    args+=(--synchronous-writes)
+  fi
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- "${args[@]}" || true
+  : "${out}${err}"
+  if [[ -n "${out_var}" ]]; then
+    printf -v "${out_var}" '%s' "${out}"
+  fi
+  if [[ -n "${err_var}" ]]; then
+    printf -v "${err_var}" '%s' "${err}"
+  fi
+  if [[ -n "${rc_var}" ]]; then
+    printf -v "${rc_var}" '%s' "${rc}"
+  fi
+  return "${rc}"
+}
+
 ftctl_blockcopy_resolve_reverse_dest() {
   local target="${1-}"
   local source="${2-}"
@@ -338,7 +548,7 @@ ftctl_blockcopy_refresh_vm_jobs() {
 ftctl_blockcopy_plan_protect() {
   local vm="${1-}"
   local disks=()
-  local line target source format dest secondary_dest
+  local line target source format dest secondary_dest remote_xml export_name
   local xml_bundle_dir primary_xml_backup standby_xml_seed persistence
   local out err rc job_state ready
   local records=()
@@ -378,12 +588,16 @@ ftctl_blockcopy_plan_protect() {
     format="${line##*|}"
     if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
       secondary_dest="$(ftctl_blockcopy_remote_nbd_secondary_path "${vm}" "${target}" "${source}" "${format}")"
-      dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}")"
+      export_name="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}"
+      dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${export_name}")"
     else
       secondary_dest=""
+      export_name=""
       dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
     fi
-    ftctl_ensure_dir "$(dirname "${dest}")" "0755"
+    if [[ "${FTCTL_PROFILE_BACKEND_MODE}" != "remote-nbd" ]]; then
+      ftctl_ensure_dir "$(dirname "${dest}")" "0755"
+    fi
     if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
       sync_flag="1"
     fi
@@ -391,17 +605,36 @@ ftctl_blockcopy_plan_protect() {
     out=""
     err=""
     rc=0
-    ftctl_blockcopy_start_job \
-      "${FTCTL_PROFILE_PRIMARY_URI}" \
-      "${vm}" \
-      "${target}" \
-      "${dest}" \
-      "${format}" \
-      "0" \
-      "${persistence}" \
-      out \
-      err \
-      rc || true
+    if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+      ftctl_blockcopy_remote_nbd_prepare_target "${vm}" "${target}" "${source}" "${format}" "${secondary_dest}" "${export_name}" || return $?
+      remote_xml=""
+      ftctl_blockcopy_build_remote_nbd_dest_xml \
+        "${vm}" "${target}" "${format}" \
+        "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${export_name}" \
+        "${primary_xml_backup}" remote_xml
+      ftctl_blockcopy_start_remote_nbd_job \
+        "${FTCTL_PROFILE_PRIMARY_URI}" \
+        "${vm}" \
+        "${target}" \
+        "${format}" \
+        "${persistence}" \
+        "${remote_xml}" \
+        out \
+        err \
+        rc || true
+    else
+      ftctl_blockcopy_start_job \
+        "${FTCTL_PROFILE_PRIMARY_URI}" \
+        "${vm}" \
+        "${target}" \
+        "${dest}" \
+        "${format}" \
+        "0" \
+        "${persistence}" \
+        out \
+        err \
+        rc || true
+    fi
     if [[ "${rc}" != "0" ]]; then
       ftctl_state_set "${vm}" \
         "protection_state=error" \
