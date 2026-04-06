@@ -274,7 +274,7 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
 set -euo pipefail
 mkdir -p "$(dirname "${secondary_path}")" /run/ablestack-vm-ftctl
 if [[ ! -f "${secondary_path}" ]]; then
-  qemu-img create -f "${format}" "${secondary_path}" "${size}B"
+  qemu-img create -f "${format}" "${secondary_path}" "${size}"
 fi
 if [[ -f "${pid_file}" ]]; then
   oldpid="\$(cat "${pid_file}" 2>/dev/null || true)"
