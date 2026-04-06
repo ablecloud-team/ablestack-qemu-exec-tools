@@ -299,15 +299,138 @@ v2k_has_lvm_tools() {
   return 0
 }
 
+v2k_linux_guest_has_identity_markers() {
+  local rootmnt="${1:-}"
+  [[ -n "${rootmnt}" && -d "${rootmnt}" ]] || return 1
+
+  local markers=(
+    "${rootmnt}/etc/os-release"
+    "${rootmnt}/usr/lib/os-release"
+    "${rootmnt}/etc/redhat-release"
+    "${rootmnt}/etc/system-release"
+    "${rootmnt}/etc/centos-release"
+    "${rootmnt}/etc/rocky-release"
+    "${rootmnt}/etc/almalinux-release"
+    "${rootmnt}/etc/oracle-release"
+    "${rootmnt}/etc/fedora-release"
+    "${rootmnt}/etc/SuSE-release"
+    "${rootmnt}/etc/lsb-release"
+    "${rootmnt}/etc/debian_version"
+  )
+
+  local f
+  for f in "${markers[@]}"; do
+    [[ -f "${f}" ]] && return 0
+  done
+  return 1
+}
+
+v2k_linux_guest_detect_distro() {
+  local rootmnt="${1:-}"
+  [[ -n "${rootmnt}" && -d "${rootmnt}" ]] || return 1
+
+  ROOTMNT="${rootmnt}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["ROOTMNT"])
+result = {"id": "", "like": "", "version_id": "", "pretty_name": "", "source": ""}
+
+def parse_shell_kv(path: Path):
+    data = {}
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key] = value.strip().strip('"').strip("'")
+    return data
+
+for candidate in (root / "etc/os-release", root / "usr/lib/os-release"):
+    if candidate.is_file():
+        data = parse_shell_kv(candidate)
+        result["id"] = data.get("ID", "")
+        result["like"] = data.get("ID_LIKE", "")
+        result["version_id"] = data.get("VERSION_ID", "")
+        result["pretty_name"] = data.get("PRETTY_NAME", "")
+        result["source"] = str(candidate.relative_to(root))
+        print(json.dumps(result))
+        raise SystemExit(0)
+
+release_candidates = [
+    ("redhat", "rhel fedora", root / "etc/redhat-release"),
+    ("rhel", "rhel fedora", root / "etc/system-release"),
+    ("centos", "rhel fedora", root / "etc/centos-release"),
+    ("rocky", "rhel fedora", root / "etc/rocky-release"),
+    ("almalinux", "rhel fedora", root / "etc/almalinux-release"),
+    ("oracle", "rhel fedora", root / "etc/oracle-release"),
+    ("fedora", "rhel fedora", root / "etc/fedora-release"),
+    ("suse", "suse", root / "etc/SuSE-release"),
+]
+for distro_id, like, candidate in release_candidates:
+    if candidate.is_file():
+        result["id"] = distro_id
+        result["like"] = like
+        result["pretty_name"] = candidate.read_text(encoding="utf-8", errors="ignore").strip()
+        result["source"] = str(candidate.relative_to(root))
+        print(json.dumps(result))
+        raise SystemExit(0)
+
+if (root / "etc/debian_version").is_file():
+    result["id"] = "debian"
+    result["like"] = "debian"
+    result["pretty_name"] = (root / "etc/debian_version").read_text(encoding="utf-8", errors="ignore").strip()
+    result["source"] = "etc/debian_version"
+    print(json.dumps(result))
+    raise SystemExit(0)
+
+if (root / "etc/lsb-release").is_file():
+    data = parse_shell_kv(root / "etc/lsb-release")
+    result["id"] = data.get("DISTRIB_ID", "").lower()
+    result["version_id"] = data.get("DISTRIB_RELEASE", "")
+    result["pretty_name"] = data.get("DISTRIB_DESCRIPTION", "")
+    result["source"] = "etc/lsb-release"
+    print(json.dumps(result))
+    raise SystemExit(0)
+
+print(json.dumps(result))
+PY
+}
+
+v2k_linux_guest_detect_bootloader() {
+  local rootmnt="${1:-}"
+  [[ -n "${rootmnt}" && -d "${rootmnt}" ]] || return 1
+
+  local bootloader="unknown" source=""
+  if [[ -d "${rootmnt}/boot/grub2" || -f "${rootmnt}/boot/grub2/grub.cfg" ]]; then
+    bootloader="grub2"
+    source="boot/grub2"
+  elif [[ -d "${rootmnt}/boot/grub" || -f "${rootmnt}/boot/grub/grub.cfg" ]]; then
+    bootloader="grub"
+    source="boot/grub"
+  elif [[ -d "${rootmnt}/boot/efi/EFI" ]]; then
+    bootloader="uefi"
+    source="boot/efi/EFI"
+  elif [[ -f "${rootmnt}/etc/default/grub" ]]; then
+    bootloader="grub-default"
+    source="etc/default/grub"
+  fi
+
+  jq -nc --arg bootloader "${bootloader}" --arg source "${source}" \
+    '{bootloader:$bootloader,source:$source}'
+}
+
 v2k_linux_bootstrap_try_mount_partitions() {
-  # Try to find root by mounting partitions directly and checking /etc/os-release
+  # Try to find the guest root by mounting partitions directly and checking
+  # common distro identity markers such as os-release or *release files.
   local nbd_dev="$1" mnt="$2"
   local part root_part=""
   for part in "${nbd_dev}"p[0-9]*; do
     [[ -b "${part}" ]] || continue
     # guard: clear any leftover mount on mnt (prevents false rc=0 from mount_robust)
     v2k_linux_bootstrap_umount_robust "${mnt}" --recursive >/dev/null 2>&1 || true
-    # Skip LVM PV partitions early (they won't contain /etc/os-release)
+    # Skip LVM PV partitions early; they usually do not contain guest identity files.
     if lsblk -rn -o FSTYPE "${part}" 2>/dev/null | grep -qx "LVM2_member"; then
       continue
     fi
@@ -327,15 +450,17 @@ v2k_linux_bootstrap_try_mount_partitions() {
       continue
     fi
 
-    local has_os=0
-    [[ -f "${mnt}/etc/os-release" ]] && has_os=1
+    local has_identity=0
+    if v2k_linux_guest_has_identity_markers "${mnt}"; then
+      has_identity=1
+    fi
     v2k_event INFO "linux_bootstrap" "" "mount_try_partition_probe" \
       "$(v2k_linux_bootstrap_json \
         --arg part "${part}" \
-        --argjson has_os_release "${has_os}" \
-        '{part:$part,has_os_release:$has_os_release}')"
+        --argjson has_identity "${has_identity}" \
+        '{part:$part,has_identity:$has_identity}')"
 
-    if [[ "${has_os}" -eq 1 ]]; then
+    if [[ "${has_identity}" -eq 1 ]]; then
       root_part="${part}"
       v2k_linux_bootstrap_umount_robust "${mnt}" >/dev/null 2>&1 || true
       echo "${root_part}"
@@ -730,10 +855,12 @@ v2k_linux_bootstrap_try_mount_lvm() {
       continue
     fi
 
-    local has_os=0
-    [[ -f "${mnt}/etc/os-release" ]] && has_os=1
+    local has_identity=0
+    if v2k_linux_guest_has_identity_markers "${mnt}"; then
+      has_identity=1
+    fi
     
-    if [[ "${has_os}" -eq 1 ]]; then
+    if [[ "${has_identity}" -eq 1 ]]; then
       v2k_linux_bootstrap_umount_robust "${mnt}" >/dev/null 2>&1 || true
       echo "${lv}"
       return 0
@@ -1176,7 +1303,7 @@ local qout qrc
     root_dev="$(v2k_linux_bootstrap_try_mount_lvm "${nbd_dev}" "${mnt}" || true)"
   fi
   if [[ -z "${root_dev}" ]]; then
-    v2k_event ERROR "linux_bootstrap" "" "root_partition_not_found" "{\"nbd\":\"${nbd_dev}\",\"note\":\"no /etc/os-release found on partitions or LVM LVs\"}"
+    v2k_event ERROR "linux_bootstrap" "" "root_partition_not_found" "{\"nbd\":\"${nbd_dev}\",\"note\":\"no distro identity markers found on partitions or LVM LVs\"}"
     finish 80
     return $?
   fi
@@ -1272,10 +1399,19 @@ v2k_linux_bootstrap_rebuild_initramfs() {
   mount --make-rslave "${rootmnt}/proc" >/dev/null 2>&1 || true
   mount --make-rslave "${rootmnt}/sys"  >/dev/null 2>&1 || true
 
-  # Detect distro family
-  local os_id os_like
-  os_id="$(. "${rootmnt}/etc/os-release" >/dev/null 2>&1; echo "${ID:-}")"
-  os_like="$(. "${rootmnt}/etc/os-release" >/dev/null 2>&1; echo "${ID_LIKE:-}")"
+  # Detect distro family and bootloader using broad marker coverage.
+  local distro_json os_id os_like os_version_id os_pretty os_source
+  local bootloader_json bootloader bootloader_source
+  distro_json="$(v2k_linux_guest_detect_distro "${rootmnt}" 2>/dev/null || echo '{}')"
+  os_id="$(printf '%s' "${distro_json}" | jq -r '.id // ""' 2>/dev/null || true)"
+  os_like="$(printf '%s' "${distro_json}" | jq -r '.like // ""' 2>/dev/null || true)"
+  os_version_id="$(printf '%s' "${distro_json}" | jq -r '.version_id // ""' 2>/dev/null || true)"
+  os_pretty="$(printf '%s' "${distro_json}" | jq -r '.pretty_name // ""' 2>/dev/null || true)"
+  os_source="$(printf '%s' "${distro_json}" | jq -r '.source // ""' 2>/dev/null || true)"
+
+  bootloader_json="$(v2k_linux_guest_detect_bootloader "${rootmnt}" 2>/dev/null || echo '{}')"
+  bootloader="$(printf '%s' "${bootloader_json}" | jq -r '.bootloader // "unknown"' 2>/dev/null || true)"
+  bootloader_source="$(printf '%s' "${bootloader_json}" | jq -r '.source // ""' 2>/dev/null || true)"
 
   # Persist virtio module load hints (harmless if already present)
   mkdir -p "${rootmnt}/etc/modules-load.d" "${rootmnt}/etc/dracut.conf.d"
@@ -1292,7 +1428,15 @@ add_drivers+=" virtio_pci virtio_scsi virtio_blk scsi_mod "
 EOF
 
   v2k_event INFO "linux_bootstrap" "" "initramfs_rebuild_start" \
-    "{\"id\":\"${os_id}\",\"like\":\"${os_like}\"}"
+    "$(v2k_linux_bootstrap_json \
+      --arg id "${os_id}" \
+      --arg like "${os_like}" \
+      --arg version_id "${os_version_id}" \
+      --arg pretty_name "${os_pretty}" \
+      --arg identity_source "${os_source}" \
+      --arg bootloader "${bootloader}" \
+      --arg bootloader_source "${bootloader_source}" \
+      '{id:$id,like:$like,version_id:$version_id,pretty_name:$pretty_name,identity_source:$identity_source,bootloader:$bootloader,bootloader_source:$bootloader_source}')"
 
   # ------------------------------------------------------------------
   # Determine target kernel version (kver) deterministically
