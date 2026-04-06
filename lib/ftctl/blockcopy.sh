@@ -99,7 +99,7 @@ ftctl_blockcopy_parse_ssh_target_from_uri() {
   local uri="${1-}"
   local host_var="${2}"
   local user_var="${3}"
-  local rest host user
+  local rest parsed_host parsed_user
 
   [[ "${uri}" == qemu+ssh://* ]] || {
     echo "ERROR: remote-nbd requires qemu+ssh secondary URI" >&2
@@ -108,38 +108,38 @@ ftctl_blockcopy_parse_ssh_target_from_uri() {
   rest="${uri#qemu+ssh://}"
   rest="${rest%%/*}"
   if [[ "${rest}" == *"@"* ]]; then
-    user="${rest%@*}"
-    host="${rest#*@}"
+    parsed_user="${rest%@*}"
+    parsed_host="${rest#*@}"
   else
-    user="${FTCTL_PROFILE_FENCING_SSH_USER}"
-    host="${rest}"
+    parsed_user="${FTCTL_PROFILE_FENCING_SSH_USER}"
+    parsed_host="${rest}"
   fi
-  [[ -n "${host}" ]] || {
+  [[ -n "${parsed_host}" ]] || {
     echo "ERROR: could not parse remote host from URI: ${uri}" >&2
     return 2
   }
-  [[ -n "${user}" ]] || user="root"
-  printf -v "${host_var}" '%s' "${host}"
-  printf -v "${user_var}" '%s' "${user}"
+  [[ -n "${parsed_user}" ]] || parsed_user="root"
+  printf -v "${host_var}" '%s' "${parsed_host}"
+  printf -v "${user_var}" '%s' "${parsed_user}"
 }
 
 ftctl_blockcopy_remote_target_host_user() {
   local host_var="${1}"
   local user_var="${2}"
   local record="" host_id="" role="" mgmt_ip="" libvirt_uri="" blockcopy_ip="" xcolo_ctrl="" xcolo_data=""
-  local host="" user=""
+  local resolved_host="" resolved_user=""
 
-  user="${FTCTL_PROFILE_FENCING_SSH_USER:-root}"
+  resolved_user="${FTCTL_PROFILE_FENCING_SSH_USER:-root}"
   if ftctl_cluster_find_peer_record_for_vm record 2>/dev/null; then
     ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
     : "${host_id}${role}${libvirt_uri}${blockcopy_ip}${xcolo_ctrl}${xcolo_data}"
-    host="${mgmt_ip}"
+    resolved_host="${mgmt_ip}"
   fi
-  if [[ -z "${host}" ]]; then
-    ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_SECONDARY_URI}" host user || return 2
+  if [[ -z "${resolved_host}" ]]; then
+    ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_SECONDARY_URI}" resolved_host resolved_user || return 2
   fi
-  printf -v "${host_var}" '%s' "${host}"
-  printf -v "${user_var}" '%s' "${user}"
+  printf -v "${host_var}" '%s' "${resolved_host}"
+  printf -v "${user_var}" '%s' "${resolved_user}"
 }
 
 ftctl_blockcopy_source_virtual_size_bytes() {
