@@ -123,6 +123,26 @@ ftctl_blockcopy_parse_ssh_target_from_uri() {
   printf -v "${user_var}" '%s' "${user}"
 }
 
+ftctl_blockcopy_remote_target_host_user() {
+  local host_var="${1}"
+  local user_var="${2}"
+  local record host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+  local host user
+
+  host=""
+  user="${FTCTL_PROFILE_FENCING_SSH_USER:-root}"
+  if ftctl_cluster_find_peer_record_for_vm record 2>/dev/null; then
+    ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+    : "${host_id}${role}${libvirt_uri}${blockcopy_ip}${xcolo_ctrl}${xcolo_data}"
+    host="${mgmt_ip}"
+  fi
+  if [[ -z "${host}" ]]; then
+    ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_SECONDARY_URI}" host user || return 2
+  fi
+  printf -v "${host_var}" '%s' "${host}"
+  printf -v "${user_var}" '%s' "${user}"
+}
+
 ftctl_blockcopy_source_virtual_size_bytes() {
   local vm="${1-}"
   local target="${2-}"
@@ -217,7 +237,7 @@ ftctl_blockcopy_remote_exec() {
   shift 5
   ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" "${out_var}" "${err_var}" "${rc_var}" -- \
     ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout="${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
-    "${user}@${host}" "$@"
+    "${user}@${host}" bash -lc "$@"
 }
 
 ftctl_blockcopy_remote_nbd_prepare_target() {
@@ -229,7 +249,7 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   local export_name="${6-}"
   local host="" user="" size="" out="" err="" rc=0 pid_file="" remote_cmd=""
 
-  ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_SECONDARY_URI}" host user || return 2
+  ftctl_blockcopy_remote_target_host_user host user || return 2
   ftctl_blockcopy_source_virtual_size_bytes "${vm}" "${target}" "${source}" size || {
     echo "ERROR: could not determine source virtual size for ${source}" >&2
     return 2
