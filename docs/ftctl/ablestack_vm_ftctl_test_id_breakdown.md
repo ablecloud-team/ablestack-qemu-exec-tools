@@ -76,14 +76,14 @@ Recommended execution order:
 
 | Test ID | Image | Storage | Priority | Purpose | Status |
 |---|---|---|---|---|---|
-| `HA-IMG01-ST01` | `IMG01` | `ST01` | mandatory | HA baseline Linux qcow2 on local qcow2 | pass |
+| `HA-IMG01-ST01` | `IMG01` | `ST01` | mandatory | HA baseline Linux qcow2 on local qcow2 | fail |
 | `HA-IMG02-ST02` | `IMG02` | `ST02` | mandatory | HA baseline Linux raw on local raw | pending |
 | `HA-IMG03-ST01` | `IMG03` | `ST01` | mandatory | HA baseline Windows qcow2 | pending |
 | `HA-IMG04-ST02` | `IMG04` | `ST02` | recommended | HA Windows raw | pending |
 | `HA-IMG05-ST01` | `IMG05` | `ST01` | mandatory | HA multi-disk Linux qcow2 | pending |
 | `HA-IMG06-ST02` | `IMG06` | `ST02` | recommended | HA multi-disk Linux raw | pending |
 | `HA-IMG07-ST01` | `IMG07` | `ST01` | recommended | HA mixed-size multi-disk | pending |
-| `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | pending |
+| `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | fail |
 | `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pending |
 | `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pending |
 | `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA NFS backend | pending |
@@ -160,8 +160,20 @@ Every `Test ID` should end with:
 ## 12. Current Follow-Up Notes
 
 - `HA-IMG01-ST01`
-  - Result: `PASS`
+  - Result: `FAIL` after reclassification
   - Observation:
     - In the tested ABLESTACK/libvirt/QEMU environment, `virsh dumpxml` mirror metadata was a more reliable confirmation signal than `virsh blockjob --info` or `virsh domblklist --details`.
+    - However, the mirror target was still created on the primary host local filesystem, so the test did not produce a usable secondary-side HA replica.
   - Follow-up improvement:
     - Update HA protect observability logic to prioritize runtime XML `<mirror ...>` inspection when blockjob visibility is incomplete.
+    - Redesign HA/DR backend modes so non-shared local storage uses a remote transport path instead of a primary-local mirror target.
+
+- `HA-IMG08-ST01`
+  - Result: `FAIL`
+  - Observation:
+    - Transient control-plane handling was correct, but the data-plane mirror target was again a primary-host local path.
+    - No secondary-side disk replica or standby VM was prepared.
+  - Follow-up improvement:
+    - Split HA/DR blockcopy design into at least:
+      shared-visible blockcopy mode, and remote-local transport mode.
+    - Add profile/backend validation to reject unsupported non-shared local storage layouts under the current implementation.

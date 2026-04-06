@@ -45,7 +45,6 @@ If FAIL:
 - `HA-IMG02-ST02`
 - `HA-IMG03-ST01`
 - `HA-IMG05-ST01`
-- `HA-IMG08-ST01`
 - `HA-IMG09-ST01`
 - `HA-IMG01-ST03`
 - `DR-IMG01-ST01`
@@ -70,6 +69,7 @@ If FAIL:
 ### Done
 
 - `HA-IMG01-ST01`
+- `HA-IMG08-ST01`
 
 ## 4. Execution Records
 
@@ -122,13 +122,79 @@ Evidence:
 - HA-IMG01-ST01.peer.dominfo.retry4.txt
 - HA-IMG01-ST01.dumpxml.retry4.xml
 
-Status: PASS
+Status: FAIL
 
 If FAIL:
-- Root cause: n/a
-- Files changed: n/a
-- Re-test result: n/a
+- Root cause:
+  The current HA blockcopy implementation mirrors to a primary-host local path.
+  For host-local, non-shared storage this does not create a usable secondary-side replica.
+- Files changed:
+  Multiple FTCTL runtime/controller fixes were applied during the investigation, but the final issue is architectural rather than a single command bug.
+- Re-test result:
+  Control-plane checks passed, but the data-plane target remained on the primary host.
 - Remaining gap:
-  dumpxml mirror inspection is currently the most reliable success signal.
-  blockjob --info and domblklist --details should be demoted to secondary observability signals for this libvirt/QEMU environment.
+  This test must be re-run only after backend mode redesign.
+  Success requires a secondary-usable replica, not just runtime XML mirror metadata on the primary host.
+```
+
+### HA-IMG08-ST01
+
+```text
+Test ID: HA-IMG08-ST01
+Date: 2026-04-06
+Mode: HA
+VM Name: rocky10-t
+Primary Host: 10.10.32.1
+Secondary Host: 10.10.32.2
+Image Type: transient VM / single-disk Linux qcow2
+Storage Backend: local file qcow2
+Profile Path: /etc/ablestack/ftctl.d/rocky10-t.conf
+
+Preconditions:
+- Transient VM
+- local file qcow2 source disk
+- FTCTL_PROFILE_DOMAIN_PERSISTENCE="no"
+- Secondary host reachable by qemu+ssh libvirt URI
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-t
+- ablestack_vm_ftctl protect --vm rocky10-t --mode ha --peer qemu+ssh://10.10.32.2/system
+- ablestack_vm_ftctl status --vm rocky10-t --json
+- virsh domblklist rocky10-t --details
+- virsh dumpxml rocky10-t
+- virsh blockjob rocky10-t vda --info
+- virsh -c qemu+ssh://10.10.32.2/system list --all
+- virsh -c qemu+ssh://10.10.32.2/system dominfo rocky10-t
+
+Expected Result:
+- protect completes without error
+- transient standby handling is selected
+- a usable secondary-side replica is prepared for failover
+
+Actual Result:
+- transient control-plane handling was correct: primary_persistence=no and standby_state=prepared-transient
+- runtime XML on the primary host contained a mirror element for vda
+- the mirror target path was still a primary-host local path under /var/lib/ablestack-vm-ftctl/blockcopy/...
+- no standby VM and no replica disk were created on the secondary host
+
+Evidence:
+- HA-IMG08-ST01.status.after.json
+- HA-IMG08-ST01.runtime-state.txt
+- HA-IMG08-ST01.dumpxml.xml
+- HA-IMG08-ST01.peer.list.txt
+- HA-IMG08-ST01.peer.dominfo.txt
+
+Status: FAIL
+
+If FAIL:
+- Root cause:
+  The current blockcopy target model assumes a path writable by the primary-host QEMU process.
+  That is insufficient for non-shared local storage because it does not prepare a secondary-local replica.
+- Files changed:
+  n/a
+- Re-test result:
+  n/a
+- Remaining gap:
+  HA/DR backend mode redesign is required.
+  This case should use a remote transport model such as NBD, not a primary-local file mirror target.
 ```

@@ -195,10 +195,16 @@ Completed items:
   - pass/fail matrix by storage backend
   - list of defects / gaps / mitigations
 - Progress:
-  - `HA-IMG01-ST01`: `PASS`
+  - `HA-IMG01-ST01`: `FAIL` after backend-model reclassification
+  - `HA-IMG08-ST01`: `FAIL`
 - Follow-up improvements discovered during real-environment testing:
   - HA protect success detection should prioritize runtime `virsh dumpxml` mirror metadata when `virsh blockjob --info` is empty or incomplete.
   - `virsh domblklist --details` should be treated as a secondary indicator because it may continue to show the original source path while an active mirror element exists in runtime XML.
+  - The current blockcopy target model is not valid for non-shared host-local storage.
+  - Real HA/DR support now needs explicit backend-mode redesign:
+    - `shared-visible blockcopy mode`
+    - `remote-local transport mode` such as NBD-backed remote sink
+  - Current local-file, non-shared cases must not be treated as PASS even when runtime XML shows a mirror element on the primary host.
 
 ### Step 13. PR preparation
 
@@ -214,6 +220,9 @@ Completed items:
 ## 5. Next Work
 
 - Next priority: `Step 12. Real-Environment Integration Testing`
+- Immediate sub-priority inside Step 12: `HA/DR backend redesign and test-matrix reclassification`
+- Backend redesign reference:
+  - `docs/ftctl/ablestack_vm_ftctl_blockcopy_backend_redesign.md`
 - Follow-up after real-environment testing: `Step 13. PR preparation`
 - Follow-up after PR prep: `final review`
 
