@@ -155,7 +155,7 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   if [[ -n "${vm}" && -n "${target}" ]]; then
     ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domblkinfo "${vm}" "${target}" || true
     if [[ "${rc}" == "0" ]]; then
-      size="$(awk -F: 'tolower($1) ~ /capacity/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' <<< "${out}")"
+      size="$(awk -F: 'tolower($1) ~ /capacity/ {gsub(/^[ \t]+/, "", $2); gsub(/[^0-9]/, "", $2); print $2; exit}' <<< "${out}")"
       if [[ "${size}" =~ ^[0-9]+$ ]]; then
         printf -v "${out_var}" '%s' "${size}"
         return 0
@@ -274,7 +274,7 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
 set -euo pipefail
 mkdir -p "$(dirname "${secondary_path}")" /run/ablestack-vm-ftctl
 if [[ ! -f "${secondary_path}" ]]; then
-  qemu-img create -f "${format}" "${secondary_path}" "${size}"
+  qemu-img create -f "${format}" "${secondary_path}" "${size}B"
 fi
 if [[ -f "${pid_file}" ]]; then
   oldpid="\$(cat "${pid_file}" 2>/dev/null || true)"
