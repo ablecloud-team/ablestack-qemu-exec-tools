@@ -126,10 +126,9 @@ ftctl_blockcopy_parse_ssh_target_from_uri() {
 ftctl_blockcopy_remote_target_host_user() {
   local host_var="${1}"
   local user_var="${2}"
-  local record host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
-  local host user
+  local record="" host_id="" role="" mgmt_ip="" libvirt_uri="" blockcopy_ip="" xcolo_ctrl="" xcolo_data=""
+  local host="" user=""
 
-  host=""
   user="${FTCTL_PROFILE_FENCING_SSH_USER:-root}"
   if ftctl_cluster_find_peer_record_for_vm record 2>/dev/null; then
     ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
