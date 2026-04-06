@@ -38,6 +38,26 @@ ftctl_blockcopy_state_write() {
   chmod 0644 "${path}" 2>/dev/null || true
 }
 
+ftctl_blockcopy_debug_dir() {
+  local vm="${1-}"
+  local target="${2-}"
+  printf '%s\n' "${FTCTL_RUN_DIR}/debug/blockcopy/$(ftctl_state_vm_key "${vm}")/${target}"
+}
+
+ftctl_blockcopy_write_debug_file() {
+  local vm="${1-}"
+  local target="${2-}"
+  local name="${3-}"
+  local content="${4-}"
+  local dir path
+
+  dir="$(ftctl_blockcopy_debug_dir "${vm}" "${target}")"
+  ftctl_ensure_dir "${dir}" "0755"
+  path="${dir}/${name}"
+  printf '%s\n' "${content}" > "${path}"
+  chmod 0644 "${path}" 2>/dev/null || true
+}
+
 ftctl_blockcopy_resolve_dest() {
   local vm="${1-}"
   local target="${2-}"
@@ -147,7 +167,7 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   local target="${2-}"
   local source_path="${3-}"
   local out_var="${4}"
-  local out err rc size
+  local out err rc size_value
 
   out=""
   err=""
@@ -155,9 +175,9 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   if [[ -n "${vm}" && -n "${target}" ]]; then
     ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domblkinfo "${vm}" "${target}" || true
     if [[ "${rc}" == "0" ]]; then
-      size="$(awk -F: 'tolower($1) ~ /capacity/ { line=$0; gsub(/[^0-9]/, "", line); print line; exit }' <<< "${out}")"
-      if [[ "${size}" =~ ^[0-9]+$ ]]; then
-        printf -v "${out_var}" '%s' "${size}"
+      size_value="$(awk -F: 'tolower($1) ~ /capacity/ { line=$0; gsub(/[^0-9]/, "", line); print line; exit }' <<< "${out}")"
+      if [[ "${size_value}" =~ ^[0-9]+$ ]]; then
+        printf -v "${out_var}" '%s' "${size_value}"
         return 0
       fi
     fi
@@ -170,18 +190,18 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   if [[ "${rc}" != "0" ]]; then
     return "${rc}"
   fi
-  size="$(python3 -c 'import json, sys; obj=json.loads(sys.argv[1]); print(obj.get("virtual-size", ""))' "${out}")" || return 1
-  [[ "${size}" =~ ^[0-9]+$ ]] || return 1
-  printf -v "${out_var}" '%s' "${size}"
+  size_value="$(python3 -c 'import json, sys; obj=json.loads(sys.argv[1]); print(obj.get("virtual-size", ""))' "${out}")" || return 1
+  [[ "${size_value}" =~ ^[0-9]+$ ]] || return 1
+  printf -v "${out_var}" '%s' "${size_value}"
 }
 
 ftctl_blockcopy_disk_bus_from_xml() {
   local xml_path="${1-}"
   local target="${2-}"
   local out_var="${3}"
-  local bus
+  local bus_value
 
-  bus="$(python3 -c 'import sys, xml.etree.ElementTree as ET; xml_path, target = sys.argv[1], sys.argv[2]; tree = ET.parse(xml_path); root = tree.getroot();
+  bus_value="$(python3 -c 'import sys, xml.etree.ElementTree as ET; xml_path, target = sys.argv[1], sys.argv[2]; tree = ET.parse(xml_path); root = tree.getroot();
 for disk in root.findall("./devices/disk"):
     t = disk.find("target")
     if t is not None and t.get("dev") == target:
@@ -189,7 +209,7 @@ for disk in root.findall("./devices/disk"):
         break
 else:
     print("virtio")' "${xml_path}" "${target}")" || return 1
-  printf -v "${out_var}" '%s' "${bus}"
+  printf -v "${out_var}" '%s' "${bus_value}"
 }
 
 ftctl_blockcopy_remote_nbd_dest_xml_path() {
@@ -344,6 +364,65 @@ ftctl_blockcopy_start_remote_nbd_job() {
     printf -v "${rc_var}" '%s' "${rc}"
   fi
   return "${rc}"
+}
+
+ftctl_blockcopy_write_remote_nbd_repro() {
+  local vm="${1-}"
+  local target="${2-}"
+  local xml_path="${3-}"
+  local remote_host="${4-}"
+  local remote_user="${5-}"
+  local remote_cmd="${6-}"
+  local persistence="${7-}"
+  local cmd script
+
+  cmd="env LC_ALL=C LANG=C virsh -c ${FTCTL_PROFILE_PRIMARY_URI@Q} blockcopy ${vm@Q} ${target@Q} --xml ${xml_path@Q}"
+  if [[ "${persistence}" == "yes" ]]; then
+    cmd+=" --transient-job"
+  fi
+  if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
+    cmd+=" --synchronous-writes"
+  fi
+
+  script=$(cat <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[REPRO] remote prepare on secondary host"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${remote_user}@${remote_host}" bash -lc $(printf '%q' "${remote_cmd}")
+
+echo "[REPRO] blockcopy command on primary host"
+${cmd}
+EOF
+)
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "remote-nbd-repro.sh" "${script}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-command.txt" "${cmd}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "secondary-prepare-command.txt" "${remote_cmd}"
+  if [[ -f "${xml_path}" ]]; then
+    ftctl_blockcopy_write_debug_file "${vm}" "${target}" "remote-nbd-dest.xml" "$(cat "${xml_path}")"
+  fi
+}
+
+ftctl_blockcopy_capture_primary_debug() {
+  local vm="${1-}"
+  local target="${2-}"
+  local out err rc
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" dumpxml "${vm}" || true
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-dumpxml.stdout.xml" "${out}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-dumpxml.stderr.txt" "${err}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-dumpxml.rc.txt" "${rc}"
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" blockjob "${vm}" "${target}" --info || true
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockjob.stdout.txt" "${out}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockjob.stderr.txt" "${err}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockjob.rc.txt" "${rc}"
 }
 
 ftctl_blockcopy_resolve_reverse_dest() {
@@ -653,6 +732,29 @@ ftctl_blockcopy_plan_protect() {
         "${vm}" "${target}" "${format}" \
         "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${export_name}" \
         "${primary_xml_backup}" remote_xml
+      {
+        local remote_host="" remote_user="" debug_remote_cmd="" debug_size=""
+        ftctl_blockcopy_remote_target_host_user remote_host remote_user || true
+        ftctl_blockcopy_source_virtual_size_bytes "${vm}" "${target}" "${source}" debug_size || true
+        debug_remote_cmd="$(cat <<EOF
+set -euo pipefail
+mkdir -p "$(dirname "${secondary_dest}")" /run/ablestack-vm-ftctl
+if [[ ! -f "${secondary_dest}" ]]; then
+  qemu-img create -f "${format}" "${secondary_dest}" "${debug_size}"
+fi
+qemu-nbd --fork --persistent --shared=8 --bind "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" --port "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" --export-name "${export_name}" --format "${format}" --pid-file "/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid" "${secondary_dest}"
+EOF
+)"
+        ftctl_blockcopy_write_remote_nbd_repro "${vm}" "${target}" "${remote_xml}" "${remote_host}" "${remote_user}" "${debug_remote_cmd}" "${persistence}"
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "secondary-prepare-context.txt" \
+          "host=${remote_host}
+user=${remote_user}
+size=${debug_size}
+format=${format}
+secondary_path=${secondary_dest}
+export_name=${export_name}
+xml=${remote_xml}"
+      }
       ftctl_blockcopy_start_remote_nbd_job \
         "${FTCTL_PROFILE_PRIMARY_URI}" \
         "${vm}" \
@@ -663,6 +765,10 @@ ftctl_blockcopy_plan_protect() {
         out \
         err \
         rc || true
+      ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-stdout.txt" "${out}"
+      ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-stderr.txt" "${err}"
+      ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-rc.txt" "${rc}"
+      ftctl_blockcopy_capture_primary_debug "${vm}" "${target}"
     else
       ftctl_blockcopy_start_job \
         "${FTCTL_PROFILE_PRIMARY_URI}" \
@@ -688,6 +794,11 @@ ftctl_blockcopy_plan_protect() {
       else
         echo "ERROR: blockcopy start failed for ${vm}:${target} rc=${rc}" >&2
       fi
+      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-stdout.txt" "${out}"
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-stderr.txt" "${err}"
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-rc.txt" "${rc}"
+      fi
       return "${rc}"
     fi
 
@@ -700,6 +811,11 @@ ftctl_blockcopy_plan_protect() {
         "last_error=blockcopy_job_query_failed"
       ftctl_log_event "mirror" "blockcopy.query" "fail" "${vm}" "" \
         "target=${target} dest=${dest}"
+      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-stdout.txt" "${out}"
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-stderr.txt" "${err}"
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-rc.txt" "${rc}"
+      fi
       return 1
     fi
 
