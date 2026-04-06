@@ -56,6 +56,7 @@ need_cmd() {
   command -v "${cmd}" >/dev/null 2>&1 || MISSING+=("${cmd}")
 }
 
+need_cmd jq
 need_cmd virsh
 need_cmd virt-inspector
 need_cmd virt-copy-in
@@ -121,6 +122,7 @@ if [[ -d "${SHARE_SRC}/ablestack/v2k/compat" ]]; then
   sudo mkdir -p "$(dirname "${COMPAT_TARGET_ROOT}")"
   sudo rm -rf "${COMPAT_TARGET_ROOT}"
   sudo cp -a "${SHARE_SRC}/ablestack/v2k/compat" "${COMPAT_TARGET_ROOT}"
+  sudo find "${COMPAT_TARGET_ROOT}" -type f \( -path '*/bin/govc' -o -path '*/venv/bin/python3' \) -exec chmod 0755 {} \; 2>/dev/null || true
 else
   echo "Skipping compatibility profile install: ${SHARE_SRC}/ablestack/v2k/compat"
 fi
