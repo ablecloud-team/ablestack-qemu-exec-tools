@@ -25,6 +25,8 @@ V2K_NBD_LOCK_ROOT="/var/lock/ablestack-v2k/reservations"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+# shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
@@ -297,15 +299,138 @@ v2k_has_lvm_tools() {
   return 0
 }
 
+v2k_linux_guest_has_identity_markers() {
+  local rootmnt="${1:-}"
+  [[ -n "${rootmnt}" && -d "${rootmnt}" ]] || return 1
+
+  local markers=(
+    "${rootmnt}/etc/os-release"
+    "${rootmnt}/usr/lib/os-release"
+    "${rootmnt}/etc/redhat-release"
+    "${rootmnt}/etc/system-release"
+    "${rootmnt}/etc/centos-release"
+    "${rootmnt}/etc/rocky-release"
+    "${rootmnt}/etc/almalinux-release"
+    "${rootmnt}/etc/oracle-release"
+    "${rootmnt}/etc/fedora-release"
+    "${rootmnt}/etc/SuSE-release"
+    "${rootmnt}/etc/lsb-release"
+    "${rootmnt}/etc/debian_version"
+  )
+
+  local f
+  for f in "${markers[@]}"; do
+    [[ -f "${f}" ]] && return 0
+  done
+  return 1
+}
+
+v2k_linux_guest_detect_distro() {
+  local rootmnt="${1:-}"
+  [[ -n "${rootmnt}" && -d "${rootmnt}" ]] || return 1
+
+  ROOTMNT="${rootmnt}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["ROOTMNT"])
+result = {"id": "", "like": "", "version_id": "", "pretty_name": "", "source": ""}
+
+def parse_shell_kv(path: Path):
+    data = {}
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key] = value.strip().strip('"').strip("'")
+    return data
+
+for candidate in (root / "etc/os-release", root / "usr/lib/os-release"):
+    if candidate.is_file():
+        data = parse_shell_kv(candidate)
+        result["id"] = data.get("ID", "")
+        result["like"] = data.get("ID_LIKE", "")
+        result["version_id"] = data.get("VERSION_ID", "")
+        result["pretty_name"] = data.get("PRETTY_NAME", "")
+        result["source"] = str(candidate.relative_to(root))
+        print(json.dumps(result))
+        raise SystemExit(0)
+
+release_candidates = [
+    ("redhat", "rhel fedora", root / "etc/redhat-release"),
+    ("rhel", "rhel fedora", root / "etc/system-release"),
+    ("centos", "rhel fedora", root / "etc/centos-release"),
+    ("rocky", "rhel fedora", root / "etc/rocky-release"),
+    ("almalinux", "rhel fedora", root / "etc/almalinux-release"),
+    ("oracle", "rhel fedora", root / "etc/oracle-release"),
+    ("fedora", "rhel fedora", root / "etc/fedora-release"),
+    ("suse", "suse", root / "etc/SuSE-release"),
+]
+for distro_id, like, candidate in release_candidates:
+    if candidate.is_file():
+        result["id"] = distro_id
+        result["like"] = like
+        result["pretty_name"] = candidate.read_text(encoding="utf-8", errors="ignore").strip()
+        result["source"] = str(candidate.relative_to(root))
+        print(json.dumps(result))
+        raise SystemExit(0)
+
+if (root / "etc/debian_version").is_file():
+    result["id"] = "debian"
+    result["like"] = "debian"
+    result["pretty_name"] = (root / "etc/debian_version").read_text(encoding="utf-8", errors="ignore").strip()
+    result["source"] = "etc/debian_version"
+    print(json.dumps(result))
+    raise SystemExit(0)
+
+if (root / "etc/lsb-release").is_file():
+    data = parse_shell_kv(root / "etc/lsb-release")
+    result["id"] = data.get("DISTRIB_ID", "").lower()
+    result["version_id"] = data.get("DISTRIB_RELEASE", "")
+    result["pretty_name"] = data.get("DISTRIB_DESCRIPTION", "")
+    result["source"] = "etc/lsb-release"
+    print(json.dumps(result))
+    raise SystemExit(0)
+
+print(json.dumps(result))
+PY
+}
+
+v2k_linux_guest_detect_bootloader() {
+  local rootmnt="${1:-}"
+  [[ -n "${rootmnt}" && -d "${rootmnt}" ]] || return 1
+
+  local bootloader="unknown" source=""
+  if [[ -d "${rootmnt}/boot/grub2" || -f "${rootmnt}/boot/grub2/grub.cfg" ]]; then
+    bootloader="grub2"
+    source="boot/grub2"
+  elif [[ -d "${rootmnt}/boot/grub" || -f "${rootmnt}/boot/grub/grub.cfg" ]]; then
+    bootloader="grub"
+    source="boot/grub"
+  elif [[ -d "${rootmnt}/boot/efi/EFI" ]]; then
+    bootloader="uefi"
+    source="boot/efi/EFI"
+  elif [[ -f "${rootmnt}/etc/default/grub" ]]; then
+    bootloader="grub-default"
+    source="etc/default/grub"
+  fi
+
+  jq -nc --arg bootloader "${bootloader}" --arg source "${source}" \
+    '{bootloader:$bootloader,source:$source}'
+}
+
 v2k_linux_bootstrap_try_mount_partitions() {
-  # Try to find root by mounting partitions directly and checking /etc/os-release
+  # Try to find the guest root by mounting partitions directly and checking
+  # common distro identity markers such as os-release or *release files.
   local nbd_dev="$1" mnt="$2"
   local part root_part=""
   for part in "${nbd_dev}"p[0-9]*; do
     [[ -b "${part}" ]] || continue
     # guard: clear any leftover mount on mnt (prevents false rc=0 from mount_robust)
     v2k_linux_bootstrap_umount_robust "${mnt}" --recursive >/dev/null 2>&1 || true
-    # Skip LVM PV partitions early (they won't contain /etc/os-release)
+    # Skip LVM PV partitions early; they usually do not contain guest identity files.
     if lsblk -rn -o FSTYPE "${part}" 2>/dev/null | grep -qx "LVM2_member"; then
       continue
     fi
@@ -325,15 +450,17 @@ v2k_linux_bootstrap_try_mount_partitions() {
       continue
     fi
 
-    local has_os=0
-    [[ -f "${mnt}/etc/os-release" ]] && has_os=1
+    local has_identity=0
+    if v2k_linux_guest_has_identity_markers "${mnt}"; then
+      has_identity=1
+    fi
     v2k_event INFO "linux_bootstrap" "" "mount_try_partition_probe" \
       "$(v2k_linux_bootstrap_json \
         --arg part "${part}" \
-        --argjson has_os_release "${has_os}" \
-        '{part:$part,has_os_release:$has_os_release}')"
+        --argjson has_identity "${has_identity}" \
+        '{part:$part,has_identity:$has_identity}')"
 
-    if [[ "${has_os}" -eq 1 ]]; then
+    if [[ "${has_identity}" -eq 1 ]]; then
       root_part="${part}"
       v2k_linux_bootstrap_umount_robust "${mnt}" >/dev/null 2>&1 || true
       echo "${root_part}"
@@ -728,10 +855,12 @@ v2k_linux_bootstrap_try_mount_lvm() {
       continue
     fi
 
-    local has_os=0
-    [[ -f "${mnt}/etc/os-release" ]] && has_os=1
+    local has_identity=0
+    if v2k_linux_guest_has_identity_markers "${mnt}"; then
+      has_identity=1
+    fi
     
-    if [[ "${has_os}" -eq 1 ]]; then
+    if [[ "${has_identity}" -eq 1 ]]; then
       v2k_linux_bootstrap_umount_robust "${mnt}" >/dev/null 2>&1 || true
       echo "${lv}"
       return 0
@@ -1174,7 +1303,7 @@ local qout qrc
     root_dev="$(v2k_linux_bootstrap_try_mount_lvm "${nbd_dev}" "${mnt}" || true)"
   fi
   if [[ -z "${root_dev}" ]]; then
-    v2k_event ERROR "linux_bootstrap" "" "root_partition_not_found" "{\"nbd\":\"${nbd_dev}\",\"note\":\"no /etc/os-release found on partitions or LVM LVs\"}"
+    v2k_event ERROR "linux_bootstrap" "" "root_partition_not_found" "{\"nbd\":\"${nbd_dev}\",\"note\":\"no distro identity markers found on partitions or LVM LVs\"}"
     finish 80
     return $?
   fi
@@ -1270,10 +1399,19 @@ v2k_linux_bootstrap_rebuild_initramfs() {
   mount --make-rslave "${rootmnt}/proc" >/dev/null 2>&1 || true
   mount --make-rslave "${rootmnt}/sys"  >/dev/null 2>&1 || true
 
-  # Detect distro family
-  local os_id os_like
-  os_id="$(. "${rootmnt}/etc/os-release" >/dev/null 2>&1; echo "${ID:-}")"
-  os_like="$(. "${rootmnt}/etc/os-release" >/dev/null 2>&1; echo "${ID_LIKE:-}")"
+  # Detect distro family and bootloader using broad marker coverage.
+  local distro_json os_id os_like os_version_id os_pretty os_source
+  local bootloader_json bootloader bootloader_source
+  distro_json="$(v2k_linux_guest_detect_distro "${rootmnt}" 2>/dev/null || echo '{}')"
+  os_id="$(printf '%s' "${distro_json}" | jq -r '.id // ""' 2>/dev/null || true)"
+  os_like="$(printf '%s' "${distro_json}" | jq -r '.like // ""' 2>/dev/null || true)"
+  os_version_id="$(printf '%s' "${distro_json}" | jq -r '.version_id // ""' 2>/dev/null || true)"
+  os_pretty="$(printf '%s' "${distro_json}" | jq -r '.pretty_name // ""' 2>/dev/null || true)"
+  os_source="$(printf '%s' "${distro_json}" | jq -r '.source // ""' 2>/dev/null || true)"
+
+  bootloader_json="$(v2k_linux_guest_detect_bootloader "${rootmnt}" 2>/dev/null || echo '{}')"
+  bootloader="$(printf '%s' "${bootloader_json}" | jq -r '.bootloader // "unknown"' 2>/dev/null || true)"
+  bootloader_source="$(printf '%s' "${bootloader_json}" | jq -r '.source // ""' 2>/dev/null || true)"
 
   # Persist virtio module load hints (harmless if already present)
   mkdir -p "${rootmnt}/etc/modules-load.d" "${rootmnt}/etc/dracut.conf.d"
@@ -1290,7 +1428,15 @@ add_drivers+=" virtio_pci virtio_scsi virtio_blk scsi_mod "
 EOF
 
   v2k_event INFO "linux_bootstrap" "" "initramfs_rebuild_start" \
-    "{\"id\":\"${os_id}\",\"like\":\"${os_like}\"}"
+    "$(v2k_linux_bootstrap_json \
+      --arg id "${os_id}" \
+      --arg like "${os_like}" \
+      --arg version_id "${os_version_id}" \
+      --arg pretty_name "${os_pretty}" \
+      --arg identity_source "${os_source}" \
+      --arg bootloader "${bootloader}" \
+      --arg bootloader_source "${bootloader_source}" \
+      '{id:$id,like:$like,version_id:$version_id,pretty_name:$pretty_name,identity_source:$identity_source,bootloader:$bootloader,bootloader_source:$bootloader_source}')"
 
   # ------------------------------------------------------------------
   # Determine target kernel version (kver) deterministically
@@ -1635,11 +1781,52 @@ v2k_load_runtime_flags_from_manifest() {
     "{\"enabled\":${force},\"source\":\"manifest\",\"manifest\":\"${V2K_MANIFEST}\"}"
 }
 
+v2k_restore_runtime_env_from_workdir() {
+  local workdir=""
+  local govc_env=""
+  local vddk_cred=""
+
+  if [[ -n "${V2K_WORKDIR:-}" && -d "${V2K_WORKDIR}" ]]; then
+    workdir="${V2K_WORKDIR}"
+  elif [[ -n "${V2K_MANIFEST:-}" ]]; then
+    workdir="$(dirname "${V2K_MANIFEST}")"
+  fi
+
+  [[ -n "${workdir}" && -d "${workdir}" ]] || return 0
+
+  govc_env="${workdir}/govc.env"
+  if [[ -f "${govc_env}" ]]; then
+    v2k_source_kv_env "${govc_env}" || true
+    export GOVC_URL GOVC_USERNAME GOVC_PASSWORD GOVC_INSECURE
+  fi
+
+  vddk_cred="${workdir}/vddk.cred"
+  if [[ -f "${vddk_cred}" ]]; then
+    export V2K_VDDK_CRED_FILE="${vddk_cred}"
+    set +u
+    # shellcheck disable=SC1090
+    source "${vddk_cred}" || true
+    set -u
+    if [[ -n "${VDDK_USER-}" ]]; then
+      export V2K_VDDK_USER="${VDDK_USER}"
+    fi
+    if [[ -n "${VDDK_SERVER-}" ]]; then
+      export V2K_VDDK_SERVER="${VDDK_SERVER}"
+    fi
+    if [[ -n "${VDDK_THUMBPRINT-}" ]]; then
+      export V2K_VDDK_THUMBPRINT="${VDDK_THUMBPRINT}"
+    fi
+  fi
+
+  return 0
+}
+
 v2k_cmd_init() {
   local vm="" vcenter="" dst="" mode="govc" cred_file=""
 
   # New: VDDK(ESXi) auth (separated from GOVC/vCenter)
   local vddk_cred_file=""
+  local compat_profile="${V2K_COMPAT_PROFILE:-auto}"
 
   # New: target override options (CLI -> env)
   local target_format="" target_storage="" target_map_json=""
@@ -1653,6 +1840,7 @@ v2k_cmd_init() {
       --mode) mode="${2:-}"; shift 2;;
       --cred-file) cred_file="${2:-}"; shift 2;;
       --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;;
+      --compat-profile) compat_profile="${2:-}"; shift 2;;
 
       # --- new options ---
       --target-format) target_format="${2:-}"; shift 2;;
@@ -1671,6 +1859,8 @@ v2k_cmd_init() {
   if [[ -n "${cred_file}" ]]; then
     v2k_vmware_load_cred_file "${cred_file}"
   fi
+
+  export V2K_COMPAT_PROFILE="${compat_profile:-auto}"
 
   # Persist the VDDK credential file only after workdir creation is complete.
   # The older flow could run before V2K_WORKDIR was ready and hit empty or invalid paths.
@@ -1732,6 +1922,21 @@ v2k_cmd_init() {
     export V2K_EVENTS_LOG
   fi
 
+  v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
+  v2k_compat_resolve_profile "${V2K_COMPAT_PROFILE:-auto}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 0
+
+  # If init was given only a govc credential file, derive a VDDK credential file
+  # so follow-up base/incremental sync commands can reuse the same workdir.
+  if [[ -z "${vddk_cred_file}" && -n "${GOVC_USERNAME:-}" && -n "${GOVC_PASSWORD:-}" ]]; then
+    vddk_cred_file="${V2K_WORKDIR}/vddk.auto.cred"
+    cat > "${vddk_cred_file}" <<EOF
+VDDK_USER=${GOVC_USERNAME}
+VDDK_PASSWORD=${GOVC_PASSWORD}
+VDDK_SERVER=${vcenter}
+EOF
+    chmod 600 "${vddk_cred_file}" 2>/dev/null || true
+  fi
+
   # (FIX) Persist VDDK cred file into workdir (productization) AFTER workdir exists
   if [[ -n "${vddk_cred_file}" ]]; then
     local vddk_saved="${V2K_WORKDIR}/vddk.cred"
@@ -1777,13 +1982,18 @@ v2k_cmd_init() {
 
   # Log init start with target overrides for observability
   v2k_event INFO "init" "" "phase_start" \
-    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\"}"
+    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
 
   local inv_json
   inv_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter}")"
 
   # Build manifest using inventory json + target settings (from env)
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}"
+  v2k_manifest_set_compat_requested_profile "${V2K_MANIFEST}" "${V2K_COMPAT_PROFILE:-auto}"
+  v2k_manifest_set_compat_selected_profile "${V2K_MANIFEST}" "${V2K_COMPAT_SELECTED_PROFILE:-}"
+  v2k_manifest_set_compat_detected_vcenter_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_VCENTER_VERSION:-}"
+  v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}"
+  v2k_compat_write_env "${V2K_WORKDIR}" || true
 
   v2k_event INFO "init" "" "phase_done" "{\"manifest\":\"${V2K_MANIFEST}\",\"workdir\":\"${V2K_WORKDIR}\"}"
 
@@ -1795,6 +2005,7 @@ v2k_cmd_init() {
 v2k_cmd_cbt() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local action="${1:-}"
   case "${action}" in
     enable)
@@ -1819,6 +2030,7 @@ v2k_cmd_cbt() {
 v2k_cmd_snapshot() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local which="${1:-}" name=""
   local safe_mode=0
   shift || true
@@ -1987,6 +2199,7 @@ v2k_cmd_sync() {
 
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local which="${1:-}" jobs=1 coalesce_gap=$((64*1024)) chunk=$((4*1024*1024))
   shift || true
   while [[ $# -gt 0 ]]; do
@@ -2074,6 +2287,7 @@ v2k_cmd_sync() {
 v2k_cmd_verify() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local mode="quick" samples=64
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2120,6 +2334,7 @@ v2k_cutover_prepare_rbd_mappings() {
 v2k_cmd_cutover() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local shutdown="guest" define_only=0 start_vm=0
   local safe_mode=0
   local winpe_bootstrap=1
@@ -2502,6 +2717,7 @@ v2k_cmd_cutover() {
 v2k_cmd_cleanup() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local keep_snapshots=0 keep_workdir=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2541,6 +2757,7 @@ v2k_cmd_cleanup() {
 v2k_cmd_status() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
+  v2k_restore_runtime_env_from_workdir
   local summary
   summary="$(v2k_manifest_status_summary "${V2K_MANIFEST}" "${V2K_EVENTS_LOG:-}")"
   v2k_json_or_text_ok "status" "${summary}" "${summary}"

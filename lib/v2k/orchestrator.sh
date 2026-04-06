@@ -211,7 +211,7 @@ v2k_cmd_run_foreground() {
 
   local vm="" vcenter_host="" username="" password="" dst=""
   local cred_file_in="" vddk_cred_file_in=""
-
+  local compat_profile="${V2K_COMPAT_PROFILE:-auto}"
   local init_mode="govc"
   local init_target_format="" init_target_storage="" init_target_map_json=""
   local init_force_block_device="0"
@@ -230,6 +230,7 @@ v2k_cmd_run_foreground() {
       --insecure) insecure="${2:-}"; shift 2;;
       --cred-file) cred_file_in="${2:-}"; shift 2;;
       --vddk-cred-file) vddk_cred_file_in="${2:-}"; shift 2;;
+      --compat-profile) compat_profile="${2:-}"; shift 2;;
       --shutdown) shutdown="${2:-}"; shift 2;;
       --kvm-vm-policy) kvm_vm_policy="${2:-}"; shift 2;;
       --incr-interval) incr_interval="${2:-}"; shift 2;;
@@ -323,9 +324,11 @@ v2k_cmd_run_foreground() {
   fi
   
   if [[ -z "${dst}" ]]; then dst="/var/lib/libvirt/images/${vm}"; fi
+  export V2K_COMPAT_PROFILE="${compat_profile:-auto}"
 
   # init args setup
   local -a init_args=( --vm "${vm}" --vcenter "${vcenter_host}" --dst "${dst}" --mode "${init_mode}" )
+  init_args+=( --compat-profile "${V2K_COMPAT_PROFILE:-auto}" )
   [[ -n "${init_target_format}" ]] && init_args+=( --target-format "${init_target_format}" )
   [[ -n "${init_target_storage}" ]] && init_args+=( --target-storage "${init_target_storage}" )
   [[ -n "${init_target_map_json}" ]] && init_args+=( --target-map-json "${init_target_map_json}" )
@@ -338,7 +341,7 @@ v2k_cmd_run_foreground() {
   local tmp_vddk_cred=""
   local persisted_govc_env="${V2K_WORKDIR}/govc.env"
   local persisted_vddk_cred="${V2K_WORKDIR}/vddk.cred"
-  
+  local persisted_compat_env="${V2K_WORKDIR}/compat.env"  
   local -a cleanup_tmp=()
 
   # A. GOVC Credential
@@ -394,7 +397,9 @@ v2k_cmd_run_foreground() {
 
   # Load Env
   v2k_source_kv_env "${persisted_govc_env}"
-  
+  v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
+  v2k_compat_resolve_profile "${V2K_COMPAT_PROFILE:-auto}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 0
+
   # For init, we point to the persisted file
   init_args+=( --cred-file "${persisted_govc_env}" )
 
@@ -470,6 +475,11 @@ v2k_cmd_run_foreground() {
              V2K_VDDK_SERVER="${V2K_VDDK_SERVER%%/*}"
         fi
     fi
+    if [[ -f "${persisted_compat_env}" ]]; then
+        v2k_compat_load_from_workdir "${V2K_WORKDIR}" || true
+    fi
+    v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
+    v2k_compat_resolve_profile "${V2K_COMPAT_PROFILE:-auto}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 1
 
     skip_init=1
     skip_cbt=1

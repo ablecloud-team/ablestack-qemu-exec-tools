@@ -1,88 +1,97 @@
 # ablestack_v2k Operational Scenarios
 
-이 문서는 다양한 환경에서 `ablestack_v2k`를 운영하기 위한 권장 시나리오를 정리합니다.
+This document lists practical run patterns for `ablestack_v2k`.
 
----
+## 1. Standard File-Based Migration
 
-## 1. 기본 자동 실행 (권장)
-
-### 대상
-
-- 일반 업무용 VM
-- qcow2 또는 raw(file) 스토리지
-
-### 실행
+Use this for the most common qcow2/file flow.
 
 ```bash
 ablestack_v2k run \
   --vm <VM> \
   --vcenter <VCENTER> \
+  --cred-file <govc.env> \
   --dst <DST> \
+  --compat-profile auto \
   --target-format qcow2 \
   --target-storage file
 ```
 
-특징:
+## 2. Split-Run Migration
 
-- 전체 라이프사이클 자동 실행
-- 중단 시간 최소화
-- 오류 발생 시 `--resume` 가능
+Use this when you want to separate daytime copy traffic from final cutover.
 
----
-
-## 2. Split-run 운영 (대규모 VM)
-
-### Phase1 (주간/업무시간)
+### Phase1
 
 ```bash
-ablestack_v2k run --split phase1 ...
+ablestack_v2k run \
+  --split phase1 \
+  --vm <VM> \
+  --vcenter <VCENTER> \
+  --cred-file <govc.env> \
+  --dst <DST> \
+  --compat-profile auto
 ```
 
-- base + incr1까지만 실행
-- 업무 중단 없음
-
-### Phase2 (야간/휴일시간)
+### Phase2
 
 ```bash
-ablestack_v2k run --split phase2 --resume ...
+ablestack_v2k run \
+  --split phase2 \
+  --vm <VM> \
+  --vcenter <VCENTER> \
+  --dst <DST> \
+  --compat-profile auto
 ```
 
-- 추가 incr 반복 후 cutover
-- 실제 업무 중단 발생 구간
+Phase2 reuses `govc.env`, `vddk.cred`, and `compat.env` from the existing workdir.
 
----
+## 3. Full Real-Environment Sequence
 
-## 3. Windows VM 이전
+Recommended order for one validation VM:
 
-- WinPE 자동 부트스트랩 기본 활성
-- virtio 드라이버 ISO 필요
-- 최초 부팅 후 장치 인식 확인 필수
+1. `init --compat-profile auto`
+2. `cbt status`
+3. `cbt enable`
+4. `snapshot base`
+5. `sync base`
+6. `run --split phase1`
+7. `run --split phase2`
+8. restore source VM state if needed
+9. `run` full
 
----
+## 4. RBD Target Migration
 
-## 4. Block / RBD 스토리지
-
-- `--target-map-json` 필수
-- 운영 환경에서는 사전 대상 경로 검증 필수
-- 실수 방지를 위해 테스트 환경 선행 권장
-
-### RBD 운영 포인트
-
-- 매핑 값은 `rbd:pool/image` 형식으로 입력
-- 실제 실행 시 호스트에서 `rbd map`으로 `/dev/rbd/<pool>/<image>`를 생성
-- cutover 직전 persistent map을 생성하고 libvirt는 이를 block disk로 사용
-- Ceph 연결 정보는 별도 입력하지 않고 로컬 `ceph.conf` / keyring 설정을 사용
-- cutover 이후 활성 VM이 사용하는 RBD map은 자동 unmap하지 않음
-
----
-
-## 5. 장애 복구 전략
-
-- 작업 중단 시:
+For Ceph RBD targets:
 
 ```bash
-ablestack_v2k status
-ablestack_v2k run --resume
+ablestack_v2k run \
+  --vm <VM> \
+  --vcenter <VCENTER> \
+  --cred-file <govc.env> \
+  --dst <DST> \
+  --compat-profile auto \
+  --target-format raw \
+  --target-storage rbd \
+  --target-map-json '{"scsi0:0":"rbd:pool/vm-disk0"}'
 ```
 
-- 필요 시 `cleanup`을 명시적으로 실행
+Notes:
+
+- `rbd` targets use host-side mapped block devices
+- mapped paths are recorded in `manifest.runtime.rbd.mapped`
+- cutover uses libvirt block-disk XML for mapped RBD devices
+
+## 5. Windows Cutover
+
+For Windows guests, ensure:
+
+- WinPE ISO is present
+- VirtIO ISO path is correct
+- compatibility profile selection is verified in the manifest before cutover
+
+Typical cutover:
+
+```bash
+ablestack_v2k --workdir <workdir> cutover --shutdown guest --define-only
+```

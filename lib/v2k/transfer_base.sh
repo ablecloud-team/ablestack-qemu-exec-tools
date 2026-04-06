@@ -20,6 +20,8 @@ V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+# shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
@@ -32,7 +34,7 @@ v2k_require_vddk_env() {
   : "${VDDK_LIBDIR:?missing VDDK_LIBDIR (e.g. /opt/vmware-vix-disklib-distrib/lib64)}"
   command -v nbdkit >/dev/null
   command -v qemu-img >/dev/null
-  command -v govc >/dev/null
+  v2k_has_govc_bin
 }
 
 v2k_load_vddk_cred_from_manifest() {

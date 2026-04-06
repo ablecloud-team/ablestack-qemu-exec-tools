@@ -1,0 +1,34 @@
+{
+  "hostSystems": [
+    {
+      "summary": {
+        "config": {
+          "name": "esxi01.example.local",
+          "sslThumbprint": "11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44"
+        }
+      },
+      "config": {
+        "virtualNicManagerInfo": {
+          "netConfig": [
+            {
+              "nicType": "management",
+              "selectedVnic": [
+                "key-vim.host.VirtualNic-vmk0"
+              ],
+              "candidateVnic": [
+                {
+                  "key": "key-vim.host.VirtualNic-vmk0",
+                  "spec": {
+                    "ip": {
+                      "ipAddress": "10.0.0.11"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

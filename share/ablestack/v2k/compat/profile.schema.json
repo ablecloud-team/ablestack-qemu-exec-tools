@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ablecloud.io/schemas/ablestack-v2k/compat-profile-v1.json",
+  "title": "ABLESTACK V2K Compatibility Profile",
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "label",
+    "supported_vcenter",
+    "toolchain"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ablestack-v2k/compat-profile-v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "supported_vcenter": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+"
+        },
+        "max": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+"
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "toolchain": {
+      "type": "object",
+      "required": [
+        "govc",
+        "python",
+        "vddk_libdir"
+      ],
+      "properties": {
+        "govc": {
+          "type": "string",
+          "minLength": 1
+        },
+        "python": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vddk_libdir": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "sdk": {
+      "type": "object",
+      "properties": {
+        "govc_version": {
+          "type": "string"
+        },
+        "pyvmomi_version": {
+          "type": "string"
+        },
+        "vddk_version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "selection_rules": {
+      "type": "object",
+      "properties": {
+        "priority": {
+          "type": "integer"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

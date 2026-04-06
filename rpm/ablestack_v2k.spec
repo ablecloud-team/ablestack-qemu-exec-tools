@@ -50,14 +50,34 @@ Assets such as VDDK and govc are handled by the offline ISO installer.
 # Binaries (explicit path: /usr/local/bin)
 mkdir -p %{buildroot}/usr/local/bin
 install -m 0755 bin/ablestack_v2k.sh %{buildroot}/usr/local/bin/ablestack_v2k
+install -m 0755 bin/v2k_test_install.sh %{buildroot}/usr/local/bin/v2k_test_install.sh
 
 # Libraries (explicit path: /usr/local/lib/ablestack-qemu-exec-tools/v2k)
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k
 cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev/null || :
 
+# Compatibility profiles (sample/default layout)
+mkdir -p %{buildroot}/usr/share/ablestack/v2k
+cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/ 2>/dev/null || :
+
 # Bash completion (standard location)
 mkdir -p %{buildroot}%{_datadir}/bash-completion/completions
 install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/completions/%{name}
+
+%preun
+if [ "$1" -eq 0 ]; then
+  # Remove installer-managed compatibility runtime assets on final erase.
+  rm -rf /usr/share/ablestack/v2k/compat >/dev/null 2>&1 || true
+  rm -f /etc/profile.d/v2k-compat.sh >/dev/null 2>&1 || true
+
+  # Remove installer-managed WinPE staging when the V2K add-on is erased.
+  rm -f /usr/share/ablestack/v2k/winpe.iso >/dev/null 2>&1 || true
+  rm -rf /usr/share/ablestack/v2k/winpe >/dev/null 2>&1 || true
+
+  # Remove now-empty parent directories when possible.
+  rmdir /usr/share/ablestack/v2k >/dev/null 2>&1 || true
+  rmdir /usr/share/ablestack >/dev/null 2>&1 || true
+fi
 
 %files
 
@@ -65,7 +85,9 @@ install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/comp
 
 %license LICENSE
 /usr/local/bin/ablestack_v2k
+/usr/local/bin/v2k_test_install.sh
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
+/usr/share/ablestack/v2k/compat/*
 %{_datadir}/bash-completion/completions/%{name}
 
 %changelog

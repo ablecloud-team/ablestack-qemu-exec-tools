@@ -12,12 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# 
-# bash completion for ablestack_v2k
-# - Must match CLI parsers in:
-#   - ablestack_v2k.sh (global opts + commands)
-#   - orchestrator.sh (run/auto opts)
-#   - engine.sh (init/snapshot/sync/verify/cutover/cleanup opts)
 # ---------------------------------------------------------------------
 
 _ablestack_v2k()
@@ -35,28 +29,34 @@ _ablestack_v2k()
     run auto init cbt snapshot sync verify cutover cleanup status
   )
 
-  # Determine command position (skip global options and their arguments)
+  local -a compat_profiles=(
+    auto vsphere60 vsphere67 vsphere80
+  )
+
   local cmd="" cmd_i=-1
   local i=1
   while (( i < cword )); do
     case "${words[i]}" in
       --workdir|--run-id|--manifest|--log)
-        ((i+=2)); continue ;;
+        ((i+=2))
+        continue
+        ;;
       --json|--dry-run|--resume|--force|-h|--help)
-        ((i+=1)); continue ;;
-      --)
-        ((i+=1)); break ;;
+        ((i+=1))
+        continue
+        ;;
       -*)
-        # unknown global-style option: stop parsing (let normal completion happen)
-        ((i+=1)); continue ;;
+        ((i+=1))
+        continue
+        ;;
       *)
         cmd="${words[i]}"
         cmd_i=$i
-        break ;;
+        break
+        ;;
     esac
   done
 
-  # If no command yet, complete global opts or commands
   if [[ -z "${cmd}" || "${cmd_i}" -lt 0 ]]; then
     if [[ "${cur}" == -* ]]; then
       COMPREPLY=( $(compgen -W "${global_opts[*]}" -- "${cur}") )
@@ -66,43 +66,54 @@ _ablestack_v2k()
     return 0
   fi
 
-  # Helpers
-  local _fileopts='--workdir --manifest --log --cred-file --vddk-cred-file --winpe-iso --virtio-iso --dst'
-  local _numopts='--run-id --jobs --chunk --coalesce-gap --incr-interval --max-incr --converge-threshold-sec --deadline-sec --max-incr-phase2 --shutdown-timeout --winpe-timeout --vcpu --memory --samples'
-
-  # Option value completion
   case "${prev}" in
+    --workdir|--manifest|--log|--cred-file|--vddk-cred-file|--dst|--winpe-iso|--virtio-iso)
+      COMPREPLY=( $(compgen -f -- "${cur}") )
+      return 0
+      ;;
+    --compat-profile)
+      COMPREPLY=( $(compgen -W "${compat_profiles[*]}" -- "${cur}") )
+      return 0
+      ;;
     --shutdown)
-      COMPREPLY=( $(compgen -W "manual guest poweroff" -- "${cur}") ); return 0 ;;
+      COMPREPLY=( $(compgen -W "manual guest poweroff" -- "${cur}") )
+      return 0
+      ;;
     --kvm-vm-policy)
-      # orchestrator.sh: none|define-only|define-and-start
-      COMPREPLY=( $(compgen -W "none define-only define-and-start" -- "${cur}") ); return 0 ;;
+      COMPREPLY=( $(compgen -W "none define-only define-and-start" -- "${cur}") )
+      return 0
+      ;;
     --split)
-      COMPREPLY=( $(compgen -W "full phase1 phase2" -- "${cur}") ); return 0 ;;
+      COMPREPLY=( $(compgen -W "full phase1 phase2" -- "${cur}") )
+      return 0
+      ;;
     --insecure)
-      COMPREPLY=( $(compgen -W "0 1" -- "${cur}") ); return 0 ;;
-    --mode)
-      COMPREPLY=( $(compgen -W "govc" -- "${cur}") ); return 0 ;;
+      COMPREPLY=( $(compgen -W "0 1" -- "${cur}") )
+      return 0
+      ;;
     --target-format)
-      COMPREPLY=( $(compgen -W "qcow2 raw" -- "${cur}") ); return 0 ;;
+      COMPREPLY=( $(compgen -W "qcow2 raw" -- "${cur}") )
+      return 0
+      ;;
     --target-storage)
-      COMPREPLY=( $(compgen -W "file block rbd" -- "${cur}") ); return 0 ;;
-    --mode)
-      COMPREPLY=( $(compgen -W "quick" -- "${cur}") ); return 0 ;;
-    --vm|--vcenter|--username|--password|--network|--bridge|--vlan)
-      # free-form values; no opinionated completion
-      return 0 ;;
-    --workdir|--manifest|--log|--cred-file|--vddk-cred-file|--winpe-iso|--virtio-iso|--dst)
-      COMPREPLY=( $(compgen -f -- "${cur}") ); return 0 ;;
+      COMPREPLY=( $(compgen -W "file block rbd" -- "${cur}") )
+      return 0
+      ;;
   esac
 
-  # Command-specific completion
   case "${cmd}" in
     run|auto)
+      case "${prev}" in
+        --mode)
+          COMPREPLY=( $(compgen -W "govc" -- "${cur}") )
+          return 0
+          ;;
+      esac
+
       local -a run_opts=(
         --foreground
         --vm --vcenter --username --password --dst
-        --insecure --cred-file --vddk-cred-file
+        --cred-file --vddk-cred-file --compat-profile --insecure
         --shutdown --kvm-vm-policy
         --incr-interval --max-incr --converge-threshold-sec --no-incr
         --split --deadline-sec --max-incr-phase2
@@ -111,20 +122,25 @@ _ablestack_v2k()
         --base-args --incr-args --cutover-args
         --mode --target-format --target-storage --target-map-json --force-block-device
       )
-
       if [[ "${cur}" == -* ]]; then
         COMPREPLY=( $(compgen -W "${run_opts[*]} ${global_opts[*]}" -- "${cur}") )
       else
-        # run/auto takes only options (no sub-actions)
         COMPREPLY=()
       fi
       return 0
       ;;
 
     init)
+      case "${prev}" in
+        --mode)
+          COMPREPLY=( $(compgen -W "govc" -- "${cur}") )
+          return 0
+          ;;
+      esac
+
       local -a init_opts=(
         --vm --vcenter --dst
-        --mode --cred-file --vddk-cred-file
+        --mode --cred-file --vddk-cred-file --compat-profile
         --target-format --target-storage --target-map-json --force-block-device
       )
       if [[ "${cur}" == -* ]]; then
@@ -176,6 +192,13 @@ _ablestack_v2k()
       ;;
 
     verify)
+      case "${prev}" in
+        --mode)
+          COMPREPLY=( $(compgen -W "quick" -- "${cur}") )
+          return 0
+          ;;
+      esac
+
       local -a verify_opts=( --mode --samples )
       if [[ "${cur}" == -* ]]; then
         COMPREPLY=( $(compgen -W "${verify_opts[*]} ${global_opts[*]}" -- "${cur}") )
@@ -216,7 +239,6 @@ _ablestack_v2k()
       ;;
 
     status)
-      # engine.sh status takes no args, but fleet.sh enables --vm for fleet status UX.
       local -a status_opts=( --vm )
       if [[ "${cur}" == -* ]]; then
         COMPREPLY=( $(compgen -W "${status_opts[*]} ${global_opts[*]}" -- "${cur}") )
@@ -231,5 +253,4 @@ _ablestack_v2k()
   return 0
 }
 
-# Register completion
 complete -F _ablestack_v2k ablestack_v2k

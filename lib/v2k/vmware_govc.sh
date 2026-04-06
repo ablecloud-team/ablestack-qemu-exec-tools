@@ -24,6 +24,10 @@
 
 set -euo pipefail
 
+V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+# shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+
 # -----------------------------------------------------------------------------
 # Physical size helpers (VMDK actual/physical size)
 #
@@ -74,14 +78,14 @@ v2k_vmware_datastore_vmdk_physical_bytes() {
   local ds_path="${1-}"
   [[ -n "${ds_path}" ]] || { echo 0; return 0; }
 
-  command -v govc >/dev/null 2>&1 || { echo 0; return 0; }
+  v2k_has_govc_bin || { echo 0; return 0; }
 
   # Ensure govc is configured; if not, fail fast.
-  govc about >/dev/null 2>&1 || { echo 0; return 0; }
+  v2k_govc about >/dev/null 2>&1 || { echo 0; return 0; }
 
   local line size_h size_b
   # Use the first line only.
-  line="$(govc datastore.ls -l "${ds_path}" 2>/dev/null | head -n 1 || true)"
+  line="$(v2k_govc datastore.ls -l "${ds_path}" 2>/dev/null | head -n 1 || true)"
   [[ -n "${line}" ]] || { echo 0; return 0; }
 
   size_h="$(awk '{print $1}' <<<"${line}")"
@@ -125,7 +129,7 @@ v2k_json_s() {
     printf '%s' "${s}" | jq -Rs '.'
     return 0
   fi
-  python3 - <<'PY' 2>/dev/null || echo '""'
+  v2k_python - <<'PY' 2>/dev/null || echo '""'
 import json,sys
 print(json.dumps(sys.argv[1]))
 PY
@@ -137,7 +141,7 @@ v2k_vmware_vm_power_state() {
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
   # govc vm.info -json provides runtime.powerState; fallback to empty.
-  govc vm.info -json "${vm}" 2>/dev/null \
+  v2k_govc vm.info -json "${vm}" 2>/dev/null \
     | jq -r '.virtualMachines[0].runtime.powerState // empty' 2>/dev/null \
     || true
 }
@@ -171,9 +175,9 @@ v2k_vmware_vm_poweroff() {
   fi
 
   if [[ "${force}" == "1" ]]; then
-    govc vm.power -off -force "${vm}"
+    v2k_govc vm.power -off -force "${vm}"
   else
-    govc vm.power -off "${vm}"
+    v2k_govc vm.power -off "${vm}"
   fi
 
   v2k_vmware_vm_wait_poweroff "${manifest}" "${timeout}"
@@ -189,11 +193,11 @@ v2k_vmware_vm_shutdown_guest_best_effort() {
 
   # Detect supported flags dynamically (avoid hard dependency on exact govc version).
   local help
-  help="$(govc vm.power -h 2>&1 || true)"
+  help="$(v2k_govc vm.power -h 2>&1 || true)"
 
   # Commonly seen flags in some builds: -shutdown / -reboot / -reset / etc.
   if echo "${help}" | grep -q -- '-shutdown'; then
-    govc vm.power -shutdown "${vm}"
+    v2k_govc vm.power -shutdown "${vm}"
     return 0
   fi
 
@@ -204,8 +208,10 @@ v2k_vmware_load_cred_file() {
   local file="$1"
   [[ -f "${file}" ]] || { echo "cred-file not found: ${file}" >&2; exit 2; }
   # expected format: KEY=VALUE lines (GOVC_URL/GOVC_USERNAME/GOVC_PASSWORD/GOVC_INSECURE)
+  set -a
   # shellcheck disable=SC1090
   source "${file}"
+  set +a
 }
 
 v2k_require_govc_env() {
@@ -213,6 +219,7 @@ v2k_require_govc_env() {
   : "${GOVC_USERNAME:?missing GOVC_USERNAME}"
   : "${GOVC_PASSWORD:?missing GOVC_PASSWORD}"
   : "${GOVC_INSECURE:=1}"
+  export GOVC_URL GOVC_USERNAME GOVC_PASSWORD GOVC_INSECURE
 }
 
 v2k_is_ipv4() {
@@ -233,11 +240,11 @@ v2k_vmware_inventory_json() {
   v2k_require_govc_env
 
   local vm_info dev_info
-  local host_moref host_name hostinfo_json
-  local esxi_mgmt_ip esxi_thumbprint
+  local host_moref="" host_name="" hostinfo_json=""
+  local esxi_mgmt_ip="" esxi_thumbprint=""
 
-  vm_info="$(govc vm.info -json "${vm}")"
-  dev_info="$(govc device.info -json -vm "${vm}")"
+  vm_info="$(v2k_govc vm.info -json "${vm}")"
+  dev_info="$(v2k_govc device.info -json -vm "${vm}")"
 
   # 1) VM???¬ë¼ê°?HostSystem MoRef ì¶”ì¶œ
   host_moref="$(
@@ -248,13 +255,10 @@ v2k_vmware_inventory_json() {
   )"
 
   # 2) host.infoë¡?management IP + thumbprint ì¶”ì¶œ (DNS ?˜ì¡´ ?œê±°)
-  esxi_mgmt_ip=""
-  esxi_thumbprint=""
-  hostinfo_json=""
 
   # 2-1) MoRef ?°ì„  ì¡°íšŒ
   if [[ -n "${host_moref}" && "${host_moref}" != "null" ]]; then
-    hostinfo_json="$(govc host.info -json -host "${host_moref}" 2>/dev/null || true)"
+    hostinfo_json="$(v2k_govc host.info -json -host "${host_moref}" 2>/dev/null || true)"
   fi
 
   # 2-2) ?Œì‹±
@@ -527,7 +531,7 @@ v2k_vmware_snapshot_create() {
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
   v2k_event INFO "snapshot.${which}" "" "snapshot_create_start" "{\"name\":$(v2k_json_s "${name}")}"
-  govc snapshot.create -vm "${vm}" -m=false -q=true "${name}" >/dev/null
+  v2k_govc snapshot.create -vm "${vm}" -m=false -q=true "${name}" >/dev/null
   v2k_event INFO "snapshot.${which}" "" "snapshot_create_done" "{\"name\":$(v2k_json_s "${name}")}"
 }
 
@@ -536,7 +540,7 @@ v2k_vmware_snapshot_cleanup() {
   v2k_require_govc_env
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
-  govc snapshot.tree -vm "${vm}" >/dev/null 2>&1 || true
+  v2k_govc snapshot.tree -vm "${vm}" >/dev/null 2>&1 || true
   v2k_event INFO "cleanup" "" "snapshot_cleanup_skip" "{\"reason\":\"v1 does not auto-remove snapshots for safety\"}"
 }
 
@@ -546,7 +550,7 @@ v2k_vmware_cbt_enable_all() {
   local vm
   vm="$(jq -r '.source.vm.name' "${manifest}")"
 
-  govc vm.change -vm "${vm}" -e "ctkEnabled=true" >/dev/null
+  v2k_govc vm.change -vm "${vm}" -e "ctkEnabled=true" >/dev/null
 
   local count
   count="$(jq -r '.disks|length' "${manifest}")"
@@ -555,7 +559,7 @@ v2k_vmware_cbt_enable_all() {
     local disk_id
     disk_id="$(jq -r ".disks[$i].disk_id" "${manifest}")"
     if [[ "${disk_id}" =~ ^scsi[0-9]+:[0-9]+$ ]]; then
-      govc vm.change -vm "${vm}" -e "${disk_id}.ctkEnabled=true" >/dev/null
+      v2k_govc vm.change -vm "${vm}" -e "${disk_id}.ctkEnabled=true" >/dev/null
     else
       v2k_event INFO "cbt_enable" "${disk_id}" "cbt_enable_skip" "{\"reason\":$(v2k_json_s "non-scsi disk_id; cannot set scsiX:Y.ctkEnabled")}"
     fi
@@ -607,7 +611,7 @@ v2k_vmware_snapshot_moref_by_name() {
   # [
   #   { "name":"snapshot", "val": { "rootSnapshotList":[{ "name":"X", "snapshot":{ "value":"snapshot-123" }, "childSnapshotList":[...] }] } }
   # ]
-  govc object.collect -json "${vm_ref}" snapshot 2>/dev/null \
+  v2k_govc object.collect -json "${vm_ref}" snapshot 2>/dev/null \
     | jq -r --arg n "${snap_name}" '
         def walk(nodes):
           nodes[]? as $x
@@ -707,13 +711,13 @@ v2k_vmware_snapshot_remove_all() {
   # Delete ALL snapshots of the source VM.
   # govc usage: snapshot.remove NAME (NAME can be '*' to remove all snapshots)
   # Ref: govc USAGE.md
-  if govc snapshot.remove -vm "${vm}" '*' >/dev/null 2>&1; then
+  if v2k_govc snapshot.remove -vm "${vm}" '*' >/dev/null 2>&1; then
     return 0
   fi
 
   # If it failed, surface stderr for diagnostics.
   # (Caller decides whether to treat as fatal.)
-  govc snapshot.remove -vm "${vm}" '*' 2>&1 | sed 's/^/[govc] /' >&2
+  v2k_govc snapshot.remove -vm "${vm}" '*' 2>&1 | sed 's/^/[govc] /' >&2
   return 1
 }
 
@@ -734,7 +738,7 @@ v2k_vmware_snapshot_remove_migr() {
     local tree_json names
     
     # [?˜ì • 1] ?ëŸ¬ ë©”ì‹œì§€ë¥?stderrë¡?ì¶œë ¥?˜ë„ë¡?2>/dev/null ?œê±°, ?¤íŒ¨ ??loop continue ?€???ëŸ¬ ì²´í¬ ê°•í™”
-    if ! tree_json="$(govc snapshot.tree -vm "${vm}" -json 2>&1)"; then
+    if ! tree_json="$(v2k_govc snapshot.tree -vm "${vm}" -json 2>&1)"; then
        # govc ëª…ë ¹ ?ì²´ê°€ ?¤íŒ¨??ê²½ìš° (?? ?°ê²° ?Šê?, VM Busy)
        echo "[WARN] Failed to list snapshots (round ${round}): ${tree_json}" >&2
        sleep 2
@@ -762,7 +766,7 @@ v2k_vmware_snapshot_remove_migr() {
       [[ -n "${snap_name}" ]] || continue
       
       local out
-      if ! out="$(govc snapshot.remove -vm "${vm}" "${snap_name}" 2>&1)"; then
+      if ! out="$(v2k_govc snapshot.remove -vm "${vm}" "${snap_name}" 2>&1)"; then
         echo "[WARN] Failed to remove snapshot '${snap_name}': ${out}" >&2
         delete_failed=1
       else
@@ -778,7 +782,7 @@ v2k_vmware_snapshot_remove_migr() {
 
   # [?˜ì • 3] ë£¨í”„ ì¢…ë£Œ ?„ì—???¨ì•„?ˆëŠ”ì§€ ?•ì¸
   local remain
-  remain="$(govc snapshot.tree -vm "${vm}" -json 2>/dev/null \
+  remain="$(v2k_govc snapshot.tree -vm "${vm}" -json 2>/dev/null \
       | jq -r '.. | objects | (.name? // .Name? // empty)' 2>/dev/null \
       | grep -F "${pattern}" || true)"
       
