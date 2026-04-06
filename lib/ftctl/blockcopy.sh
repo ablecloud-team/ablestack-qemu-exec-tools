@@ -124,9 +124,25 @@ ftctl_blockcopy_parse_ssh_target_from_uri() {
 }
 
 ftctl_blockcopy_source_virtual_size_bytes() {
-  local source_path="${1-}"
-  local out_var="${2}"
+  local vm="${1-}"
+  local target="${2-}"
+  local source_path="${3-}"
+  local out_var="${4}"
   local out err rc size
+
+  out=""
+  err=""
+  rc=0
+  if [[ -n "${vm}" && -n "${target}" ]]; then
+    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domblkinfo "${vm}" "${target}" || true
+    if [[ "${rc}" == "0" ]]; then
+      size="$(awk -F: 'tolower($1) ~ /capacity/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' <<< "${out}")"
+      if [[ "${size}" =~ ^[0-9]+$ ]]; then
+        printf -v "${out_var}" '%s' "${size}"
+        return 0
+      fi
+    fi
+  fi
 
   out=""
   err=""
@@ -135,12 +151,7 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   if [[ "${rc}" != "0" ]]; then
     return "${rc}"
   fi
-  size="$(python3 - <<'PY' "${out}"
-import json, sys
-obj = json.loads(sys.argv[1])
-print(obj.get("virtual-size", ""))
-PY
-)" || return 1
+  size="$(python3 -c 'import json, sys; obj=json.loads(sys.argv[1]); print(obj.get("virtual-size", ""))' "${out}")" || return 1
   [[ "${size}" =~ ^[0-9]+$ ]] || return 1
   printf -v "${out_var}" '%s' "${size}"
 }
@@ -151,21 +162,14 @@ ftctl_blockcopy_disk_bus_from_xml() {
   local out_var="${3}"
   local bus
 
-  bus="$(python3 - <<'PY' "${xml_path}" "${target}"
-import sys
-import xml.etree.ElementTree as ET
-xml_path, target = sys.argv[1], sys.argv[2]
-tree = ET.parse(xml_path)
-root = tree.getroot()
+  bus="$(python3 -c 'import sys, xml.etree.ElementTree as ET; xml_path, target = sys.argv[1], sys.argv[2]; tree = ET.parse(xml_path); root = tree.getroot();
 for disk in root.findall("./devices/disk"):
     t = disk.find("target")
     if t is not None and t.get("dev") == target:
         print(t.get("bus", "virtio"))
         break
 else:
-    print("virtio")
-PY
-)" || return 1
+    print("virtio")' "${xml_path}" "${target}")" || return 1
   printf -v "${out_var}" '%s' "${bus}"
 }
 
@@ -226,7 +230,7 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   local host user size out err rc pid_file remote_cmd
 
   ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_SECONDARY_URI}" host user || return 2
-  ftctl_blockcopy_source_virtual_size_bytes "${source}" size || {
+  ftctl_blockcopy_source_virtual_size_bytes "${vm}" "${target}" "${source}" size || {
     echo "ERROR: could not determine source virtual size for ${source}" >&2
     return 2
   }
