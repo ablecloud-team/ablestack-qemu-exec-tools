@@ -155,7 +155,7 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   if [[ -n "${vm}" && -n "${target}" ]]; then
     ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domblkinfo "${vm}" "${target}" || true
     if [[ "${rc}" == "0" ]]; then
-      size="$(awk -F: 'tolower($1) ~ /capacity/ {gsub(/^[ \t]+/, "", $2); gsub(/[^0-9]/, "", $2); print $2; exit}' <<< "${out}")"
+      size="$(awk -F: 'tolower($1) ~ /capacity/ { line=$0; gsub(/[^0-9]/, "", line); print line; exit }' <<< "${out}")"
       if [[ "${size}" =~ ^[0-9]+$ ]]; then
         printf -v "${out_var}" '%s' "${size}"
         return 0
@@ -166,7 +166,7 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   out=""
   err=""
   rc=0
-  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- qemu-img info --output=json "${source_path}" || true
+  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- qemu-img info --force-share --output=json "${source_path}" || true
   if [[ "${rc}" != "0" ]]; then
     return "${rc}"
   fi
