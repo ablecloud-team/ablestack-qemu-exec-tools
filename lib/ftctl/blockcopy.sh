@@ -70,6 +70,31 @@ ftctl_blockcopy_resolve_dest() {
   return 2
 }
 
+ftctl_blockcopy_remote_nbd_uri() {
+  local host="${1-}"
+  local port="${2-}"
+  local export_name="${3-}"
+  printf 'nbd://%s:%s/%s\n' "${host}" "${port}" "${export_name}"
+}
+
+ftctl_blockcopy_remote_nbd_secondary_path() {
+  local vm="${1-}"
+  local target="${2-}"
+  local source="${3-}"
+  local format="${4-}"
+  local source_base path
+
+  source_base="$(basename "${source}")"
+  path="${FTCTL_PROFILE_SECONDARY_TARGET_DIR}/${vm}/${target}-${source_base}"
+  if [[ -n "${format}" ]]; then
+    case "${path}" in
+      *.qcow2|*.raw) ;;
+      *) path="${path}.${format}" ;;
+    esac
+  fi
+  printf '%s\n' "${path}"
+}
+
 ftctl_blockcopy_resolve_reverse_dest() {
   local target="${1-}"
   local source="${2-}"
@@ -93,7 +118,7 @@ ftctl_blockcopy_resolve_reverse_dest() {
 ftctl_blockcopy_validate_backend_mode() {
   local vm="${1-}"
   local disks=()
-  local line target source format dest
+  local line target source format dest secondary_target
 
   case "${FTCTL_PROFILE_BACKEND_MODE}" in
     shared-blockcopy)
@@ -115,8 +140,18 @@ ftctl_blockcopy_validate_backend_mode() {
       done
       ;;
     remote-nbd)
-      echo "ERROR: remote-nbd backend mode is not implemented yet" >&2
-      return 3
+      ftctl_inventory_collect_vm_disks "${vm}" disks || return $?
+      for line in "${disks[@]}"; do
+        target="${line%%|*}"
+        source="${line#*|}"
+        source="${source%%|*}"
+        format="${line##*|}"
+        secondary_target="$(ftctl_blockcopy_remote_nbd_secondary_path "${vm}" "${target}" "${source}" "${format}")"
+        [[ -n "${secondary_target}" ]] || {
+          echo "ERROR: remote-nbd requires a resolvable secondary target path" >&2
+          return 2
+        }
+      done
       ;;
     *)
       echo "ERROR: unsupported backend mode: ${FTCTL_PROFILE_BACKEND_MODE}" >&2
@@ -303,7 +338,7 @@ ftctl_blockcopy_refresh_vm_jobs() {
 ftctl_blockcopy_plan_protect() {
   local vm="${1-}"
   local disks=()
-  local line target source format dest
+  local line target source format dest secondary_dest
   local xml_bundle_dir primary_xml_backup standby_xml_seed persistence
   local out err rc job_state ready
   local records=()
@@ -341,7 +376,13 @@ ftctl_blockcopy_plan_protect() {
     source="${line#*|}"
     source="${source%%|*}"
     format="${line##*|}"
-    dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
+    if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+      secondary_dest="$(ftctl_blockcopy_remote_nbd_secondary_path "${vm}" "${target}" "${source}" "${format}")"
+      dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}")"
+    else
+      secondary_dest=""
+      dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
+    fi
     ftctl_ensure_dir "$(dirname "${dest}")" "0755"
     if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
       sync_flag="1"
@@ -388,7 +429,7 @@ ftctl_blockcopy_plan_protect() {
       return 1
     fi
 
-    records+=("${target}|${source}|${dest}|${format}|${job_state}|${ready}")
+    records+=("${target}|${source}|${dest}|${format}|${job_state}|${ready}|${secondary_dest}")
     ftctl_log_event "mirror" "blockcopy.start" "ok" "${vm}" "" \
       "target=${target} dest=${dest} format=${format} sync_writes=${sync_flag}"
   done

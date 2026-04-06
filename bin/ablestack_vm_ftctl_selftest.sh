@@ -220,6 +220,43 @@ selftest_case_backend_validation() {
   if ftctl_profile_validate "${vm}" && ftctl_blockcopy_validate_backend_mode "${vm}"; then
     selftest_fail "shared-blockcopy should reject disk_map=auto"
   fi
+
+  ftctl_profile_reset
+  FTCTL_PROFILE_MODE="ha"
+  FTCTL_PROFILE_PRIMARY_URI="qemu:///system"
+  FTCTL_PROFILE_SECONDARY_URI="qemu+ssh://peer/system"
+  FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+  FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+  FTCTL_PROFILE_SECONDARY_VM_NAME="${vm}-standby"
+  FTCTL_PROFILE_SECONDARY_TARGET_DIR="/secondary"
+  FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR="10.0.0.12"
+  FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT="10809"
+  FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME="${vm}"
+  FTCTL_PROFILE_DISK_MAP="auto"
+  FTCTL_PROFILE_DOMAIN_PERSISTENCE="no"
+  ftctl_profile_validate "${vm}"
+
+  mkdir -p "${SELFTEST_ROOT}/xml/${vm}"
+  cat > "${SELFTEST_ROOT}/xml/${vm}/standby.xml" <<EOF
+<domain type='kvm'>
+  <name>${vm}</name>
+  <devices>
+    <disk type='file' device='disk'>
+      <source file='/var/lib/libvirt/images/${vm}.qcow2'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+  </devices>
+</domain>
+EOF
+  ftctl_state_init_vm "${vm}"
+  ftctl_state_set "${vm}" \
+    "standby_xml_seed=${SELFTEST_ROOT}/xml/${vm}/standby.xml" \
+    "primary_persistence=no"
+  cat > "$(ftctl_blockcopy_state_path "${vm}")" <<EOF
+vda|/var/lib/libvirt/images/${vm}.qcow2|nbd://10.0.0.12:10809/${vm}-vda|qcow2|running|yes|/secondary/${vm}/vda-${vm}.qcow2
+EOF
+  ftctl_standby_prepare "${vm}"
+  selftest_assert_file_contains "$(ftctl_state_get "${vm}" "standby_xml_generated")" "/secondary/${vm}/vda-${vm}.qcow2"
 }
 
 selftest_case_reconcile_and_fencing() {

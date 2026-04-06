@@ -197,7 +197,7 @@ ftctl_standby_materialize_xml() {
   local vm="${1-}"
   local seed out_path standby_vm_name
   local records=()
-  local record target source dest format job_state ready attr
+  local record target source dest format job_state ready secondary_dest attr
 
   seed="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
   [[ -n "${seed}" && -f "${seed}" ]] || {
@@ -225,8 +225,19 @@ ftctl_standby_materialize_xml() {
     format="${record%%|*}"
     record="${record#*|}"
     job_state="${record%%|*}"
-    ready="${record##*|}"
+    record="${record#*|}"
+    if [[ "${record}" == *"|"* ]]; then
+      ready="${record%%|*}"
+      secondary_dest="${record##*|}"
+    else
+      ready="${record}"
+      secondary_dest=""
+    fi
     : "${source}${format}${job_state}${ready}"
+
+    if [[ -n "${secondary_dest}" ]]; then
+      dest="${secondary_dest}"
+    fi
 
     attr="$(ftctl_standby__source_attr_for_dest "${dest}")"
     ftctl_standby__rewrite_xml "${out_path}" "${target}" "${dest}" "${attr}"
