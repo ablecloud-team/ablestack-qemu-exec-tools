@@ -261,7 +261,7 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   local format="${4-}"
   local secondary_path="${5-}"
   local export_name="${6-}"
-  local host="" user="" size="" out="" err="" rc=0 pid_file="" remote_cmd=""
+  local host="" user="" size="" out="" err="" rc=0 pid_file="" remote_cmd="" debug_cmd=""
 
   ftctl_blockcopy_remote_target_host_user host user || return 2
   ftctl_blockcopy_source_virtual_size_bytes "${vm}" "${target}" "${source}" size || {
@@ -293,6 +293,7 @@ qemu-nbd --fork --persistent --shared=8 \
   "${secondary_path}"
 EOF
 )
+  debug_cmd="$(tr '\n' ' ' <<< "${remote_cmd}" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
 
   out=""
   err=""
@@ -300,6 +301,8 @@ EOF
   ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
   : "${out}${err}"
   [[ "${rc}" == "0" ]] || {
+    echo "ERROR: remote-nbd prepare context: host=${host} user=${user} size=${size} format=${format} secondary_path=${secondary_path} export=${export_name}" >&2
+    echo "ERROR: remote-nbd prepare command: ${debug_cmd}" >&2
     [[ -n "${err}" ]] && echo "ERROR: remote-nbd prepare failed: ${err}" >&2
     return "${rc}"
   }
