@@ -1,71 +1,103 @@
 # manifest.json Specification
 
-`manifest.json`은 ablestack_v2k의 상태 머신과 메타데이터를 저장하는 핵심 파일입니다.
+`manifest.json` is the source of truth for a `ablestack_v2k` run.
 
----
+It records:
 
-## 기본 구조
+- source VM metadata
+- target storage settings
+- disk mapping state
+- phase completion state
+- runtime compatibility selection
+- resume metadata
+
+## Top-Level Shape
 
 ```json
 {
   "schema": "ablestack-v2k/manifest-v1",
-  "run": {
-    "run_id": "...",
-    "created_at": "...",
-    "workdir": "..."
-  },
-  "source": {
-    "type": "vmware",
-    "vm": {}
-  },
-  "target": {
-    "type": "kvm",
-    "format": "qcow2|raw",
-    "storage": {
-      "type": "file|block|rbd",
-      "map": {}
-    }
-  },
+  "run": {},
+  "source": {},
+  "target": {},
   "disks": [],
   "phases": {},
   "runtime": {}
 }
 ```
 
----
+## Important Fields
 
-## 주요 필드
+| Path | Meaning |
+| --- | --- |
+| `run.run_id` | unique run identifier |
+| `run.workdir` | workdir path |
+| `source.vm` | source VM metadata |
+| `source.vddk` | VDDK connection metadata |
+| `source.compat` | selected compatibility profile and tool paths |
+| `target.storage` | file/block/rbd target settings |
+| `disks[]` | per-disk transfer state |
+| `phases` | phase completion markers |
+| `runtime` | resume, split-run, and sync-issue metadata |
 
-| 필드 | 설명 |
-|-----|-----|
-| schema | manifest 스키마 버전 |
-| run.run_id | 실행 ID |
-| source.vm | VMware VM 식별자/메타데이터 |
-| target.storage.type | 대상 스토리지 타입 |
-| target.format | 디스크 포맷 |
-| disks | 디스크 매핑 정보 |
-| phases | 단계별 상태 |
-| runtime | 실행 중 상태 및 관측 정보 |
+## Compatibility Block
 
----
+Current runtime writes compatibility details into `source.compat`.
 
-## phases 상태 예시
+Example:
 
 ```json
 {
-  "init": { "done": true, "ts": "..." },
-  "base_sync": { "done": true, "ts": "..." },
-  "incr_sync": { "done": false, "ts": "" },
-  "final_sync": { "done": false, "ts": "" },
-  "cutover": { "done": false, "ts": "" }
+  "source": {
+    "compat": {
+      "requested_profile": "auto",
+      "selected_profile": "vsphere80",
+      "detected_vcenter_version": "8.0.1",
+      "compat_root": "/usr/share/ablestack/v2k/compat",
+      "tools": {
+        "govc_bin": "/usr/share/ablestack/v2k/compat/vsphere80/bin/govc",
+        "python_bin": "/usr/share/ablestack/v2k/compat/vsphere80/venv/bin/python3",
+        "vddk_libdir": "/usr/share/ablestack/v2k/compat/vsphere80/vddk"
+      }
+    }
+  }
 }
 ```
 
----
+## Phase Markers
 
-## runtime.rbd.mapped
+Example:
 
-`target.storage.type=rbd`인 경우 cutover 직전 host-side persistent map 경로를 runtime에 기록합니다.
+```json
+{
+  "phases": {
+    "init": { "done": true, "ts": "..." },
+    "cbt_enable": { "done": true, "ts": "..." },
+    "base_sync": { "done": true, "ts": "..." },
+    "incr_sync": { "done": false, "ts": "" },
+    "final_sync": { "done": false, "ts": "" },
+    "cutover": { "done": false, "ts": "" }
+  }
+}
+```
+
+## Runtime Split State
+
+Example:
+
+```json
+{
+  "runtime": {
+    "split": {
+      "phase1": { "done": true, "ts": "..." },
+      "phase2": { "done": false, "ts": "" }
+    }
+  }
+}
+```
+
+## RBD Runtime State
+
+For `target.storage.type=rbd`, mapped host block devices are recorded under:
 
 ```json
 {
@@ -73,10 +105,10 @@
     "rbd": {
       "mapped": {
         "scsi0:0": {
-          "uri": "rbd:rbd/vmA-disk0",
-          "dev_path": "/dev/rbd/rbd/vmA-disk0",
+          "uri": "rbd:rbd/vm-disk0",
+          "dev_path": "/dev/rbd/rbd/vm-disk0",
           "mapped": true,
-          "ts": "2026-03-11T12:00:00+09:00"
+          "ts": "2026-04-05T00:00:00+09:00"
         }
       }
     }
@@ -84,15 +116,14 @@
 }
 ```
 
-용도:
+## Resume Model
 
-- cutover 시 실제 block device 경로 추적
-- libvirt XML 생성 시 mapped path 우선 사용
-- status / 장애 분석 시 현재 매핑 상태 확인
+The following files are expected inside the workdir:
 
----
+- `manifest.json`
+- `events.log`
+- `govc.env`
+- `vddk.cred`
+- `compat.env`
 
-## resume 동작
-
-- `--resume` 옵션은 manifest 기반으로 미완료 단계를 재개합니다.
-- 완료된 단계는 다시 실행하지 않습니다.
+Follow-up commands now restore `govc.env` and `vddk.cred` automatically from the workdir.

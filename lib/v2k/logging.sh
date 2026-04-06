@@ -17,6 +17,10 @@
 
 set -euo pipefail
 
+V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+# shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+
 # ---------------------------------------------------------------------
 # Progress helpers (state machine observability)
 # ---------------------------------------------------------------------
@@ -79,7 +83,7 @@ v2k_json_string() {
     jq -Rs '.' 2>/dev/null || echo '""'
     return 0
   fi
-  python3 - <<'PY' 2>/dev/null || echo '""'
+  v2k_python - <<'PY' 2>/dev/null || echo '""'
 import json,sys
 print(json.dumps(sys.stdin.read()))
 PY

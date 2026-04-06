@@ -1,0 +1,25 @@
+{
+  "devices": [
+    {
+      "key": 1000,
+      "type": "VirtualLsiLogicController",
+      "busNumber": 0,
+      "deviceInfo": {
+        "label": "SCSI controller 0"
+      }
+    },
+    {
+      "key": 2000,
+      "type": "VirtualDisk",
+      "controllerKey": 1000,
+      "unitNumber": 0,
+      "deviceInfo": {
+        "label": "Hard disk 1"
+      },
+      "backing": {
+        "fileName": "[datastore1] demo-vm/demo-vm.vmdk"
+      },
+      "capacityInBytes": 10737418240
+    }
+  ]
+}

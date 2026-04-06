@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+set -euo pipefail
 
 INSTALL_PREFIX="/usr/local"
 BIN_DIR="${INSTALL_PREFIX}/bin"
@@ -24,11 +24,13 @@ LIB_TARGET="${INSTALL_PREFIX}/lib/ablestack-qemu-exec-tools"
 PAYLOAD_SRC="payload"
 LIB_SRC="lib"
 BIN_SRC="bin"
+SHARE_SRC="share"
 SYSTEMD_UNIT_DIR="/etc/systemd/system"
 COMPLETIONS_TARGET="/usr/share/bash-completion/completions"
 
 ISO_DEFAULT_DIR="/usr/share/ablestack/tools"
 ISO_DEFAULT_PATH="${ISO_DEFAULT_DIR}/ablestack-qemu-exec-tools.iso"
+COMPAT_TARGET_ROOT="/usr/share/ablestack/v2k/compat"
 
 is_ablestack_host() {
   if [[ -f /etc/os-release ]] && grep -q '^PRETTY_NAME="ABLESTACK' /etc/os-release; then
@@ -112,6 +114,15 @@ if [[ -d "${LIB_SRC}" ]]; then
   find "${LIB_TARGET}" -type f \( -name "*.service" -o -name "*.ps1" \) -exec chmod 644 {} \; 2>/dev/null || true
 else
   echo "  skipped missing library directory: ${LIB_SRC}"
+fi
+
+if [[ -d "${SHARE_SRC}/ablestack/v2k/compat" ]]; then
+  echo "Installing compatibility profile tree into ${COMPAT_TARGET_ROOT}"
+  sudo mkdir -p "$(dirname "${COMPAT_TARGET_ROOT}")"
+  sudo rm -rf "${COMPAT_TARGET_ROOT}"
+  sudo cp -a "${SHARE_SRC}/ablestack/v2k/compat" "${COMPAT_TARGET_ROOT}"
+else
+  echo "Skipping compatibility profile install: ${SHARE_SRC}/ablestack/v2k/compat"
 fi
 
 if [[ -d "completions" ]]; then
@@ -218,6 +229,7 @@ cat <<EOF | sudo tee "${PROFILE_D}" >/dev/null
 # ablestack-qemu-exec-tools environment
 export ABLESTACK_QEMU_EXEC_TOOLS_HOME="${LIB_TARGET}"
 export ISO_PATH_DEFAULT="${ISO_DEFAULT_PATH}"
+export V2K_COMPAT_ROOT="${COMPAT_TARGET_ROOT}"
 EOF
 
 echo "Installation complete."
@@ -238,5 +250,6 @@ echo
 echo "Notes:"
 echo "  - Payload files are installed under ${LIB_TARGET}/payload"
 echo "  - The default ISO path is ${ISO_DEFAULT_PATH}"
+echo "  - Compatibility profiles are installed under ${COMPAT_TARGET_ROOT}"
 echo "  - Windows ISO entrypoint: install.bat"
 echo "  - Linux ISO entrypoint: install-linux.sh"

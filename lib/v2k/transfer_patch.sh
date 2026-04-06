@@ -20,6 +20,8 @@ V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
 # shellcheck source=/dev/null
+source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+# shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
 # shellcheck source=/dev/null
 source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
@@ -35,8 +37,8 @@ v2k_require_patch_deps() {
   command -v nbdkit >/dev/null
   command -v nbd-client >/dev/null
   command -v qemu-nbd >/dev/null
-  command -v python3 >/dev/null
-  command -v govc >/dev/null
+  v2k_has_python_bin
+  v2k_has_govc_bin
 }
 
 v2k_load_vddk_cred_from_manifest() {
@@ -249,7 +251,7 @@ v2k_transfer_patch_one() {
 
     local areas_json
 
-    areas_json="$(python3 "${V2K_PY_DIR}/vmware_changed_areas.py" \
+    areas_json="$(v2k_python "${V2K_PY_DIR}/vmware_changed_areas.py" \
         --vm "$(jq -r '.source.vm.name' "${manifest}")" \
         --snapshot "${snap_name}" \
         --disk-id "${disk_id}" \
@@ -344,7 +346,7 @@ v2k_transfer_patch_one() {
     fi
 
     if [[ "${areas_count}" -gt 0 ]]; then
-      python3 "${V2K_PY_DIR}/patch_apply.py" \
+      v2k_python "${V2K_PY_DIR}/patch_apply.py" \
         --source "${src_dev}" \
         --target "${dst_dev}" \
         --areas-json "${areas_json}" \

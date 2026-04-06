@@ -1,0 +1,27 @@
+{
+  "schema": "ablestack-v2k/compat-profile-v1",
+  "id": "vsphere60",
+  "label": "vSphere 6.0 through 6.5 compatibility profile",
+  "supported_vcenter": {
+    "min": "6.0",
+    "max": "6.5",
+    "versions": [
+      "6.0",
+      "6.5"
+    ]
+  },
+  "toolchain": {
+    "govc": "bin/govc",
+    "python": "venv/bin/python3",
+    "vddk_libdir": "vddk"
+  },
+  "sdk": {
+    "govc_version": "sample-wrapper-legacy",
+    "pyvmomi_version": "sample-wrapper-legacy",
+    "vddk_version": "6.7.x-family"
+  },
+  "selection_rules": {
+    "priority": 10,
+    "notes": "Use for older vCenter environments where a legacy-compatible VDDK/govc/pyVmomi toolchain is required."
+  }
+}

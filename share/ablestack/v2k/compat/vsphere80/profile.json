@@ -1,0 +1,28 @@
+{
+  "schema": "ablestack-v2k/compat-profile-v1",
+  "id": "vsphere80",
+  "label": "vSphere 8.x compatibility profile",
+  "supported_vcenter": {
+    "min": "8.0",
+    "max": "9.0",
+    "versions": [
+      "8.0",
+      "8.1",
+      "9.0"
+    ]
+  },
+  "toolchain": {
+    "govc": "bin/govc",
+    "python": "venv/bin/python3",
+    "vddk_libdir": "vddk"
+  },
+  "sdk": {
+    "govc_version": "sample-wrapper-modern",
+    "pyvmomi_version": "sample-wrapper-modern",
+    "vddk_version": "8.0.x-or-newer"
+  },
+  "selection_rules": {
+    "priority": 30,
+    "notes": "Use for modern vCenter environments and the current default test profile."
+  }
+}

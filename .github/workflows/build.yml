@@ -743,9 +743,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release/assets
+          mkdir -p release/assets release/assets/compat release/assets/v2k release/share/ablestack/v2k
           cp -v assets/govc_Linux_x86_64.tar.gz release/assets/ || true
           cp -v assets/VMware-vix-disklib-*.tar.gz release/assets/ || true
+          if [[ -d assets/compat ]]; then
+            cp -a assets/compat/. release/assets/compat/
+          fi
+          if [[ -d share/ablestack/v2k/compat ]]; then
+            cp -a share/ablestack/v2k/compat release/share/ablestack/v2k/
+          fi
 
       - name: Prepare pyvmomi offline wheels (Air-Gap)
         shell: bash
@@ -1557,6 +1563,9 @@ jobs:
           fi
           if [[ -d release/assets ]]; then
             cp -a release/assets build/iso-staging/rocky/
+          fi
+          if [[ -d release/share ]]; then
+            cp -a release/share build/iso-staging/rocky/
           fi
           if [[ -d release/winpe ]]; then
             cp -a release/winpe build/iso-staging/rocky/

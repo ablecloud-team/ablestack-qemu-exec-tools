@@ -1,0 +1,47 @@
+name: V2K Compatibility Smoke
+
+on:
+  push:
+    paths:
+      - '.github/workflows/v2k-compat-smoke.yml'
+      - 'bin/ablestack_v2k.sh'
+      - 'bin/v2k_test_install.sh'
+      - 'lib/v2k/**'
+      - 'share/ablestack/v2k/compat/**'
+      - 'tests/v2k_compat_installer_runtime_smoke.sh'
+      - 'tests/fixtures/v2k/compat/**'
+  pull_request:
+    paths:
+      - '.github/workflows/v2k-compat-smoke.yml'
+      - 'bin/ablestack_v2k.sh'
+      - 'bin/v2k_test_install.sh'
+      - 'lib/v2k/**'
+      - 'share/ablestack/v2k/compat/**'
+      - 'tests/v2k_compat_installer_runtime_smoke.sh'
+      - 'tests/fixtures/v2k/compat/**'
+
+permissions:
+  contents: read
+
+jobs:
+  v2k-compat-installer-runtime-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install smoke test dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Ensure sample profile wrappers are executable
+        run: |
+          set -euo pipefail
+          find share/ablestack/v2k/compat -type f \( -path '*/bin/govc' -o -path '*/venv/bin/python3' \) -exec chmod 755 {} +
+
+      - name: Run installer-runtime smoke test
+        run: |
+          set -euo pipefail
+          bash tests/v2k_compat_installer_runtime_smoke.sh

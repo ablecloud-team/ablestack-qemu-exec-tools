@@ -1,0 +1,45 @@
+{
+  "virtualMachines": [
+    {
+      "self": {
+        "value": "vm-101"
+      },
+      "config": {
+        "uuid": "demo-vm-uuid-0001",
+        "guestId": "ubuntu64Guest",
+        "firmware": "bios",
+        "bootOptions": {
+          "efiSecureBootEnabled": false
+        },
+        "hardware": {
+          "numCPU": 2,
+          "memoryMB": 4096,
+          "device": [
+            {
+              "key": 4000,
+              "deviceInfo": {
+                "label": "Network adapter 1"
+              },
+              "macAddress": "52:54:00:12:34:56"
+            }
+          ]
+        }
+      },
+      "guest": {
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "osFullName": "Ubuntu 22.04 LTS",
+        "guestFamily": "linuxGuest"
+      },
+      "runtime": {
+        "host": {
+          "value": "host-11"
+        }
+      },
+      "summary": {
+        "config": {
+          "name": "esxi01.example.local"
+        }
+      }
+    }
+  ]
+}

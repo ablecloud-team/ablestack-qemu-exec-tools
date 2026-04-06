@@ -20,16 +20,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/engine.sh"
-# shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
-# shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
-# shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/orchestrator.sh"
-# shellcheck source=/dev/null
-source "${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/fleet.sh"
+source_v2k_lib() {
+  local name="$1"
+  local installed="${ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/${name}"
+  local source_tree="${ROOT_DIR}/lib/v2k/${name}"
+  if [[ -f "${installed}" ]]; then
+    # shellcheck source=/dev/null
+    source "${installed}"
+    return 0
+  fi
+  if [[ -f "${source_tree}" ]]; then
+    # shellcheck source=/dev/null
+    source "${source_tree}"
+    return 0
+  fi
+  echo "Missing v2k library: ${name}" >&2
+  exit 2
+}
 
 v2k_resolve_vddk_libdir() {
   # Do NOT modify the path (no auto appending like /lib64).
@@ -55,10 +62,13 @@ v2k_resolve_vddk_libdir() {
   fi
 }
 
-v2k_resolve_vddk_libdir
-
 # Optional diagnostics
 if [[ "${V2K_DEBUG_ENV:-0}" -eq 1 ]]; then
+  echo "[DEBUG] V2K_COMPAT_ROOT='${V2K_COMPAT_ROOT-}'" >&2
+  echo "[DEBUG] V2K_COMPAT_PROFILE='${V2K_COMPAT_PROFILE-}'" >&2
+  echo "[DEBUG] V2K_COMPAT_SELECTED_PROFILE='${V2K_COMPAT_SELECTED_PROFILE-}'" >&2
+  echo "[DEBUG] V2K_GOVC_BIN='${V2K_GOVC_BIN-}'" >&2
+  echo "[DEBUG] V2K_PYTHON_BIN='${V2K_PYTHON_BIN-}'" >&2
   echo "[DEBUG] VDDK_LIBDIR='${VDDK_LIBDIR-}'" >&2
 fi
 
@@ -68,6 +78,7 @@ ablestack_v2k - VMware -> ABLESTACK(KVM) minimal downtime migration tool (v1)
 
 Usage:
   ablestack_v2k [global options] <command> [command options]
+  ablestack_v2k <command> --help
 
 Global options (all commands):
   --workdir <path>        Work directory (default: /var/lib/ablestack-v2k/<vm>/<run_id>)
@@ -91,133 +102,168 @@ Commands:
   cleanup                 Cleanup resources (snapshots/workdir policy)
   status                  Show current status (manifest + events)
 
-----------------------------------------------------------------------
-RUN / AUTO (pipeline orchestration)
-----------------------------------------------------------------------
+Examples:
+  ablestack_v2k run --help
+  ablestack_v2k init --help
+  ablestack_v2k cbt --help
+  ablestack_v2k cutover --help
+
+Environment:
+  GOVC_URL, GOVC_USERNAME, GOVC_PASSWORD, GOVC_INSECURE
+  VDDK_LIBDIR
+  V2K_COMPAT_ROOT
+  V2K_COMPAT_PROFILE
+  V2K_COMPAT_SELECTED_PROFILE
+  V2K_GOVC_BIN
+  V2K_PYTHON_BIN
+EOF
+}
+
+usage_run() {
+  cat <<'EOF'
 Usage:
   ablestack_v2k run [--foreground] [run options...]
   ablestack_v2k auto [--foreground] [run options...]
 
-Run options (exactly parsed by orchestrator.sh):
-  --foreground
-      Run in foreground. (Default: background; logs to <workdir>/run.out)
+Required:
+  --vm <name|moref>
+  --vcenter <host>
+  --dst <path>
 
-  # Required init inputs for 'run' (phase2 can auto-discover cred files from workdir)
-  --vm <name|moref>                   VM name or MoRef
-  --vcenter <host>                    vCenter host
-  --dst <path>                        Destination root path (work/meta path)
+Authentication:
+  --cred-file <file>
+  --vddk-cred-file <file>
+  --username <user>
+  --password <pass>
+  --compat-profile <id|auto>
+  --insecure <0|1>
 
-  # Optional auth shortcuts / files
-  --username <user>                   vCenter username (optional shortcut)
-  --password <pass>                   vCenter password (optional shortcut)
-  --cred-file <file>                  govc env file (preferred)
-  --vddk-cred-file <file>             VDDK cred file (for nbdkit/vddk plugin)
-  --insecure <0|1>                    govc insecure (default: V2K_RUN_DEFAULT_INSECURE or 1)
-
-  # Pipeline policy
-  --shutdown manual|guest|poweroff    VMware VM shutdown policy for cutover (default: V2K_RUN_DEFAULT_SHUTDOWN or manual)
+Pipeline:
+  --shutdown manual|guest|poweroff
   --kvm-vm-policy none|define-only|define-and-start
-                                     KVM VM action at cutover (default: V2K_RUN_DEFAULT_KVM_POLICY or none)
-  --incr-interval <sec>               Interval between incremental loops (default: V2K_RUN_DEFAULT_INCR_INTERVAL or 10)
-  --max-incr <N>                      Maximum number of incremental loops (default: V2K_RUN_DEFAULT_MAX_INCR or 6)
-  --converge-threshold-sec <sec>      Stop incr loop early if (snapshot+sync) duration <= sec (default: V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC or 120)
-  --no-incr                           Skip incremental loops (base -> final -> cutover)
+  --incr-interval <sec>
+  --max-incr <N>
+  --converge-threshold-sec <sec>
+  --no-incr
 
-  # Split-run mode
-  --split full|phase1|phase2          Split-run mode (default: V2K_RUN_DEFAULT_SPLIT or full)
-      full   : base + incr* + final + verify + cutover
-      phase1 : base + incr1 then exit (no cutover)
-      phase2 : resume from workdir; run incrN until a sync completes within deadline window, then cutover
-  --deadline-sec <sec>                Phase2 deadline window seconds (default: V2K_RUN_DEFAULT_DEADLINE_SEC or 120)
-  --max-incr-phase2 <N>               Phase2 safety cap for incr loops (default: V2K_RUN_DEFAULT_MAX_INCR_PHASE2 or 20)
+Split-run:
+  --split full|phase1|phase2
+  --deadline-sec <sec>
+  --max-incr-phase2 <N>
 
-  # Sync defaults (applied to base/incr/final sync when set)
-  --jobs <N>                          Default jobs for sync steps
-  --chunk <BYTES>                     Default chunk size for sync steps
-  --coalesce-gap <BYTES>              Default coalesce gap for sync steps
+Sync defaults:
+  --jobs <N>
+  --chunk <BYTES>
+  --coalesce-gap <BYTES>
 
-  # Extra argument strings (split by whitespace; for complex quoting prefer discrete commands)
-  --base-args "<...>"                 Extra args appended to 'sync base'
-  --incr-args "<...>"                 Extra args appended to 'sync incr'
-  --cutover-args "<...>"              Extra args appended to 'cutover'
+Extra args:
+  --base-args "<args>"
+      Whitespace-split extra args for 'sync base'
+      Example: --base-args "--jobs 4 --chunk 4194304"
+  --incr-args "<args>"
+      Whitespace-split extra args for 'sync incr'
+      Example: --incr-args "--jobs 2 --coalesce-gap 65536"
+  --cutover-args "<args>"
+      Whitespace-split extra args for 'cutover'
+      Example: --cutover-args "--define-only --bridge br0 --vcpu 4 --memory 8192"
 
-  # Init parameters (passed into init stage inside run)
-  --mode <govc>                       Init mode (default: govc)
+Init-stage options:
+  --mode govc
   --target-format qcow2|raw
   --target-storage file|block|rbd
-  --target-map-json <json>            Required for block/rbd targets (disk mapping)
-  --force-block-device                Allow risky block/rbd operations
+  --target-map-json <json>
+      Required for block and rbd targets.
+      block example: --target-map-json '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
+      rbd example:   --target-map-json '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
+  --force-block-device
 
-  # Cleanup policy for run
-  --no-cleanup                        Do not call cleanup at the end
-  --keep-snapshots                    Keep VMware snapshots during cleanup
-  --keep-workdir                      Keep workdir during cleanup
+Cleanup policy:
+  --no-cleanup
+  --keep-snapshots
+  --keep-workdir
+EOF
+}
 
-Notes:
-  - Phase2 will auto-discover creds from workdir when omitted:
-      <workdir>/govc.env , <workdir>/vddk.cred
-  - For Windows guests, run/auto may enable WinPE bootstrap at cutover depending on V2K_RUN_WINPE_BOOTSTRAP_AUTO.
-
-----------------------------------------------------------------------
-INIT
-----------------------------------------------------------------------
+usage_init() {
+  cat <<'EOF'
 Usage:
   ablestack_v2k init --vm <name|moref> --vcenter <host> --dst <path> [options...]
 
 Options:
-  --mode <govc>                       Init mode (default: govc)
-  --cred-file <file>                  govc env file
-  --vddk-cred-file <file>             VDDK cred file (for nbdkit/vddk plugin)
+  --mode govc
+  --cred-file <file>
+  --vddk-cred-file <file>
+  --compat-profile <id|auto>
   --target-format qcow2|raw
   --target-storage file|block|rbd
-  --target-map-json <json>            Disk mapping JSON (required for block/rbd)
-  --force-block-device                Allow risky block/rbd operations
+  --target-map-json <json>
+      block example: '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
+      rbd example:   '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
+  --force-block-device
 
-----------------------------------------------------------------------
-CBT
-----------------------------------------------------------------------
+Notes:
+  - If only --cred-file is provided, init auto-generates workdir/vddk.cred.
+  - Compatibility selection is stored in manifest.json and compat.env.
+EOF
+}
+
+usage_cbt() {
+  cat <<'EOF'
 Usage:
   ablestack_v2k cbt enable
   ablestack_v2k cbt status
 
-----------------------------------------------------------------------
-SNAPSHOT
-----------------------------------------------------------------------
+Notes:
+  - Requires an existing workdir/manifest.
+  - Restores govc.env automatically from the workdir.
+EOF
+}
+
+usage_snapshot() {
+  cat <<'EOF'
 Usage:
-  ablestack_v2k snapshot base|incr|final [--name <snapname>]
+  ablestack_v2k snapshot base|incr|final [options...]
 
 Options:
-  --name <snapname>                   Snapshot name override
+  --name <snapshot-name>
+  --safe-mode
+EOF
+}
 
-----------------------------------------------------------------------
-SYNC
-----------------------------------------------------------------------
+usage_sync() {
+  cat <<'EOF'
 Usage:
   ablestack_v2k sync base|incr|final [options...]
 
 Options:
-  --jobs <N>                          Parallel jobs
-  --coalesce-gap <BYTES>              Coalesce gap
-  --chunk <BYTES>                     Chunk size
+  --jobs <N>
+  --coalesce-gap <BYTES>
+  --chunk <BYTES>
+  --force-cleanup
+  --safe-mode
+EOF
+}
 
-----------------------------------------------------------------------
-VERIFY
-----------------------------------------------------------------------
+usage_verify() {
+  cat <<'EOF'
 Usage:
-  ablestack_v2k verify [--mode quick] [--samples N]
+  ablestack_v2k verify [options...]
 
 Options:
-  --mode <quick>                      Verification mode
-  --samples <N>                       Number of samples
+  --mode quick
+  --samples <N>
+EOF
+}
 
-----------------------------------------------------------------------
-CUTOVER
-----------------------------------------------------------------------
+usage_cutover() {
+  cat <<'EOF'
 Usage:
   ablestack_v2k cutover [options...]
 
-Common options (see engine.sh/target_libvirt.sh for full behavior):
+Options:
   --shutdown manual|guest|poweroff
+  --shutdown-force
+  --shutdown-timeout <SEC>
   --define-only
   --start
   --vcpu <N>
@@ -225,95 +271,53 @@ Common options (see engine.sh/target_libvirt.sh for full behavior):
   --network <name>
   --bridge <br>
   --vlan <id>
-  --shutdown-timeout <SEC>
-  --force-cleanup
   --winpe-bootstrap
+  --no-winpe-bootstrap
   --winpe-iso <path>
   --virtio-iso <path>
   --winpe-timeout <SEC>
-
-----------------------------------------------------------------------
-CLEANUP / STATUS
-----------------------------------------------------------------------
-Usage:
-  ablestack_v2k cleanup [--keep-snapshots] [--keep-workdir]
-  ablestack_v2k status
-
-----------------------------------------------------------------------
-Environment variables
-----------------------------------------------------------------------
-Global behavior:
-  V2K_JSON_OUT=1                      Same as --json
-  V2K_DRY_RUN=1                       Same as --dry-run
-  V2K_RESUME=1                        Same as --resume
-  V2K_FORCE=1                         Same as --force
-
-Paths:
-  V2K_WORKDIR=<path>
-  V2K_RUN_ID=<id>
-  V2K_MANIFEST=<path>
-  V2K_EVENTS_LOG=<path>
-
-govc (common):
-  GOVC_URL, GOVC_USERNAME, GOVC_PASSWORD, GOVC_INSECURE
-
-VDDK:
-  VDDK_LIBDIR                          VDDK distrib root (no auto /lib64 append)
-  V2K_DEBUG_ENV=1                       Print resolved VDDK_LIBDIR diagnostics
-
-run defaults (orchestrator):
-  V2K_RUN_DEFAULT_SHUTDOWN
-  V2K_RUN_DEFAULT_KVM_POLICY
-  V2K_RUN_DEFAULT_INCR_INTERVAL
-  V2K_RUN_DEFAULT_MAX_INCR
-  V2K_RUN_DEFAULT_CONVERGE_THRESHOLD_SEC
-  V2K_RUN_DEFAULT_INSECURE
-  V2K_RUN_WINPE_BOOTSTRAP_AUTO
-  V2K_RUN_DEFAULT_SPLIT
-  V2K_RUN_DEFAULT_DEADLINE_SEC
-  V2K_RUN_DEFAULT_MAX_INCR_PHASE2
-
-----------------------------------------------------------------------
-Storage presets (init/run)
-----------------------------------------------------------------------
-1) qcow2 + file (image files under dst)
-  ablestack_v2k run --vm <VM> --vcenter <VC> --dst /var/lib/libvirt/images/<vm> \
-    --target-format qcow2 --target-storage file
-
-2) raw + file (raw image files under dst)
-  ablestack_v2k run --vm <VM> --vcenter <VC> --dst /var/lib/libvirt/images/<vm> \
-    --target-format raw --target-storage file
-
-3) raw + block (direct block devices; requires target map)
-  ablestack_v2k run --vm <VM> --vcenter <VC> --dst /var/lib/libvirt/images/<vm> \
-    --target-format raw --target-storage block \
-    --target-map-json '{"scsi0:0":"/dev/sdb"}'
-
-4) raw + rbd (Ceph RBD; requires target map)
-  ablestack_v2k run --vm <VM> --vcenter <VC> --dst /var/lib/libvirt/images/<vm> \
-    --target-format raw --target-storage rbd \
-    --target-map-json '{"scsi0:0":"rbd:pool/myvm-disk0"}'
-
-----------------------------------------------------------------------
-Step-by-step examples (run first, then discrete steps)
-----------------------------------------------------------------------
-Full automation:
-  ablestack_v2k run --vm <VM> --vcenter <VC> --dst <DST> --target-format qcow2 --target-storage file
-
-Manual steps:
-  ablestack_v2k init --vm <VM> --vcenter <VC> --dst <DST> --target-format qcow2 --target-storage file
-  ablestack_v2k cbt enable
-  ablestack_v2k snapshot base
-  ablestack_v2k sync base --jobs 8
-  ablestack_v2k snapshot incr
-  ablestack_v2k sync incr --jobs 8
-  ablestack_v2k snapshot final
-  ablestack_v2k sync final --jobs 8
-  ablestack_v2k verify --mode quick --samples 50
-  ablestack_v2k cutover --shutdown guest --start --vcpu 4 --memory 8192 --bridge br0
-  ablestack_v2k cleanup
-  ablestack_v2k status
+  --linux-bootstrap
+  --no-linux-bootstrap
+  --safe-mode
+  --force-cleanup
 EOF
+}
+
+usage_cleanup() {
+  cat <<'EOF'
+Usage:
+  ablestack_v2k cleanup [options...]
+
+Options:
+  --keep-snapshots
+  --keep-workdir
+EOF
+}
+
+usage_status() {
+  cat <<'EOF'
+Usage:
+  ablestack_v2k status
+
+Notes:
+  - Reads manifest.json and events.log from the selected workdir.
+EOF
+}
+
+usage_command() {
+  local cmd="${1:-}"
+  case "${cmd}" in
+    run|auto) usage_run ;;
+    init) usage_init ;;
+    cbt) usage_cbt ;;
+    snapshot) usage_snapshot ;;
+    sync) usage_sync ;;
+    verify) usage_verify ;;
+    cutover) usage_cutover ;;
+    cleanup) usage_cleanup ;;
+    status) usage_status ;;
+    *) usage ;;
+  esac
 }
 
 die() { echo "ERROR: $*" >&2; exit 2; }
@@ -351,7 +355,10 @@ while [[ $# -gt 0 ]]; do
     --resume) RESUME=1; shift 1;;
     --force) FORCE=1; shift 1;;
     -h|--help) usage; exit 0;;
-    *) ARGS+=("$1"); shift 1;;
+    *)
+      ARGS=("$@")
+      break
+      ;;
   esac
 done
 
@@ -363,10 +370,29 @@ fi
 CMD="${ARGS[0]}"
 shifted_args=("${ARGS[@]:1}")
 
+if [[ ${#shifted_args[@]} -gt 0 ]]; then
+  case "${shifted_args[0]}" in
+    -h|--help)
+      usage_command "${CMD}"
+      exit 0
+      ;;
+  esac
+fi
+
 export V2K_JSON_OUT="${JSON_OUT}"
 export V2K_DRY_RUN="${DRY_RUN}"
 export V2K_RESUME="${RESUME}"
 export V2K_FORCE="${FORCE}"
+
+source_v2k_lib compat.sh
+source_v2k_lib engine.sh
+source_v2k_lib logging.sh
+source_v2k_lib manifest.sh
+source_v2k_lib orchestrator.sh
+source_v2k_lib fleet.sh
+
+v2k_compat_bootstrap_env "" "" || true
+v2k_resolve_vddk_libdir
 
 v2k_set_paths \
   "${WORKDIR}" \
@@ -374,11 +400,17 @@ v2k_set_paths \
   "${MANIFEST}" \
   "${EVENTS_LOG}"
 
+v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
+v2k_resolve_vddk_libdir
+
 # [NEW] Ensure NBD module is loaded (Auto-recovery after reboot)
 if ! lsmod | grep -q "^nbd"; then
     v2k_event INFO "linux_bootstrap" "" "loading_nbd_module" "{}"
-    modprobe nbd max_part=16
-    udevadm settle
+    if modprobe nbd max_part=16 >/dev/null 2>&1; then
+      udevadm settle >/dev/null 2>&1 || true
+    else
+      v2k_event WARN "linux_bootstrap" "" "nbd_module_load_failed" "{\"note\":\"continuing; commands that require nbd may fail later\"}"
+    fi
 fi
 
 case "${CMD}" in
