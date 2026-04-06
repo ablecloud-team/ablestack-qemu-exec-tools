@@ -233,10 +233,25 @@ ftctl_blockcopy_remote_exec() {
   local out_var="${3}"
   local err_var="${4}"
   local rc_var="${5}"
-  shift 5
+  local remote_cmd="${6-}"
+  local wrapped_cmd=""
+  [[ -n "${host}" ]] || {
+    printf -v "${out_var}" '%s' ""
+    printf -v "${err_var}" '%s' "missing_remote_host"
+    printf -v "${rc_var}" '%s' "2"
+    return 2
+  }
+  [[ -n "${user}" ]] || user="root"
+  [[ -n "${remote_cmd}" ]] || {
+    printf -v "${out_var}" '%s' ""
+    printf -v "${err_var}" '%s' "missing_remote_command"
+    printf -v "${rc_var}" '%s' "2"
+    return 2
+  }
+  printf -v wrapped_cmd 'bash -lc %q' "${remote_cmd}"
   ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" "${out_var}" "${err_var}" "${rc_var}" -- \
     ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout="${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
-    "${user}@${host}" bash -lc "$@"
+    "${user}@${host}" "${wrapped_cmd}"
 }
 
 ftctl_blockcopy_remote_nbd_prepare_target() {
