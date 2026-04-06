@@ -596,6 +596,42 @@ ftctl_blockcopy_job_query() {
   printf -v "${ready_var}" '%s' "${ready}"
 }
 
+ftctl_blockcopy_runtime_mirror_query() {
+  local vm="${1-}"
+  local target="${2-}"
+  local type_var="${3}"
+  local ready_var="${4}"
+  local out err rc payload
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" dumpxml "${vm}" || true
+  if [[ "${rc}" != "0" ]]; then
+    printf -v "${type_var}" '%s' "unknown"
+    printf -v "${ready_var}" '%s' "unknown"
+    return "${rc}"
+  fi
+
+  payload="$(python3 -c 'import sys, xml.etree.ElementTree as ET; target=sys.argv[1]; xml_text=sys.argv[2]; root=ET.fromstring(xml_text);
+for disk in root.findall("./devices/disk"):
+    tgt = disk.find("target")
+    if tgt is None or tgt.get("dev") != target:
+        continue
+    mirror = disk.find("mirror")
+    if mirror is None:
+        print("none|unknown")
+        break
+    print(f"{mirror.get(\"type\", \"unknown\")}|{mirror.get(\"ready\", \"no\")}")
+    break
+else:
+    print("none|unknown")' "${target}" "${out}")" || payload="none|unknown"
+
+  printf -v "${type_var}" '%s' "${payload%%|*}"
+  printf -v "${ready_var}" '%s' "${payload##*|}"
+  [[ "${payload%%|*}" != "none" ]]
+}
+
 ftctl_blockcopy_wait_for_job_visibility() {
   local vm="${1-}"
   local target="${2-}"
@@ -612,6 +648,16 @@ ftctl_blockcopy_wait_for_job_visibility() {
       printf -v "${ready_var}" '%s' "${ready}"
       return 0
     fi
+    if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+      if ftctl_blockcopy_runtime_mirror_query "${vm}" "${target}" state ready; then
+        if [[ "${state}" == "network" ]]; then
+          state="copy"
+        fi
+        printf -v "${state_var}" '%s' "${state}"
+        printf -v "${ready_var}" '%s' "${ready}"
+        return 0
+      fi
+    fi
     rc=$?
     sleep 1
     tries=$((tries - 1))
@@ -625,7 +671,7 @@ ftctl_blockcopy_wait_for_job_visibility() {
 ftctl_blockcopy_refresh_vm_jobs() {
   local vm="${1-}"
   local disks=()
-  local line target source format dest job_state ready
+  local line target source format dest job_state ready secondary_dest runtime_mirror_type
   local records=()
   local all_ready="1"
   local rc_any=0
@@ -637,14 +683,29 @@ ftctl_blockcopy_refresh_vm_jobs() {
     source="${line#*|}"
     source="${source%%|*}"
     format="${line##*|}"
-    dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
+    secondary_dest=""
+    if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+      dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}")"
+      secondary_dest="$(ftctl_blockcopy_remote_nbd_secondary_path "${vm}" "${target}" "${source}" "${format}")"
+    else
+      dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
+    fi
     job_state="unknown"
     ready="unknown"
     if ! ftctl_blockcopy_job_query "${vm}" "${target}" job_state ready; then
-      rc_any=1
+      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+        runtime_mirror_type="unknown"
+        if ftctl_blockcopy_runtime_mirror_query "${vm}" "${target}" runtime_mirror_type ready; then
+          job_state="${runtime_mirror_type}"
+        else
+          rc_any=1
+        fi
+      else
+        rc_any=1
+      fi
     fi
     [[ "${ready}" == "yes" ]] || all_ready="0"
-    records+=("${target}|${source}|${dest}|${format}|${job_state}|${ready}")
+    records+=("${target}|${source}|${dest}|${format}|${job_state}|${ready}|${secondary_dest}")
   done
 
   ftctl_blockcopy_state_write "${vm}" "${records[@]}"
