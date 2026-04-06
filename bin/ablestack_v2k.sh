@@ -157,15 +157,24 @@ Sync defaults:
   --coalesce-gap <BYTES>
 
 Extra args:
-  --base-args "<...>"
-  --incr-args "<...>"
-  --cutover-args "<...>"
+  --base-args "<args>"
+      Whitespace-split extra args for 'sync base'
+      Example: --base-args "--jobs 4 --chunk 4194304"
+  --incr-args "<args>"
+      Whitespace-split extra args for 'sync incr'
+      Example: --incr-args "--jobs 2 --coalesce-gap 65536"
+  --cutover-args "<args>"
+      Whitespace-split extra args for 'cutover'
+      Example: --cutover-args "--define-only --bridge br0 --vcpu 4 --memory 8192"
 
 Init-stage options:
   --mode govc
   --target-format qcow2|raw
   --target-storage file|block|rbd
   --target-map-json <json>
+      Required for block and rbd targets.
+      block example: --target-map-json '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
+      rbd example:   --target-map-json '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
   --force-block-device
 
 Cleanup policy:
@@ -188,6 +197,8 @@ Options:
   --target-format qcow2|raw
   --target-storage file|block|rbd
   --target-map-json <json>
+      block example: '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
+      rbd example:   '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
   --force-block-device
 
 Notes:

@@ -64,7 +64,7 @@ Common options:
 | `--compat-profile <id|auto>` | Compatibility profile selection |
 | `--target-format qcow2|raw` | Output image format |
 | `--target-storage file|block|rbd` | Target storage type |
-| `--target-map-json <json>` | Required for `block` and `rbd` targets |
+| `--target-map-json <json>` | Required for `block` and `rbd` targets. Block example: `{"scsi0:0":"/dev/sdb"}`. RBD example: `{"scsi0:0":"rbd:pool/vm-disk0"}` |
 | `--split full|phase1|phase2` | Split-run mode |
 | `--shutdown manual|guest|poweroff` | Source shutdown policy |
 | `--kvm-vm-policy none|define-only|define-and-start` | Target KVM policy |
@@ -82,6 +82,20 @@ ablestack_v2k run \
   --target-storage file
 ```
 
+Quoted extra-argument examples:
+
+```bash
+ablestack_v2k run \
+  --vm my-vm \
+  --vcenter vc.example.local \
+  --cred-file ./govc.env \
+  --dst /var/lib/libvirt/images/my-vm \
+  --compat-profile auto \
+  --base-args "--jobs 4 --chunk 4194304" \
+  --incr-args "--jobs 2 --coalesce-gap 65536" \
+  --cutover-args "--define-only --bridge br0 --vcpu 4 --memory 8192"
+```
+
 ## `init`
 
 ```bash
@@ -91,6 +105,30 @@ ablestack_v2k init \
   --cred-file <file> \
   --dst <path> \
   --compat-profile auto
+```
+
+Target map examples:
+
+```bash
+ablestack_v2k init \
+  --vm <VM> \
+  --vcenter <VC> \
+  --cred-file ./govc.env \
+  --dst <DST> \
+  --target-format raw \
+  --target-storage block \
+  --target-map-json '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
+```
+
+```bash
+ablestack_v2k init \
+  --vm <VM> \
+  --vcenter <VC> \
+  --cred-file ./govc.env \
+  --dst <DST> \
+  --target-format raw \
+  --target-storage rbd \
+  --target-map-json '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
 ```
 
 Notes:
