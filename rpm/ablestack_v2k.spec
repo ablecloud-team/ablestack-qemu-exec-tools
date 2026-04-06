@@ -64,6 +64,21 @@ cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/ 2>/dev/nu
 mkdir -p %{buildroot}%{_datadir}/bash-completion/completions
 install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/completions/%{name}
 
+%preun
+if [ "$1" -eq 0 ]; then
+  # Remove installer-managed compatibility runtime assets on final erase.
+  rm -rf /usr/share/ablestack/v2k/compat >/dev/null 2>&1 || true
+  rm -f /etc/profile.d/v2k-compat.sh >/dev/null 2>&1 || true
+
+  # Remove installer-managed WinPE staging when the V2K add-on is erased.
+  rm -f /usr/share/ablestack/v2k/winpe.iso >/dev/null 2>&1 || true
+  rm -rf /usr/share/ablestack/v2k/winpe >/dev/null 2>&1 || true
+
+  # Remove now-empty parent directories when possible.
+  rmdir /usr/share/ablestack/v2k >/dev/null 2>&1 || true
+  rmdir /usr/share/ablestack >/dev/null 2>&1 || true
+fi
+
 %files
 
 
