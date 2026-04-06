@@ -56,7 +56,7 @@ ftctl_verify_domain_network_on_uri() {
 
 ftctl_verify_standby_boot() {
   local vm="${1-}"
-  local state net result i
+  local state net result i standby_vm
 
   if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
     ftctl_state_set "${vm}" "standby_verify_state=dry-run"
@@ -64,10 +64,11 @@ ftctl_verify_standby_boot() {
     return 0
   fi
 
+  standby_vm="$(ftctl_state_get "${vm}" "secondary_vm_name" 2>/dev/null || ftctl_profile_secondary_vm_name_resolved "${vm}")"
   result="fail"
   for ((i=0; i<FTCTL_STANDBY_VERIFY_TIMEOUT_SEC; i++)); do
     state="unknown"
-    if ftctl_verify_domain_state_on_uri "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" state; then
+    if ftctl_verify_domain_state_on_uri "${FTCTL_PROFILE_SECONDARY_URI}" "${standby_vm}" state; then
       case "${state}" in
         running|running\ \(*) result="ok"; break ;;
       esac
@@ -83,7 +84,7 @@ ftctl_verify_standby_boot() {
   fi
 
   net="unknown"
-  ftctl_verify_domain_network_on_uri "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" net || true
+  ftctl_verify_domain_network_on_uri "${FTCTL_PROFILE_SECONDARY_URI}" "${standby_vm}" net || true
   case "${net}" in
     ok) ftctl_state_set "${vm}" "standby_verify_state=running-network-ok" ;;
     *)  ftctl_state_set "${vm}" "standby_verify_state=running-network-unknown" ;;

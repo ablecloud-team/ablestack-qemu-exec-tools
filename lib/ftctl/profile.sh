@@ -20,6 +20,13 @@ FTCTL_PROFILE_MODE=""
 FTCTL_PROFILE_PRIMARY_URI=""
 FTCTL_PROFILE_SECONDARY_URI=""
 FTCTL_PROFILE_DISK_MAP=""
+FTCTL_PROFILE_BACKEND_MODE=""
+FTCTL_PROFILE_TARGET_STORAGE_SCOPE=""
+FTCTL_PROFILE_SECONDARY_VM_NAME=""
+FTCTL_PROFILE_SECONDARY_TARGET_DIR=""
+FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR=""
+FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT=""
+FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME=""
 FTCTL_PROFILE_NETWORK_MAP=""
 FTCTL_PROFILE_TRANSPORT_TOLERANCE_SEC=""
 FTCTL_PROFILE_AUTO_REARM=""
@@ -44,6 +51,13 @@ ftctl_profile_reset() {
   FTCTL_PROFILE_PRIMARY_URI="${FTCTL_DEFAULT_PRIMARY_URI}"
   FTCTL_PROFILE_SECONDARY_URI="${FTCTL_DEFAULT_PEER_URI}"
   FTCTL_PROFILE_DISK_MAP="auto"
+  FTCTL_PROFILE_BACKEND_MODE="shared-blockcopy"
+  FTCTL_PROFILE_TARGET_STORAGE_SCOPE="shared"
+  FTCTL_PROFILE_SECONDARY_VM_NAME=""
+  FTCTL_PROFILE_SECONDARY_TARGET_DIR=""
+  FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR=""
+  FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT="10809"
+  FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME=""
   FTCTL_PROFILE_NETWORK_MAP="inherit"
   FTCTL_PROFILE_TRANSPORT_TOLERANCE_SEC="${FTCTL_TRANSIENT_NET_GRACE_SEC}"
   FTCTL_PROFILE_AUTO_REARM="1"
@@ -77,6 +91,13 @@ ftctl_profile_load_vm() {
     FTCTL_PROFILE_PRIMARY_URI="${FTCTL_PROFILE_PRIMARY_URI:-${FTCTL_DEFAULT_PRIMARY_URI}}"
     FTCTL_PROFILE_SECONDARY_URI="${FTCTL_PROFILE_SECONDARY_URI:-${FTCTL_DEFAULT_PEER_URI}}"
     FTCTL_PROFILE_DISK_MAP="${FTCTL_PROFILE_DISK_MAP:-auto}"
+    FTCTL_PROFILE_BACKEND_MODE="${FTCTL_PROFILE_BACKEND_MODE:-shared-blockcopy}"
+    FTCTL_PROFILE_TARGET_STORAGE_SCOPE="${FTCTL_PROFILE_TARGET_STORAGE_SCOPE:-shared}"
+    FTCTL_PROFILE_SECONDARY_VM_NAME="${FTCTL_PROFILE_SECONDARY_VM_NAME:-${vm}-standby}"
+    FTCTL_PROFILE_SECONDARY_TARGET_DIR="${FTCTL_PROFILE_SECONDARY_TARGET_DIR:-}"
+    FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR:-}"
+    FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT:-10809}"
+    FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME:-${vm}}"
     FTCTL_PROFILE_NETWORK_MAP="${FTCTL_PROFILE_NETWORK_MAP:-inherit}"
     FTCTL_PROFILE_TRANSPORT_TOLERANCE_SEC="${FTCTL_PROFILE_TRANSPORT_TOLERANCE_SEC:-${FTCTL_TRANSIENT_NET_GRACE_SEC}}"
     FTCTL_PROFILE_AUTO_REARM="${FTCTL_PROFILE_AUTO_REARM:-1}"
@@ -94,6 +115,18 @@ ftctl_profile_load_vm() {
     FTCTL_PROFILE_XCOLO_CHECKPOINT_DELAY="${FTCTL_PROFILE_XCOLO_CHECKPOINT_DELAY:-2000}"
     FTCTL_PROFILE_XCOLO_QEMU_ARGS_PRIMARY="${FTCTL_PROFILE_XCOLO_QEMU_ARGS_PRIMARY:-}"
     FTCTL_PROFILE_XCOLO_QEMU_ARGS_SECONDARY="${FTCTL_PROFILE_XCOLO_QEMU_ARGS_SECONDARY:-}"
+  fi
+  FTCTL_PROFILE_SECONDARY_VM_NAME="${FTCTL_PROFILE_SECONDARY_VM_NAME:-${vm}-standby}"
+  FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME:-${vm}}"
+}
+
+ftctl_profile_secondary_vm_name_resolved() {
+  local vm="${1-}"
+  local value="${FTCTL_PROFILE_SECONDARY_VM_NAME:-}"
+  if [[ -n "${value}" ]]; then
+    printf '%s\n' "${value}"
+  else
+    printf '%s\n' "${vm}-standby"
   fi
 }
 
@@ -191,6 +224,11 @@ ftctl_profile_validate() {
   ftctl_profile__validate_nonempty "FTCTL_PROFILE_PRIMARY_URI" "${FTCTL_PROFILE_PRIMARY_URI}" || return 2
   ftctl_profile__validate_nonempty "FTCTL_PROFILE_SECONDARY_URI" "${FTCTL_PROFILE_SECONDARY_URI}" || return 2
   ftctl_profile__validate_disk_map "${FTCTL_PROFILE_DISK_MAP}" || return 2
+  ftctl_profile__validate_choice "FTCTL_PROFILE_BACKEND_MODE" "${FTCTL_PROFILE_BACKEND_MODE}" \
+    shared-blockcopy remote-nbd || return 2
+  ftctl_profile__validate_choice "FTCTL_PROFILE_TARGET_STORAGE_SCOPE" "${FTCTL_PROFILE_TARGET_STORAGE_SCOPE}" \
+    shared secondary-local || return 2
+  ftctl_profile__validate_nonempty "FTCTL_PROFILE_SECONDARY_VM_NAME" "${FTCTL_PROFILE_SECONDARY_VM_NAME}" || return 2
   ftctl_profile__validate_network_map "${FTCTL_PROFILE_NETWORK_MAP}" || return 2
   ftctl_profile__validate_choice "FTCTL_PROFILE_FENCING_POLICY" "${FTCTL_PROFILE_FENCING_POLICY}" \
     manual-block ssh peer-virsh-destroy ipmi redfish || return 2
@@ -209,6 +247,28 @@ ftctl_profile_validate() {
     echo "ERROR: FTCTL_PROFILE_RECOVERY_PRIORITY must be an unsigned integer" >&2
     return 2
   }
+  ftctl_profile__is_uint "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" || {
+    echo "ERROR: FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT must be an unsigned integer" >&2
+    return 2
+  }
+
+  case "${FTCTL_PROFILE_BACKEND_MODE}" in
+    shared-blockcopy)
+      [[ "${FTCTL_PROFILE_TARGET_STORAGE_SCOPE}" == "shared" ]] || {
+        echo "ERROR: shared-blockcopy requires FTCTL_PROFILE_TARGET_STORAGE_SCOPE=shared" >&2
+        return 2
+      }
+      ;;
+    remote-nbd)
+      [[ "${FTCTL_PROFILE_TARGET_STORAGE_SCOPE}" == "secondary-local" ]] || {
+        echo "ERROR: remote-nbd requires FTCTL_PROFILE_TARGET_STORAGE_SCOPE=secondary-local" >&2
+        return 2
+      }
+      ftctl_profile__validate_nonempty "FTCTL_PROFILE_SECONDARY_TARGET_DIR" "${FTCTL_PROFILE_SECONDARY_TARGET_DIR}" || return 2
+      ftctl_profile__validate_nonempty "FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" || return 2
+      ftctl_profile__validate_nonempty "FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}" || return 2
+      ;;
+  esac
 
   case "${FTCTL_PROFILE_MODE}" in
     ha|dr)
@@ -231,8 +291,15 @@ ftctl_profile_validate() {
       ;;
   esac
 
+  if [[ "${FTCTL_PROFILE_MODE}" == "ha" || "${FTCTL_PROFILE_MODE}" == "dr" ]]; then
+    if [[ "${FTCTL_PROFILE_SECONDARY_VM_NAME}" == "${vm}" ]]; then
+      echo "ERROR: FTCTL_PROFILE_SECONDARY_VM_NAME must differ from the primary VM name for HA/DR" >&2
+      return 2
+    fi
+  fi
+
   ftctl_log_event "profile" "profile.validate" "ok" "${vm}" "" \
-    "mode=${FTCTL_PROFILE_MODE} fencing=${FTCTL_PROFILE_FENCING_POLICY} qga=${FTCTL_PROFILE_QGA_POLICY} auto_rearm=${FTCTL_PROFILE_AUTO_REARM}"
+    "mode=${FTCTL_PROFILE_MODE} backend=${FTCTL_PROFILE_BACKEND_MODE} target_scope=${FTCTL_PROFILE_TARGET_STORAGE_SCOPE} fencing=${FTCTL_PROFILE_FENCING_POLICY} qga=${FTCTL_PROFILE_QGA_POLICY} auto_rearm=${FTCTL_PROFILE_AUTO_REARM}"
 }
 
 ftctl_profile_lookup_map_value() {

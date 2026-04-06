@@ -90,6 +90,41 @@ ftctl_blockcopy_resolve_reverse_dest() {
   return 2
 }
 
+ftctl_blockcopy_validate_backend_mode() {
+  local vm="${1-}"
+  local disks=()
+  local line target source format dest
+
+  case "${FTCTL_PROFILE_BACKEND_MODE}" in
+    shared-blockcopy)
+      if [[ "${FTCTL_PROFILE_DISK_MAP}" == "auto" ]]; then
+        echo "ERROR: shared-blockcopy requires an explicit FTCTL_PROFILE_DISK_MAP with shared-visible target paths" >&2
+        return 2
+      fi
+      ftctl_inventory_collect_vm_disks "${vm}" disks || return $?
+      for line in "${disks[@]}"; do
+        target="${line%%|*}"
+        source="${line#*|}"
+        source="${source%%|*}"
+        format="${line##*|}"
+        dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")" || return $?
+        if [[ "${dest}" == "${FTCTL_BLOCKCOPY_TARGET_BASE_DIR}/"* ]]; then
+          echo "ERROR: shared-blockcopy destination must not use the default local blockcopy target base dir: ${dest}" >&2
+          return 2
+        fi
+      done
+      ;;
+    remote-nbd)
+      echo "ERROR: remote-nbd backend mode is not implemented yet" >&2
+      return 3
+      ;;
+    *)
+      echo "ERROR: unsupported backend mode: ${FTCTL_PROFILE_BACKEND_MODE}" >&2
+      return 2
+      ;;
+  esac
+}
+
 ftctl_blockcopy_start_job() {
   local uri="${1-}"
   local vm="${2-}"
@@ -278,6 +313,14 @@ ftctl_blockcopy_plan_protect() {
   primary_xml_backup=""
   standby_xml_seed=""
   persistence="unknown"
+  if ! ftctl_blockcopy_validate_backend_mode "${vm}"; then
+    rc=$?
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "transport_state=failed" \
+      "last_error=backend_mode_validation_failed"
+    return "${rc}"
+  fi
   ftctl_inventory_backup_domain_xml "${vm}" xml_bundle_dir primary_xml_backup standby_xml_seed persistence
   if [[ "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "yes" || "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "no" ]]; then
     persistence="${FTCTL_PROFILE_DOMAIN_PERSISTENCE}"
@@ -286,7 +329,10 @@ ftctl_blockcopy_plan_protect() {
     "xml_bundle_dir=${xml_bundle_dir}" \
     "primary_xml_backup=${primary_xml_backup}" \
     "standby_xml_seed=${standby_xml_seed}" \
-    "primary_persistence=${persistence}"
+    "primary_persistence=${persistence}" \
+    "secondary_vm_name=$(ftctl_profile_secondary_vm_name_resolved "${vm}")" \
+    "backend_mode=${FTCTL_PROFILE_BACKEND_MODE}" \
+    "target_storage_scope=${FTCTL_PROFILE_TARGET_STORAGE_SCOPE}"
 
   ftctl_inventory_collect_vm_disks "${vm}" disks
 

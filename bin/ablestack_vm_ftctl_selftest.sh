@@ -168,6 +168,7 @@ selftest_case_blockcopy_and_standby() {
   FTCTL_PROFILE_MODE="ha"
   FTCTL_PROFILE_PRIMARY_URI="qemu:///system"
   FTCTL_PROFILE_SECONDARY_URI="qemu+ssh://peer/system"
+  FTCTL_PROFILE_SECONDARY_VM_NAME="${vm}-standby"
   ftctl_state_init_vm "${vm}"
   mkdir -p "${bundle}"
 
@@ -194,10 +195,31 @@ EOF
   ftctl_standby_prepare "${vm}"
   selftest_assert_eq "$(ftctl_state_get "${vm}" "standby_state")" "prepared-transient" "standby prepare"
   selftest_assert_file_contains "$(ftctl_state_get "${vm}" "standby_xml_generated")" "/mirror/${vm}-vda.qcow2"
+  selftest_assert_file_contains "$(ftctl_state_get "${vm}" "standby_xml_generated")" "<name>${vm}-standby</name>"
 
   ftctl_standby_activate "${vm}"
   selftest_assert_eq "$(ftctl_state_get "${vm}" "standby_state")" "start-dry-run" "standby activate"
   selftest_assert_eq "$(ftctl_state_get "${vm}" "active_side")" "secondary" "standby activate side"
+}
+
+selftest_case_backend_validation() {
+  selftest_reset_env
+  selftest_info "backend mode validation"
+
+  local vm="backend-vm"
+  ftctl_profile_reset
+  FTCTL_PROFILE_MODE="ha"
+  FTCTL_PROFILE_PRIMARY_URI="qemu:///system"
+  FTCTL_PROFILE_SECONDARY_URI="qemu+ssh://peer/system"
+  FTCTL_PROFILE_BACKEND_MODE="shared-blockcopy"
+  FTCTL_PROFILE_TARGET_STORAGE_SCOPE="shared"
+  FTCTL_PROFILE_SECONDARY_VM_NAME="${vm}-standby"
+  FTCTL_PROFILE_DOMAIN_PERSISTENCE="yes"
+  FTCTL_PROFILE_DISK_MAP="auto"
+
+  if ftctl_profile_validate "${vm}" && ftctl_blockcopy_validate_backend_mode "${vm}"; then
+    selftest_fail "shared-blockcopy should reject disk_map=auto"
+  fi
 }
 
 selftest_case_reconcile_and_fencing() {
@@ -312,6 +334,7 @@ selftest_main() {
   selftest_run_lint
   selftest_case_cluster_cli
   selftest_case_blockcopy_and_standby
+  selftest_case_backend_validation
   selftest_case_reconcile_and_fencing
   selftest_case_xcolo_and_xml
   selftest_info "all checks passed"

@@ -205,3 +205,63 @@ FTCTL_PROFILE_XCOLO_QEMU_ARGS_SECONDARY="-S"
 - `network_map=inherit`는 Step 5에서 standby domain network attach와 연결한다.
 - `fencing_policy` 실제 provider 구현은 Step 4에서 진행한다.
 - `manual-block` 정책은 `ablestack_vm_ftctl fence-confirm --vm <vm>`로 수동 확인할 수 있다.
+
+## 8. Backend Mode Additions
+
+The HA/DR profile now includes backend-mode fields so the controller can distinguish
+between shared-storage blockcopy and remote-local transport designs.
+
+### 8.1 New HA/DR fields
+
+- `FTCTL_PROFILE_BACKEND_MODE`
+  - allowed values:
+    - `shared-blockcopy`
+    - `remote-nbd`
+  - default:
+    - `shared-blockcopy`
+
+- `FTCTL_PROFILE_TARGET_STORAGE_SCOPE`
+  - allowed values:
+    - `shared`
+    - `secondary-local`
+  - default:
+    - `shared`
+
+- `FTCTL_PROFILE_SECONDARY_VM_NAME`
+  - standby domain name on the secondary host
+  - default:
+    - `<vm>-standby`
+
+- `FTCTL_PROFILE_SECONDARY_TARGET_DIR`
+  - required for `remote-nbd`
+  - secondary-host local directory used to prepare target disks
+
+- `FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR`
+  - required for `remote-nbd`
+
+- `FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT`
+  - required for `remote-nbd`
+  - default:
+    - `10809`
+
+- `FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME`
+  - required for `remote-nbd`
+  - default:
+    - `<vm>`
+
+### 8.2 Current validation behavior
+
+- `shared-blockcopy` currently requires:
+  - `FTCTL_PROFILE_TARGET_STORAGE_SCOPE=shared`
+  - explicit `FTCTL_PROFILE_DISK_MAP`
+  - `FTCTL_PROFILE_SECONDARY_VM_NAME` different from the primary VM name for `ha` and `dr`
+
+- `remote-nbd` profile fields are now part of schema validation, but the actual
+  transport implementation is not complete yet.
+
+### 8.3 Practical rule
+
+- Do not use `DISK_MAP=auto` for shared blockcopy.
+- Do not point a shared-blockcopy destination into a known primary-local path such as
+  `/var/lib/ablestack-vm-ftctl/blockcopy/...`.
+- Use a distinct standby domain name on the secondary host.

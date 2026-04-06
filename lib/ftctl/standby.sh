@@ -108,6 +108,35 @@ tree.write(xml_path, encoding="unicode")
 PY
 }
 
+ftctl_standby__rewrite_domain_name() {
+  local xml_path="${1-}"
+  local domain_name="${2-}"
+
+  command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: python3 is required for standby XML rewrite" >&2
+    return 2
+  }
+
+  XML_PATH="${xml_path}" DOMAIN_NAME="${domain_name}" python3 - <<'PY'
+import os
+import xml.etree.ElementTree as ET
+
+xml_path = os.environ["XML_PATH"]
+domain_name = os.environ["DOMAIN_NAME"]
+
+tree = ET.parse(xml_path)
+root = tree.getroot()
+
+name = root.find("name")
+if name is None:
+    name = ET.Element("name")
+    root.insert(0, name)
+name.text = domain_name
+
+tree.write(xml_path, encoding="unicode")
+PY
+}
+
 ftctl_xml_apply_qemu_commandline() {
   local xml_path="${1-}"
   local args_string="${2-}"
@@ -166,7 +195,7 @@ ftctl_standby_materialize_primary_xml() {
 
 ftctl_standby_materialize_xml() {
   local vm="${1-}"
-  local seed out_path
+  local seed out_path standby_vm_name
   local records=()
   local record target source dest format job_state ready attr
 
@@ -178,6 +207,8 @@ ftctl_standby_materialize_xml() {
   out_path="$(ftctl_standby_generated_xml_path "${vm}")"
   ftctl_ensure_dir "$(dirname "${out_path}")" "0755"
   cp -f "${seed}" "${out_path}"
+  standby_vm_name="$(ftctl_profile_secondary_vm_name_resolved "${vm}")"
+  ftctl_standby__rewrite_domain_name "${out_path}" "${standby_vm_name}"
 
   ftctl_standby_blockcopy_records "${vm}" records || {
     echo "ERROR: blockcopy state records not found for ${vm}" >&2
@@ -207,6 +238,7 @@ ftctl_standby_materialize_xml() {
 
   ftctl_state_set "${vm}" \
     "standby_xml_generated=${out_path}" \
+    "secondary_vm_name=${standby_vm_name}" \
     "standby_last_prepare_ts=$(ftctl_now_iso8601)"
   ftctl_log_event "standby" "standby.materialize" "ok" "${vm}" "" \
     "path=${out_path}"
@@ -259,7 +291,7 @@ ftctl_standby_prepare() {
 
 ftctl_standby_activate() {
   local vm="${1-}"
-  local persistence generated_xml out err rc
+  local persistence generated_xml out err rc secondary_vm_name
 
   generated_xml="$(ftctl_state_get "${vm}" "standby_xml_generated" 2>/dev/null || true)"
   [[ -n "${generated_xml}" ]] || {
@@ -267,6 +299,7 @@ ftctl_standby_activate() {
     return 2
   }
   persistence="$(ftctl_state_get "${vm}" "primary_persistence" 2>/dev/null || echo "unknown")"
+  secondary_vm_name="$(ftctl_state_get "${vm}" "secondary_vm_name" 2>/dev/null || ftctl_profile_secondary_vm_name_resolved "${vm}")"
   if [[ "${persistence}" == "unknown" && ( "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "yes" || "${FTCTL_PROFILE_DOMAIN_PERSISTENCE:-auto}" == "no" ) ]]; then
     persistence="${FTCTL_PROFILE_DOMAIN_PERSISTENCE}"
     ftctl_state_set "${vm}" "primary_persistence=${persistence}"
@@ -285,7 +318,7 @@ ftctl_standby_activate() {
   err=""
   rc=0
   if [[ "${persistence}" == "yes" ]]; then
-    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_SECONDARY_URI}" start "${vm}" || true
+    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_SECONDARY_URI}" start "${secondary_vm_name}" || true
   else
     ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_SECONDARY_URI}" create "${generated_xml}" || true
   fi
