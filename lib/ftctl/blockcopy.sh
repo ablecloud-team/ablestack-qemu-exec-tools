@@ -227,7 +227,7 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   local format="${4-}"
   local secondary_path="${5-}"
   local export_name="${6-}"
-  local host user size out err rc pid_file remote_cmd
+  local host="" user="" size="" out="" err="" rc=0 pid_file="" remote_cmd=""
 
   ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_SECONDARY_URI}" host user || return 2
   ftctl_blockcopy_source_virtual_size_bytes "${vm}" "${target}" "${source}" size || {
