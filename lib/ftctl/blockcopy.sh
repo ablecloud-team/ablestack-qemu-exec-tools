@@ -622,7 +622,7 @@ for disk in root.findall("./devices/disk"):
     if mirror is None:
         print("none|unknown")
         break
-    print(f"{mirror.get(\"type\", \"unknown\")}|{mirror.get(\"ready\", \"no\")}")
+    print(mirror.get("type", "unknown") + "|" + mirror.get("ready", "no"))
     break
 else:
     print("none|unknown")' "${target}" "${out}")" || payload="none|unknown"
