@@ -61,7 +61,7 @@ ftctl_orchestrator_probe_peer() {
   local host_id_var="${1}"
   local mgmt_ip_var="${2}"
   local reach_var="${3}"
-  local record host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data rc
+  local record="" host_id="" role="" mgmt_ip="" libvirt_uri="" blockcopy_ip="" xcolo_ctrl="" xcolo_data="" rc=0
 
   printf -v "${host_id_var}" '%s' ""
   printf -v "${mgmt_ip_var}" '%s' ""
@@ -76,7 +76,6 @@ ftctl_orchestrator_probe_peer() {
   printf -v "${host_id_var}" '%s' "${host_id}"
   printf -v "${mgmt_ip_var}" '%s' "${mgmt_ip}"
 
-  rc=0
   ftctl_cluster_probe_management_reachability "${mgmt_ip}" "1" || rc=$?
   case "${rc}" in
     0) printf -v "${reach_var}" '%s' "reachable" ;;
