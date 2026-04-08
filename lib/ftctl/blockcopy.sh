@@ -304,6 +304,19 @@ if [[ -f "${pid_file}" ]]; then
   fi
   rm -f "${pid_file}"
 fi
+listener_pids="\$(ss -lntp | awk '/:${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}[[:space:]]/ { while (match(\$0, /pid=[0-9]+/)) { print substr(\$0, RSTART+4, RLENGTH-4); \$0=substr(\$0, RSTART+RLENGTH) } }' | sort -u)"
+for listener_pid in \${listener_pids}; do
+  [[ -n "\${listener_pid}" ]] || continue
+  cmdline="\$(tr '\0' ' ' < /proc/\${listener_pid}/cmdline 2>/dev/null || true)"
+  if [[ "\${cmdline}" == *qemu-nbd* ]]; then
+    kill "\${listener_pid}" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+done
+if ss -lntp | grep -q ":${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}[[:space:]]"; then
+  echo "port_in_use:${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" >&2
+  exit 98
+fi
 qemu-nbd --fork --persistent --shared=8 \
   --bind "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" \
   --port "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" \

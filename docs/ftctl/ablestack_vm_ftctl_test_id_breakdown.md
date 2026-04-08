@@ -83,7 +83,7 @@ Recommended execution order:
 | `HA-IMG05-ST01` | `IMG05` | `ST01` | mandatory | HA multi-disk Linux qcow2 | pending |
 | `HA-IMG06-ST02` | `IMG06` | `ST02` | recommended | HA multi-disk Linux raw | pending |
 | `HA-IMG07-ST01` | `IMG07` | `ST01` | recommended | HA mixed-size multi-disk | pending |
-| `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | fail |
+| `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | pass |
 | `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pending |
 | `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pending |
 | `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA NFS backend | pending |
@@ -169,11 +169,10 @@ Every `Test ID` should end with:
     - Redesign HA/DR backend modes so non-shared local storage uses a remote transport path instead of a primary-local mirror target.
 
 - `HA-IMG08-ST01`
-  - Result: `FAIL`
+  - Result: `PASS` with `remote-nbd` backend mode
   - Observation:
-    - Transient control-plane handling was correct, but the data-plane mirror target was again a primary-host local path.
-    - No secondary-side disk replica or standby VM was prepared.
+    - The original primary-local path model failed for non-shared local storage.
+    - After backend redesign, `remote-nbd` produced a secondary-local target, active NBD export, and primary runtime network mirror.
   - Follow-up improvement:
-    - Split HA/DR blockcopy design into at least:
-      shared-visible blockcopy mode, and remote-local transport mode.
-    - Add profile/backend validation to reject unsupported non-shared local storage layouts under the current implementation.
+    - Keep `remote-nbd` as the required mode for non-shared local storage.
+    - Consider auto-refresh after protect so `status` can move to `protected/mirroring` without requiring a separate reconcile step.

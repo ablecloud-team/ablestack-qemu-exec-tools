@@ -198,3 +198,64 @@ If FAIL:
   HA/DR backend mode redesign is required.
   This case should use a remote transport model such as NBD, not a primary-local file mirror target.
 ```
+
+### HA-IMG08-ST01-remote-nbd
+
+```text
+Test ID: HA-IMG08-ST01-remote-nbd
+Date: 2026-04-07
+Mode: HA
+VM Name: rocky10-t
+Primary Host: 10.10.32.1
+Secondary Host: 10.10.32.2
+Image Type: transient VM / single-disk Linux qcow2
+Storage Backend: local file qcow2
+Profile Path: /etc/ablestack/ftctl.d/rocky10-t.conf
+
+Preconditions:
+- Transient VM
+- local file qcow2 source disk
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- FTCTL_PROFILE_DOMAIN_PERSISTENCE="no"
+- Secondary host qemu-nbd export port 10809/tcp reachable from the primary host
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-t
+- ablestack_vm_ftctl protect --vm rocky10-t --mode ha --peer qemu+ssh://10.10.32.2/system
+- virsh dumpxml rocky10-t
+- virsh blockjob --domain rocky10-t --path vda --info
+- secondary target/export checks
+- ablestack_vm_ftctl reconcile --vm rocky10-t
+- ablestack_vm_ftctl status --vm rocky10-t --json
+
+Expected Result:
+- secondary-local target is created on the secondary host
+- qemu-nbd export is started on the secondary host
+- primary runtime XML contains a network mirror for vda
+- reconcile upgrades the state to protected/mirroring
+
+Actual Result:
+- secondary-local target was created and maintained
+- qemu-nbd export was reachable and active
+- primary runtime XML showed <mirror type='network' ... ready='yes'> for vda
+- runtime state recorded NBD target URI and secondary-local target path
+- reconcile upgraded the VM to protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-IMG08-ST01-remote-nbd.status.reconciled.final.json
+- HA-IMG08-ST01-remote-nbd.runtime-state.reconciled.final.txt
+- HA-IMG08-ST01-remote-nbd.dumpxml.reconciled.final.xml
+- HA-IMG08-ST01-remote-nbd.secondary-target.t10.final.txt
+- HA-IMG08-ST01-remote-nbd.debug-bundle.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  protect may still report syncing/copying until reconcile runs.
+  dumpxml network-mirror metadata remains the strongest success signal for this backend.
+```
