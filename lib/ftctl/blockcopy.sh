@@ -38,6 +38,24 @@ ftctl_blockcopy_state_write() {
   chmod 0644 "${path}" 2>/dev/null || true
 }
 
+ftctl_blockcopy_state_record_for_target() {
+  local vm="${1-}"
+  local target="${2-}"
+  local out_var="${3}"
+  local path line
+
+  path="$(ftctl_blockcopy_state_path "${vm}")"
+  [[ -f "${path}" ]] || return 1
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    if [[ "${line%%|*}" == "${target}" ]]; then
+      printf -v "${out_var}" '%s' "${line}"
+      return 0
+    fi
+  done < "${path}"
+  return 1
+}
+
 ftctl_blockcopy_debug_dir() {
   local vm="${1-}"
   local target="${2-}"
@@ -95,6 +113,29 @@ ftctl_blockcopy_remote_nbd_uri() {
   local port="${2-}"
   local export_name="${3-}"
   printf 'nbd://%s:%s/%s\n' "${host}" "${port}" "${export_name}"
+}
+
+ftctl_blockcopy_remote_nbd_port_extract_from_uri() {
+  local uri="${1-}"
+  local out_var="${2}"
+  local tail port
+  tail="${uri#nbd://}"
+  tail="${tail#*/}"
+  port="${uri#nbd://}"
+  port="${port#*:}"
+  port="${port%%/*}"
+  [[ "${port}" =~ ^[0-9]+$ ]] || return 1
+  printf -v "${out_var}" '%s' "${port}"
+}
+
+ftctl_blockcopy_remote_nbd_candidate_port() {
+  local vm="${1-}"
+  local target="${2-}"
+  local out_var="${3}"
+  local seed offset
+  seed="$(printf '%s:%s' "${vm}" "${target}" | cksum | awk '{print $1}')"
+  offset=$((seed % FTCTL_REMOTE_NBD_PORT_COUNT))
+  printf -v "${out_var}" '%s' "$((FTCTL_REMOTE_NBD_PORT_BASE + offset))"
 }
 
 ftctl_blockcopy_remote_nbd_secondary_path() {
@@ -160,6 +201,90 @@ ftctl_blockcopy_remote_target_host_user() {
   fi
   printf -v "${host_var}" '%s' "${resolved_host}"
   printf -v "${user_var}" '%s' "${resolved_user}"
+}
+
+ftctl_blockcopy_remote_nbd_port_in_use() {
+  local host="${1-}"
+  local user="${2-}"
+  local port="${3-}"
+  local out err rc
+
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "ss -lntp | grep -q ':${port}[[:space:]]'" || true
+  [[ "${rc}" == "0" ]]
+}
+
+ftctl_blockcopy_remote_nbd_active_count() {
+  local host="${1-}"
+  local user="${2-}"
+  local out_var="${3}"
+  local out err rc count remote_cmd
+
+  out=""
+  err=""
+  rc=0
+  remote_cmd=$(cat <<EOF
+ss -lntp | python3 -c 'import sys,re; base=${FTCTL_REMOTE_NBD_PORT_BASE}; end=${FTCTL_REMOTE_NBD_PORT_BASE}+${FTCTL_REMOTE_NBD_PORT_COUNT}-1; n=0
+for line in sys.stdin:
+    if "qemu-nbd" not in line:
+        continue
+    m = re.search(r":([0-9]+)\\s", line)
+    if not m:
+        continue
+    p = int(m.group(1))
+    if base <= p <= end:
+        n += 1
+print(n)'
+EOF
+)
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
+  if [[ "${rc}" != "0" ]]; then
+    return "${rc}"
+  fi
+  count="$(tr -dc '0-9' <<< "${out}")"
+  [[ "${count}" =~ ^[0-9]+$ ]] || count="0"
+  printf -v "${out_var}" '%s' "${count}"
+}
+
+ftctl_blockcopy_remote_nbd_pick_port() {
+  local vm="${1-}"
+  local target="${2-}"
+  local out_var="${3}"
+  local record="" host="" user="" active_count=0 preferred=0 candidate=0 i=0 existing_uri="" existing_port=""
+
+  if [[ "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" != "auto" ]]; then
+    printf -v "${out_var}" '%s' "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}"
+    return 0
+  fi
+
+  if ftctl_blockcopy_state_record_for_target "${vm}" "${target}" record; then
+    existing_uri="$(cut -d'|' -f3 <<< "${record}")"
+    if ftctl_blockcopy_remote_nbd_port_extract_from_uri "${existing_uri}" existing_port; then
+      printf -v "${out_var}" '%s' "${existing_port}"
+      return 0
+    fi
+  fi
+
+  ftctl_blockcopy_remote_target_host_user host user || return 2
+  ftctl_blockcopy_remote_nbd_active_count "${host}" "${user}" active_count || true
+  if (( active_count >= FTCTL_REMOTE_NBD_MAX_CONCURRENT )); then
+    echo "ERROR: remote-nbd active count ${active_count} reached FTCTL_REMOTE_NBD_MAX_CONCURRENT=${FTCTL_REMOTE_NBD_MAX_CONCURRENT}" >&2
+    return 3
+  fi
+
+  ftctl_blockcopy_remote_nbd_candidate_port "${vm}" "${target}" preferred
+  for ((i=0; i<FTCTL_REMOTE_NBD_PORT_COUNT; i++)); do
+    candidate=$((FTCTL_REMOTE_NBD_PORT_BASE + ((preferred - FTCTL_REMOTE_NBD_PORT_BASE + i) % FTCTL_REMOTE_NBD_PORT_COUNT)))
+    if ! ftctl_blockcopy_remote_nbd_port_in_use "${host}" "${user}" "${candidate}"; then
+      printf -v "${out_var}" '%s' "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "ERROR: no free remote-nbd port available in range ${FTCTL_REMOTE_NBD_PORT_BASE}..$((FTCTL_REMOTE_NBD_PORT_BASE + FTCTL_REMOTE_NBD_PORT_COUNT - 1))" >&2
+  return 4
 }
 
 ftctl_blockcopy_source_virtual_size_bytes() {
@@ -281,6 +406,7 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   local format="${4-}"
   local secondary_path="${5-}"
   local export_name="${6-}"
+  local export_port="${7-}"
   local host="" user="" size="" out="" err="" rc=0 pid_file="" remote_cmd="" debug_cmd=""
 
   ftctl_blockcopy_remote_target_host_user host user || return 2
@@ -304,7 +430,7 @@ if [[ -f "${pid_file}" ]]; then
   fi
   rm -f "${pid_file}"
 fi
-listener_pids="\$(ss -lntp | awk '/:${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}[[:space:]]/ { while (match(\$0, /pid=[0-9]+/)) { print substr(\$0, RSTART+4, RLENGTH-4); \$0=substr(\$0, RSTART+RLENGTH) } }' | sort -u)"
+listener_pids="\$(ss -lntp | awk '/:${export_port}[[:space:]]/ { while (match(\$0, /pid=[0-9]+/)) { print substr(\$0, RSTART+4, RLENGTH-4); \$0=substr(\$0, RSTART+RLENGTH) } }' | sort -u)"
 for listener_pid in \${listener_pids}; do
   [[ -n "\${listener_pid}" ]] || continue
   cmdline="\$(tr '\0' ' ' < /proc/\${listener_pid}/cmdline 2>/dev/null || true)"
@@ -313,13 +439,13 @@ for listener_pid in \${listener_pids}; do
     sleep 1
   fi
 done
-if ss -lntp | grep -q ":${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}[[:space:]]"; then
-  echo "port_in_use:${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" >&2
+if ss -lntp | grep -q ":${export_port}[[:space:]]"; then
+  echo "port_in_use:${export_port}" >&2
   exit 98
 fi
 qemu-nbd --fork --persistent --shared=8 \
   --bind "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" \
-  --port "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" \
+  --port "${export_port}" \
   --export-name "${export_name}" \
   --format "${format}" \
   --pid-file "${pid_file}" \
@@ -742,7 +868,7 @@ ftctl_blockcopy_refresh_vm_jobs() {
 ftctl_blockcopy_plan_protect() {
   local vm="${1-}"
   local disks=()
-  local line target source format dest secondary_dest remote_xml export_name
+  local line target source format dest secondary_dest remote_xml export_name export_port
   local xml_bundle_dir primary_xml_backup standby_xml_seed persistence
   local out err rc job_state ready
   local records=()
@@ -782,10 +908,13 @@ ftctl_blockcopy_plan_protect() {
     format="${line##*|}"
     if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
       secondary_dest="$(ftctl_blockcopy_remote_nbd_secondary_path "${vm}" "${target}" "${source}" "${format}")"
+      export_port=""
+      ftctl_blockcopy_remote_nbd_pick_port "${vm}" "${target}" export_port || return $?
       export_name="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}"
-      dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${export_name}")"
+      dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${export_port}" "${export_name}")"
     else
       secondary_dest=""
+      export_port=""
       export_name=""
       dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
     fi
@@ -800,11 +929,11 @@ ftctl_blockcopy_plan_protect() {
     err=""
     rc=0
     if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
-      ftctl_blockcopy_remote_nbd_prepare_target "${vm}" "${target}" "${source}" "${format}" "${secondary_dest}" "${export_name}" || return $?
+      ftctl_blockcopy_remote_nbd_prepare_target "${vm}" "${target}" "${source}" "${format}" "${secondary_dest}" "${export_name}" "${export_port}" || return $?
       remote_xml=""
       ftctl_blockcopy_build_remote_nbd_dest_xml \
         "${vm}" "${target}" "${format}" \
-        "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${export_name}" \
+        "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${export_port}" "${export_name}" \
         "${primary_xml_backup}" remote_xml
       {
         local remote_host="" remote_user="" debug_remote_cmd="" debug_size=""
@@ -816,7 +945,7 @@ mkdir -p "$(dirname "${secondary_dest}")" /run/ablestack-vm-ftctl
 if [[ ! -f "${secondary_dest}" ]]; then
   qemu-img create -f "${format}" "${secondary_dest}" "${debug_size}"
 fi
-qemu-nbd --fork --persistent --shared=8 --bind "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" --port "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" --export-name "${export_name}" --format "${format}" --pid-file "/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid" "${secondary_dest}"
+qemu-nbd --fork --persistent --shared=8 --bind "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" --port "${export_port}" --export-name "${export_name}" --format "${format}" --pid-file "/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid" "${secondary_dest}"
 EOF
 )"
         ftctl_blockcopy_write_remote_nbd_repro "${vm}" "${target}" "${remote_xml}" "${remote_host}" "${remote_user}" "${debug_remote_cmd}" "${persistence}"
@@ -827,6 +956,7 @@ size=${debug_size}
 format=${format}
 secondary_path=${secondary_dest}
 export_name=${export_name}
+xml_port=${export_port}
 xml=${remote_xml}"
       }
       ftctl_blockcopy_start_remote_nbd_job \

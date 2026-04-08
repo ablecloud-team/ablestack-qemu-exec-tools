@@ -44,6 +44,7 @@ rm -rf %{buildroot}
 install -d %{buildroot}/usr/local/bin
 install -m 0755 bin/ablestack_vm_ftctl.sh %{buildroot}/usr/local/bin/ablestack_vm_ftctl
 install -m 0755 bin/ablestack_vm_ftctl_selftest.sh %{buildroot}/usr/local/bin/ablestack_vm_ftctl_selftest
+install -m 0755 bin/ablestack_vm_ftctl_firewalld.sh %{buildroot}/usr/local/bin/ablestack_vm_ftctl_firewalld
 
 install -d %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/ftctl
 cp -a lib/ftctl/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/ftctl/
@@ -64,6 +65,9 @@ install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/comp
 %post
 %systemd_post ablestack-vm-ftctl.service
 %systemd_post ablestack-vm-ftctl.timer
+if [ -x /usr/local/bin/ablestack_vm_ftctl_firewalld ]; then
+  /usr/local/bin/ablestack_vm_ftctl_firewalld apply >/dev/null 2>&1 || true
+fi
 
 %preun
 %systemd_preun ablestack-vm-ftctl.service
@@ -72,11 +76,15 @@ install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/comp
 %postun
 %systemd_postun_with_restart ablestack-vm-ftctl.service
 %systemd_postun_with_restart ablestack-vm-ftctl.timer
+if [ "$1" -eq 0 ] && [ -x /usr/local/bin/ablestack_vm_ftctl_firewalld ]; then
+  /usr/local/bin/ablestack_vm_ftctl_firewalld remove >/dev/null 2>&1 || true
+fi
 
 %files
 %license LICENSE
 /usr/local/bin/ablestack_vm_ftctl
 /usr/local/bin/ablestack_vm_ftctl_selftest
+/usr/local/bin/ablestack_vm_ftctl_firewalld
 /usr/local/lib/ablestack-qemu-exec-tools/ftctl/
 %config(noreplace) /etc/ablestack/ablestack-vm-ftctl.conf
 %config(noreplace) /etc/ablestack/ablestack-vm-ftctl-cluster.conf

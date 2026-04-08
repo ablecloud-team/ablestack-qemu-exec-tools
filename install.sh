@@ -77,6 +77,7 @@ if [[ "${INSTALL_MODE}" == "HOST" ]]; then
     "ablestack_vm_hangctl.sh"
     "ablestack_vm_ftctl.sh"
     "ablestack_vm_ftctl_selftest.sh"
+    "ablestack_vm_ftctl_firewalld.sh"
     "v2k_test_install.sh"
   )
 else
@@ -89,6 +90,7 @@ else
     "ablestack_vm_hangctl.sh"
     "ablestack_vm_ftctl.sh"
     "ablestack_vm_ftctl_selftest.sh"
+    "ablestack_vm_ftctl_firewalld.sh"
     "v2k_test_install.sh"
   )
 fi
@@ -205,6 +207,11 @@ if [[ -f "${FTCTL_CLUSTER_CONF_SRC}" ]]; then
   fi
 else
   echo "Skipping ftctl cluster config install: ${FTCTL_CLUSTER_CONF_SRC}"
+fi
+
+if [[ -x "${BIN_DIR}/ablestack_vm_ftctl_firewalld" ]]; then
+  echo "Applying firewalld service for FTCTL remote NBD range"
+  sudo "${BIN_DIR}/ablestack_vm_ftctl_firewalld" apply || true
 fi
 
 echo "Installing payloads into ${LIB_TARGET}/payload"

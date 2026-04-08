@@ -58,6 +58,7 @@ install:
 	install -m 0755 bin/agent_policy_fix.sh $(BIN_DIR)/agent_policy_fix
 	@if [ -f bin/ablestack_vm_ftctl.sh ]; then install -m 0755 bin/ablestack_vm_ftctl.sh $(BIN_DIR)/ablestack_vm_ftctl; fi
 	@if [ -f bin/ablestack_vm_ftctl_selftest.sh ]; then install -m 0755 bin/ablestack_vm_ftctl_selftest.sh $(BIN_DIR)/ablestack_vm_ftctl_selftest; fi
+	@if [ -f bin/ablestack_vm_ftctl_firewalld.sh ]; then install -m 0755 bin/ablestack_vm_ftctl_firewalld.sh $(BIN_DIR)/ablestack_vm_ftctl_firewalld; fi
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(BIN_DIR)/install_ablestack_qemu_exec_tools; fi
 	install -d $(LIB_TARGET)
 	cp -a lib/* $(LIB_TARGET)/

@@ -257,6 +257,18 @@ vda|/var/lib/libvirt/images/${vm}.qcow2|nbd://10.0.0.12:10809/${vm}-vda|qcow2|ru
 EOF
   ftctl_standby_prepare "${vm}"
   selftest_assert_file_contains "$(ftctl_state_get "${vm}" "standby_xml_generated")" "/secondary/${vm}/vda-${vm}.qcow2"
+
+  FTCTL_REMOTE_NBD_PORT_BASE="10809"
+  FTCTL_REMOTE_NBD_PORT_COUNT="32"
+  FTCTL_REMOTE_NBD_MAX_CONCURRENT="32"
+  local chosen_port=""
+  ftctl_blockcopy_remote_target_host_user() { printf -v "$1" '%s' '10.0.0.12'; printf -v "$2" '%s' 'root'; }
+  ftctl_blockcopy_remote_nbd_active_count() { printf -v "$3" '%s' '0'; }
+  ftctl_blockcopy_remote_nbd_port_in_use() { return 1; }
+  ftctl_blockcopy_remote_nbd_pick_port "${vm}" "vda" chosen_port
+  [[ "${chosen_port}" =~ ^[0-9]+$ ]] || selftest_fail "remote-nbd port not assigned"
+  (( chosen_port >= FTCTL_REMOTE_NBD_PORT_BASE && chosen_port < FTCTL_REMOTE_NBD_PORT_BASE + FTCTL_REMOTE_NBD_PORT_COUNT )) || \
+    selftest_fail "remote-nbd port out of range"
 }
 
 selftest_case_reconcile_and_fencing() {
