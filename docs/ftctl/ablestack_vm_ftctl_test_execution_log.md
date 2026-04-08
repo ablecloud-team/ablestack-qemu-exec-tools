@@ -43,7 +43,6 @@ If FAIL:
 ### Pending
 
 - `HA-IMG03-ST01`
-- `HA-IMG09-ST01`
 - `HA-IMG01-ST03`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
@@ -70,6 +69,7 @@ If FAIL:
 - `HA-IMG08-ST01`
 - `HA-IMG02-ST02`
 - `HA-IMG05-ST01`
+- `HA-IMG09-ST01`
 
 ## 4. Execution Records
 
@@ -375,4 +375,64 @@ If FAIL:
 - Remaining gap:
   Persistent multi-disk VM behavior is still unverified.
   Failover and failback across all protected disks remain separate test items.
+```
+
+### HA-IMG09-ST01
+
+```text
+Test ID: HA-IMG09-ST01
+Date: 2026-04-08
+Mode: HA
+VM Name: rocky10-raw
+Primary Host: 10.10.32.1
+Secondary Host: 10.10.32.2
+Image Type: persistent VM / single-disk Linux raw
+Storage Backend: local file raw
+Profile Path: /etc/ablestack/ftctl.d/rocky10-raw.conf
+
+Preconditions:
+- Persistent VM
+- local file raw source disk
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- distinct standby domain name on the secondary host
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-raw
+- ablestack_vm_ftctl protect --vm rocky10-raw --mode ha --peer qemu+ssh://10.10.32.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-raw
+- ablestack_vm_ftctl status --vm rocky10-raw --json
+- virsh dumpxml rocky10-raw
+- virsh -c qemu+ssh://10.10.32.2/system list --all
+- virsh -c qemu+ssh://10.10.32.2/system dominfo rocky10-raw-standby
+
+Expected Result:
+- remote NBD mirror is attached to the persistent source VM
+- secondary-local target is prepared
+- standby VM is defined on the secondary host with a distinct persistent name
+- final state is protected/mirroring
+
+Actual Result:
+- remote NBD mirror attached successfully with ready='yes'
+- secondary-local target was prepared
+- standby domain `rocky10-raw-standby` was defined on the secondary host as a persistent domain
+- final state reached protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-IMG09-ST01.status.final.json
+- HA-IMG09-ST01.runtime-state.final.txt
+- HA-IMG09-ST01.dumpxml.final.xml
+- HA-IMG09-ST01.peer.list.final.txt
+- HA-IMG09-ST01.peer.dominfo.final.txt
+- HA-IMG09-ST01.debug-bundle.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  Shared-storage HA mode remains unverified.
+  Persistent failover/failback behavior should be validated separately.
 ```

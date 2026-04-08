@@ -84,7 +84,7 @@ Recommended execution order:
 | `HA-IMG06-ST02` | `IMG06` | `ST02` | recommended | HA multi-disk Linux raw | pending |
 | `HA-IMG07-ST01` | `IMG07` | `ST01` | recommended | HA mixed-size multi-disk | pending |
 | `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | pass |
-| `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pending |
+| `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pass |
 | `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pending |
 | `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA NFS backend | pending |
 | `HA-IMG01-ST05` | `IMG01` | `ST05` | recommended | HA multipath backend | pending |
@@ -193,3 +193,12 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Validate the same backend for persistent multi-disk VMs.
     - Validate failover/failback behavior across all protected disks together.
+
+- `HA-IMG09-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - Persistent VM behavior worked with secondary-local target preparation and persistent standby define.
+    - The standby domain name separation model (`<vm>-standby`) worked as intended.
+  - Follow-up improvement:
+    - Validate persistent multi-disk behavior.
+    - Validate persistent failover/failback under the same backend.
