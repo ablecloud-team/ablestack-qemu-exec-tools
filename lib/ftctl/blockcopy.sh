@@ -810,7 +810,7 @@ ftctl_blockcopy_wait_for_job_visibility() {
 ftctl_blockcopy_refresh_vm_jobs() {
   local vm="${1-}"
   local disks=()
-  local line target source format dest job_state ready secondary_dest runtime_mirror_type
+  local line target source format dest job_state ready secondary_dest runtime_mirror_type existing_record existing_dest
   local records=()
   local all_ready="1"
   local rc_any=0
@@ -824,8 +824,20 @@ ftctl_blockcopy_refresh_vm_jobs() {
     format="${line##*|}"
     secondary_dest=""
     if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
-      dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}")"
-      secondary_dest="$(ftctl_blockcopy_remote_nbd_secondary_path "${vm}" "${target}" "${source}" "${format}")"
+      existing_record=""
+      existing_dest=""
+      if ftctl_blockcopy_state_record_for_target "${vm}" "${target}" existing_record; then
+        existing_dest="$(cut -d'|' -f3 <<< "${existing_record}")"
+        secondary_dest="$(cut -d'|' -f7 <<< "${existing_record}")"
+      fi
+      if [[ -n "${existing_dest}" && "${existing_dest}" == nbd://* ]]; then
+        dest="${existing_dest}"
+      else
+        dest="$(ftctl_blockcopy_remote_nbd_uri "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_PORT}" "${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}")"
+      fi
+      if [[ -z "${secondary_dest}" ]]; then
+        secondary_dest="$(ftctl_blockcopy_remote_nbd_secondary_path "${vm}" "${target}" "${source}" "${format}")"
+      fi
     else
       dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")"
     fi
