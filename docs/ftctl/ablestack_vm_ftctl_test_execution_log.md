@@ -43,7 +43,6 @@ If FAIL:
 ### Pending
 
 - `HA-IMG03-ST01`
-- `HA-IMG05-ST01`
 - `HA-IMG09-ST01`
 - `HA-IMG01-ST03`
 - `DR-IMG01-ST01`
@@ -70,6 +69,7 @@ If FAIL:
 - `HA-IMG01-ST01`
 - `HA-IMG08-ST01`
 - `HA-IMG02-ST02`
+- `HA-IMG05-ST01`
 
 ## 4. Execution Records
 
@@ -317,4 +317,62 @@ If FAIL:
 - Remaining gap:
   protect may still show syncing/copying until reconcile runs.
   remote-nbd state is now deterministic per VM/target, but concurrent multi-disk validation is still required.
+```
+
+### HA-IMG05-ST01
+
+```text
+Test ID: HA-IMG05-ST01
+Date: 2026-04-08
+Mode: HA
+VM Name: rocky10-t
+Primary Host: 10.10.32.1
+Secondary Host: 10.10.32.2
+Image Type: multi-disk Linux qcow2
+Storage Backend: local file qcow2
+Profile Path: /etc/ablestack/ftctl.d/rocky10-t.conf
+
+Preconditions:
+- Transient VM
+- three local file qcow2 source disks
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- Secondary host firewall opened for the remote NBD service range
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-t
+- ablestack_vm_ftctl protect --vm rocky10-t --mode ha --peer qemu+ssh://10.10.32.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-t
+- ablestack_vm_ftctl status --vm rocky10-t --json
+- virsh dumpxml rocky10-t
+- secondary target/export checks
+
+Expected Result:
+- each protected disk gets its own secondary-local target
+- each protected disk gets its own remote NBD export name and chosen port
+- runtime XML contains a network mirror for each protected disk
+- reconcile upgrades the VM to protected/mirroring
+
+Actual Result:
+- `vda`, `vdb`, and `vdc` each received separate secondary-local targets
+- deterministic per-disk export ports were allocated and persisted
+- runtime XML showed network mirrors for all three protected disks
+- reconcile upgraded the VM to protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-IMG05-ST01.status.final.json
+- HA-IMG05-ST01.runtime-state.final.txt
+- HA-IMG05-ST01.dumpxml.final.xml
+- HA-IMG05-ST01.secondary-target.t10.txt
+- HA-IMG05-ST01.debug-bundle.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  Persistent multi-disk VM behavior is still unverified.
+  Failover and failback across all protected disks remain separate test items.
 ```

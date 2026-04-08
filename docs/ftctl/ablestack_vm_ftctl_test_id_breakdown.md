@@ -80,7 +80,7 @@ Recommended execution order:
 | `HA-IMG02-ST02` | `IMG02` | `ST02` | mandatory | HA baseline Linux raw on local raw | pass |
 | `HA-IMG03-ST01` | `IMG03` | `ST01` | mandatory | HA baseline Windows qcow2 | pending |
 | `HA-IMG04-ST02` | `IMG04` | `ST02` | recommended | HA Windows raw | pending |
-| `HA-IMG05-ST01` | `IMG05` | `ST01` | mandatory | HA multi-disk Linux qcow2 | pending |
+| `HA-IMG05-ST01` | `IMG05` | `ST01` | mandatory | HA multi-disk Linux qcow2 | pass |
 | `HA-IMG06-ST02` | `IMG06` | `ST02` | recommended | HA multi-disk Linux raw | pending |
 | `HA-IMG07-ST01` | `IMG07` | `ST01` | recommended | HA mixed-size multi-disk | pending |
 | `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | pass |
@@ -184,3 +184,12 @@ Every `Test ID` should end with:
     - The selected export port was persisted in state after reconcile.
   - Follow-up improvement:
     - Validate the same backend under multi-disk load where multiple target-specific exports are active at once.
+
+- `HA-IMG05-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - Multi-disk local qcow2 worked with per-disk remote NBD exports.
+    - Distinct export ports were selected and persisted for `vda`, `vdb`, and `vdc`.
+  - Follow-up improvement:
+    - Validate the same backend for persistent multi-disk VMs.
+    - Validate failover/failback behavior across all protected disks together.
