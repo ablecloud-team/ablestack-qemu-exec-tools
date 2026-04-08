@@ -197,6 +197,7 @@ Completed items:
 - Progress:
   - `HA-IMG01-ST01`: `FAIL` after backend-model reclassification
   - `HA-IMG08-ST01`: `PASS` with `remote-nbd`
+  - `HA-IMG02-ST02`: `PASS` with `remote-nbd`
 - Follow-up improvements discovered during real-environment testing:
   - HA protect success detection should prioritize runtime `virsh dumpxml` mirror metadata when `virsh blockjob --info` is empty or incomplete.
   - `virsh domblklist --details` should be treated as a secondary indicator because it may continue to show the original source path while an active mirror element exists in runtime XML.
@@ -206,6 +207,7 @@ Completed items:
     - `remote-local transport mode` such as NBD-backed remote sink
   - Current local-file, non-shared cases must not be treated as PASS even when runtime XML shows a mirror element on the primary host.
   - `remote-nbd` protect can still appear as `syncing/copying` until `reconcile` runs; status auto-refresh policy should be improved.
+  - Per-VM/target deterministic remote NBD port allocation and firewalld service range support are now in place; multi-disk concurrency validation is the next priority.
 
 ### Step 13. PR preparation
 

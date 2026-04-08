@@ -77,7 +77,7 @@ Recommended execution order:
 | Test ID | Image | Storage | Priority | Purpose | Status |
 |---|---|---|---|---|---|
 | `HA-IMG01-ST01` | `IMG01` | `ST01` | mandatory | HA baseline Linux qcow2 on local qcow2 | fail |
-| `HA-IMG02-ST02` | `IMG02` | `ST02` | mandatory | HA baseline Linux raw on local raw | pending |
+| `HA-IMG02-ST02` | `IMG02` | `ST02` | mandatory | HA baseline Linux raw on local raw | pass |
 | `HA-IMG03-ST01` | `IMG03` | `ST01` | mandatory | HA baseline Windows qcow2 | pending |
 | `HA-IMG04-ST02` | `IMG04` | `ST02` | recommended | HA Windows raw | pending |
 | `HA-IMG05-ST01` | `IMG05` | `ST01` | mandatory | HA multi-disk Linux qcow2 | pending |
@@ -176,3 +176,11 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Keep `remote-nbd` as the required mode for non-shared local storage.
     - Consider auto-refresh after protect so `status` can move to `protected/mirroring` without requiring a separate reconcile step.
+
+- `HA-IMG02-ST02`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - The same non-shared local storage model also worked for raw images.
+    - The selected export port was persisted in state after reconcile.
+  - Follow-up improvement:
+    - Validate the same backend under multi-disk load where multiple target-specific exports are active at once.

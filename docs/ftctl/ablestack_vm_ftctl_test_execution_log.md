@@ -42,7 +42,6 @@ If FAIL:
 
 ### Pending
 
-- `HA-IMG02-ST02`
 - `HA-IMG03-ST01`
 - `HA-IMG05-ST01`
 - `HA-IMG09-ST01`
@@ -70,6 +69,7 @@ If FAIL:
 
 - `HA-IMG01-ST01`
 - `HA-IMG08-ST01`
+- `HA-IMG02-ST02`
 
 ## 4. Execution Records
 
@@ -258,4 +258,63 @@ If FAIL:
 - Remaining gap:
   protect may still report syncing/copying until reconcile runs.
   dumpxml network-mirror metadata remains the strongest success signal for this backend.
+```
+
+### HA-IMG02-ST02
+
+```text
+Test ID: HA-IMG02-ST02
+Date: 2026-04-08
+Mode: HA
+VM Name: rocky10-raw
+Primary Host: 10.10.32.1
+Secondary Host: 10.10.32.2
+Image Type: single-disk Linux raw
+Storage Backend: local file raw
+Profile Path: /etc/ablestack/ftctl.d/rocky10-raw.conf
+
+Preconditions:
+- Transient VM
+- local file raw source disk
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- Secondary host firewall opened for the remote NBD service range
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-raw
+- ablestack_vm_ftctl protect --vm rocky10-raw --mode ha --peer qemu+ssh://10.10.32.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-raw
+- ablestack_vm_ftctl status --vm rocky10-raw --json
+- virsh dumpxml rocky10-raw
+- virsh blockjob --domain rocky10-raw --path vda --info
+- secondary target/export checks
+
+Expected Result:
+- raw image is mirrored to a secondary-local raw target through remote NBD
+- runtime XML contains a network mirror for vda
+- reconcile upgrades the VM to protected/mirroring
+- chosen remote NBD export port is persisted in state
+
+Actual Result:
+- remote NBD target was created on the secondary host and kept alive
+- runtime XML showed a network mirror for vda with raw format
+- reconcile upgraded the VM to protection_state=protected and transport_state=mirroring
+- state persisted the chosen export port (`10863`) and the secondary-local target path
+
+Evidence:
+- HA-IMG02-ST02.status.final.json
+- HA-IMG02-ST02.runtime-state.final.txt
+- HA-IMG02-ST02.dumpxml.final.xml
+- HA-IMG02-ST02.secondary-target.t10.txt
+- HA-IMG02-ST02.debug-bundle.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  protect may still show syncing/copying until reconcile runs.
+  remote-nbd state is now deterministic per VM/target, but concurrent multi-disk validation is still required.
 ```
