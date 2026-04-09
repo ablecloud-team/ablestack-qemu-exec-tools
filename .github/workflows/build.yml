@@ -165,6 +165,9 @@ jobs:
   # ======================================================================
   build-v2k-rpm:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        host_os_minor: ["9.6", "9.7"]
     container:
       image: rockylinux/rockylinux:9
       options: --user 0
@@ -173,79 +176,85 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install build deps (v2k)
+      - name: Install build deps (v2k, Rocky ${{ matrix.host_os_minor }})
         run: |
           set -euo pipefail
 
+          ROCKY_MINOR="${{ matrix.host_os_minor }}"
+          REPO_PREFIX="rocky-vault-${ROCKY_MINOR}"
+
           # ======================================================================
-          # Rocky 9.6 vault  (AirGap )
-          # -  rocky.repo??mirrorlist? baseurl??          # - releasever=9.6 ? ? (baseurl??????
-          # - ???9.6 vault baseurl???repo?"" ?
+          # Rocky 9.x vault  (AirGap )
+          # -  rocky.repo??mirrorlist? baseurl??          # - releasever?minor? ? (baseurl??????
+          # - ???minor vault baseurl???repo?"" ?
           # ======================================================================
-          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
-          [rocky-vault-9.6-baseos]
-          name=Rocky Linux 9.6 - BaseOS (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
+          [${REPO_PREFIX}-baseos]
+          name=Rocky Linux ${ROCKY_MINOR} - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/BaseOS/\$basearch/os/
           enabled=1
           gpgcheck=0
 
-          [rocky-vault-9.6-appstream]
-          name=Rocky Linux 9.6 - AppStream (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          [${REPO_PREFIX}-appstream]
+          name=Rocky Linux ${ROCKY_MINOR} - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/AppStream/\$basearch/os/
           enabled=1
           gpgcheck=0
 
-          [rocky-vault-9.6-crb]
-          name=Rocky Linux 9.6 - CRB (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          [${REPO_PREFIX}-crb]
+          name=Rocky Linux ${ROCKY_MINOR} - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/CRB/\$basearch/os/
           enabled=1
           gpgcheck=0
           EOF
 
           dnf clean all
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" makecache
 
           # curl  ?: curl-minimal vs curl
           # - ? ? curl-minimal?? , ? ??allowerasing? 
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install \
             --allowerasing ca-certificates curl-minimal || true
 
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install \
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install \
             make rpm-build tar git dnf-plugins-core createrepo_c
 
-      - name: Configure Rocky 9.6 vault repos + enable EPEL (build-time only)
+      - name: Configure Rocky ${{ matrix.host_os_minor }} vault repos + enable EPEL (build-time only)
         run: |
           set -euo pipefail
 
+          ROCKY_MINOR="${{ matrix.host_os_minor }}"
+          REPO_PREFIX="rocky-vault-${ROCKY_MINOR}"
+
           # ?: rocky.repo?"rewrite"? ???          # rocky.repo??mirrorlist? baseurl???? ?
           # mirrorlist? ? "baseurl ?"? dnf  ??.
-          # ???9.6 vault baseurl???repo ?????? ??.
+          # ???minor vault baseurl???repo ?????? ??.
 
-          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
-          [rocky-vault-9.6-baseos]
-          name=Rocky Linux 9.6 - BaseOS (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
+          [${REPO_PREFIX}-baseos]
+          name=Rocky Linux ${ROCKY_MINOR} - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/BaseOS/\$basearch/os/
           enabled=1
           gpgcheck=0
 
-          [rocky-vault-9.6-appstream]
-          name=Rocky Linux 9.6 - AppStream (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          [${REPO_PREFIX}-appstream]
+          name=Rocky Linux ${ROCKY_MINOR} - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/AppStream/\$basearch/os/
           enabled=1
           gpgcheck=0
 
-          [rocky-vault-9.6-crb]
-          name=Rocky Linux 9.6 - CRB (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          [${REPO_PREFIX}-crb]
+          name=Rocky Linux ${ROCKY_MINOR} - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/CRB/\$basearch/os/
           enabled=1
           gpgcheck=0
           EOF
 
-          echo "[INFO] Enabled repos (vault 9.6):"
-          grep -nE '^\[|^baseurl=' /etc/yum.repos.d/rocky-vault-9.6.repo
+          echo "[INFO] Enabled repos (vault ${ROCKY_MINOR}):"
+          grep -nE '^\[|^baseurl=' "/etc/yum.repos.d/${REPO_PREFIX}.repo"
 
           # vault repo? ?
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" makecache
 
           # EPEL??build-time only (nbd ? ) ??? ?
           # vault repo  ? ??epel-release ??'dnf install'? ???(No match).
@@ -267,7 +276,7 @@ jobs:
           echo "EPEL_REPO_ID=${EPEL_REPO_ID}" >> "$GITHUB_ENV"
 
           # vault + epel  ?(???repo?
-          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*","${EPEL_REPO_ID}" makecache          
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*","${EPEL_REPO_ID}" makecache
 
       - name: Build V2K RPM (separate path)
         run: |
@@ -284,10 +293,12 @@ jobs:
           rpm -qlp "${RPM_FILE}" | grep -E "bash-completion/completions/ablestack_v2k$" >/dev/null
           echo "[OK] bash completion is packaged"
 
-      - name: Create V2K RPM repo (offline) for ABLESTACK (Rocky 9.6)
+      - name: Create V2K RPM repo (offline) for ABLESTACK (Rocky ${{ matrix.host_os_minor }})
         run: |
           set -euo pipefail
-          WORKDIR="release/v2k/v2k-rpm-rocky9.6"
+          ROCKY_MINOR="${{ matrix.host_os_minor }}"
+          REPO_PREFIX="rocky-vault-${ROCKY_MINOR}"
+          WORKDIR="release/v2k/v2k-rpm-rocky${ROCKY_MINOR}"
           mkdir -p "$WORKDIR"
 
           # Collect V2K RPM outputs while avoiding files already inside WORKDIR.
@@ -300,9 +311,9 @@ jobs:
 
           : "${EPEL_REPO_ID:?EPEL_REPO_ID is not set. Configure step must export it to GITHUB_ENV}"
           DNF_COMMON_OPTS=(
-            --releasever=9.6
+            --releasever=${ROCKY_MINOR}
             --disablerepo=*
-            --enablerepo="rocky-vault-9.6-*","${EPEL_REPO_ID}"
+            --enablerepo="${REPO_PREFIX}-*","${EPEL_REPO_ID}"
             --setopt=install_weak_deps=False
           )
 
@@ -317,13 +328,8 @@ jobs:
             libvirt-client
           )
 
-          BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
-          if [[ ! -f "${BASELINE_FILE}" ]]; then
-            echo "[ERR] Missing baseline file: ${BASELINE_FILE}" >&2
-            echo "      Generate on ABLESTACK 9.6 host:" >&2
-            echo "        rpm -qa --qf '%{NAME}\\n' | sort -u > ${BASELINE_FILE}" >&2
-            exit 2
-          fi
+          BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_${ROCKY_MINOR}.txt"
+          SHARED_BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_9.6.txt"
 
           echo "[INFO] Sanity check: required pkgs availability (repo view)"
           dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available "${REQ_PKGS[@]}" >/dev/null
@@ -334,47 +340,63 @@ jobs:
             --qf '%{name}' \
             "${REQ_PKGS[@]}" | sed '/^$/d' | sort -u > /tmp/v2k_dep_closure.txt
 
-          printf '%s\n' "${REQ_PKGS[@]}" | sed '/^$/d' | sort -u > /tmp/v2k_must_have.txt
-          sort -u "${BASELINE_FILE}" > /tmp/v2k_baseline.txt
-          comm -23 /tmp/v2k_dep_closure.txt /tmp/v2k_baseline.txt > /tmp/v2k_to_download_closure.txt
+          TMP_PREFIX="/tmp/v2k-${ROCKY_MINOR}"
+          printf '%s\n' "${REQ_PKGS[@]}" | sed '/^$/d' | sort -u > "${TMP_PREFIX}-must-have.txt"
 
-          # must-have + (closure-baseline) = candidate list
-          cat /tmp/v2k_must_have.txt /tmp/v2k_to_download_closure.txt | sort -u > /tmp/v2k_to_download_candidate.txt
-
-          echo "[INFO] Candidate(to-download) count: $(wc -l < /tmp/v2k_to_download_candidate.txt)"
-          echo "[INFO] Candidate sample (first 50):"
-          head -n 50 /tmp/v2k_to_download_candidate.txt || true
-
-          echo "[INFO] Filtering candidate list by repo availability (STRICT)..."
-          : > /tmp/v2k_to_download_avail.txt
-          cat /tmp/v2k_to_download_candidate.txt \
-            | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
-            | sort -u > /tmp/v2k_to_download_avail.txt
-
-          # Drop language pack expansions from the final download set.
-          grep -vE '^glibc-all-langpacks$|^glibc-langpack-' /tmp/v2k_to_download_avail.txt \
-            | sort -u > /tmp/v2k_to_download.txt
-
-          comm -23 /tmp/v2k_to_download_candidate.txt /tmp/v2k_to_download_avail.txt > /tmp/v2k_missing_in_repo.txt
-          if [[ -s /tmp/v2k_missing_in_repo.txt ]]; then
-            echo "[WARN] Missing in enabled repos (skipped):"
-            head -n 50 /tmp/v2k_missing_in_repo.txt || true
+          EFFECTIVE_BASELINE_FILE="${BASELINE_FILE}"
+          if [[ -f "${BASELINE_FILE}" ]]; then
+            echo "[INFO] Using ABLESTACK baseline file: ${BASELINE_FILE}"
+          elif [[ -f "${SHARED_BASELINE_FILE}" ]]; then
+            EFFECTIVE_BASELINE_FILE="${SHARED_BASELINE_FILE}"
+            echo "[WARN] Missing minor-specific baseline: ${BASELINE_FILE}"
+            echo "[INFO] Reusing shared ABLESTACK 9.6 baseline: ${SHARED_BASELINE_FILE}"
+          else
+            echo "[ERR] Missing baseline file: ${BASELINE_FILE}" >&2
+            echo "[ERR] Missing shared fallback baseline: ${SHARED_BASELINE_FILE}" >&2
+            echo "      Provide at least ${SHARED_BASELINE_FILE} to avoid downloading unnecessary host packages." >&2
+            exit 2
           fi
 
-          echo "[INFO] Final to-download count(after avail+langpack filter): $(wc -l < /tmp/v2k_to_download.txt)"
+          sort -u "${EFFECTIVE_BASELINE_FILE}" > "${TMP_PREFIX}-baseline.txt"
+          comm -23 /tmp/v2k_dep_closure.txt "${TMP_PREFIX}-baseline.txt" > "${TMP_PREFIX}-to-download-closure.txt"
+
+          # must-have + (closure-baseline) = candidate list
+          cat "${TMP_PREFIX}-must-have.txt" "${TMP_PREFIX}-to-download-closure.txt" | sort -u > "${TMP_PREFIX}-to-download-candidate.txt"
+
+          echo "[INFO] Candidate(to-download) count: $(wc -l < "${TMP_PREFIX}-to-download-candidate.txt")"
+          echo "[INFO] Candidate sample (first 50):"
+          head -n 50 "${TMP_PREFIX}-to-download-candidate.txt" || true
+
+          echo "[INFO] Filtering candidate list by repo availability (STRICT)..."
+          : > "${TMP_PREFIX}-to-download-avail.txt"
+          cat "${TMP_PREFIX}-to-download-candidate.txt" \
+            | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
+            | sort -u > "${TMP_PREFIX}-to-download-avail.txt"
+
+          # Drop language pack expansions from the final download set.
+          grep -vE '^glibc-all-langpacks$|^glibc-langpack-' "${TMP_PREFIX}-to-download-avail.txt" \
+            | sort -u > "${TMP_PREFIX}-to-download.txt"
+
+          comm -23 "${TMP_PREFIX}-to-download-candidate.txt" "${TMP_PREFIX}-to-download-avail.txt" > "${TMP_PREFIX}-missing-in-repo.txt"
+          if [[ -s "${TMP_PREFIX}-missing-in-repo.txt" ]]; then
+            echo "[WARN] Missing in enabled repos (skipped):"
+            head -n 50 "${TMP_PREFIX}-missing-in-repo.txt" || true
+          fi
+
+          echo "[INFO] Final to-download count(after avail+langpack filter): $(wc -l < "${TMP_PREFIX}-to-download.txt")"
           echo "[INFO] Final to-download sample (first 50):"
-          head -n 50 /tmp/v2k_to_download.txt || true
+          head -n 50 "${TMP_PREFIX}-to-download.txt" || true
 
           # Safety check: key packages must exist either in the baseline or in the download list.
           for p in nbd nbdkit qemu-img; do
-            if ! grep -qx "$p" /tmp/v2k_to_download.txt && ! grep -qx "$p" /tmp/v2k_baseline.txt; then
+            if ! grep -qx "$p" "${TMP_PREFIX}-to-download.txt" && ! grep -qx "$p" "${TMP_PREFIX}-baseline.txt"; then
               echo "[ERR] Required package '$p' is neither in baseline nor in final download list." >&2
               exit 2
             fi
           done
 
-          if [[ -s /tmp/v2k_to_download.txt ]]; then
-            xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < /tmp/v2k_to_download.txt
+          if [[ -s "${TMP_PREFIX}-to-download.txt" ]]; then
+            xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < "${TMP_PREFIX}-to-download.txt"
           else
             echo "[INFO] Nothing to download (all deps satisfied by baseline)."
           fi
@@ -388,7 +410,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: v2k-rpm-package
+          name: v2k-rpm-package-rocky${{ matrix.host_os_minor }}
           path: release/v2k/**
 
   # ======================================================================
@@ -623,23 +645,23 @@ jobs:
           echo " Collecting MSI artifacts..."
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
 
-      - name: Collect V2K RPM repo (Rocky 9.6) into ISO tree
+      - name: Collect V2K RPM repos into ISO tree
         shell: bash
         run: |
           set -euo pipefail
-          # build-v2k-rpm outputs: release/v2k/v2k-rpm-rocky9.6
-          SRC_DIR=$(find dist -type d -path "*/v2k-rpm-package/v2k-rpm-rocky9.6" -o -path "*/v2k-rpm-package/release/v2k/v2k-rpm-rocky9.6" | head -n 1 || true)
-          if [[ -z "${SRC_DIR}" || ! -d "${SRC_DIR}" ]]; then
-            echo "[ERR] No V2K RPM repo found in workflow artifacts." >&2
-            echo "[ERR] Debug: listing dist/v2k-rpm-package tree (maxdepth=6)" >&2
-            find dist -maxdepth 6 -path "*v2k-rpm-package*" -print >&2 || true
-            exit 2
-          fi
+          for ver in 9.6 9.7; do
+            SRC_DIR=$(find dist -type d -path "*/v2k-rpm-rocky${ver}" | head -n 1 || true)
+            if [[ -z "${SRC_DIR}" || ! -d "${SRC_DIR}" ]]; then
+              echo "[ERR] No V2K RPM repo found for Rocky ${ver} in workflow artifacts." >&2
+              echo "[ERR] Debug: listing dist/*v2k-rpm* tree (maxdepth=6)" >&2
+              find dist -maxdepth 6 -path "*v2k-rpm*" -print >&2 || true
+              exit 2
+            fi
 
-          echo "[INFO] Found V2K repo: ${SRC_DIR}"
-          mkdir -p release/v2k/v2k-rpm-rocky9.6
-          # Preserve repodata/ and all rpm files
-          cp -a "${SRC_DIR}/." release/v2k/v2k-rpm-rocky9.6/
+            echo "[INFO] Found V2K repo for Rocky ${ver}: ${SRC_DIR}"
+            mkdir -p "release/v2k/v2k-rpm-rocky${ver}"
+            cp -a "${SRC_DIR}/." "release/v2k/v2k-rpm-rocky${ver}/"
+          done
 
       - name: Stage V2K assets from repo ./assets into ISO
         shell: bash
@@ -945,6 +967,7 @@ jobs:
                 install.bat / install.ps1
             - V2K (ABLESTACK Host add-on):
                 v2k/v2k-rpm-rocky9.6 (offline RPM repo for ablestack_v2k)
+                v2k/v2k-rpm-rocky9.7 (offline RPM repo for ablestack_v2k)
                 assets/govc_Linux_x86_64.tar.gz
                 assets/VMware-vix-disklib-*.tar.gz
                 assets/v2k/wheels (pyvmomi offline wheels)
@@ -980,6 +1003,16 @@ jobs:
               echo "[ERROR] Cannot detect distribution!"
               exit 1
           fi
+
+          resolve_v2k_repo_dir() {
+              local repo_dir=
+              if [[ -z "${VERSION_ID:-}" ]]; then
+                  return 1
+              fi
+              repo_dir="${ISO_MNT}/v2k/v2k-rpm-rocky${VERSION_ID}"
+              [[ -d "${repo_dir}" ]] || return 1
+              printf '%s\n' "${repo_dir}"
+          }
 
           case "$DISTRO" in
               rocky|rhel|centos|almalinux|fedora)
@@ -1037,14 +1070,13 @@ jobs:
                   #  - Air-Gap: pyvmomi installs from ISO offline wheels
                   #  - NO ldconfig / NO global linker path modifications
                   # ======================================================================
-                  if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${VERSION_ID:-}" == 9.6* ]]; then
-                      echo "[INFO] ABLESTACK 9.6 detected. Installing V2K add-on..."
+                  if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${MAJOR_VERSION:-}" == "9" ]]; then
+                      if V2K_REPO_DIR="$(resolve_v2k_repo_dir)"; then
+                          echo "[INFO] ABLESTACK ${VERSION_ID:-unknown} detected. Installing V2K add-on..."
 
-                      has_cmd() { command -v "$1" >/dev/null 2>&1; }
+                          has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
-                      # 1) Install ablestack_v2k RPM from ISO local repo
-                      V2K_REPO_DIR="${ISO_MNT}/v2k/v2k-rpm-rocky9.6"
-                      if [[ -d "${V2K_REPO_DIR}" ]]; then
+                          # 1) Install ablestack_v2k RPM from ISO local repo
                           V2K_REPO_FILE=/etc/yum.repos.d/ablestack-v2k.repo
                           sudo tee "${V2K_REPO_FILE}" >/dev/null <<-EOV
           [ablestack-v2k]
@@ -1059,47 +1091,50 @@ jobs:
                             sudo dnf -y localinstall "${V2K_REPO_DIR}"/*.rpm
                           sudo rm -f "${V2K_REPO_FILE}"
                           sudo dnf clean all
-                      else
-                          echo "[WARN] V2K RPM repo not found in ISO: ${V2K_REPO_DIR}"
-                      fi
 
-                      # 2) Install compatibility profile assets from ISO
-                      V2K_INSTALLER_BIN="$(command -v v2k_test_install.sh || true)"
-                      if [[ -z "${V2K_INSTALLER_BIN}" && -x "${ISO_MNT}/bin/v2k_test_install.sh" ]]; then
-                          V2K_INSTALLER_BIN="${ISO_MNT}/bin/v2k_test_install.sh"
-                      fi
-                      if [[ -x "${V2K_INSTALLER_BIN}" ]]; then
-                          echo "[INFO] Installing V2K compatibility profiles from ISO assets..."
-                          sudo "${V2K_INSTALLER_BIN}" \
-                            --repo-root "${ISO_MNT}" \
-                            --skip-install \
-                            --install-assets \
-                            --install-profile all \
-                            --validate-profile all
-                      else
-                          echo "[WARN] v2k_test_install.sh not found after ablestack_v2k installation."
-                          echo "[WARN] Skipping compatibility profile asset installation."
-                      fi
-
-                      # 5) WinPE ISO  (???? ?? /??
-                      # - ? ISO??winpe/*.iso  ???? ?
-                      WINPE_SRC_DIR="${ISO_MNT}/winpe"
-                      WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
-                      WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
-                      if [[ -d "${WINPE_SRC_DIR}" ]]; then
-                          WINPE_ISO_FILE="$(ls -1 "${WINPE_SRC_DIR}"/*.iso 2>/dev/null | head -n 1 || true)"
-                          if [[ -n "${WINPE_ISO_FILE}" && -f "${WINPE_ISO_FILE}" ]]; then
-                              echo "[INFO] Installing WinPE ISO from: ${WINPE_ISO_FILE}"
-                              sudo mkdir -p "${WINPE_DST_DIR}"
-                              sudo cp -a "${WINPE_ISO_FILE}" "${WINPE_DST_DIR}/"
-                              sudo ln -sfn "${WINPE_DST_DIR}/$(basename "${WINPE_ISO_FILE}")" "${WINPE_LINK}"
-                              echo "[OK] WinPE ISO installed: ${WINPE_LINK}"
+                          # 2) Install compatibility profile assets from ISO
+                          V2K_INSTALLER_BIN="$(command -v v2k_test_install.sh || true)"
+                          if [[ -z "${V2K_INSTALLER_BIN}" && -x "${ISO_MNT}/bin/v2k_test_install.sh" ]]; then
+                              V2K_INSTALLER_BIN="${ISO_MNT}/bin/v2k_test_install.sh"
+                          fi
+                          if [[ -x "${V2K_INSTALLER_BIN}" ]]; then
+                              echo "[INFO] Installing V2K compatibility profiles from ISO assets..."
+                              sudo "${V2K_INSTALLER_BIN}" \
+                                --repo-root "${ISO_MNT}" \
+                                --skip-install \
+                                --install-assets \
+                                --install-profile all \
+                                --validate-profile all
                           else
-                              echo "[WARN] WinPE ISO not found under ${WINPE_SRC_DIR}"
+                              echo "[WARN] v2k_test_install.sh not found after ablestack_v2k installation."
+                              echo "[WARN] Skipping compatibility profile asset installation."
+                          fi
+
+                          # 5) WinPE ISO  (???? ?? /??
+                          # - ? ISO??winpe/*.iso  ???? ?
+                          WINPE_SRC_DIR="${ISO_MNT}/winpe"
+                          WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
+                          WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
+                          if [[ -d "${WINPE_SRC_DIR}" ]]; then
+                              WINPE_ISO_FILE="$(ls -1 "${WINPE_SRC_DIR}"/*.iso 2>/dev/null | head -n 1 || true)"
+                              if [[ -n "${WINPE_ISO_FILE}" && -f "${WINPE_ISO_FILE}" ]]; then
+                                  echo "[INFO] Installing WinPE ISO from: ${WINPE_ISO_FILE}"
+                                  sudo mkdir -p "${WINPE_DST_DIR}"
+                                  sudo cp -a "${WINPE_ISO_FILE}" "${WINPE_DST_DIR}/"
+                                  sudo ln -sfn "${WINPE_DST_DIR}/$(basename "${WINPE_ISO_FILE}")" "${WINPE_LINK}"
+                                  echo "[OK] WinPE ISO installed: ${WINPE_LINK}"
+                              else
+                                  echo "[WARN] WinPE ISO not found under ${WINPE_SRC_DIR}"
+                              fi
+                          else
+                              echo "[WARN] WinPE dir not found in ISO: ${WINPE_SRC_DIR} (skip)"
                           fi
                       else
-                          echo "[WARN] WinPE dir not found in ISO: ${WINPE_SRC_DIR} (skip)"
+                          echo "[WARN] No bundled V2K repo matches host Rocky ${VERSION_ID:-unknown}."
+                          echo "[WARN] Expected: ${ISO_MNT}/v2k/v2k-rpm-rocky${VERSION_ID:-<minor>}"
                       fi
+                  else
+                      echo "[INFO] V2K add-on skipped (not ABLESTACK host or not Rocky 9)."
                   fi
                   ;;
               ubuntu|debian)
@@ -1181,3 +1216,4 @@ jobs:
             release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
             release/rpm/hangctl-rpm-rocky9/*.rpm
             release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
+            release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.rpm
