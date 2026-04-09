@@ -181,29 +181,37 @@ jobs:
           set -euo pipefail
 
           ROCKY_MINOR="${{ matrix.host_os_minor }}"
-          REPO_PREFIX="rocky-vault-${ROCKY_MINOR}"
+          REPO_PREFIX="rocky-build-${ROCKY_MINOR}"
+          if [[ "${ROCKY_MINOR}" == "9.6" ]]; then
+            REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
+          elif [[ "${ROCKY_MINOR}" == "9.7" ]]; then
+            REPO_ROOT="https://dl.rockylinux.org/pub/rocky/${ROCKY_MINOR}"
+          else
+            echo "[ERR] Unsupported Rocky minor for V2K build: ${ROCKY_MINOR}" >&2
+            exit 2
+          fi
 
           # ======================================================================
-          # Rocky 9.x vault  (AirGap )
-          # -  rocky.repo??mirrorlist? baseurl??          # - releasever?minor? ? (baseurl??????
-          # - ???minor vault baseurl???repo?"" ?
+          # Rocky 9.x build repos
+          # - 9.6 uses vault because it is an older point release.
+          # - 9.7 uses the normal pub tree because it is the active release.
           # ======================================================================
           cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
           [${REPO_PREFIX}-baseos]
-          name=Rocky Linux ${ROCKY_MINOR} - BaseOS (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/BaseOS/\$basearch/os/
+          name=Rocky Linux ${ROCKY_MINOR} - BaseOS
+          baseurl=${REPO_ROOT}/BaseOS/\$basearch/os/
           enabled=1
           gpgcheck=0
 
           [${REPO_PREFIX}-appstream]
-          name=Rocky Linux ${ROCKY_MINOR} - AppStream (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/AppStream/\$basearch/os/
+          name=Rocky Linux ${ROCKY_MINOR} - AppStream
+          baseurl=${REPO_ROOT}/AppStream/\$basearch/os/
           enabled=1
           gpgcheck=0
 
           [${REPO_PREFIX}-crb]
-          name=Rocky Linux ${ROCKY_MINOR} - CRB (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/CRB/\$basearch/os/
+          name=Rocky Linux ${ROCKY_MINOR} - CRB
+          baseurl=${REPO_ROOT}/CRB/\$basearch/os/
           enabled=1
           gpgcheck=0
           EOF
@@ -224,33 +232,40 @@ jobs:
           set -euo pipefail
 
           ROCKY_MINOR="${{ matrix.host_os_minor }}"
-          REPO_PREFIX="rocky-vault-${ROCKY_MINOR}"
+          REPO_PREFIX="rocky-build-${ROCKY_MINOR}"
+          if [[ "${ROCKY_MINOR}" == "9.6" ]]; then
+            REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
+          elif [[ "${ROCKY_MINOR}" == "9.7" ]]; then
+            REPO_ROOT="https://dl.rockylinux.org/pub/rocky/${ROCKY_MINOR}"
+          else
+            echo "[ERR] Unsupported Rocky minor for V2K build: ${ROCKY_MINOR}" >&2
+            exit 2
+          fi
 
-          # ?: rocky.repo?"rewrite"? ???          # rocky.repo??mirrorlist? baseurl???? ?
-          # mirrorlist? ? "baseurl ?"? dnf  ??.
-          # ???minor vault baseurl???repo ?????? ??.
+          # Use explicit baseurl repos so dependency resolution stays pinned to the
+          # intended Rocky minor even when the default rocky.repo changes upstream.
 
           cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
           [${REPO_PREFIX}-baseos]
-          name=Rocky Linux ${ROCKY_MINOR} - BaseOS (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/BaseOS/\$basearch/os/
+          name=Rocky Linux ${ROCKY_MINOR} - BaseOS
+          baseurl=${REPO_ROOT}/BaseOS/\$basearch/os/
           enabled=1
           gpgcheck=0
 
           [${REPO_PREFIX}-appstream]
-          name=Rocky Linux ${ROCKY_MINOR} - AppStream (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/AppStream/\$basearch/os/
+          name=Rocky Linux ${ROCKY_MINOR} - AppStream
+          baseurl=${REPO_ROOT}/AppStream/\$basearch/os/
           enabled=1
           gpgcheck=0
 
           [${REPO_PREFIX}-crb]
-          name=Rocky Linux ${ROCKY_MINOR} - CRB (vault)
-          baseurl=https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}/CRB/\$basearch/os/
+          name=Rocky Linux ${ROCKY_MINOR} - CRB
+          baseurl=${REPO_ROOT}/CRB/\$basearch/os/
           enabled=1
           gpgcheck=0
           EOF
 
-          echo "[INFO] Enabled repos (vault ${ROCKY_MINOR}):"
+          echo "[INFO] Enabled repos (${ROCKY_MINOR}):"
           grep -nE '^\[|^baseurl=' "/etc/yum.repos.d/${REPO_PREFIX}.repo"
 
           # vault repo? ?
@@ -297,7 +312,7 @@ jobs:
         run: |
           set -euo pipefail
           ROCKY_MINOR="${{ matrix.host_os_minor }}"
-          REPO_PREFIX="rocky-vault-${ROCKY_MINOR}"
+          REPO_PREFIX="rocky-build-${ROCKY_MINOR}"
           WORKDIR="release/v2k/v2k-rpm-rocky${ROCKY_MINOR}"
           mkdir -p "$WORKDIR"
 
