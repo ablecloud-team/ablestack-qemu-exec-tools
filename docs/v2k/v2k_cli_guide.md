@@ -60,8 +60,8 @@ Common options:
 | `--vcenter <host>` | Source vCenter host |
 | `--cred-file <file>` | GOVC credential file |
 | `--vddk-cred-file <file>` | Explicit VDDK credential file |
-| `--dst <path>` | Destination root path |
-| `--compat-profile <id|auto>` | Compatibility profile selection |
+| `--dst <path>` | Destination root path. If omitted, `run` uses `/var/lib/libvirt/images/<vm>` |
+| `--compat-profile <id|auto>` | Compatibility profile selection. Default is `auto` |
 | `--target-format qcow2|raw` | Output image format |
 | `--target-storage file|block|rbd` | Target storage type |
 | `--target-map-json <json>` | Required for `block` and `rbd` targets. Block example: `{"scsi0:0":"/dev/sdb"}`. RBD example: `{"scsi0:0":"rbd:pool/vm-disk0"}` |
@@ -76,7 +76,6 @@ ablestack_v2k run \
   --vm my-vm \
   --vcenter vc.example.local \
   --cred-file ./govc.env \
-  --dst /var/lib/libvirt/images/my-vm \
   --compat-profile auto \
   --target-format qcow2 \
   --target-storage file
@@ -89,11 +88,10 @@ ablestack_v2k run \
   --vm my-vm \
   --vcenter vc.example.local \
   --cred-file ./govc.env \
-  --dst /var/lib/libvirt/images/my-vm \
   --compat-profile auto \
   --base-args "--jobs 4 --chunk 4194304" \
   --incr-args "--jobs 2 --coalesce-gap 65536" \
-  --cutover-args "--define-only --bridge br0 --vcpu 4 --memory 8192"
+  --cutover-args "--define-only --shutdown guest"
 ```
 
 ## `init`
@@ -145,6 +143,12 @@ ablestack_v2k cbt enable
 
 After `init`, `--workdir` is enough. The command restores `govc.env` and `vddk.cred` automatically from the workdir.
 
+Example with workdir:
+
+```bash
+ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cbt status
+```
+
 ## `snapshot`
 
 ```bash
@@ -157,6 +161,12 @@ Optional flags:
 
 - `--name <snapshot-name>`
 - `--safe-mode`
+
+Example with workdir:
+
+```bash
+ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> snapshot incr --name migr-incr-manual
+```
 
 ## `sync`
 
@@ -174,10 +184,22 @@ Optional flags:
 - `--force-cleanup`
 - `--safe-mode`
 
+Example with workdir:
+
+```bash
+ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> sync base --jobs 4
+```
+
 ## `verify`
 
 ```bash
 ablestack_v2k verify --mode quick --samples 64
+```
+
+Example with workdir:
+
+```bash
+ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> verify
 ```
 
 ## `cutover`
@@ -201,6 +223,17 @@ Important options:
 - `--winpe-iso <path>`
 - `--virtio-iso <path>`
 
+Notes:
+
+- Current libvirt XML generation uses source inventory values for CPU/memory and the source MAC plus auto-detected host bridge.
+- `--vcpu`, `--memory`, `--network`, `--bridge`, and `--vlan` are accepted by `cutover`, but they are not currently reflected in the generated XML.
+
+Example with workdir:
+
+```bash
+ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cutover --shutdown poweroff --no-winpe-bootstrap --start
+```
+
 ## `cleanup`
 
 ```bash
@@ -208,15 +241,28 @@ ablestack_v2k cleanup
 ablestack_v2k cleanup --keep-snapshots --keep-workdir
 ```
 
+Example with workdir:
+
+```bash
+ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cleanup
+```
+
 ## `status`
 
 ```bash
 ablestack_v2k status
+ablestack_v2k status --vm "my-vm"
+ablestack_v2k status --vm "vm-a,vm-b" --watch
 ```
 
 This reads the manifest and recent `events.log` entries and shows:
 
 - phase completion state
 - selected compatibility profile
+
+Notes:
+
+- Plain `status` reads the selected workdir.
+- `status --vm ...` enters fleet status mode and scans the work root for the latest run per VM.
 - disk CBT state
 - recent sync issues
