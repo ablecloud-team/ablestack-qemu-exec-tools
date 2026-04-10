@@ -197,9 +197,7 @@ v2k_target_generate_libvirt_xml() {
   local os_xml features_xml tpm_xml="" balloon_xml="" channel_xml="" video_xml=""
   features_xml="<features><acpi/><apic/></features>"
   balloon_xml="
-    <memballoon model='virtio' autodeflate='on' freePageReporting='on'>
-      <stats period='60'/>
-    </memballoon>"
+    <memballoon model='none'/>"
   channel_xml="
     <controller type='virtio-serial' index='0'/>
     <channel type='unix'>
@@ -207,7 +205,7 @@ v2k_target_generate_libvirt_xml() {
     </channel>"
   video_xml="
     <video>
-      <model type='cirrus' vram='16384' heads='1' primary='yes'/>
+      <model type='vga' vram='16384' heads='1' primary='yes'/>
     </video>"
 
   if [[ "${fw}" == "efi" ]]; then
