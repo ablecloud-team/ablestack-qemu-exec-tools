@@ -177,6 +177,44 @@ FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME="${export_name}"
 EOF
 }
 
+ftctl_test_shared_target_get() {
+  local idx="${1-}"
+  local var
+  if [[ "${idx}" == "1" ]]; then
+    var="SHARED_TARGET_PATH"
+  else
+    var="SHARED_TARGET_PATH_${idx}"
+  fi
+  printf '%s' "${!var-}"
+}
+
+ftctl_test_build_disk_map() {
+  local backend="${1-}"
+  local parts=()
+  local idx target shared_target
+
+  case "${backend}" in
+    remote-nbd)
+      printf '%s' "auto"
+      return 0
+      ;;
+    shared-blockcopy)
+      for idx in $(ftctl_test_protected_disk_indices); do
+        target="$(ftctl_test_disk_get "${idx}" TARGET)"
+        shared_target="$(ftctl_test_shared_target_get "${idx}")"
+        [[ -n "${target}" && -n "${shared_target}" ]] || ftctl_test_die "shared-blockcopy requires SHARED_TARGET_PATH values for each protected disk"
+        parts+=("${target}=${shared_target}")
+      done
+      local IFS=';'
+      printf '%s' "${parts[*]}"
+      return 0
+      ;;
+    *)
+      ftctl_test_die "unsupported backend for disk map: ${backend}"
+      ;;
+  esac
+}
+
 ftctl_test_cleanup_remote_nbd() {
   local vm="${1-}"
   local secondary_vm="${2-}"
@@ -196,6 +234,40 @@ ftctl_test_cleanup_remote_nbd() {
   "
   virsh -c "${SECONDARY_LIBVIRT_URI}" destroy "${secondary_vm}" >/dev/null 2>&1 || true
   virsh -c "${SECONDARY_LIBVIRT_URI}" undefine "${secondary_vm}" >/dev/null 2>&1 || true
+}
+
+ftctl_test_cleanup_shared_blockcopy() {
+  local vm="${1-}"
+  local secondary_vm="${2-}"
+  local idx target_path
+
+  rm -f /run/ablestack-vm-ftctl/state/"${vm}".state*
+  rm -rf /run/ablestack-vm-ftctl/debug/blockcopy/"${vm}"
+
+  for idx in $(ftctl_test_protected_disk_indices); do
+    target_path="$(ftctl_test_shared_target_get "${idx}")"
+    [[ -n "${target_path}" ]] || continue
+    rm -f "${target_path}" >/dev/null 2>&1 || true
+  done
+
+  virsh -c "${SECONDARY_LIBVIRT_URI}" destroy "${secondary_vm}" >/dev/null 2>&1 || true
+  virsh -c "${SECONDARY_LIBVIRT_URI}" undefine "${secondary_vm}" >/dev/null 2>&1 || true
+}
+
+ftctl_test_cleanup_case() {
+  local vm="${1-}"
+  local secondary_vm="${2-}"
+  case "${FTCTL_PROFILE_BACKEND_MODE}" in
+    remote-nbd)
+      ftctl_test_cleanup_remote_nbd "${vm}" "${secondary_vm}"
+      ;;
+    shared-blockcopy)
+      ftctl_test_cleanup_shared_blockcopy "${vm}" "${secondary_vm}"
+      ;;
+    *)
+      ftctl_test_die "unsupported backend for cleanup: ${FTCTL_PROFILE_BACKEND_MODE}"
+      ;;
+  esac
 }
 
 ftctl_test_destroy_vm_if_present() {
@@ -382,6 +454,32 @@ ftctl_test_collect_bundle() {
   for f in /run/ablestack-vm-ftctl/debug/blockcopy/"${vm}"/v*/{remote-nbd-repro.sh,remote-nbd-dest.xml,primary-blockcopy-command.txt,primary-blockcopy-stdout.txt,primary-blockcopy-stderr.txt,primary-blockcopy-rc.txt,primary-dumpxml.stdout.xml,primary-blockjob.stdout.txt,secondary-prepare-context.txt,secondary-prepare-command.txt}; do
     [[ -f "${f}" ]] && { echo "===== ${f} ====="; cat "${f}"; }
   done > "${out_dir}/${TEST_ID}.debug-bundle.txt" || true
+}
+
+ftctl_test_collect_backend_target_log() {
+  local log_name="${1-}"
+  local cmd=""
+
+  case "${FTCTL_PROFILE_BACKEND_MODE}" in
+    remote-nbd)
+      cmd="ls -lh ${FTCTL_PROFILE_SECONDARY_TARGET_DIR}/${VM_NAME}/ ; ps -ef | grep qemu-nbd | grep ${VM_NAME} || true ; ss -lntp | grep ${FTCTL_REMOTE_NBD_PORT_BASE} || true"
+      ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${SECONDARY_SSH_USER}@${SECONDARY_MGMT_IP}" "${cmd}" 2>&1 | tee "$(ftctl_test_log_path "${log_name}")"
+      ;;
+    shared-blockcopy)
+      {
+        for idx in $(ftctl_test_protected_disk_indices); do
+          local path
+          path="$(ftctl_test_shared_target_get "${idx}")"
+          [[ -n "${path}" ]] || continue
+          echo "===== ${path} ====="
+          ls -lh "${path}" 2>/dev/null || true
+        done
+      } | tee "$(ftctl_test_log_path "${log_name}")"
+      ;;
+    *)
+      ftctl_test_die "unsupported backend for target collection: ${FTCTL_PROFILE_BACKEND_MODE}"
+      ;;
+  esac
 }
 
 ftctl_test_mark_summary() {

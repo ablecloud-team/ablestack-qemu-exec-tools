@@ -32,6 +32,7 @@ ftctl_test_prepare_log_dir
 
 PROFILE_PATH_REAL="${FTCTL_PROFILE_DIR:-/etc/ablestack/ftctl.d}/${VM_NAME}.conf"
 VM_XML_PATH="${VM_XML_RUNTIME_DIR}/${VM_NAME}.xml"
+FTCTL_PROFILE_DISK_MAP="$(ftctl_test_build_disk_map "${FTCTL_PROFILE_BACKEND_MODE}")"
 
 main() {
   ftctl_test_info "TEST_ID=${TEST_ID}"
@@ -60,8 +61,10 @@ main() {
   tee "$(ftctl_test_log_path "${TEST_ID}.profile.conf")" < "${PROFILE_PATH_REAL}" >/dev/null
 
   if [[ "${RECREATE_VM:-1}" == "1" ]]; then
-    ftctl_test_cleanup_remote_nbd "${VM_NAME}" "${FTCTL_PROFILE_SECONDARY_VM_NAME}"
+    ftctl_test_cleanup_case "${VM_NAME}" "${FTCTL_PROFILE_SECONDARY_VM_NAME}"
     ftctl_test_create_vm "${VM_NAME}" "${VM_XML_PATH}"
+  else
+    ftctl_test_cleanup_case "${VM_NAME}" "${FTCTL_PROFILE_SECONDARY_VM_NAME}"
   fi
 
   ftctl_test_run_and_log "${TEST_ID}.check.txt" ablestack_vm_ftctl check --vm "${VM_NAME}"
@@ -75,7 +78,7 @@ main() {
 
   ftctl_test_run_and_log "${TEST_ID}.status.t10.json" ablestack_vm_ftctl status --vm "${VM_NAME}" --json
   ftctl_test_run_and_log "${TEST_ID}.dumpxml.t10.xml" env LC_ALL=C LANG=C virsh -c "${PRIMARY_LIBVIRT_URI}" dumpxml "${VM_NAME}"
-  ftctl_test_run_and_log "${TEST_ID}.secondary-target.t10.txt" ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${SECONDARY_SSH_USER}@${SECONDARY_MGMT_IP}" "ls -lh ${FTCTL_PROFILE_SECONDARY_TARGET_DIR}/${VM_NAME}/ ; ps -ef | grep qemu-nbd | grep ${VM_NAME} || true ; ss -lntp | grep ${FTCTL_REMOTE_NBD_PORT_BASE} || true"
+  ftctl_test_collect_backend_target_log "${TEST_ID}.secondary-target.t10.txt"
 
   ftctl_test_run_and_log "${TEST_ID}.reconcile.txt" ablestack_vm_ftctl reconcile --vm "${VM_NAME}"
   ftctl_test_run_and_log "${TEST_ID}.status.final.json" ablestack_vm_ftctl status --vm "${VM_NAME}" --json

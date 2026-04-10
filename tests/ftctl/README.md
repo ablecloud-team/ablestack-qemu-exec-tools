@@ -10,6 +10,7 @@ The current automation scope targets:
 - `HA-IMG02-ST02`
 - `HA-IMG05-ST01`
 - `HA-IMG09-ST01`
+- `HA-IMG01-ST04`
 
 These are the non-shared local-storage HA cases that use the `remote-nbd` backend mode.
 
@@ -75,3 +76,4 @@ The runner performs the following high-level steps:
 - The current automation uses `virsh dumpxml` of the existing VM as the XML source template when `RECREATE_VM=1`.
 - For the currently committed case files, `RECREATE_VM=0` is used so the scripts operate on existing prepared VMs.
 - Shared-storage cases are not automated yet in this directory.
+- `HA-IMG01-ST04` assumes shared-visible storage is already mounted and accessible on both hosts.
