@@ -70,6 +70,7 @@ If FAIL:
 - `HA-IMG02-ST02`
 - `HA-IMG05-ST01`
 - `HA-IMG09-ST01`
+- `HA-IMG01-ST04`
 
 ## 4. Execution Records
 
@@ -435,4 +436,67 @@ If FAIL:
 - Remaining gap:
   Shared-storage HA mode remains unverified.
   Persistent failover/failback behavior should be validated separately.
+```
+
+### HA-IMG01-ST04
+
+```text
+Test ID: HA-IMG01-ST04
+Date: 2026-04-11
+Mode: HA
+VM Name: rocky10-shared
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Linux qcow2
+Storage Backend: shared GFS2-visible file path
+Profile Path: /etc/ablestack/ftctl.d/rocky10-shared.conf
+
+Preconditions:
+- Persistent VM
+- source disk on shared-visible primary path
+- target disk on shared-visible secondary path
+- FTCTL_PROFILE_BACKEND_MODE="shared-blockcopy"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="shared"
+- standby domain name distinct from the primary VM name
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-shared
+- ablestack_vm_ftctl protect --vm rocky10-shared --mode ha --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-shared
+- ablestack_vm_ftctl status --vm rocky10-shared --json
+- virsh dumpxml rocky10-shared
+- virsh blockjob --domain rocky10-shared --path vda --info
+- virsh -c qemu+ssh://10.10.31.2/system list --all
+- virsh -c qemu+ssh://10.10.31.2/system dominfo rocky10-shared-standby
+
+Expected Result:
+- blockcopy mirror is attached to the shared-visible target path
+- shared target file is created and maintained
+- standby domain is defined on the secondary host as a persistent standby VM
+- final state is protected/mirroring
+
+Actual Result:
+- runtime XML showed a file-based mirror with ready='yes'
+- blockjob reported 100.00%
+- shared target file existed on the secondary-visible shared path
+- standby domain `rocky10-shared-standby` was defined on the secondary host as a persistent domain
+- final state reached protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-IMG01-ST04.status.final.json
+- HA-IMG01-ST04.runtime-state.final.txt
+- HA-IMG01-ST04.dumpxml.final.xml
+- HA-IMG01-ST04.blockjob.vda.final.txt
+- HA-IMG01-ST04.peer.list.final.txt
+- HA-IMG01-ST04.peer.dominfo.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  Shared visible file-path mode now works for the single-disk persistent case.
+  Shared multi-disk and failover/failback behavior still need separate validation.
 ```

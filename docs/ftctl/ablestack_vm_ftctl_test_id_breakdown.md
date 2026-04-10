@@ -86,7 +86,7 @@ Recommended execution order:
 | `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | pass |
 | `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pass |
 | `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pending |
-| `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA NFS backend | pending |
+| `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA shared-visible filesystem backend | pass |
 | `HA-IMG01-ST05` | `IMG01` | `ST05` | recommended | HA multipath backend | pending |
 | `HA-IMG01-ST06` | `IMG01` | `ST06` | recommended | HA Ceph RBD backend | pending |
 
@@ -202,3 +202,12 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Validate persistent multi-disk behavior.
     - Validate persistent failover/failback under the same backend.
+
+- `HA-IMG01-ST04`
+  - Result: `PASS` with `shared-blockcopy` backend mode
+  - Observation:
+    - Shared-visible source and target paths worked with a file-based blockcopy mirror.
+    - The persistent standby domain naming and define path worked as intended on the secondary host.
+  - Follow-up improvement:
+    - Validate the same backend for multi-disk shared-visible layouts.
+    - Validate shared-visible failover/failback behavior.
