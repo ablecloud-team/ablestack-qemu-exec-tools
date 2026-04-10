@@ -85,10 +85,10 @@ Global options (all commands):
   --run-id <id>           Run identifier (auto-generate if omitted)
   --manifest <path>       Manifest path (default: <workdir>/manifest.json)
   --log <path>            Events log path (default: <workdir>/events.log)
-  --json                  Machine-readable JSON output
-  --dry-run               Do not execute destructive operations
-  --resume                Resume based on manifest
-  --force                 Force risky operations (required for some edge cases)
+  --json                  Machine-readable JSON output (default: off)
+  --dry-run               Do not execute destructive operations (default: off)
+  --resume                Resume based on manifest (default: off)
+  --force                 Force risky operations (default: off)
   -h, --help              Show help
 
 Commands:
@@ -128,28 +128,31 @@ Usage:
 Required:
   --vm <name|moref>
   --vcenter <host>
-  --dst <path>
 
 Authentication:
   --cred-file <file>
   --vddk-cred-file <file>
   --username <user>
   --password <pass>
-  --compat-profile <id|auto>
-  --insecure <0|1>
+  --compat-profile <id|auto>   Compatibility profile (default: auto)
+  --insecure <0|1>             GOVC insecure mode (default: 1)
+
+Destination:
+  --dst <path>                 Destination root (default: /var/lib/libvirt/images/<vm>)
 
 Pipeline:
-  --shutdown manual|guest|poweroff
+  --shutdown manual|guest|poweroff          Source shutdown policy (default: manual)
   --kvm-vm-policy none|define-only|define-and-start
-  --incr-interval <sec>
-  --max-incr <N>
-  --converge-threshold-sec <sec>
+                                            Target KVM policy (default: none)
+  --incr-interval <sec>                     Incr loop interval (default: 10)
+  --max-incr <N>                            Max incr loops (default: 6)
+  --converge-threshold-sec <sec>            Convergence threshold (default: 120)
   --no-incr
 
 Split-run:
-  --split full|phase1|phase2
-  --deadline-sec <sec>
-  --max-incr-phase2 <N>
+  --split full|phase1|phase2                Split-run mode (default: full)
+  --deadline-sec <sec>                      Phase2 deadline window (default: 120)
+  --max-incr-phase2 <N>                     Phase2 incr cap (default: 20)
 
 Sync defaults:
   --jobs <N>
@@ -168,9 +171,9 @@ Extra args:
       Example: --cutover-args "--define-only --bridge br0 --vcpu 4 --memory 8192"
 
 Init-stage options:
-  --mode govc
-  --target-format qcow2|raw
-  --target-storage file|block|rbd
+  --mode govc                               Inventory mode (default: govc)
+  --target-format qcow2|raw                 Target image format (default: qcow2)
+  --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>
       Required for block and rbd targets.
       block example: --target-map-json '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
@@ -178,9 +181,14 @@ Init-stage options:
   --force-block-device
 
 Cleanup policy:
-  --no-cleanup
-  --keep-snapshots
-  --keep-workdir
+  --no-cleanup                              Skip cleanup (default: cleanup runs)
+  --keep-snapshots                          Preserve migr-* snapshots (default: off)
+  --keep-workdir                            Preserve workdir after cleanup (default: on)
+
+Examples:
+  ablestack_v2k run --vm my-vm --vcenter vc.example.local --cred-file ./govc.env
+  ablestack_v2k run --vm my-vm --vcenter vc.example.local --cred-file ./govc.env --split phase1
+  ablestack_v2k run --vm my-vm --vcenter vc.example.local --cred-file ./govc.env --target-storage rbd --target-map-json '{"scsi0:0":"rbd:pool/my-vm-disk0"}'
 EOF
 }
 
@@ -190,12 +198,12 @@ Usage:
   ablestack_v2k init --vm <name|moref> --vcenter <host> --dst <path> [options...]
 
 Options:
-  --mode govc
+  --mode govc                               Inventory mode (default: govc)
   --cred-file <file>
   --vddk-cred-file <file>
-  --compat-profile <id|auto>
-  --target-format qcow2|raw
-  --target-storage file|block|rbd
+  --compat-profile <id|auto>   Compatibility profile (default: auto)
+  --target-format qcow2|raw                 Target image format (default: qcow2)
+  --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>
       block example: '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
       rbd example:   '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
@@ -204,6 +212,10 @@ Options:
 Notes:
   - If only --cred-file is provided, init auto-generates workdir/vddk.cred.
   - Compatibility selection is stored in manifest.json and compat.env.
+
+Examples:
+  ablestack_v2k init --vm my-vm --vcenter vc.example.local --cred-file ./govc.env --dst /var/lib/libvirt/images/my-vm
+  ablestack_v2k init --vm my-vm --vcenter vc.example.local --cred-file ./govc.env --dst /data/migrate --target-storage block --target-map-json '{"scsi0:0":"/dev/sdb"}'
 EOF
 }
 
@@ -216,6 +228,10 @@ Usage:
 Notes:
   - Requires an existing workdir/manifest.
   - Restores govc.env automatically from the workdir.
+
+Examples:
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cbt status
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cbt enable
 EOF
 }
 
@@ -225,8 +241,12 @@ Usage:
   ablestack_v2k snapshot base|incr|final [options...]
 
 Options:
-  --name <snapshot-name>
-  --safe-mode
+  --name <snapshot-name>                    Default: migr-<base|incr|final>-<timestamp>
+  --safe-mode                               Default: off
+
+Examples:
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> snapshot base
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> snapshot incr --name migr-incr-manual
 EOF
 }
 
@@ -236,11 +256,15 @@ Usage:
   ablestack_v2k sync base|incr|final [options...]
 
 Options:
-  --jobs <N>
-  --coalesce-gap <BYTES>
-  --chunk <BYTES>
-  --force-cleanup
-  --safe-mode
+  --jobs <N>                                Default: 1
+  --coalesce-gap <BYTES>                    Default: 65536
+  --chunk <BYTES>                           Default: 4194304
+  --force-cleanup                           Default: off
+  --safe-mode                               Default: off
+
+Examples:
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> sync base --jobs 4
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> sync incr --jobs 2 --coalesce-gap 65536
 EOF
 }
 
@@ -250,8 +274,12 @@ Usage:
   ablestack_v2k verify [options...]
 
 Options:
-  --mode quick
-  --samples <N>
+  --mode quick                              Default: quick
+  --samples <N>                             Default: 64
+
+Examples:
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> verify
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> verify --mode quick --samples 128
 EOF
 }
 
@@ -261,25 +289,33 @@ Usage:
   ablestack_v2k cutover [options...]
 
 Options:
-  --shutdown manual|guest|poweroff
-  --shutdown-force
-  --shutdown-timeout <SEC>
-  --define-only
-  --start
-  --vcpu <N>
-  --memory <MB>
-  --network <name>
-  --bridge <br>
-  --vlan <id>
-  --winpe-bootstrap
+  --shutdown manual|guest|poweroff          Default: guest
+  --shutdown-force                          Hard poweroff fallback is enabled by default
+  --shutdown-timeout <SEC>                  Default: 300
+  --define-only                             Default: off
+  --start                                   Default: auto when WinPE is skipped and --define-only is not set
+  --vcpu <N>                                Default: source VM CPU, else 2
+  --memory <MB>                             Default: source VM memory_mb, else 2048
+  --network <name>                          Default: default
+  --bridge <br>                             Default: auto-detect host bridge
+  --vlan <id>                               Default: unset
+  --winpe-bootstrap                         Default: on for Windows guests, auto-skip for non-Windows
   --no-winpe-bootstrap
-  --winpe-iso <path>
-  --virtio-iso <path>
-  --winpe-timeout <SEC>
-  --linux-bootstrap
+  --winpe-iso <path>                        Default: /usr/share/ablestack/v2k/winpe.iso
+  --virtio-iso <path>                       Default: /usr/share/virtio-win/virtio-win.iso
+  --winpe-timeout <SEC>                     Default: 600
+  --linux-bootstrap                         Default: auto for Linux guests
   --no-linux-bootstrap
-  --safe-mode
-  --force-cleanup
+  --safe-mode                               Default: off
+  --force-cleanup                           Default: off
+
+Notes:
+  - Current libvirt XML generation uses VM inventory values for CPU/memory and source MAC plus auto-detected host bridge.
+  - --vcpu, --memory, --network, --bridge, and --vlan are accepted by cutover but are not currently reflected in the generated XML.
+
+Examples:
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cutover --shutdown guest --define-only
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cutover --shutdown poweroff --no-winpe-bootstrap --start
 EOF
 }
 
@@ -289,8 +325,12 @@ Usage:
   ablestack_v2k cleanup [options...]
 
 Options:
-  --keep-snapshots
-  --keep-workdir
+  --keep-snapshots                          Default: off
+  --keep-workdir                            Default: off
+
+Examples:
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cleanup
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> cleanup --keep-snapshots --keep-workdir
 EOF
 }
 
@@ -298,9 +338,18 @@ usage_status() {
   cat <<'EOF'
 Usage:
   ablestack_v2k status
+  ablestack_v2k status --vm <name[,name...]>
+  ablestack_v2k status --vm <name[,name...]> --watch
 
 Notes:
   - Reads manifest.json and events.log from the selected workdir.
+  - With --vm, fleet status mode scans the work root and shows the latest run per VM.
+  - --watch is available only with fleet status mode and is off by default.
+
+Examples:
+  ablestack_v2k --workdir /var/lib/ablestack-v2k/my-vm/<run_id> status
+  ablestack_v2k --workdir /var/lib/ablestack-v2k status --vm "my-vm"
+  ablestack_v2k --workdir /var/lib/ablestack-v2k status --vm "vm-a,vm-b" --watch
 EOF
 }
 
