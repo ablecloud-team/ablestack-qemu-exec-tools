@@ -65,13 +65,21 @@ assert_manifest_values() {
 }
 
 run_case() {
-  local version="$1" expected_profile="$2"
+  local version="$1" expected_profile="$2" compat_mode="${3:-explicit}"
   local safe_version="${version//./_}"
   local workdir="${WORK_ROOT}/${safe_version}"
   local dst="${DST_ROOT}/${safe_version}"
   local cred="${workdir}/govc.env"
   local call_log="${workdir}/govc.calls.log"
   local manifest="${workdir}/manifest.json"
+  local -a init_args=(
+    --workdir "${workdir}"
+    init
+    --vm "demo-vm"
+    --vcenter "vc.example.local"
+    --dst "${dst}"
+    --cred-file "${cred}"
+  )
 
   rm -rf "${workdir}" "${dst}"
   mkdir -p "${workdir}" "${dst}"
@@ -92,14 +100,11 @@ EOF
   export V2K_VDDK_THUMBPRINT="AA:BB:CC:DD"
   unset V2K_COMPAT_SELECTED_PROFILE V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_COMPAT_DETECTED_VCENTER_VERSION
 
-  bash "${ROOT_DIR}/bin/ablestack_v2k.sh" \
-    --workdir "${workdir}" \
-    init \
-    --vm "demo-vm" \
-    --vcenter "vc.example.local" \
-    --dst "${dst}" \
-    --cred-file "${cred}" \
-    --compat-profile auto >/dev/null
+  if [[ "${compat_mode}" == "explicit" ]]; then
+    init_args+=( --compat-profile auto )
+  fi
+
+  bash "${ROOT_DIR}/bin/ablestack_v2k.sh" "${init_args[@]}" >/dev/null
 
   [[ -f "${manifest}" ]] || {
     echo "[ERR] Manifest not created: ${manifest}" >&2
@@ -122,7 +127,7 @@ EOF
   assert_file_contains "${call_log}" "device.info -json -vm demo-vm"
   assert_file_contains "${call_log}" "host.info -json -host host-11"
 
-  echo "[OK] version=${version} profile=${expected_profile}"
+  echo "[OK] version=${version} profile=${expected_profile} compat_mode=${compat_mode}"
 }
 
 main() {
@@ -143,6 +148,7 @@ main() {
   run_case "6.0.0" "vsphere60"
   run_case "6.7.0" "vsphere67"
   run_case "8.0.1" "vsphere80"
+  run_case "8.0.1" "vsphere80" "implicit"
 
   echo "[OK] installer-runtime smoke test passed"
 }

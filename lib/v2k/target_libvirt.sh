@@ -194,8 +194,21 @@ v2k_target_generate_libvirt_xml() {
   local bridge
   bridge="$(_v2k_detect_main_bridge || true)"
 
-  local os_xml features_xml tpm_xml=""
+  local os_xml features_xml tpm_xml="" balloon_xml="" channel_xml="" video_xml=""
   features_xml="<features><acpi/><apic/></features>"
+  balloon_xml="
+    <memballoon model='virtio' autodeflate='on' freePageReporting='on'>
+      <stats period='60'/>
+    </memballoon>"
+  channel_xml="
+    <controller type='virtio-serial' index='0'/>
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>"
+  video_xml="
+    <video>
+      <model type='cirrus' vram='16384' heads='1' primary='yes'/>
+    </video>"
 
   if [[ "${fw}" == "efi" ]]; then
     local sb=0
@@ -259,7 +272,6 @@ $(_v2k_target_disk_xml "${manifest}" "$i")"
       <source bridge='$(_v2k_escape_xml "${bridge}")'/>
       <model type='virtio'/>
       <filterref filter='allow-all-traffic'/>
-      <link state='down'/>
     </interface>"
   fi
 
@@ -281,9 +293,9 @@ $(_v2k_target_disk_xml "${manifest}" "$i")"
     ${disks_xml}
     ${iface_xml}
     ${tpm_xml}
-    <video>
-      <model type='virtio' heads='1' primary='yes'/>
-    </video>
+    ${channel_xml}
+    ${video_xml}
+    ${balloon_xml}
     <graphics type='vnc' port='-1'/>
   </devices>
 </domain>
