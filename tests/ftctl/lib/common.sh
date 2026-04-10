@@ -105,6 +105,12 @@ ftctl_test_disk_get() {
   printf '%s' "${!var-}"
 }
 
+ftctl_test_disk_source_image_get() {
+  local idx="${1-}"
+  local var="DISK_${idx}_SOURCE_IMAGE"
+  printf '%s' "${!var-}"
+}
+
 ftctl_test_protected_disk_indices() {
   local i=1
   while (( i <= PROTECTED_DISK_COUNT )); do
@@ -278,17 +284,16 @@ ftctl_test_destroy_vm_if_present() {
 
 ftctl_test_prepare_root_disk() {
   local format="${1-}"
-  local dst="${2-}"
+  local src="${2-}"
+  local dst="${3-}"
 
   mkdir -p "$(dirname "${dst}")"
   rm -f "${dst}"
+  [[ -n "${src}" && -f "${src}" ]] || ftctl_test_die "missing root disk source image: ${src}"
 
   case "${format}" in
-    qcow2)
-      qemu-img create -f qcow2 -F qcow2 -b "${BASE_IMAGE_QCOW2}" "${dst}" >/dev/null
-      ;;
-    raw)
-      cp --sparse=always "${BASE_IMAGE_RAW}" "${dst}"
+    qcow2|raw)
+      cp --reflink=auto --sparse=always "${src}" "${dst}"
       ;;
     *)
       ftctl_test_die "unsupported root disk format: ${format}"
@@ -298,34 +303,34 @@ ftctl_test_prepare_root_disk() {
 
 ftctl_test_prepare_extra_disk() {
   local format="${1-}"
-  local dst="${2-}"
-  local size_bytes="${3-}"
+  local src="${2-}"
+  local dst="${3-}"
+  local size_bytes="${4-}"
 
   mkdir -p "$(dirname "${dst}")"
   rm -f "${dst}"
-  qemu-img create -f "${format}" "${dst}" "${size_bytes}" >/dev/null
-}
-
-ftctl_test_template_source_xml() {
-  local vm="${1-}"
-  if [[ "${VM_CREATE_MODE}" == "virsh" ]]; then
-    env LC_ALL=C LANG=C virsh -c "${PRIMARY_LIBVIRT_URI}" dumpxml "${vm}"
+  if [[ -n "${src}" && -f "${src}" ]]; then
+    cp --reflink=auto --sparse=always "${src}" "${dst}"
   else
-    ftctl_test_die "unsupported VM_CREATE_MODE: ${VM_CREATE_MODE}"
+    qemu-img create -f "${format}" "${dst}" "${size_bytes}" >/dev/null
   fi
 }
 
 ftctl_test_render_vm_xml() {
   local vm="${1-}"
   local out_path="${2-}"
-  local xml_text
-  xml_text="$(ftctl_test_template_source_xml "${vm}")"
-
-  XML_TEXT="${xml_text}" \
+  VM_NAME="${vm}" \
   VM_NAME="${vm}" \
   VM_MEMORY_MB="${VM_DEFAULT_MEMORY_MB}" \
   VM_VCPU="${VM_DEFAULT_VCPU}" \
-  DEFAULT_BRIDGE="${DEFAULT_BRIDGE}" \
+  VM_MACHINE="${VM_DEFAULT_MACHINE:-q35}" \
+  VM_ARCH="${VM_DEFAULT_ARCH:-x86_64}" \
+  VM_BRIDGE="${DEFAULT_BRIDGE:-bridge0}" \
+  VM_EMULATOR="${DEFAULT_EMULATOR:-/usr/libexec/qemu-kvm}" \
+  VM_FIRMWARE="${DEFAULT_FIRMWARE:-bios}" \
+  VM_UEFI_CODE_PATH="${DEFAULT_UEFI_CODE_PATH:-}" \
+  VM_UEFI_VARS_TEMPLATE="${DEFAULT_UEFI_VARS_TEMPLATE:-}" \
+  VM_NVRAM_PATH="${VM_NVRAM_ROOT:-/var/lib/libvirt/qemu/nvram}/${vm}_VARS.fd" \
   PROTECTED_DISK_COUNT="${PROTECTED_DISK_COUNT}" \
   DISK_1_TARGET="${DISK_1_TARGET:-}" DISK_1_PATH="${DISK_1_PATH:-}" DISK_1_FORMAT="${DISK_1_FORMAT:-}" \
   DISK_2_TARGET="${DISK_2_TARGET:-}" DISK_2_PATH="${DISK_2_PATH:-}" DISK_2_FORMAT="${DISK_2_FORMAT:-}" DISK_2_SIZE_BYTES="${DISK_2_SIZE_BYTES:-}" \
@@ -334,41 +339,49 @@ ftctl_test_render_vm_xml() {
 import os
 import xml.etree.ElementTree as ET
 
-root = ET.fromstring(os.environ["XML_TEXT"])
 vm_name = os.environ["VM_NAME"]
 memory_mb = int(os.environ["VM_MEMORY_MB"])
 vcpu = int(os.environ["VM_VCPU"])
-default_bridge = os.environ["DEFAULT_BRIDGE"]
+machine = os.environ["VM_MACHINE"]
+arch = os.environ["VM_ARCH"]
+bridge = os.environ["VM_BRIDGE"]
+emulator = os.environ["VM_EMULATOR"]
+firmware = os.environ["VM_FIRMWARE"]
+uefi_code = os.environ["VM_UEFI_CODE_PATH"]
+uefi_vars_template = os.environ["VM_UEFI_VARS_TEMPLATE"]
+nvram_path = os.environ["VM_NVRAM_PATH"]
 
-for child in list(root):
-    if child.tag in {"uuid", "id"}:
-        root.remove(child)
+root = ET.Element("domain", {"type": "kvm"})
+ET.SubElement(root, "name").text = vm_name
+ET.SubElement(root, "memory", {"unit": "KiB"}).text = str(memory_mb * 1024)
+ET.SubElement(root, "currentMemory", {"unit": "KiB"}).text = str(memory_mb * 1024)
+ET.SubElement(root, "vcpu", {"placement": "static"}).text = str(vcpu)
 
-name = root.find("name")
-if name is None:
-    name = ET.SubElement(root, "name")
-name.text = vm_name
+os_node = ET.SubElement(root, "os")
+if firmware == "uefi" and uefi_code and uefi_vars_template:
+    os_node.set("firmware", "efi")
+ET.SubElement(os_node, "type", {"arch": arch, "machine": machine}).text = "hvm"
+ET.SubElement(os_node, "boot", {"dev": "hd"})
+if firmware == "uefi" and uefi_code and uefi_vars_template:
+    ET.SubElement(os_node, "loader", {"readonly": "yes", "type": "pflash"}).text = uefi_code
+    ET.SubElement(os_node, "nvram", {"template": uefi_vars_template}).text = nvram_path
 
-memory = root.find("memory")
-if memory is None:
-    memory = ET.SubElement(root, "memory", {"unit": "KiB"})
-memory.set("unit", "KiB")
-memory.text = str(memory_mb * 1024)
+features = ET.SubElement(root, "features")
+ET.SubElement(features, "acpi")
+ET.SubElement(features, "apic")
+ET.SubElement(root, "cpu", {"mode": "host-passthrough", "check": "none", "migratable": "on"})
 
-current = root.find("currentMemory")
-if current is None:
-    current = ET.SubElement(root, "currentMemory", {"unit": "KiB"})
-current.set("unit", "KiB")
-current.text = str(memory_mb * 1024)
+clock = ET.SubElement(root, "clock", {"offset": "utc"})
+ET.SubElement(clock, "timer", {"name": "rtc", "tickpolicy": "catchup"})
+ET.SubElement(clock, "timer", {"name": "pit", "tickpolicy": "delay"})
+ET.SubElement(clock, "timer", {"name": "hpet", "present": "no"})
 
-vcpu_node = root.find("vcpu")
-if vcpu_node is None:
-    vcpu_node = ET.SubElement(root, "vcpu")
-vcpu_node.text = str(vcpu)
+ET.SubElement(root, "on_poweroff").text = "destroy"
+ET.SubElement(root, "on_reboot").text = "restart"
+ET.SubElement(root, "on_crash").text = "destroy"
 
-devices = root.find("devices")
-if devices is None:
-    raise SystemExit("missing devices section in source XML")
+devices = ET.SubElement(root, "devices")
+ET.SubElement(devices, "emulator").text = emulator
 
 disks = {}
 for idx in range(1, 4):
@@ -391,19 +404,47 @@ for disk in devices.findall("disk"):
         source = ET.SubElement(disk, "source")
     source.attrib.clear()
     source.set("file", src_path)
-    driver = disk.find("driver")
-    if driver is None:
-        driver = ET.SubElement(disk, "driver")
-    driver.set("name", "qemu")
-    driver.set("type", fmt or "qcow2")
+for dev, (src_path, fmt) in disks.items():
+    disk = ET.SubElement(devices, "disk", {"type": "file", "device": "disk"})
+    ET.SubElement(disk, "driver", {"name": "qemu", "type": fmt or "qcow2", "discard": "unmap"})
+    ET.SubElement(disk, "source", {"file": src_path})
+    ET.SubElement(disk, "target", {"dev": dev, "bus": "virtio"})
 
-iface = devices.find("interface")
-if iface is not None and iface.get("type") == "bridge":
-    source = iface.find("source")
-    if source is None:
-        source = ET.SubElement(iface, "source")
-    source.attrib.clear()
-    source.set("bridge", default_bridge)
+cdrom = ET.SubElement(devices, "disk", {"type": "file", "device": "cdrom"})
+ET.SubElement(cdrom, "driver", {"name": "qemu"})
+ET.SubElement(cdrom, "target", {"dev": "sda", "bus": "sata"})
+ET.SubElement(cdrom, "readonly")
+
+ET.SubElement(devices, "controller", {"type": "usb", "index": "0", "model": "qemu-xhci", "ports": "15"})
+ET.SubElement(devices, "controller", {"type": "pci", "index": "0", "model": "pcie-root"})
+ET.SubElement(devices, "controller", {"type": "sata", "index": "0"})
+ET.SubElement(devices, "controller", {"type": "virtio-serial", "index": "0"})
+
+iface = ET.SubElement(devices, "interface", {"type": "bridge"})
+ET.SubElement(iface, "source", {"bridge": bridge})
+ET.SubElement(iface, "model", {"type": "virtio"})
+
+serial = ET.SubElement(devices, "serial", {"type": "pty"})
+ET.SubElement(serial, "target", {"type": "isa-serial", "port": "0"})
+console = ET.SubElement(devices, "console", {"type": "pty"})
+ET.SubElement(console, "target", {"type": "serial", "port": "0"})
+
+channel = ET.SubElement(devices, "channel", {"type": "unix"})
+ET.SubElement(channel, "target", {"type": "virtio", "name": "org.qemu.guest_agent.0"})
+
+ET.SubElement(devices, "input", {"type": "tablet", "bus": "usb"})
+ET.SubElement(devices, "input", {"type": "mouse", "bus": "ps2"})
+ET.SubElement(devices, "input", {"type": "keyboard", "bus": "ps2"})
+
+graphics = ET.SubElement(devices, "graphics", {"type": "vnc", "autoport": "yes", "listen": "0.0.0.0"})
+ET.SubElement(graphics, "listen", {"type": "address", "address": "0.0.0.0"})
+ET.SubElement(devices, "audio", {"id": "1", "type": "none"})
+video = ET.SubElement(devices, "video")
+ET.SubElement(video, "model", {"type": "virtio", "heads": "1", "primary": "yes"})
+ET.SubElement(devices, "watchdog", {"model": "itco", "action": "reset"})
+ET.SubElement(devices, "memballoon", {"model": "virtio"})
+rng = ET.SubElement(devices, "rng", {"model": "virtio"})
+ET.SubElement(rng, "backend", {"model": "random"}).text = "/dev/urandom"
 
 print(ET.tostring(root, encoding="unicode"))
 PY
@@ -411,13 +452,21 @@ PY
 
 ftctl_test_prepare_vm_disks() {
   local disk1_format="${DISK_1_FORMAT:-qcow2}"
-  ftctl_test_prepare_root_disk "${disk1_format}" "${DISK_1_PATH}"
+  local disk1_source
+  disk1_source="$(ftctl_test_disk_source_image_get 1)"
+  if [[ -z "${disk1_source}" ]]; then
+    case "${disk1_format}" in
+      qcow2) disk1_source="${BASE_IMAGE_QCOW2}" ;;
+      raw)   disk1_source="${BASE_IMAGE_RAW}" ;;
+    esac
+  fi
+  ftctl_test_prepare_root_disk "${disk1_format}" "${disk1_source}" "${DISK_1_PATH}"
 
   if (( PROTECTED_DISK_COUNT >= 2 )) && [[ -n "${DISK_2_PATH:-}" ]]; then
-    ftctl_test_prepare_extra_disk "${DISK_2_FORMAT}" "${DISK_2_PATH}" "${DISK_2_SIZE_BYTES:-21474836480}"
+    ftctl_test_prepare_extra_disk "${DISK_2_FORMAT}" "$(ftctl_test_disk_source_image_get 2)" "${DISK_2_PATH}" "${DISK_2_SIZE_BYTES:-21474836480}"
   fi
   if (( PROTECTED_DISK_COUNT >= 3 )) && [[ -n "${DISK_3_PATH:-}" ]]; then
-    ftctl_test_prepare_extra_disk "${DISK_3_FORMAT}" "${DISK_3_PATH}" "${DISK_3_SIZE_BYTES:-21474836480}"
+    ftctl_test_prepare_extra_disk "${DISK_3_FORMAT}" "$(ftctl_test_disk_source_image_get 3)" "${DISK_3_PATH}" "${DISK_3_SIZE_BYTES:-21474836480}"
   fi
 }
 
