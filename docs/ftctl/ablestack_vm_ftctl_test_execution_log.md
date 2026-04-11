@@ -43,7 +43,6 @@ If FAIL:
 ### Pending
 
 - `HA-IMG03-ST01`
-- `HA-IMG01-ST03`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
@@ -70,6 +69,7 @@ If FAIL:
 - `HA-IMG02-ST02`
 - `HA-IMG05-ST01`
 - `HA-IMG09-ST01`
+- `HA-IMG01-ST03`
 - `HA-IMG01-ST04`
 
 ## 4. Execution Records
@@ -499,4 +499,62 @@ If FAIL:
 - Remaining gap:
   Shared visible file-path mode now works for the single-disk persistent case.
   Shared multi-disk and failover/failback behavior still need separate validation.
+```
+
+### HA-IMG01-ST03
+
+```text
+Test ID: HA-IMG01-ST03
+Date: 2026-04-11
+Mode: HA
+VM Name: rocky10-block-st03
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Linux raw-on-block
+Storage Backend: local block device with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/rocky10-block-st03.conf
+
+Preconditions:
+- Transient VM
+- primary source disk on local block LV /dev/vg_ftctl_st03_p/lv_rocky10_block_st03
+- secondary target disk on local block LV /dev/vg_ftctl_st03_s/lv_rocky10_block_st03
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- explicit FTCTL_PROFILE_DISK_MAP="vda=/dev/vg_ftctl_st03_s/lv_rocky10_block_st03"
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-block-st03
+- ablestack_vm_ftctl protect --vm rocky10-block-st03 --mode ha --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-block-st03
+- ablestack_vm_ftctl status --vm rocky10-block-st03 --json
+- virsh dumpxml rocky10-block-st03
+- virsh blockjob --domain rocky10-block-st03 --path vda --info
+
+Expected Result:
+- primary runtime XML exposes a network mirror for the block-backed root disk
+- secondary local block LV is exported over NBD and referenced in runtime state
+- reconcile promotes the VM to protected/mirroring once the initial copy reaches 100%
+
+Actual Result:
+- a transient block-backed VM was created from a cloned qcow2 base image and converted onto /dev/vg_ftctl_st03_p/lv_rocky10_block_st03
+- runtime XML exposed a network mirror to nbd://10.10.31.2:10867/rocky10-block-st03-vda
+- secondary target LV /dev/vg_ftctl_st03_s/lv_rocky10_block_st03 was exported by qemu-nbd
+- after the initial full copy reached 100.00%, reconcile promoted the controller state to protection_state=protected and transport_state=mirroring
+- runtime blockcopy state recorded the explicit secondary block target path and ready=yes
+
+Evidence:
+- HA-IMG01-ST03.status.final.json
+- HA-IMG01-ST03.runtime-state.final.txt
+- HA-IMG01-ST03.dumpxml.final.xml
+- HA-IMG01-ST03.blockjob.vda.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  Local block backend now works for the single-disk transient HA case.
+  Persistent local-block and multi-disk local-block variants still need separate validation.
 ```

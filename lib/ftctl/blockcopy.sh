@@ -143,7 +143,13 @@ ftctl_blockcopy_remote_nbd_secondary_path() {
   local target="${2-}"
   local source="${3-}"
   local format="${4-}"
-  local source_base path
+  local source_base path explicit
+
+  explicit="$(ftctl_profile_lookup_map_value "${FTCTL_PROFILE_DISK_MAP}" "${target}" 2>/dev/null || true)"
+  if [[ -n "${explicit}" && "${FTCTL_PROFILE_DISK_MAP}" != "auto" ]]; then
+    printf '%s\n' "${explicit}"
+    return 0
+  fi
 
   source_base="$(basename "${source}")"
   path="${FTCTL_PROFILE_SECONDARY_TARGET_DIR}/${vm}/${target}-${source_base}"
@@ -418,9 +424,14 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   pid_file="/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid"
   remote_cmd=$(cat <<EOF
 set -euo pipefail
-mkdir -p "$(dirname "${secondary_path}")" /run/ablestack-vm-ftctl
-if [[ ! -f "${secondary_path}" ]]; then
-  qemu-img create -f "${format}" "${secondary_path}" "${size}"
+mkdir -p /run/ablestack-vm-ftctl
+if [[ -b "${secondary_path}" ]]; then
+  :
+else
+  mkdir -p "$(dirname "${secondary_path}")"
+  if [[ ! -f "${secondary_path}" ]]; then
+    qemu-img create -f "${format}" "${secondary_path}" "${size}"
+  fi
 fi
 if [[ -f "${pid_file}" ]]; then
   oldpid="\$(cat "${pid_file}" 2>/dev/null || true)"

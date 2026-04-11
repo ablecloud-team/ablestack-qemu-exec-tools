@@ -85,7 +85,7 @@ Recommended execution order:
 | `HA-IMG07-ST01` | `IMG07` | `ST01` | recommended | HA mixed-size multi-disk | pending |
 | `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | pass |
 | `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pass |
-| `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pending |
+| `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pass |
 | `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA shared-visible filesystem backend | pass |
 | `HA-IMG01-ST05` | `IMG01` | `ST05` | recommended | HA multipath backend | pending |
 | `HA-IMG01-ST06` | `IMG01` | `ST06` | recommended | HA Ceph RBD backend | pending |
@@ -211,3 +211,12 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Validate the same backend for multi-disk shared-visible layouts.
     - Validate shared-visible failover/failback behavior.
+
+- `HA-IMG01-ST03`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - The local block backend required a secondary-local block target rather than a shared-visible path model.
+    - An explicit `FTCTL_PROFILE_DISK_MAP` to the secondary LV path allowed `remote-nbd` to export a block device target and mirror the primary block-backed root disk over NBD.
+  - Follow-up improvement:
+    - Validate the same backend for persistent local-block VMs.
+    - Validate multi-disk local-block behavior and failover/failback.

@@ -200,6 +200,7 @@ Completed items:
   - `HA-IMG02-ST02`: `PASS` with `remote-nbd`
   - `HA-IMG05-ST01`: `PASS` with `remote-nbd`
   - `HA-IMG09-ST01`: `PASS` with `remote-nbd`
+  - `HA-IMG01-ST03`: `PASS` with `remote-nbd` and explicit secondary-local block target
   - `HA-IMG01-ST04`: `PASS` with `shared-blockcopy`
 - Follow-up improvements discovered during real-environment testing:
   - HA protect success detection should prioritize runtime `virsh dumpxml` mirror metadata when `virsh blockjob --info` is empty or incomplete.
@@ -213,7 +214,8 @@ Completed items:
   - Per-VM/target deterministic remote NBD port allocation and firewalld service range support are now in place; multi-disk concurrency validation is the next priority.
   - Multi-disk `remote-nbd` validation is now complete for transient qcow2 VMs; persistent single-disk validation is also complete.
   - Shared-visible HA validation is now complete for the single-disk persistent case.
-  - The remaining HA priorities are local-block and shared/multi-disk variants.
+  - Local-block validation is now complete for the single-disk transient case.
+  - The remaining HA priorities are Windows baseline, persistent local-block, and shared/multi-disk variants.
 
 ### Step 13. PR preparation
 
