@@ -202,6 +202,10 @@ Completed items:
   - `HA-IMG09-ST01`: `PASS` with `remote-nbd`
   - `HA-IMG01-ST03`: `PASS` with `remote-nbd` and explicit secondary-local block target
   - `HA-IMG01-ST04`: `PASS` with `shared-blockcopy`
+  - `HA-IMG03-ST01`: `PASS` with `remote-nbd` after explicit Windows 11 UEFI/TPM XML handling
+  - `HA-IMG06-ST02`: `PASS` with `remote-nbd` for transient multi-disk raw images
+  - `HA-IMG04-ST02`: `PASS` with `remote-nbd` for Windows 11 raw
+  - `HA-IMG07-ST01`: `PASS` with `remote-nbd` for mixed-size multi-disk Linux
 - Follow-up improvements discovered during real-environment testing:
   - HA protect success detection should prioritize runtime `virsh dumpxml` mirror metadata when `virsh blockjob --info` is empty or incomplete.
   - `virsh domblklist --details` should be treated as a secondary indicator because it may continue to show the original source path while an active mirror element exists in runtime XML.
@@ -215,7 +219,11 @@ Completed items:
   - Multi-disk `remote-nbd` validation is now complete for transient qcow2 VMs; persistent single-disk validation is also complete.
   - Shared-visible HA validation is now complete for the single-disk persistent case.
   - Local-block validation is now complete for the single-disk transient case.
-  - The remaining HA priorities are Windows baseline, persistent local-block, and shared/multi-disk variants.
+  - Windows qcow2 baseline is now complete after fixing UEFI/TPM VM generation.
+  - Windows raw validation is now complete on the same UEFI/TPM generation path.
+  - Mixed-size multi-disk validation is now complete for the transient local-file case.
+  - Multi-disk raw validation is now complete for the transient local-file case.
+  - The remaining HA priorities are persistent local-block/raw variants and shared/multipath variants.
 
 ### Step 13. PR preparation
 

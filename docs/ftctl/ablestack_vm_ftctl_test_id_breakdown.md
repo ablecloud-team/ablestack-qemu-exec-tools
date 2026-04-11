@@ -78,11 +78,11 @@ Recommended execution order:
 |---|---|---|---|---|---|
 | `HA-IMG01-ST01` | `IMG01` | `ST01` | mandatory | HA baseline Linux qcow2 on local qcow2 | fail |
 | `HA-IMG02-ST02` | `IMG02` | `ST02` | mandatory | HA baseline Linux raw on local raw | pass |
-| `HA-IMG03-ST01` | `IMG03` | `ST01` | mandatory | HA baseline Windows qcow2 | pending |
-| `HA-IMG04-ST02` | `IMG04` | `ST02` | recommended | HA Windows raw | pending |
+| `HA-IMG03-ST01` | `IMG03` | `ST01` | mandatory | HA baseline Windows qcow2 | pass |
+| `HA-IMG04-ST02` | `IMG04` | `ST02` | recommended | HA Windows raw | pass |
 | `HA-IMG05-ST01` | `IMG05` | `ST01` | mandatory | HA multi-disk Linux qcow2 | pass |
-| `HA-IMG06-ST02` | `IMG06` | `ST02` | recommended | HA multi-disk Linux raw | pending |
-| `HA-IMG07-ST01` | `IMG07` | `ST01` | recommended | HA mixed-size multi-disk | pending |
+| `HA-IMG06-ST02` | `IMG06` | `ST02` | recommended | HA multi-disk Linux raw | pass |
+| `HA-IMG07-ST01` | `IMG07` | `ST01` | recommended | HA mixed-size multi-disk | pass |
 | `HA-IMG08-ST01` | `IMG08` | `ST01` | mandatory | HA transient VM behavior | pass |
 | `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pass |
 | `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pass |
@@ -220,3 +220,39 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Validate the same backend for persistent local-block VMs.
     - Validate multi-disk local-block behavior and failover/failback.
+
+- `HA-IMG03-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - The Windows 11 baseline required explicit UEFI loader/NVRAM handling and TPM 2.0 in the generated libvirt XML.
+    - Once the VM creation path was corrected, the same secondary-local remote-nbd model used for Linux local-file qcow2 worked for Windows 11 qcow2 as well.
+  - Follow-up improvement:
+    - Validate Windows raw images.
+    - Validate persistent Windows behavior and failover/failback.
+
+- `HA-IMG06-ST02`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - Multi-disk raw images followed the same secondary-local remote transport model as the qcow2 multi-disk case.
+    - Per-disk export ports were selected independently and the final reconcile promoted the VM only after the slowest raw root disk completed.
+  - Follow-up improvement:
+    - Validate persistent multi-disk raw behavior.
+    - Validate mixed-size raw multi-disk layouts and failover/failback.
+
+- `HA-IMG04-ST02`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - The same Windows 11 UEFI/TPM generation path used for the qcow2 baseline also worked when the primary source disk and secondary target were raw files.
+    - The controller promoted normally after the initial full copy completed.
+  - Follow-up improvement:
+    - Validate persistent Windows behavior.
+    - Validate mixed-size Windows multi-disk layouts only if they become a target scope later.
+
+- `HA-IMG07-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - Mixed-size and mixed-format multi-disk layouts also worked on the same secondary-local remote transport model.
+    - Distinct export ports were allocated across the qcow2/qcow2/raw combination and all mirrors reached ready=yes in a single run.
+  - Follow-up improvement:
+    - Validate persistent mixed-size multi-disk behavior.
+    - Validate failover/failback once this image mix is included in the HA operational suite.

@@ -42,7 +42,6 @@ If FAIL:
 
 ### Pending
 
-- `HA-IMG03-ST01`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
@@ -71,6 +70,10 @@ If FAIL:
 - `HA-IMG09-ST01`
 - `HA-IMG01-ST03`
 - `HA-IMG01-ST04`
+- `HA-IMG03-ST01`
+- `HA-IMG06-ST02`
+- `HA-IMG04-ST02`
+- `HA-IMG07-ST01`
 
 ## 4. Execution Records
 
@@ -557,4 +560,229 @@ If FAIL:
 - Remaining gap:
   Local block backend now works for the single-disk transient HA case.
   Persistent local-block and multi-disk local-block variants still need separate validation.
+```
+
+### HA-IMG03-ST01
+
+```text
+Test ID: HA-IMG03-ST01
+Date: 2026-04-11
+Mode: HA
+VM Name: win11-ha-img03-st01
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Windows 11 qcow2
+Storage Backend: local file qcow2 with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/win11-ha-img03-st01.conf
+
+Preconditions:
+- Transient VM
+- UEFI firmware with OVMF loader and NVRAM
+- TPM 2.0 emulator device in the generated libvirt XML
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+
+Commands:
+- ablestack_vm_ftctl check --vm win11-ha-img03-st01
+- ablestack_vm_ftctl protect --vm win11-ha-img03-st01 --mode ha --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm win11-ha-img03-st01
+- ablestack_vm_ftctl status --vm win11-ha-img03-st01 --json
+- virsh dumpxml win11-ha-img03-st01
+- virsh blockjob --domain win11-ha-img03-st01 --path vda --info
+
+Expected Result:
+- the generated Windows 11 test VM boots with UEFI and TPM 2.0
+- primary runtime XML exposes a network mirror to a secondary-local qcow2 target over NBD
+- reconcile promotes the VM to protected/mirroring after the initial copy finishes
+
+Actual Result:
+- the runner generated a transient Windows 11 VM with OVMF pflash loader, NVRAM, and TPM 2.0 emulator support
+- initial XML generation failed with libvirt firmware selection, then succeeded after switching to explicit loader/nvram handling without the incompatible firmware auto-selection path
+- runtime XML exposed a network mirror to nbd://10.10.31.2:10872/win11-ha-img03-st01-vda
+- secondary-local target qcow2 was created and exported by qemu-nbd
+- after the initial full copy reached 100.00%, reconcile promoted the controller state to protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-IMG03-ST01.status.final.json
+- HA-IMG03-ST01.runtime-state.final.txt
+- HA-IMG03-ST01.dumpxml.final.xml
+- HA-IMG03-ST01.blockjob.vda.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: local-only test runner XML generation logic only
+- Re-test result: passed after fixing UEFI/TPM XML generation
+- Remaining gap:
+  Windows qcow2 baseline is now complete.
+  Windows raw and persistent Windows variants still need separate validation.
+```
+
+### HA-IMG06-ST02
+
+```text
+Test ID: HA-IMG06-ST02
+Date: 2026-04-11
+Mode: HA
+VM Name: rocky10-raw-multi-st06
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: multi-disk Linux raw
+Storage Backend: local file raw with remote-nbd secondary-local targets
+Profile Path: /etc/ablestack/ftctl.d/rocky10-raw-multi-st06.conf
+
+Preconditions:
+- Transient VM
+- three protected raw disks on the primary host
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- per-disk remote NBD exports enabled on the secondary host
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-raw-multi-st06
+- ablestack_vm_ftctl protect --vm rocky10-raw-multi-st06 --mode ha --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-raw-multi-st06
+- ablestack_vm_ftctl status --vm rocky10-raw-multi-st06 --json
+- virsh dumpxml rocky10-raw-multi-st06
+- virsh blockjob --domain rocky10-raw-multi-st06 --path vda --info
+
+Expected Result:
+- each protected raw disk is mirrored to a distinct secondary-local raw target over NBD
+- all three runtime XML mirrors reach ready='yes'
+- reconcile promotes the VM to protected/mirroring once the slowest disk finishes the initial copy
+
+Actual Result:
+- primary runtime XML showed three network mirrors with distinct export ports for `vda`, `vdb`, and `vdc`
+- secondary-local raw targets were created under /var/lib/ablestack-vm-ftctl/remote-nbd-targets/rocky10-raw-multi-st06
+- `vdb` and `vdc` reached ready='yes' first; `vda` completed later and then reconcile promoted the VM to protection_state=protected and transport_state=mirroring
+- runtime blockcopy state recorded all three targets with ready=yes after the final reconcile
+
+Evidence:
+- HA-IMG06-ST02.status.final.json
+- HA-IMG06-ST02.runtime-state.final.txt
+- HA-IMG06-ST02.dumpxml.final.xml
+- HA-IMG06-ST02.blockjob.vda.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  Multi-disk raw validation is now complete for transient local-file storage with remote-nbd.
+  Persistent multi-disk raw behavior still needs separate validation.
+```
+
+### HA-IMG04-ST02
+
+```text
+Test ID: HA-IMG04-ST02
+Date: 2026-04-11
+Mode: HA
+VM Name: win11-ha-img04-st02
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Windows 11 raw
+Storage Backend: local file raw with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/win11-ha-img04-st02.conf
+
+Preconditions:
+- Transient VM
+- UEFI firmware with OVMF loader and NVRAM
+- TPM 2.0 emulator device in the generated libvirt XML
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+
+Commands:
+- ablestack_vm_ftctl check --vm win11-ha-img04-st02
+- ablestack_vm_ftctl protect --vm win11-ha-img04-st02 --mode ha --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm win11-ha-img04-st02
+- ablestack_vm_ftctl status --vm win11-ha-img04-st02 --json
+- virsh dumpxml win11-ha-img04-st02
+- virsh blockjob --domain win11-ha-img04-st02 --path vda --info
+
+Expected Result:
+- the generated Windows 11 raw VM boots with UEFI and TPM 2.0
+- primary runtime XML exposes a network mirror to a secondary-local raw target over NBD
+- reconcile promotes the VM to protected/mirroring after the initial copy finishes
+
+Actual Result:
+- the runner generated a transient Windows 11 raw VM from a raw seed image with OVMF pflash loader, NVRAM, and TPM 2.0 emulator support
+- runtime XML exposed a network mirror to nbd://10.10.31.2:10828/win11-ha-img04-st02-vda
+- secondary-local raw target was created and exported by qemu-nbd
+- after the initial full copy reached 100.00%, reconcile promoted the controller state to protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-IMG04-ST02.status.final.json
+- HA-IMG04-ST02.runtime-state.final.txt
+- HA-IMG04-ST02.dumpxml.final.xml
+- HA-IMG04-ST02.blockjob.vda.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: local-only test runner raw Windows case only
+- Re-test result: n/a
+- Remaining gap:
+  Windows raw baseline is now complete.
+  Persistent Windows behavior still needs separate validation.
+```
+
+### HA-IMG07-ST01
+
+```text
+Test ID: HA-IMG07-ST01
+Date: 2026-04-11
+Mode: HA
+VM Name: rocky10-mixed-st07
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: mixed-size multi-disk Linux
+Storage Backend: mixed qcow2/raw local files with remote-nbd secondary-local targets
+Profile Path: /etc/ablestack/ftctl.d/rocky10-mixed-st07.conf
+
+Preconditions:
+- Transient VM
+- three protected disks with mixed size and format
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- per-disk remote NBD exports enabled on the secondary host
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-mixed-st07
+- ablestack_vm_ftctl protect --vm rocky10-mixed-st07 --mode ha --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-mixed-st07
+- ablestack_vm_ftctl status --vm rocky10-mixed-st07 --json
+- virsh dumpxml rocky10-mixed-st07
+- find /run/ablestack-vm-ftctl -maxdepth 4 -type f -print -exec cat {} \;
+
+Expected Result:
+- mixed-size and mixed-format protected disks are mirrored to distinct secondary-local targets
+- per-disk export ports remain unique and stable
+- final state reaches protected/mirroring with all runtime mirrors ready='yes'
+
+Actual Result:
+- the runner created a mixed layout with qcow2 root, smaller qcow2 data disk, and larger raw data disk
+- runtime XML exposed three network mirrors with distinct export ports for `vda`, `vdb`, and `vdc`
+- runtime blockcopy state recorded all three targets as ready=yes
+- the VM reached protection_state=protected and transport_state=mirroring during the initial automated run
+
+Evidence:
+- HA-IMG07-ST01.status.final.json
+- HA-IMG07-ST01.runtime-state.final.txt
+- HA-IMG07-ST01.dumpxml.final.xml
+- HA-IMG07-ST01.secondary-target.t10.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  Mixed-size multi-disk validation is now complete for the transient local-file case.
+  Persistent mixed-size behavior and failover/failback still need separate validation.
 ```

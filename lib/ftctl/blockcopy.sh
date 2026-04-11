@@ -1008,13 +1008,17 @@ xml=${remote_xml}"
       ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-rc.txt" "${rc}"
       ftctl_blockcopy_capture_primary_debug "${vm}" "${target}"
     else
+      local force_reuse="0"
+      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "shared-blockcopy" && "${dest}" == /dev/* ]]; then
+        force_reuse="1"
+      fi
       ftctl_blockcopy_start_job \
         "${FTCTL_PROFILE_PRIMARY_URI}" \
         "${vm}" \
         "${target}" \
         "${dest}" \
         "${format}" \
-        "0" \
+        "${force_reuse}" \
         "${persistence}" \
         out \
         err \
