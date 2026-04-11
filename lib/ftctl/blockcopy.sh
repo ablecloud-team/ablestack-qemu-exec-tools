@@ -128,6 +128,16 @@ ftctl_blockcopy_remote_nbd_port_extract_from_uri() {
   printf -v "${out_var}" '%s' "${port}"
 }
 
+ftctl_blockcopy_remote_nbd_host_extract_from_uri() {
+  local uri="${1-}"
+  local out_var="${2}"
+  local rest host
+  rest="${uri#nbd://}"
+  host="${rest%%:*}"
+  [[ -n "${host}" ]] || return 1
+  printf -v "${out_var}" '%s' "${host}"
+}
+
 ftctl_blockcopy_remote_nbd_candidate_port() {
   local vm="${1-}"
   local target="${2-}"
@@ -220,6 +230,47 @@ ftctl_blockcopy_remote_nbd_port_in_use() {
   rc=0
   ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "ss -lntp | grep -q ':${port}[[:space:]]'" || true
   [[ "${rc}" == "0" ]]
+}
+
+ftctl_blockcopy_remote_path_exists() {
+  local host="${1-}"
+  local user="${2-}"
+  local path="${3-}"
+  local out err rc
+
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "test -e $(printf '%q' "${path}")" || true
+  [[ "${rc}" == "0" ]]
+}
+
+ftctl_blockcopy_remote_nbd_process_exists() {
+  local host="${1-}"
+  local user="${2-}"
+  local needle="${3-}"
+  local out err rc
+
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "ps -ef | grep qemu-nbd | grep -F -- $(printf '%q' "${needle}") | grep -v grep >/dev/null" || true
+  [[ "${rc}" == "0" ]]
+}
+
+ftctl_blockcopy_remote_nbd_progress_looks_alive() {
+  local dest_uri="${1-}"
+  local secondary_path="${2-}"
+  local host="" user="" port="" export_name=""
+
+  ftctl_blockcopy_remote_target_host_user host user || return 1
+  export_name="${dest_uri##*/}"
+  [[ -n "${export_name}" ]] || return 1
+  ftctl_blockcopy_remote_nbd_process_exists "${host}" "${user}" "${export_name}" || return 1
+  ftctl_blockcopy_remote_nbd_port_extract_from_uri "${dest_uri}" port || return 1
+  ftctl_blockcopy_remote_nbd_port_in_use "${host}" "${user}" "${port}" || return 1
+  [[ -n "${secondary_path}" ]] || return 0
+  ftctl_blockcopy_remote_path_exists "${host}" "${user}" "${secondary_path}"
 }
 
 ftctl_blockcopy_remote_nbd_active_count() {
@@ -326,6 +377,23 @@ ftctl_blockcopy_source_virtual_size_bytes() {
   printf -v "${out_var}" '%s' "${size_value}"
 }
 
+ftctl_blockcopy_source_allocated_size_bytes() {
+  local source_path="${1-}"
+  local out_var="${2}"
+  local out err rc size_value
+
+  out=""
+  err=""
+  rc=0
+  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- qemu-img info --force-share --output=json "${source_path}" || true
+  if [[ "${rc}" != "0" ]]; then
+    return "${rc}"
+  fi
+  size_value="$(python3 -c 'import json, sys; obj=json.loads(sys.argv[1]); print(obj.get("actual-size", obj.get("virtual-size", "")))' "${out}")" || return 1
+  [[ "${size_value}" =~ ^[0-9]+$ ]] || return 1
+  printf -v "${out_var}" '%s' "${size_value}"
+}
+
 ftctl_blockcopy_disk_bus_from_xml() {
   local xml_path="${1-}"
   local target="${2-}"
@@ -413,13 +481,14 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   local secondary_path="${5-}"
   local export_name="${6-}"
   local export_port="${7-}"
-  local host="" user="" size="" out="" err="" rc=0 pid_file="" remote_cmd="" debug_cmd=""
+  local host="" user="" size="" alloc_size="" out="" err="" rc=0 pid_file="" remote_cmd="" debug_cmd=""
 
   ftctl_blockcopy_remote_target_host_user host user || return 2
   ftctl_blockcopy_source_virtual_size_bytes "${vm}" "${target}" "${source}" size || {
     echo "ERROR: could not determine source virtual size for ${source}" >&2
     return 2
   }
+  ftctl_blockcopy_source_allocated_size_bytes "${source}" alloc_size || alloc_size="${size}"
 
   pid_file="/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid"
   remote_cmd=$(cat <<EOF
@@ -429,6 +498,11 @@ if [[ -b "${secondary_path}" ]]; then
   :
 else
   mkdir -p "$(dirname "${secondary_path}")"
+  avail_bytes="\$(df -B1 --output=avail "$(dirname "${secondary_path}")" | tail -n 1 | tr -dc '0-9' || true)"
+  if [[ -n "\${avail_bytes}" && "\${avail_bytes}" =~ ^[0-9]+$ ]] && (( avail_bytes < ${alloc_size} )); then
+    echo "insufficient_space:${secondary_path}:\${avail_bytes}:${alloc_size}" >&2
+    exit 97
+  fi
   if [[ ! -f "${secondary_path}" ]]; then
     qemu-img create -f "${format}" "${secondary_path}" "${size}"
   fi
@@ -573,6 +647,22 @@ ftctl_blockcopy_capture_primary_debug() {
   ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockjob.stdout.txt" "${out}"
   ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockjob.stderr.txt" "${err}"
   ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockjob.rc.txt" "${rc}"
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" qemu-monitor-command "${vm}" --pretty '{"execute":"query-block-jobs"}' || true
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-qmp-query-block-jobs.stdout.json" "${out}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-qmp-query-block-jobs.stderr.txt" "${err}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-qmp-query-block-jobs.rc.txt" "${rc}"
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" qemu-monitor-command "${vm}" --pretty '{"execute":"query-named-block-nodes"}' || true
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-qmp-query-named-block-nodes.stdout.json" "${out}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-qmp-query-named-block-nodes.stderr.txt" "${err}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-qmp-query-named-block-nodes.rc.txt" "${rc}"
 }
 
 ftctl_blockcopy_resolve_reverse_dest() {
@@ -870,6 +960,13 @@ ftctl_blockcopy_refresh_vm_jobs() {
           else
             job_state="${runtime_mirror_type}"
           fi
+        elif [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" && -n "${dest}" && "${dest}" == nbd://* ]]; then
+          if ftctl_blockcopy_remote_nbd_progress_looks_alive "${dest}" "${secondary_dest}"; then
+            job_state="copy"
+            ready="no"
+          else
+            rc_any=1
+          fi
         else
           rc_any=1
         fi
@@ -1068,7 +1165,11 @@ xml=${remote_xml}"
 
   ftctl_blockcopy_state_write "${vm}" "${records[@]}"
   ftctl_blockcopy_refresh_vm_jobs "${vm}" || true
-  ftctl_standby_prepare "${vm}"
+  if [[ "${FTCTL_PROFILE_MODE}" == "dr" && "${FTCTL_EXPERIMENT_DR_DEFER_STANDBY_PREPARE:-0}" == "1" ]]; then
+    ftctl_log_event "standby" "standby.prepare" "skip" "${vm}" "" "reason=dr_experiment_defer"
+  else
+    ftctl_standby_prepare "${vm}"
+  fi
 }
 
 ftctl_blockcopy_rearm() {
@@ -1137,7 +1238,11 @@ ftctl_blockcopy_rearm() {
   fi
 
   ftctl_blockcopy_refresh_vm_jobs "${vm}"
-  ftctl_standby_prepare "${vm}"
+  if [[ "${FTCTL_PROFILE_MODE}" == "dr" && "${FTCTL_EXPERIMENT_DR_DEFER_STANDBY_PREPARE:-0}" == "1" ]]; then
+    ftctl_log_event "standby" "standby.prepare" "skip" "${vm}" "" "reason=dr_experiment_defer"
+  else
+    ftctl_standby_prepare "${vm}"
+  fi
 }
 
 ftctl_blockcopy_prepare_reverse_sync_plan() {

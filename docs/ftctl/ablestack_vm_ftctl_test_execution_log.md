@@ -42,9 +42,6 @@ If FAIL:
 
 ### Pending
 
-- `DR-IMG01-ST01`
-- `DR-IMG08-ST01`
-- `DR-IMG09-ST01`
 - `DR-IMG01-ST04`
 - `DR-IMG01-ST06`
 - `FT-IMG01-ST01`
@@ -74,6 +71,10 @@ If FAIL:
 - `HA-IMG06-ST02`
 - `HA-IMG04-ST02`
 - `HA-IMG07-ST01`
+- `DR-IMG01-ST01`
+- `DR-IMG08-ST01`
+- `DR-IMG09-ST01`
+- `DR-IMG03-ST01`
 
 ## 4. Execution Records
 
@@ -785,4 +786,239 @@ If FAIL:
 - Remaining gap:
   Mixed-size multi-disk validation is now complete for the transient local-file case.
   Persistent mixed-size behavior and failover/failback still need separate validation.
+```
+
+### DR-IMG01-ST01
+
+```text
+Test ID: DR-IMG01-ST01
+Date: 2026-04-11
+Mode: DR
+VM Name: rocky10-dr-img01-st01
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Linux qcow2
+Storage Backend: local file qcow2 with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/rocky10-dr-img01-st01.conf
+
+Preconditions:
+- Transient VM
+- FTCTL_PROFILE_MODE="dr"
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- secondary-local qcow2 target exported over NBD
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-dr-img01-st01
+- ablestack_vm_ftctl protect --vm rocky10-dr-img01-st01 --mode dr --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-dr-img01-st01
+- ablestack_vm_ftctl status --vm rocky10-dr-img01-st01 --json
+- virsh dumpxml rocky10-dr-img01-st01
+- find /run/ablestack-vm-ftctl -maxdepth 4 -type f -print -exec cat {} \;
+
+Expected Result:
+- DR baseline uses the same secondary-local remote transport model as HA for non-shared storage
+- runtime XML exposes a network mirror to the DR target over NBD
+- final state reaches protected/mirroring after the initial copy completes
+
+Actual Result:
+- the runner created a transient Linux qcow2 VM and protected it in DR mode
+- runtime XML exposed a network mirror to nbd://10.10.31.2:10844/rocky10-dr-img01-st01-vda
+- secondary-local qcow2 target was created under /var/lib/ablestack-vm-ftctl/remote-nbd-targets/rocky10-dr-img01-st01
+- after reconcile, the DR controller state reached protection_state=protected and transport_state=mirroring
+
+Evidence:
+- DR-IMG01-ST01.status.final.json
+- DR-IMG01-ST01.runtime-state.final.txt
+- DR-IMG01-ST01.dumpxml.final.xml
+- DR-IMG01-ST01.secondary-target.t10.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  DR baseline Linux qcow2 is now complete on the remote-nbd path.
+  DR transient/persistent behavior and failover exercises still need separate validation.
+```
+
+### DR-IMG08-ST01
+
+```text
+Test ID: DR-IMG08-ST01
+Date: 2026-04-11
+Mode: DR
+VM Name: rocky10-dr-img08-st01
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: transient Linux qcow2
+Storage Backend: local file qcow2 with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/rocky10-dr-img08-st01.conf
+
+Preconditions:
+- Transient VM
+- FTCTL_PROFILE_MODE="dr"
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- secondary-local qcow2 target exported over NBD
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-dr-img08-st01
+- ablestack_vm_ftctl protect --vm rocky10-dr-img08-st01 --mode dr --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-dr-img08-st01
+- ablestack_vm_ftctl status --vm rocky10-dr-img08-st01 --json
+- virsh dumpxml rocky10-dr-img08-st01
+- find /run/ablestack-vm-ftctl -maxdepth 4 -type f -print -exec cat {} \;
+
+Expected Result:
+- transient DR behavior uses the same remote-nbd transport model as the DR baseline
+- standby preparation remains transient on the secondary side
+- final state reaches protected/mirroring with ready=yes in runtime blockcopy state
+
+Actual Result:
+- the runner created a transient Linux qcow2 VM and protected it in DR mode with a transient standby path
+- runtime XML exposed a network mirror to nbd://10.10.31.2:10865/rocky10-dr-img08-st01-vda
+- secondary-local qcow2 target was created and exported under the remote-nbd target root
+- after reconcile, the DR controller state reached protection_state=protected and transport_state=mirroring
+- runtime state recorded standby_state=prepared-transient and blockcopy ready=yes
+
+Evidence:
+- DR-IMG08-ST01.status.final.json
+- DR-IMG08-ST01.runtime-state.final.txt
+- DR-IMG08-ST01.dumpxml.final.xml
+- DR-IMG08-ST01.secondary-target.t10.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  DR transient behavior is now complete on the remote-nbd path.
+  DR persistent behavior and failover exercises still need separate validation.
+```
+
+### DR-IMG09-ST01
+
+```text
+Test ID: DR-IMG09-ST01
+Date: 2026-04-11
+Mode: DR
+VM Name: rocky10-dr-img09-st01
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: persistent Linux qcow2
+Storage Backend: local file qcow2 with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/rocky10-dr-img09-st01.conf
+
+Preconditions:
+- Persistent VM
+- FTCTL_PROFILE_MODE="dr"
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+- secondary-local qcow2 target exported over NBD
+- standby domain name distinct from the primary VM name
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-dr-img09-st01
+- ablestack_vm_ftctl protect --vm rocky10-dr-img09-st01 --mode dr --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm rocky10-dr-img09-st01
+- ablestack_vm_ftctl status --vm rocky10-dr-img09-st01 --json
+- virsh dumpxml rocky10-dr-img09-st01
+- virsh -c qemu+ssh://10.10.31.2/system list --all
+- virsh -c qemu+ssh://10.10.31.2/system dominfo rocky10-dr-img09-st01-secondary
+
+Expected Result:
+- persistent DR behavior uses the same remote-nbd transport model as the DR baseline
+- a distinct persistent standby domain is defined on the secondary host
+- final state reaches protected/mirroring with ready=yes in runtime blockcopy state
+
+Actual Result:
+- the runner created a persistent Linux qcow2 VM and protected it in DR mode
+- runtime XML exposed a network mirror to nbd://10.10.31.2:10831/rocky10-dr-img09-st01-vda
+- secondary-local qcow2 target was created and exported under the remote-nbd target root
+- after reconcile, the DR controller state reached protection_state=protected and transport_state=mirroring
+- runtime state recorded primary_persistence=yes, standby_state=defined, and blockcopy ready=yes
+- the secondary standby domain `rocky10-dr-img09-st01-secondary` existed as a persistent defined domain
+
+Evidence:
+- DR-IMG09-ST01.status.final.json
+- DR-IMG09-ST01.runtime-state.final.txt
+- DR-IMG09-ST01.dumpxml.final.xml
+- DR-IMG09-ST01.peer.list.final.txt
+- DR-IMG09-ST01.peer.dominfo.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  DR persistent behavior is now complete on the remote-nbd path.
+  DR failover and reverse-sync/failback exercises still need separate validation.
+```
+
+### DR-IMG03-ST01
+
+```text
+Test ID: DR-IMG03-ST01
+Date: 2026-04-11
+Mode: DR
+VM Name: win11-dr-img03-st01
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: transient Windows 11 qcow2
+Storage Backend: local file qcow2 with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/win11-dr-img03-st01.conf
+
+Preconditions:
+- Transient VM
+- Windows 11 UEFI + TPM 2.0 generated XML
+- FTCTL_PROFILE_MODE="dr"
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+
+Commands:
+- ablestack_vm_ftctl check --vm win11-dr-img03-st01
+- ablestack_vm_ftctl protect --vm win11-dr-img03-st01 --mode dr --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl reconcile --vm win11-dr-img03-st01
+- ablestack_vm_ftctl status --vm win11-dr-img03-st01 --json
+- virsh dumpxml win11-dr-img03-st01
+- virsh qemu-monitor-command win11-dr-img03-st01 --pretty '{"execute":"query-block-jobs"}'
+
+Expected Result:
+- Windows qcow2 DR follows the same remote-nbd transport model as the Linux DR baseline
+- runtime XML exposes a network mirror to the secondary-local qcow2 target over NBD
+- final state reaches protected/mirroring after the initial copy completes
+
+Actual Result:
+- blockcopy start succeeded and runtime XML exposed a network mirror to nbd://10.10.31.2:10858/win11-dr-img03-st01-vda
+- secondary root filesystem exhaustion was first identified as a direct blocker and cleaned up
+- an immediate 1-second trace then showed the primary QMP block job disappearing around T+13s while the secondary export remained alive
+- product-side observability was improved with secondary export/path/process fallback and explicit free-space preflight
+- an A/B replay with `baseline`, `AUTO_REARM=0 only`, and `defer standby prepare only` showed that all three variants retained the job through the early T+15 trace window
+- a full rerun of the baseline DR case without experiment flags then completed and final reconcile reached protection_state=protected and transport_state=mirroring
+
+Evidence:
+- DR-IMG03-ST01.status.final.json
+- DR-IMG03-ST01.runtime-state.final.txt
+- DR-IMG03-ST01.dumpxml.final.xml
+- DR-IMG03-ST01.debug-bundle.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed:
+  - lib/ftctl/blockcopy.sh
+  - lib/ftctl/orchestrator.sh
+- Re-test result:
+  - passed after secondary-space cleanup and product-side remote-nbd observability/space-preflight hardening
+- Remaining gap:
+  The exact internal reason for the earlier transient job disappearance is still not fully isolated at the QEMU/libvirt layer.
+  A/B replay confirmed that the current baseline path no longer depends on the DR experiment settings.
 ```

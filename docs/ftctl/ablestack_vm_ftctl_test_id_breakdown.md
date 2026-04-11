@@ -94,10 +94,10 @@ Recommended execution order:
 
 | Test ID | Image | Storage | Priority | Purpose | Status |
 |---|---|---|---|---|---|
-| `DR-IMG01-ST01` | `IMG01` | `ST01` | mandatory | DR baseline Linux qcow2 | pending |
-| `DR-IMG03-ST01` | `IMG03` | `ST01` | recommended | DR Windows qcow2 | pending |
-| `DR-IMG08-ST01` | `IMG08` | `ST01` | mandatory | DR transient VM behavior | pending |
-| `DR-IMG09-ST01` | `IMG09` | `ST01` | mandatory | DR persistent VM behavior | pending |
+| `DR-IMG01-ST01` | `IMG01` | `ST01` | mandatory | DR baseline Linux qcow2 | pass |
+| `DR-IMG03-ST01` | `IMG03` | `ST01` | recommended | DR Windows qcow2 | pass |
+| `DR-IMG08-ST01` | `IMG08` | `ST01` | mandatory | DR transient VM behavior | pass |
+| `DR-IMG09-ST01` | `IMG09` | `ST01` | mandatory | DR persistent VM behavior | pass |
 | `DR-IMG01-ST04` | `IMG01` | `ST04` | mandatory | DR NFS backend | pending |
 | `DR-IMG01-ST06` | `IMG01` | `ST06` | mandatory | DR Ceph RBD backend | pending |
 | `DR-IMG05-ST04` | `IMG05` | `ST04` | recommended | DR multi-disk on NFS | pending |
@@ -256,3 +256,41 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Validate persistent mixed-size multi-disk behavior.
     - Validate failover/failback once this image mix is included in the HA operational suite.
+
+- `DR-IMG01-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - The DR baseline on non-shared local qcow2 storage followed the same secondary-local transport model as the HA baseline.
+    - `mode=dr` did not require additional backend changes once the remote-nbd path was in place.
+  - Follow-up improvement:
+    - Validate DR transient and persistent image-behavior cases.
+    - Validate DR site failover and reverse-sync/failback exercises.
+
+- `DR-IMG08-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - DR transient VM behavior followed the same remote-nbd model as the DR baseline.
+    - The standby side remained transient (`prepared-transient`) while still reaching protected/mirroring after reconcile.
+  - Follow-up improvement:
+    - Validate persistent DR behavior.
+    - Validate DR failover/failback flows on the same backend.
+
+- `DR-IMG09-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - Persistent DR behavior followed the same remote-nbd transport path as the DR baseline and transient case.
+    - The standby domain naming and persistent define path worked as intended in DR mode as well.
+  - Follow-up improvement:
+    - Validate DR failover/failback and reverse-sync behavior.
+    - Validate Windows DR behavior on the same backend.
+
+- `DR-IMG03-ST01`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - Windows qcow2 DR initially exposed a mode-specific job disappearance after blockcopy start while the secondary export remained alive.
+    - Secondary local target ENOSPC was identified and cleaned up.
+    - An A/B replay of `baseline`, `AUTO_REARM=0 only`, and `defer standby prepare only` kept the job alive through the early trace window in all three cases.
+    - A full rerun of the baseline case without experiment flags then completed and reached protected/mirroring.
+  - Follow-up improvement:
+    - Keep the remote-nbd free-space preflight and observability hardening.
+    - Validate DR Windows persistent behavior after the DR transient path is fully normalized.

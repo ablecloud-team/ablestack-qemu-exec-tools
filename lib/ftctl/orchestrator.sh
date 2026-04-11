@@ -111,6 +111,13 @@ ftctl_orchestrator_handle_transport_issue() {
     return 0
   fi
 
+  if [[ "${FTCTL_PROFILE_AUTO_REARM:-1}" != "1" ]]; then
+    ftctl_state_set "${vm}" "transport_state=transient_loss"
+    ftctl_log_event "rearm" "rearm.skip" "warn" "${vm}" "" \
+      "reason=auto_rearm_disabled peer_host=${peer_host_id}"
+    return 0
+  fi
+
   ftctl_orchestrator_rearm_allowed "${vm}" || rearm_rc=$?
   case "${rearm_rc}" in
     0)
