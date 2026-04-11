@@ -724,6 +724,13 @@ ftctl_blockcopy_job_query() {
 
   state="$(awk -F: 'tolower($1) ~ /state/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${out}")"
   ready="$(awk -F: 'tolower($1) ~ /ready/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${out}")"
+  if [[ -z "${state}" && "${out}" =~ Block[[:space:]]+Copy:[[:space:]]+\[([0-9.]+)[[:space:]]*%\] ]]; then
+    state="copy"
+    ready="no"
+    if [[ "${BASH_REMATCH[1]}" == "100.00" || "${BASH_REMATCH[1]}" == "100" ]]; then
+      ready="yes"
+    fi
+  fi
   if [[ -z "${state}" && -z "${ready}" ]]; then
     printf -v "${state_var}" '%s' "unknown"
     printf -v "${ready_var}" '%s' "unknown"
@@ -844,10 +851,14 @@ ftctl_blockcopy_refresh_vm_jobs() {
     job_state="unknown"
     ready="unknown"
     if ! ftctl_blockcopy_job_query "${vm}" "${target}" job_state ready; then
-      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" || "${FTCTL_PROFILE_BACKEND_MODE}" == "shared-blockcopy" ]]; then
         runtime_mirror_type="unknown"
         if ftctl_blockcopy_runtime_mirror_query "${vm}" "${target}" runtime_mirror_type ready; then
-          job_state="${runtime_mirror_type}"
+          if [[ "${runtime_mirror_type}" == "network" || "${runtime_mirror_type}" == "file" ]]; then
+            job_state="copy"
+          else
+            job_state="${runtime_mirror_type}"
+          fi
         else
           rc_any=1
         fi
