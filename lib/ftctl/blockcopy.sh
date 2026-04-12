@@ -707,6 +707,10 @@ ftctl_blockcopy_validate_backend_mode() {
           echo "ERROR: shared-blockcopy destination must not use the default local blockcopy target base dir: ${dest}" >&2
           return 2
         fi
+        if [[ "${dest}" == /dev/* && "${format}" != "raw" ]]; then
+          echo "ERROR: shared-blockcopy does not support non-raw block targets: source_format=${format} target=${dest}" >&2
+          return 2
+        fi
       done
       ;;
     remote-nbd)
@@ -721,6 +725,10 @@ ftctl_blockcopy_validate_backend_mode() {
           echo "ERROR: remote-nbd requires a resolvable secondary target path" >&2
           return 2
         }
+        if [[ "${secondary_target}" == /dev/* && "${format}" != "raw" ]]; then
+          echo "ERROR: remote-nbd secondary block targets currently require raw format: source_format=${format} target=${secondary_target}" >&2
+          return 2
+        fi
       done
       ;;
     *)

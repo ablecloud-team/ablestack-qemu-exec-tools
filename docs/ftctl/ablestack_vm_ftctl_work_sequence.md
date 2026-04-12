@@ -207,6 +207,7 @@ Completed items:
   - `HA-IMG04-ST02`: `PASS` with `remote-nbd` for Windows 11 raw
   - `HA-IMG07-ST01`: `PASS` with `remote-nbd` for mixed-size multi-disk Linux
   - `DR-IMG01-ST01`: `PASS` with `remote-nbd` for DR baseline Linux qcow2
+  - `DR-IMG04-ST02`: `PASS` with `remote-nbd` for DR Windows 11 raw
   - `DR-IMG08-ST01`: `PASS` with `remote-nbd` for DR transient VM behavior
   - `DR-IMG09-ST01`: `PASS` with `remote-nbd` for DR persistent VM behavior
   - `DR-IMG03-ST01`: `PASS` with `remote-nbd` for DR Windows qcow2
@@ -223,12 +224,16 @@ Completed items:
   - Multi-disk `remote-nbd` validation is now complete for transient qcow2 VMs; persistent single-disk validation is also complete.
   - Shared-visible HA validation is now complete for the single-disk persistent case.
   - Local-block validation is now complete for the single-disk transient case.
+  - Shared multipath `qcow2-on-block` is not currently supportable on the tested libvirt/QEMU stack:
+    - `shared-blockcopy` rejects `/dev/...` qcow2 block targets at `blockdev-add`
+    - `remote-nbd` block targets must currently be treated as raw-only
   - Windows qcow2 baseline is now complete after fixing UEFI/TPM VM generation.
   - Windows raw validation is now complete on the same UEFI/TPM generation path.
   - Mixed-size multi-disk validation is now complete for the transient local-file case.
   - Multi-disk raw validation is now complete for the transient local-file case.
   - DR transient VM behavior is now complete on the remote-nbd path.
   - DR baseline validation is now complete on the same remote-nbd backend model.
+  - DR Windows raw validation is now complete on the same remote-nbd backend model.
   - DR persistent VM behavior is now complete on the same remote-nbd backend model.
   - DR Windows qcow2 now completes on the baseline path after secondary-space cleanup and remote-nbd observability/space-preflight hardening.
   - The remaining HA priorities are persistent local-block/raw variants and shared/multipath variants.

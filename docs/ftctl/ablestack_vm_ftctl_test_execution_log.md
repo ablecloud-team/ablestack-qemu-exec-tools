@@ -75,6 +75,7 @@ If FAIL:
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
 - `DR-IMG03-ST01`
+- `DR-IMG04-ST02`
 
 ## 4. Execution Records
 
@@ -788,6 +789,49 @@ If FAIL:
   Persistent mixed-size behavior and failover/failback still need separate validation.
 ```
 
+### HA-IMG01-ST05
+
+```text
+Test ID: HA-IMG01-ST05
+Date: 2026-04-12
+Mode: HA
+VM Name: rocky10-mpath-st05
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Linux on shared multipath block
+Storage Backend: shared multipath block (`vg_clvm01`)
+Profile Variants:
+- shared-blockcopy to /dev/vg_clvm01/lv_rocky10_mpath_st05_dst
+- remote-nbd to /dev/vg_clvm01/lv_rocky10_mpath_st05_dst
+
+Expected Result:
+- A multipath-backed source LV should mirror to a multipath-backed target LV using either the shared-visible or secondary-local transport model.
+
+Actual Result:
+- `shared-blockcopy` with qcow2-on-block source and block LV target does not create a job.
+- Direct libvirt reproduction showed the real failure:
+  `unable to execute QEMU command 'blockdev-add': 'file' driver requires '/dev/vg_clvm01/...' to be a regular file`
+- `remote-nbd` with a qcow2 source and block LV secondary target also did not produce an active block job, even after pre-formatting the target LV as qcow2.
+- As a result, the current product path must treat multipath block targets as raw-only until a successful raw-only experiment is completed.
+
+Evidence:
+- manual `virsh blockcopy` reproduction on the primary host
+- libvirtd journal showing the `blockdev-add` failure for the shared-blockcopy path
+- immediate trace logs showing `No current block job for vda` from T=0 on the multipath remote-nbd path
+
+Status: pending
+
+If FAIL:
+- Root cause:
+  The tested libvirt/QEMU stack does not support the current qcow2-on-block target usage for shared multipath HA.
+- Files changed:
+  - lib/ftctl/blockcopy.sh
+- Re-test result:
+  The product now fail-fast rejects non-raw block targets for `shared-blockcopy` and `remote-nbd`.
+- Remaining gap:
+  Run a raw-only ST05 experiment before revisiting shared multipath support.
+```
+
 ### DR-IMG01-ST01
 
 ```text
@@ -1021,4 +1065,60 @@ If FAIL:
 - Remaining gap:
   The exact internal reason for the earlier transient job disappearance is still not fully isolated at the QEMU/libvirt layer.
   A/B replay confirmed that the current baseline path no longer depends on the DR experiment settings.
+```
+
+### DR-IMG04-ST02
+
+```text
+Test ID: DR-IMG04-ST02
+Date: 2026-04-11
+Mode: DR
+VM Name: win11-dr-img04-st02
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: transient Windows 11 raw
+Storage Backend: local file raw with remote-nbd secondary-local target
+Profile Path: /etc/ablestack/ftctl.d/win11-dr-img04-st02.conf
+
+Preconditions:
+- Transient VM
+- Windows 11 UEFI + TPM 2.0 generated XML
+- FTCTL_PROFILE_MODE="dr"
+- FTCTL_PROFILE_BACKEND_MODE="remote-nbd"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="secondary-local"
+
+Commands:
+- ablestack_vm_ftctl check --vm win11-dr-img04-st02
+- ablestack_vm_ftctl protect --vm win11-dr-img04-st02 --mode dr --peer qemu+ssh://10.10.31.2/system
+- wait until the initial copy reaches 100%
+- ablestack_vm_ftctl reconcile --vm win11-dr-img04-st02
+- ablestack_vm_ftctl status --vm win11-dr-img04-st02 --json
+- virsh dumpxml win11-dr-img04-st02
+- virsh blockjob --domain win11-dr-img04-st02 --path vda --info
+
+Expected Result:
+- Windows raw DR follows the same remote-nbd transport model as the Linux and Windows qcow2 DR baselines
+- runtime XML exposes a network mirror to the secondary-local raw target over NBD
+- final state reaches protected/mirroring after the initial copy completes
+
+Actual Result:
+- blockcopy start succeeded and runtime XML exposed a network mirror to nbd://10.10.31.2:10838/win11-dr-img04-st02-vda
+- the secondary-local raw target grew under /var/lib/libvirt/images/win11-dr-img04-st02-secondary/win11-dr-img04-st02
+- the initial test runner summary stopped during syncing/copying, but follow-up polling confirmed the copy reached 100%
+- after reconcile, the DR controller state reached protection_state=protected and transport_state=mirroring
+
+Evidence:
+- DR-IMG04-ST02.status.final.json
+- DR-IMG04-ST02.dumpxml.final.xml
+- DR-IMG04-ST02.blockjob.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  DR Windows raw transient validation is now complete.
+  Windows persistent DR behavior remains a separate follow-up area.
 ```

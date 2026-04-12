@@ -96,6 +96,7 @@ Recommended execution order:
 |---|---|---|---|---|---|
 | `DR-IMG01-ST01` | `IMG01` | `ST01` | mandatory | DR baseline Linux qcow2 | pass |
 | `DR-IMG03-ST01` | `IMG03` | `ST01` | recommended | DR Windows qcow2 | pass |
+| `DR-IMG04-ST02` | `IMG04` | `ST02` | recommended | DR Windows raw | pass |
 | `DR-IMG08-ST01` | `IMG08` | `ST01` | mandatory | DR transient VM behavior | pass |
 | `DR-IMG09-ST01` | `IMG09` | `ST01` | mandatory | DR persistent VM behavior | pass |
 | `DR-IMG01-ST04` | `IMG01` | `ST04` | mandatory | DR NFS backend | pending |
@@ -221,6 +222,16 @@ Every `Test ID` should end with:
     - Validate the same backend for persistent local-block VMs.
     - Validate multi-disk local-block behavior and failover/failback.
 
+- `HA-IMG01-ST05`
+  - Result: `pending`
+  - Observation:
+    - The shared multipath environment itself is healthy and `vg_clvm01` has sufficient free capacity.
+    - `shared-blockcopy` with `qcow2` source and `/dev/...` multipath LV target is rejected by libvirt/QEMU with `blockdev-add: 'file' driver requires ... to be a regular file`.
+    - `remote-nbd` with `/dev/...` secondary block target and `qcow2` source also does not produce an active block job, so the controller must not treat this combination as a valid syncing state.
+  - Follow-up improvement:
+    - Keep the new fail-fast validation that blocks non-raw block targets for `shared-blockcopy` and `remote-nbd`.
+    - Re-run `ST05` as a raw-only experiment before treating multipath as supported.
+
 - `HA-IMG03-ST01`
   - Result: `PASS` with `remote-nbd` backend mode
   - Observation:
@@ -294,3 +305,13 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Keep the remote-nbd free-space preflight and observability hardening.
     - Validate DR Windows persistent behavior after the DR transient path is fully normalized.
+
+- `DR-IMG04-ST02`
+  - Result: `PASS` with `remote-nbd` backend mode
+  - Observation:
+    - Windows raw DR followed the same remote-nbd model as the Windows qcow2 DR case.
+    - The Windows 11 UEFI + TPM 2.0 generation path remained valid for raw source images in DR mode.
+    - After the initial full copy completed, reconcile promoted the VM to protected/mirroring.
+  - Follow-up improvement:
+    - Validate DR Windows persistent behavior on both qcow2 and raw variants.
+    - Keep checking secondary-local capacity because raw targets allocate aggressively during copy.
