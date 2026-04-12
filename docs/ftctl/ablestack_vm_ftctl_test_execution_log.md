@@ -821,7 +821,7 @@ Evidence:
 - explicit owner-separated activation snapshots for primary source LV and secondary target LV
 - successful `remote-nbd + raw-on-block` owner-separated rerun reaching `protected/mirroring`
 
-Status: pending
+Status: PASS
 
 If FAIL:
 - Root cause:
@@ -829,9 +829,9 @@ If FAIL:
 - Files changed:
   - lib/ftctl/blockcopy.sh
 - Re-test result:
-  The product now fail-fast rejects unsupported block target paths for `shared-blockcopy`, and the `remote-nbd` path has explicit secondary `lvchange -ay/-an` handling for block targets.
+  The product now uses an owner-separated activation model for `remote-nbd` block targets on non-clustered shared VGs, including secondary-side stale dm cleanup and VG refresh before activation.
 - Remaining gap:
-  `ST05` remains open until the owner-separated `qcow2-on-block` path is either made to work or is explicitly classified as unsupported.
+  `shared-blockcopy` remains unsupported for `/dev/...` multipath targets on the current libvirt/QEMU stack.
 ```
 
 ### DR-IMG01-ST01

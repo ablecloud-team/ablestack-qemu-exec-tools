@@ -87,7 +87,7 @@ Recommended execution order:
 | `HA-IMG09-ST01` | `IMG09` | `ST01` | mandatory | HA persistent VM behavior | pass |
 | `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pass |
 | `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA shared-visible filesystem backend | pass |
-| `HA-IMG01-ST05` | `IMG01` | `ST05` | recommended | HA multipath backend | pending |
+| `HA-IMG01-ST05` | `IMG01` | `ST05` | recommended | HA multipath backend | pass |
 | `HA-IMG01-ST06` | `IMG01` | `ST06` | recommended | HA Ceph RBD backend | pending |
 
 ## 7. DR Test IDs
@@ -223,16 +223,16 @@ Every `Test ID` should end with:
     - Validate multi-disk local-block behavior and failover/failback.
 
 - `HA-IMG01-ST05`
-  - Result: `pending`
+  - Result: `PASS` with `remote-nbd` backend mode under an owner-separated activation model
   - Observation:
     - The shared multipath environment itself is healthy and `vg_clvm01` has sufficient free capacity.
     - `shared-blockcopy` with `qcow2` source and `/dev/...` multipath LV target is rejected by libvirt/QEMU with `blockdev-add: 'file' driver requires ... to be a regular file`.
     - For a non-clustered shared VG, the valid ownership model is: create both LVs on one host, then split activation by role.
     - Under that ownership model, `remote-nbd` with `raw` source and `raw` secondary block target succeeded and reached `protected/mirroring`.
-    - The `qcow2-on-block` owner-separated variant still does not validate cleanly because the secondary qcow2 target LV did not transition to an active state on the secondary host during explicit activation.
+    - After adding stale device-mapper cleanup and VG refresh before secondary activation, the `qcow2-on-block` owner-separated variant also reached `protected/mirroring`.
   - Follow-up improvement:
-    - Keep the new fail-fast validation that blocks unsupported non-raw block target paths for `shared-blockcopy`.
-    - For `remote-nbd`, enforce the owner-separated activation model explicitly in product code and continue debugging the qcow2-on-block variant before closing `ST05`.
+    - Keep the owner-separated activation model explicit in product code for non-clustered shared VGs.
+    - Keep `shared-blockcopy` on `/dev/...` multipath targets classified as unsupported on the current stack.
 
 - `HA-IMG03-ST01`
   - Result: `PASS` with `remote-nbd` backend mode

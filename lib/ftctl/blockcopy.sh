@@ -498,17 +498,39 @@ remote_cmd=$(cat <<EOF
 set -euo pipefail
 mkdir -p /run/ablestack-vm-ftctl
 if [[ -b "${secondary_path}" ]]; then
+  secondary_real="\$(readlink -f "${secondary_path}" 2>/dev/null || true)"
+  stale_map=""
+  if [[ -n "\${secondary_real}" ]]; then
+    stale_map="\$(dmsetup info -C --noheadings -o name "\${secondary_real}" 2>/dev/null | awk 'NR==1{print \$1}' || true)"
+  fi
+  vg_name="\$(lvs --noheadings -o vg_name "${secondary_path}" 2>/dev/null | awk 'NR==1{gsub(/^[ \t]+|[ \t]+$/, \"\", \$0); print \$0}' || true)"
   echo "=== PRE-LVCHANGE ==="
   lvs -a -o lv_name,lv_attr,lv_active "${secondary_path}" 2>/dev/null || true
+  if [[ -n "\${secondary_real}" ]]; then
+    dmsetup info -c "\${secondary_real}" 2>/dev/null || true
+  fi
   if [[ -b "${source}" ]]; then
     lvchange -an "${source}" >/dev/null 2>&1 || true
   fi
-  vgscan --mknodes >/dev/null 2>&1 || true
   lvchange -an "${secondary_path}" >/dev/null 2>&1 || true
+  if [[ -n "\${stale_map}" && -n "\${secondary_real}" ]]; then
+    stale_open="\$(dmsetup info -C --noheadings -o open "\${secondary_real}" 2>/dev/null | awk 'NR==1{print \$1}' || true)"
+    if [[ "\${stale_open}" == "0" ]]; then
+      dmsetup remove "\${stale_map}" >/dev/null 2>&1 || true
+      udevadm settle >/dev/null 2>&1 || true
+    fi
+  fi
+  if [[ -n "\${vg_name}" ]]; then
+    vgchange --refresh "\${vg_name}" >/dev/null 2>&1 || true
+  fi
+  vgscan --mknodes >/dev/null 2>&1 || true
   lvchange -ay "${secondary_path}"
   udevadm settle >/dev/null 2>&1 || true
   echo "=== POST-LVCHANGE ==="
   lvs -a -o lv_name,lv_attr,lv_active "${secondary_path}" 2>/dev/null || true
+  if [[ -n "\${secondary_real}" ]]; then
+    dmsetup info -c "\${secondary_real}" 2>/dev/null || true
+  fi
   if [[ "${format}" != "raw" ]]; then
     current_format="\$(qemu-img info --force-share --output=json "${secondary_path}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get(\"format\",\"\"))' 2>/dev/null || true)"
     if [[ "\${current_format}" != "${format}" ]]; then
@@ -747,10 +769,6 @@ ftctl_blockcopy_validate_backend_mode() {
           echo "ERROR: remote-nbd requires a resolvable secondary target path" >&2
           return 2
         }
-        if [[ "${secondary_target}" == /dev/* && "${format}" != "raw" ]]; then
-          echo "ERROR: remote-nbd secondary block targets currently require raw format: source_format=${format} target=${secondary_target}" >&2
-          return 2
-        fi
       done
       ;;
     *)
