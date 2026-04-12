@@ -227,10 +227,12 @@ Every `Test ID` should end with:
   - Observation:
     - The shared multipath environment itself is healthy and `vg_clvm01` has sufficient free capacity.
     - `shared-blockcopy` with `qcow2` source and `/dev/...` multipath LV target is rejected by libvirt/QEMU with `blockdev-add: 'file' driver requires ... to be a regular file`.
-    - `remote-nbd` with `/dev/...` secondary block target and `qcow2` source also does not produce an active block job, so the controller must not treat this combination as a valid syncing state.
+    - For a non-clustered shared VG, the valid ownership model is: create both LVs on one host, then split activation by role.
+    - Under that ownership model, `remote-nbd` with `raw` source and `raw` secondary block target succeeded and reached `protected/mirroring`.
+    - The `qcow2-on-block` owner-separated variant still does not validate cleanly because the secondary qcow2 target LV did not transition to an active state on the secondary host during explicit activation.
   - Follow-up improvement:
-    - Keep the new fail-fast validation that blocks non-raw block targets for `shared-blockcopy` and `remote-nbd`.
-    - Re-run `ST05` as a raw-only experiment before treating multipath as supported.
+    - Keep the new fail-fast validation that blocks unsupported non-raw block target paths for `shared-blockcopy`.
+    - For `remote-nbd`, enforce the owner-separated activation model explicitly in product code and continue debugging the qcow2-on-block variant before closing `ST05`.
 
 - `HA-IMG03-ST01`
   - Result: `PASS` with `remote-nbd` backend mode

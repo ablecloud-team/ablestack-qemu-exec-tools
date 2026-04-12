@@ -811,13 +811,15 @@ Actual Result:
 - `shared-blockcopy` with qcow2-on-block source and block LV target does not create a job.
 - Direct libvirt reproduction showed the real failure:
   `unable to execute QEMU command 'blockdev-add': 'file' driver requires '/dev/vg_clvm01/...' to be a regular file`
-- `remote-nbd` with a qcow2 source and block LV secondary target also did not produce an active block job, even after pre-formatting the target LV as qcow2.
-- As a result, the current product path must treat multipath block targets as raw-only until a successful raw-only experiment is completed.
+- In a non-clustered shared VG, creating the source LV on primary and the target LV on secondary is not a valid test model; both LVs must be created on one host and then activation must be split by role.
+- With that owner-separated model, `remote-nbd` plus `raw` source/target block LVs succeeded and reached `protected/mirroring`.
+- The equivalent `qcow2-on-block` owner-separated variant still remains unresolved because the secondary qcow2 target LV did not become active on the secondary host during explicit activation.
 
 Evidence:
 - manual `virsh blockcopy` reproduction on the primary host
 - libvirtd journal showing the `blockdev-add` failure for the shared-blockcopy path
-- immediate trace logs showing `No current block job for vda` from T=0 on the multipath remote-nbd path
+- explicit owner-separated activation snapshots for primary source LV and secondary target LV
+- successful `remote-nbd + raw-on-block` owner-separated rerun reaching `protected/mirroring`
 
 Status: pending
 
@@ -827,9 +829,9 @@ If FAIL:
 - Files changed:
   - lib/ftctl/blockcopy.sh
 - Re-test result:
-  The product now fail-fast rejects non-raw block targets for `shared-blockcopy` and `remote-nbd`.
+  The product now fail-fast rejects unsupported block target paths for `shared-blockcopy`, and the `remote-nbd` path has explicit secondary `lvchange -ay/-an` handling for block targets.
 - Remaining gap:
-  Run a raw-only ST05 experiment before revisiting shared multipath support.
+  `ST05` remains open until the owner-separated `qcow2-on-block` path is either made to work or is explicitly classified as unsupported.
 ```
 
 ### DR-IMG01-ST01

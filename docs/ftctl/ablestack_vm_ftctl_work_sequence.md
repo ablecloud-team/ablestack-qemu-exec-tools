@@ -226,7 +226,9 @@ Completed items:
   - Local-block validation is now complete for the single-disk transient case.
   - Shared multipath `qcow2-on-block` is not currently supportable on the tested libvirt/QEMU stack:
     - `shared-blockcopy` rejects `/dev/...` qcow2 block targets at `blockdev-add`
-    - `remote-nbd` block targets must currently be treated as raw-only
+    - on a non-clustered shared VG, multipath block testing must use an owner-separated activation model
+    - `remote-nbd` with owner-separated `raw` block source/target now works on that model
+    - `remote-nbd` qcow2-on-block still remains unresolved
   - Windows qcow2 baseline is now complete after fixing UEFI/TPM VM generation.
   - Windows raw validation is now complete on the same UEFI/TPM generation path.
   - Mixed-size multi-disk validation is now complete for the transient local-file case.

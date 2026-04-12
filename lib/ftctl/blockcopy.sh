@@ -491,11 +491,30 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
   ftctl_blockcopy_source_allocated_size_bytes "${source}" alloc_size || alloc_size="${size}"
 
   pid_file="/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid"
-  remote_cmd=$(cat <<EOF
+  if [[ -b "${secondary_path}" ]]; then
+    lvchange -an "${secondary_path}" >/dev/null 2>&1 || true
+  fi
+remote_cmd=$(cat <<EOF
 set -euo pipefail
 mkdir -p /run/ablestack-vm-ftctl
 if [[ -b "${secondary_path}" ]]; then
-  :
+  echo "=== PRE-LVCHANGE ==="
+  lvs -a -o lv_name,lv_attr,lv_active "${secondary_path}" 2>/dev/null || true
+  if [[ -b "${source}" ]]; then
+    lvchange -an "${source}" >/dev/null 2>&1 || true
+  fi
+  vgscan --mknodes >/dev/null 2>&1 || true
+  lvchange -an "${secondary_path}" >/dev/null 2>&1 || true
+  lvchange -ay "${secondary_path}"
+  udevadm settle >/dev/null 2>&1 || true
+  echo "=== POST-LVCHANGE ==="
+  lvs -a -o lv_name,lv_attr,lv_active "${secondary_path}" 2>/dev/null || true
+  if [[ "${format}" != "raw" ]]; then
+    current_format="\$(qemu-img info --force-share --output=json "${secondary_path}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get(\"format\",\"\"))' 2>/dev/null || true)"
+    if [[ "\${current_format}" != "${format}" ]]; then
+      qemu-img create -f "${format}" "${secondary_path}" "${size}"
+    fi
+  fi
 else
   mkdir -p "$(dirname "${secondary_path}")"
   avail_bytes="\$(df -B1 --output=avail "$(dirname "${secondary_path}")" | tail -n 1 | tr -dc '0-9' || true)"
@@ -543,6 +562,9 @@ EOF
   err=""
   rc=0
   ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "secondary-prepare-stdout.txt" "${out}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "secondary-prepare-stderr.txt" "${err}"
+  ftctl_blockcopy_write_debug_file "${vm}" "${target}" "secondary-prepare-rc.txt" "${rc}"
   : "${out}${err}"
   [[ "${rc}" == "0" ]] || {
     echo "ERROR: remote-nbd prepare context: host=${host} user=${user} size=${size} format=${format} secondary_path=${secondary_path} export=${export_name}" >&2
