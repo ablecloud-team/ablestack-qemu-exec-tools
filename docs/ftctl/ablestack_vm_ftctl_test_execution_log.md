@@ -42,7 +42,6 @@ If FAIL:
 
 ### Pending
 
-- `DR-IMG01-ST04`
 - `DR-IMG01-ST06`
 - `FT-IMG01-ST01`
 - `FT-IMG09-ST01`
@@ -57,6 +56,13 @@ If FAIL:
 ### In Progress
 
 - none
+
+### Skipped
+
+- `DR-IMG01-ST04`
+  - skipped because `HA-IMG01-ST04` already validated the same shared-visible filesystem blockcopy semantics on GFS2, which is treated as equivalent coverage for the NFS file-backed DR transport model in the current test environment
+- `DR-IMG05-ST04`
+  - skipped because the shared-visible multi-disk filesystem behavior was already covered by the GFS2-based shared filesystem validation path and is treated as equivalent coverage for the NFS multi-disk DR case in the current environment
 
 ### Done
 

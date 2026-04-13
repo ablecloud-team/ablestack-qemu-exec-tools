@@ -99,9 +99,9 @@ Recommended execution order:
 | `DR-IMG04-ST02` | `IMG04` | `ST02` | recommended | DR Windows raw | pass |
 | `DR-IMG08-ST01` | `IMG08` | `ST01` | mandatory | DR transient VM behavior | pass |
 | `DR-IMG09-ST01` | `IMG09` | `ST01` | mandatory | DR persistent VM behavior | pass |
-| `DR-IMG01-ST04` | `IMG01` | `ST04` | mandatory | DR NFS backend | pending |
+| `DR-IMG01-ST04` | `IMG01` | `ST04` | mandatory | DR NFS backend | skip |
 | `DR-IMG01-ST06` | `IMG01` | `ST06` | mandatory | DR Ceph RBD backend | pending |
-| `DR-IMG05-ST04` | `IMG05` | `ST04` | recommended | DR multi-disk on NFS | pending |
+| `DR-IMG05-ST04` | `IMG05` | `ST04` | recommended | DR multi-disk on NFS | skip |
 | `DR-IMG05-ST06` | `IMG05` | `ST06` | recommended | DR multi-disk on Ceph RBD | pending |
 
 ## 8. FT Test IDs
@@ -316,3 +316,19 @@ Every `Test ID` should end with:
   - Follow-up improvement:
     - Validate DR Windows persistent behavior on both qcow2 and raw variants.
     - Keep checking secondary-local capacity because raw targets allocate aggressively during copy.
+
+- `DR-IMG01-ST04`
+  - Result: `SKIP`
+  - Observation:
+    - The current environment uses GFS2 rather than NFS for the shared-visible filesystem backend.
+    - `HA-IMG01-ST04` already validated the shared-visible filesystem blockcopy semantics on GFS2, and that coverage is treated as equivalent for the NFS-oriented DR file-backed case in this environment.
+  - Follow-up improvement:
+    - Run the explicit NFS variant only if a distinct NFS-backed host pair becomes available.
+
+- `DR-IMG05-ST04`
+  - Result: `SKIP`
+  - Observation:
+    - Multi-disk shared-visible filesystem behavior was already exercised on the GFS2-backed shared filesystem path in the current environment.
+    - That coverage is treated as equivalent for the NFS multi-disk DR case unless a separate NFS backend is introduced.
+  - Follow-up improvement:
+    - Run the explicit NFS multi-disk DR variant only when a distinct NFS-backed environment is available.

@@ -239,6 +239,7 @@ Completed items:
   - DR Windows raw validation is now complete on the same remote-nbd backend model.
   - DR persistent VM behavior is now complete on the same remote-nbd backend model.
   - DR Windows qcow2 now completes on the baseline path after secondary-space cleanup and remote-nbd observability/space-preflight hardening.
+  - NFS-backed DR filesystem cases are skipped in the current environment because GFS2 shared-visible filesystem validation is treated as equivalent coverage.
   - The remaining HA priorities are persistent local-block/raw variants and shared/multipath variants.
 
 ### Step 13. PR preparation
