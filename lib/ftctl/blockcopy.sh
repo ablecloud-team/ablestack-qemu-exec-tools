@@ -448,6 +448,63 @@ else:
   printf -v "${out_var}" '%s' "${bus_value}"
 }
 
+ftctl_blockcopy_rbd_parse_spec() {
+  local spec="${1-}"
+  local pool_var="${2}"
+  local image_var="${3}"
+  local body pool image
+
+  [[ "${spec}" == rbd:* ]] || return 1
+  body="${spec#rbd:}"
+  pool="${body%%/*}"
+  image="${body#*/}"
+  [[ -n "${pool}" && -n "${image}" && "${image}" != "${pool}" ]] || return 1
+  printf -v "${pool_var}" '%s' "${pool}"
+  printf -v "${image_var}" '%s' "${image}"
+}
+
+ftctl_blockcopy_rbd_connection_from_xml() {
+  local xml_path="${1-}"
+  local target="${2-}"
+  local host_var="${3}"
+  local port_var="${4}"
+  local user_var="${5}"
+  local secret_var="${6}"
+  local values
+
+  values="$(python3 -c 'import sys, xml.etree.ElementTree as ET
+xml_path, target = sys.argv[1], sys.argv[2]
+tree = ET.parse(xml_path)
+root = tree.getroot()
+for disk in root.findall("./devices/disk"):
+    t = disk.find("target")
+    if t is None or t.get("dev") != target:
+        continue
+    source = disk.find("source")
+    auth = disk.find("auth")
+    host = ""
+    port = ""
+    user = ""
+    secret = ""
+    if source is not None:
+        h = source.find("host")
+        if h is not None:
+            host = h.get("name", "")
+            port = h.get("port", "")
+    if auth is not None:
+        user = auth.get("username", "")
+        s = auth.find("secret")
+        if s is not None:
+            secret = s.get("uuid", "")
+    print("\\n".join([host, port, user, secret]))
+    raise SystemExit(0)
+raise SystemExit(1)' "${xml_path}" "${target}")" || return 1
+  printf -v "${host_var}" '%s' "$(sed -n '1p' <<< "${values}")"
+  printf -v "${port_var}" '%s' "$(sed -n '2p' <<< "${values}")"
+  printf -v "${user_var}" '%s' "$(sed -n '3p' <<< "${values}")"
+  printf -v "${secret_var}" '%s' "$(sed -n '4p' <<< "${values}")"
+}
+
 ftctl_blockcopy_remote_nbd_dest_xml_path() {
   local vm="${1-}"
   local target="${2-}"
@@ -497,6 +554,7 @@ ftctl_blockcopy_build_shared_dest_xml() {
   local source_xml="${5-}"
   local out_path_var="${6}"
   local out_path bus disk_type source_attr_name
+  local rbd_pool="" rbd_image="" rbd_host="" rbd_port="" rbd_user="" rbd_secret=""
 
   out_path="$(ftctl_blockcopy_shared_dest_xml_path "${vm}" "${target}")"
   ftctl_ensure_dir "$(dirname "${out_path}")" "0755"
@@ -505,7 +563,18 @@ ftctl_blockcopy_build_shared_dest_xml() {
     ftctl_blockcopy_disk_bus_from_xml "${source_xml}" "${target}" bus || true
   fi
 
-  if [[ "${dest}" == /dev/* ]]; then
+  if [[ "${dest}" == rbd:* ]]; then
+    disk_type="network"
+    source_attr_name=""
+    ftctl_blockcopy_rbd_parse_spec "${dest}" rbd_pool rbd_image || return 1
+    if [[ -n "${source_xml}" && -f "${source_xml}" ]]; then
+      ftctl_blockcopy_rbd_connection_from_xml "${source_xml}" "${target}" rbd_host rbd_port rbd_user rbd_secret || true
+    fi
+    [[ -n "${rbd_host}" ]] || rbd_host="scvm"
+    [[ -n "${rbd_port}" ]] || rbd_port="6789"
+    [[ -n "${rbd_user}" ]] || rbd_user="admin"
+    [[ -n "${rbd_secret}" ]] || rbd_secret="11111111-1111-1111-1111-111111111111"
+  elif [[ "${dest}" == /dev/* ]]; then
     disk_type="block"
     source_attr_name="dev"
   else
@@ -513,13 +582,28 @@ ftctl_blockcopy_build_shared_dest_xml() {
     source_attr_name="file"
   fi
 
-  cat > "${out_path}" <<EOF
+  if [[ "${disk_type}" == "network" ]]; then
+    cat > "${out_path}" <<EOF
+<disk type='network' device='disk'>
+  <driver name='qemu' type='${format}'/>
+  <auth username='${rbd_user}'>
+    <secret type='ceph' uuid='${rbd_secret}'/>
+  </auth>
+  <source protocol='rbd' name='${rbd_pool}/${rbd_image}'>
+    <host name='${rbd_host}' port='${rbd_port}'/>
+  </source>
+  <target dev='${target}' bus='${bus}'/>
+</disk>
+EOF
+  else
+    cat > "${out_path}" <<EOF
 <disk type='${disk_type}' device='disk'>
   <driver name='qemu' type='${format}'/>
   <source ${source_attr_name}='${dest}'/>
   <target dev='${target}' bus='${bus}'/>
 </disk>
 EOF
+  fi
   printf -v "${out_path_var}" '%s' "${out_path}"
 }
 

@@ -55,6 +55,10 @@ ftctl_standby_blockcopy_records() {
 
 ftctl_standby__source_attr_for_dest() {
   local dest="${1-}"
+  if [[ "${dest}" == rbd:* ]]; then
+    printf '%s\n' "rbd"
+    return 0
+  fi
   if [[ "${dest}" == /dev/* ]]; then
     printf '%s\n' "dev"
   else
@@ -97,12 +101,35 @@ for disk in devices.findall("disk"):
     target = disk.find("target")
     if target is None or target.get("dev") != target_dev:
         continue
-    source = disk.find("source")
-    if source is None:
-        source = ET.Element("source")
-        disk.insert(0, source)
-    source.attrib.clear()
-    source.set(source_attr, dest_path)
+    if source_attr == "rbd":
+        if not dest_path.startswith("rbd:"):
+            raise SystemExit(f"invalid rbd dest: {dest_path}")
+        body = dest_path[4:]
+        pool, image = body.split("/", 1)
+        disk.set("type", "network")
+        source = disk.find("source")
+        if source is None:
+            source = ET.Element("source")
+            disk.insert(0, source)
+        hosts = [child for child in list(source) if child.tag == "host"]
+        source.attrib.clear()
+        source.set("protocol", "rbd")
+        source.set("name", f"{pool}/{image}")
+        for child in list(source):
+            source.remove(child)
+        for host in hosts:
+            source.append(host)
+    else:
+        if source_attr == "dev":
+            disk.set("type", "block")
+        elif source_attr == "file":
+            disk.set("type", "file")
+        source = disk.find("source")
+        if source is None:
+            source = ET.Element("source")
+            disk.insert(0, source)
+        source.attrib.clear()
+        source.set(source_attr, dest_path)
 
 tree.write(xml_path, encoding="unicode")
 PY
