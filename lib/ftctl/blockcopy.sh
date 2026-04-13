@@ -417,6 +417,12 @@ ftctl_blockcopy_remote_nbd_dest_xml_path() {
   printf '%s\n' "${FTCTL_RUN_DIR}/xml/$(ftctl_state_vm_key "${vm}")-${target}-remote-nbd.xml"
 }
 
+ftctl_blockcopy_shared_dest_xml_path() {
+  local vm="${1-}"
+  local target="${2-}"
+  printf '%s\n' "${FTCTL_RUN_DIR}/xml/$(ftctl_state_vm_key "${vm}")-${target}-shared-blockcopy.xml"
+}
+
 ftctl_blockcopy_build_remote_nbd_dest_xml() {
   local vm="${1-}"
   local target="${2-}"
@@ -440,6 +446,40 @@ ftctl_blockcopy_build_remote_nbd_dest_xml() {
   <source protocol='nbd' name='${export_name}'>
     <host name='${export_addr}' port='${export_port}' transport='tcp'/>
   </source>
+  <target dev='${target}' bus='${bus}'/>
+</disk>
+EOF
+  printf -v "${out_path_var}" '%s' "${out_path}"
+}
+
+ftctl_blockcopy_build_shared_dest_xml() {
+  local vm="${1-}"
+  local target="${2-}"
+  local format="${3-}"
+  local dest="${4-}"
+  local source_xml="${5-}"
+  local out_path_var="${6}"
+  local out_path bus disk_type source_attr_name
+
+  out_path="$(ftctl_blockcopy_shared_dest_xml_path "${vm}" "${target}")"
+  ftctl_ensure_dir "$(dirname "${out_path}")" "0755"
+  bus="virtio"
+  if [[ -n "${source_xml}" && -f "${source_xml}" ]]; then
+    ftctl_blockcopy_disk_bus_from_xml "${source_xml}" "${target}" bus || true
+  fi
+
+  if [[ "${dest}" == /dev/* ]]; then
+    disk_type="block"
+    source_attr_name="dev"
+  else
+    disk_type="file"
+    source_attr_name="file"
+  fi
+
+  cat > "${out_path}" <<EOF
+<disk type='${disk_type}' device='disk'>
+  <driver name='qemu' type='${format}'/>
+  <source ${source_attr_name}='${dest}'/>
   <target dev='${target}' bus='${bus}'/>
 </disk>
 EOF
@@ -634,6 +674,43 @@ ftctl_blockcopy_start_remote_nbd_job() {
   return "${rc}"
 }
 
+ftctl_blockcopy_start_shared_xml_job() {
+  local uri="${1-}"
+  local vm="${2-}"
+  local target="${3-}"
+  local persistence="${4-unknown}"
+  local xml_path="${5-}"
+  local out_var="${6-}"
+  local err_var="${7-}"
+  local rc_var="${8-}"
+  local out err rc
+  local args=()
+
+  args=(-c "${uri}" blockcopy "${vm}" "${target}" --xml "${xml_path}")
+  if [[ "${persistence}" == "yes" ]]; then
+    args+=(--transient-job)
+  fi
+  if [[ "${FTCTL_BLOCKCOPY_SYNC_WRITES}" == "1" ]]; then
+    args+=(--synchronous-writes)
+  fi
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- "${args[@]}" || true
+  : "${out}${err}"
+  if [[ -n "${out_var}" ]]; then
+    printf -v "${out_var}" '%s' "${out}"
+  fi
+  if [[ -n "${err_var}" ]]; then
+    printf -v "${err_var}" '%s' "${err}"
+  fi
+  if [[ -n "${rc_var}" ]]; then
+    printf -v "${rc_var}" '%s' "${rc}"
+  fi
+  return "${rc}"
+}
+
 ftctl_blockcopy_write_remote_nbd_repro() {
   local vm="${1-}"
   local target="${2-}"
@@ -749,10 +826,6 @@ ftctl_blockcopy_validate_backend_mode() {
         dest="$(ftctl_blockcopy_resolve_dest "${vm}" "${target}" "${source}" "${format}")" || return $?
         if [[ "${dest}" == "${FTCTL_BLOCKCOPY_TARGET_BASE_DIR}/"* ]]; then
           echo "ERROR: shared-blockcopy destination must not use the default local blockcopy target base dir: ${dest}" >&2
-          return 2
-        fi
-        if [[ "${dest}" == /dev/* && "${format}" != "raw" ]]; then
-          echo "ERROR: shared-blockcopy does not support non-raw block targets: source_format=${format} target=${dest}" >&2
           return 2
         fi
       done
@@ -1047,7 +1120,7 @@ ftctl_blockcopy_refresh_vm_jobs() {
 ftctl_blockcopy_plan_protect() {
   local vm="${1-}"
   local disks=()
-  local line target source format dest secondary_dest remote_xml export_name export_port
+  local line target source format dest secondary_dest remote_xml shared_xml export_name export_port
   local xml_bundle_dir primary_xml_backup standby_xml_seed persistence
   local out err rc job_state ready
   local records=()
@@ -1153,21 +1226,36 @@ xml=${remote_xml}"
       ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-rc.txt" "${rc}"
       ftctl_blockcopy_capture_primary_debug "${vm}" "${target}"
     else
-      local force_reuse="0"
       if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "shared-blockcopy" && "${dest}" == /dev/* ]]; then
-        force_reuse="1"
+        shared_xml=""
+        ftctl_blockcopy_build_shared_dest_xml \
+          "${vm}" "${target}" "${format}" "${dest}" "${primary_xml_backup}" shared_xml
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "shared-blockcopy-dest.xml" "$(cat "${shared_xml}")"
+        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-command.txt" \
+          "env LC_ALL=C LANG=C virsh -c ${FTCTL_PROFILE_PRIMARY_URI@Q} blockcopy ${vm@Q} ${target@Q} --xml ${shared_xml@Q}$( [[ \"${persistence}\" == \"yes\" ]] && printf ' --transient-job' || true )$( [[ \"${FTCTL_BLOCKCOPY_SYNC_WRITES}\" == \"1\" ]] && printf ' --synchronous-writes' || true )"
+        ftctl_blockcopy_start_shared_xml_job \
+          "${FTCTL_PROFILE_PRIMARY_URI}" \
+          "${vm}" \
+          "${target}" \
+          "${persistence}" \
+          "${shared_xml}" \
+          out \
+          err \
+          rc || true
+      else
+        local force_reuse="0"
+        ftctl_blockcopy_start_job \
+          "${FTCTL_PROFILE_PRIMARY_URI}" \
+          "${vm}" \
+          "${target}" \
+          "${dest}" \
+          "${format}" \
+          "${force_reuse}" \
+          "${persistence}" \
+          out \
+          err \
+          rc || true
       fi
-      ftctl_blockcopy_start_job \
-        "${FTCTL_PROFILE_PRIMARY_URI}" \
-        "${vm}" \
-        "${target}" \
-        "${dest}" \
-        "${format}" \
-        "${force_reuse}" \
-        "${persistence}" \
-        out \
-        err \
-        rc || true
     fi
     if [[ "${rc}" != "0" ]]; then
       ftctl_state_set "${vm}" \
