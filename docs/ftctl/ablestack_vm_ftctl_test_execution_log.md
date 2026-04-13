@@ -808,30 +808,41 @@ Expected Result:
 - A multipath-backed source LV should mirror to a multipath-backed target LV using either the shared-visible or secondary-local transport model.
 
 Actual Result:
-- `shared-blockcopy` with qcow2-on-block source and block LV target does not create a job.
-- Direct libvirt reproduction showed the real failure:
-  `unable to execute QEMU command 'blockdev-add': 'file' driver requires '/dev/vg_clvm01/...' to be a regular file`
 - In a non-clustered shared VG, creating the source LV on primary and the target LV on secondary is not a valid test model; both LVs must be created on one host and then activation must be split by role.
-- With that owner-separated model, `remote-nbd` plus `raw` source/target block LVs succeeded and reached `protected/mirroring`.
-- The equivalent `qcow2-on-block` owner-separated variant still remains unresolved because the secondary qcow2 target LV did not become active on the secondary host during explicit activation.
+- Under that owner-separated model, `remote-nbd` succeeded for both:
+  - `raw-on-block`
+  - `qcow2-on-block`
+- `shared-blockcopy` was then retested with the correct primary-owner model:
+  - both source and target LVs created on primary
+  - both source and target activated on primary during blockcopy
+  - target deactivated on secondary
+- Direct path-based `virsh blockcopy` still reproduced the earlier libvirt/QEMU error:
+  `unable to execute QEMU command 'blockdev-add': 'file' driver requires '/dev/vg_clvm01/...' to be a regular file`
+- After switching `shared-blockcopy` to XML block targets (`<disk type='block'><source dev='...'>`), both:
+  - `raw-on-block`
+  - `qcow2-on-block`
+  reached active block jobs and completed to `protected/mirroring`.
 
 Evidence:
 - manual `virsh blockcopy` reproduction on the primary host
-- libvirtd journal showing the `blockdev-add` failure for the shared-blockcopy path
+- libvirtd journal showing the earlier `blockdev-add` failure for the path-based shared-blockcopy call
 - explicit owner-separated activation snapshots for primary source LV and secondary target LV
-- successful `remote-nbd + raw-on-block` owner-separated rerun reaching `protected/mirroring`
+- successful `remote-nbd` owner-separated reruns for `raw` and `qcow2`
+- successful `shared-blockcopy` XML block-target reruns for `raw` and `qcow2`
 
 Status: PASS
 
 If FAIL:
 - Root cause:
-  The tested libvirt/QEMU stack does not support the current qcow2-on-block target usage for shared multipath HA.
+  superseded by the XML block-target fix for shared-blockcopy and the owner-separated activation model for remote-nbd.
 - Files changed:
   - lib/ftctl/blockcopy.sh
 - Re-test result:
-  The product now uses an owner-separated activation model for `remote-nbd` block targets on non-clustered shared VGs, including secondary-side stale dm cleanup and VG refresh before activation.
+  The product now supports:
+  - `remote-nbd` on non-clustered shared VGs via owner-separated activation
+  - `shared-blockcopy` on multipath block targets via XML block-target descriptors
 - Remaining gap:
-  `shared-blockcopy` remains unsupported for `/dev/...` multipath targets on the current libvirt/QEMU stack.
+  shared multipath failover/failback still needs separate operational validation.
 ```
 
 ### DR-IMG01-ST01

@@ -223,16 +223,15 @@ Every `Test ID` should end with:
     - Validate multi-disk local-block behavior and failover/failback.
 
 - `HA-IMG01-ST05`
-  - Result: `PASS` with `remote-nbd` backend mode under an owner-separated activation model
+  - Result: `PASS`
   - Observation:
     - The shared multipath environment itself is healthy and `vg_clvm01` has sufficient free capacity.
-    - `shared-blockcopy` with `qcow2` source and `/dev/...` multipath LV target is rejected by libvirt/QEMU with `blockdev-add: 'file' driver requires ... to be a regular file`.
     - For a non-clustered shared VG, the valid ownership model is: create both LVs on one host, then split activation by role.
-    - Under that ownership model, `remote-nbd` with `raw` source and `raw` secondary block target succeeded and reached `protected/mirroring`.
-    - After adding stale device-mapper cleanup and VG refresh before secondary activation, the `qcow2-on-block` owner-separated variant also reached `protected/mirroring`.
+    - Under that ownership model, `remote-nbd` succeeded for both `raw-on-block` and `qcow2-on-block`.
+    - `shared-blockcopy` also succeeded for both `raw-on-block` and `qcow2-on-block` once block targets were passed through XML as `<disk type='block'>` instead of plain paths.
   - Follow-up improvement:
     - Keep the owner-separated activation model explicit in product code for non-clustered shared VGs.
-    - Keep `shared-blockcopy` on `/dev/...` multipath targets classified as unsupported on the current stack.
+    - Validate operational failover/failback procedures for the same multipath layouts.
 
 - `HA-IMG03-ST01`
   - Result: `PASS` with `remote-nbd` backend mode

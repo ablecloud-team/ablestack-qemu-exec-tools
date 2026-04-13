@@ -224,11 +224,12 @@ Completed items:
   - Multi-disk `remote-nbd` validation is now complete for transient qcow2 VMs; persistent single-disk validation is also complete.
   - Shared-visible HA validation is now complete for the single-disk persistent case.
   - Local-block validation is now complete for the single-disk transient case.
-  - Shared multipath now works on the tested stack through `remote-nbd` when:
+  - Shared multipath now works on the tested stack when:
     - both source and target LVs are created on one host
     - activation ownership is split by role
     - secondary block-target activation performs stale dm cleanup and VG refresh before `lvchange -ay`
-  - `shared-blockcopy` still rejects `/dev/...` multipath targets at `blockdev-add` on the current libvirt/QEMU stack.
+  - `remote-nbd` works for both raw-on-block and qcow2-on-block under that owner-separated model.
+  - `shared-blockcopy` also works for raw-on-block and qcow2-on-block after switching block targets to XML `<disk type='block'>` descriptors instead of plain path arguments.
   - Windows qcow2 baseline is now complete after fixing UEFI/TPM VM generation.
   - Windows raw validation is now complete on the same UEFI/TPM generation path.
   - Mixed-size multi-disk validation is now complete for the transient local-file case.
