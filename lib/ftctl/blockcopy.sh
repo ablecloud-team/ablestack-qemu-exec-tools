@@ -115,6 +115,43 @@ ftctl_blockcopy_remote_nbd_uri() {
   printf 'nbd://%s:%s/%s\n' "${host}" "${port}" "${export_name}"
 }
 
+ftctl_blockcopy_is_krbd_path() {
+  local path="${1-}"
+  [[ "${path}" == /dev/rbd/* ]]
+}
+
+ftctl_blockcopy_krbd_spec_from_path() {
+  local path="${1-}"
+  local out_var="${2}"
+  [[ "${path}" == /dev/rbd/* ]] || return 1
+  printf -v "${out_var}" '%s' "${path#/dev/rbd/}"
+}
+
+ftctl_blockcopy_krbd_map_local() {
+  local path="${1-}"
+  local spec mapped
+
+  ftctl_blockcopy_is_krbd_path "${path}" || return 1
+  command -v rbd >/dev/null 2>&1 || {
+    echo "ERROR: rbd CLI not found for krbd path ${path}" >&2
+    return 2
+  }
+  if [[ -b "${path}" ]]; then
+    return 0
+  fi
+
+  ftctl_blockcopy_krbd_spec_from_path "${path}" spec || return 1
+  mapped="$(rbd map "${spec}" 2>&1)" || {
+    echo "ERROR: rbd map failed for ${spec}: ${mapped}" >&2
+    return 2
+  }
+  udevadm settle >/dev/null 2>&1 || true
+  [[ -b "${path}" ]] || {
+    echo "ERROR: krbd stable path missing after map: ${path}" >&2
+    return 2
+  }
+}
+
 ftctl_blockcopy_remote_nbd_port_extract_from_uri() {
   local uri="${1-}"
   local out_var="${2}"
@@ -537,6 +574,24 @@ ftctl_blockcopy_remote_nbd_prepare_target() {
 remote_cmd=$(cat <<EOF
 set -euo pipefail
 mkdir -p /run/ablestack-vm-ftctl
+if [[ "${secondary_path}" == /dev/rbd/* ]]; then
+  krbd_spec="${secondary_path#/dev/rbd/}"
+  if [[ -b "${secondary_path}" ]]; then
+    krbd_real="\$(readlink -f "${secondary_path}" 2>/dev/null || true)"
+    krbd_open="0"
+    if [[ -n "\${krbd_real}" ]]; then
+      krbd_open="\$(dmsetup info -C --noheadings -o open "\${krbd_real}" 2>/dev/null | awk 'NR==1{print \$1}' || true)"
+    fi
+    if [[ "\${krbd_open}" == "0" ]]; then
+      rbd unmap "${secondary_path}" >/dev/null 2>&1 || true
+      udevadm settle >/dev/null 2>&1 || true
+    fi
+  fi
+  if [[ ! -b "${secondary_path}" ]]; then
+    rbd map "${krbd_spec}" >/dev/null
+    udevadm settle >/dev/null 2>&1 || true
+  fi
+fi
 if [[ -b "${secondary_path}" ]]; then
   secondary_real="\$(readlink -f "${secondary_path}" 2>/dev/null || true)"
   stale_map=""
@@ -1226,6 +1281,9 @@ xml=${remote_xml}"
       ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-rc.txt" "${rc}"
       ftctl_blockcopy_capture_primary_debug "${vm}" "${target}"
     else
+      if ftctl_blockcopy_is_krbd_path "${dest}"; then
+        ftctl_blockcopy_krbd_map_local "${dest}" || return $?
+      fi
       shared_xml=""
       ftctl_blockcopy_build_shared_dest_xml \
         "${vm}" "${target}" "${format}" "${dest}" "${primary_xml_backup}" shared_xml
