@@ -1226,36 +1226,21 @@ xml=${remote_xml}"
       ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-rc.txt" "${rc}"
       ftctl_blockcopy_capture_primary_debug "${vm}" "${target}"
     else
-      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "shared-blockcopy" && "${dest}" == /dev/* ]]; then
-        shared_xml=""
-        ftctl_blockcopy_build_shared_dest_xml \
-          "${vm}" "${target}" "${format}" "${dest}" "${primary_xml_backup}" shared_xml
-        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "shared-blockcopy-dest.xml" "$(cat "${shared_xml}")"
-        ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-command.txt" \
-          "env LC_ALL=C LANG=C virsh -c ${FTCTL_PROFILE_PRIMARY_URI@Q} blockcopy ${vm@Q} ${target@Q} --xml ${shared_xml@Q}$( [[ \"${persistence}\" == \"yes\" ]] && printf ' --transient-job' || true )$( [[ \"${FTCTL_BLOCKCOPY_SYNC_WRITES}\" == \"1\" ]] && printf ' --synchronous-writes' || true )"
-        ftctl_blockcopy_start_shared_xml_job \
-          "${FTCTL_PROFILE_PRIMARY_URI}" \
-          "${vm}" \
-          "${target}" \
-          "${persistence}" \
-          "${shared_xml}" \
-          out \
-          err \
-          rc || true
-      else
-        local force_reuse="0"
-        ftctl_blockcopy_start_job \
-          "${FTCTL_PROFILE_PRIMARY_URI}" \
-          "${vm}" \
-          "${target}" \
-          "${dest}" \
-          "${format}" \
-          "${force_reuse}" \
-          "${persistence}" \
-          out \
-          err \
-          rc || true
-      fi
+      shared_xml=""
+      ftctl_blockcopy_build_shared_dest_xml \
+        "${vm}" "${target}" "${format}" "${dest}" "${primary_xml_backup}" shared_xml
+      ftctl_blockcopy_write_debug_file "${vm}" "${target}" "shared-blockcopy-dest.xml" "$(cat "${shared_xml}")"
+      ftctl_blockcopy_write_debug_file "${vm}" "${target}" "primary-blockcopy-command.txt" \
+        "env LC_ALL=C LANG=C virsh -c ${FTCTL_PROFILE_PRIMARY_URI@Q} blockcopy ${vm@Q} ${target@Q} --xml ${shared_xml@Q}$( [[ \"${persistence}\" == \"yes\" ]] && printf ' --transient-job' || true )$( [[ \"${FTCTL_BLOCKCOPY_SYNC_WRITES}\" == \"1\" ]] && printf ' --synchronous-writes' || true )"
+      ftctl_blockcopy_start_shared_xml_job \
+        "${FTCTL_PROFILE_PRIMARY_URI}" \
+        "${vm}" \
+        "${target}" \
+        "${persistence}" \
+        "${shared_xml}" \
+        out \
+        err \
+        rc || true
     fi
     if [[ "${rc}" != "0" ]]; then
       ftctl_state_set "${vm}" \

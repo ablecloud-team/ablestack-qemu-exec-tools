@@ -552,12 +552,16 @@ Actual Result:
 - secondary target LV /dev/vg_ftctl_st03_s/lv_rocky10_block_st03 was exported by qemu-nbd
 - after the initial full copy reached 100.00%, reconcile promoted the controller state to protection_state=protected and transport_state=mirroring
 - runtime blockcopy state recorded the explicit secondary block target path and ready=yes
+- an additional qcow2-on-block variant (`HA-IMG01-ST03-QCOW2`) was also validated on the same local-block/secondary-local model and reached protected/mirroring with a network mirror to the secondary block LV
 
 Evidence:
 - HA-IMG01-ST03.status.final.json
 - HA-IMG01-ST03.runtime-state.final.txt
 - HA-IMG01-ST03.dumpxml.final.xml
 - HA-IMG01-ST03.blockjob.vda.final.txt
+- HA-IMG01-ST03-QCOW2.status.final.json
+- HA-IMG01-ST03-QCOW2.runtime-state.final.txt
+- HA-IMG01-ST03-QCOW2.dumpxml.final.xml
 
 Status: PASS
 
@@ -566,8 +570,75 @@ If FAIL:
 - Files changed: n/a
 - Re-test result: n/a
 - Remaining gap:
-  Local block backend now works for the single-disk transient HA case.
+  Local block backend now works for the single-disk transient HA case for both raw-on-block and qcow2-on-block.
   Persistent local-block and multi-disk local-block variants still need separate validation.
+```
+
+### HA-MIX01-LVM-TO-GFS2-RAW
+
+```text
+Test ID: HA-MIX01-LVM-TO-GFS2-RAW
+Date: 2026-04-13
+Mode: HA
+VM Name: rocky10-mix-lvm-gfs2-raw
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Linux raw with mixed source/target storage kinds
+Storage Backend: primary LVM raw block source -> secondary GFS2 raw file target
+Profile Path: /etc/ablestack/ftctl.d/rocky10-mix-lvm-gfs2-raw.conf
+
+Preconditions:
+- Transient VM
+- primary source disk on /dev/vg_clvm01/lv_mix_lvm_gfs2_raw_src
+- shared-visible target file on /mnt/glue-gfs-1/rocky10-mix-lvm-gfs2-raw.img
+- FTCTL_PROFILE_BACKEND_MODE="shared-blockcopy"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="shared"
+
+Actual Result:
+- the source disk was block-backed (`type='block'`) and the mirror target was file-backed (`type='file'`)
+- runtime XML exposed a file mirror to /mnt/glue-gfs-1/rocky10-mix-lvm-gfs2-raw.img
+- after copy completion and reconcile, the VM reached protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-MIX01-LVM-TO-GFS2-RAW.status.final.json
+- HA-MIX01-LVM-TO-GFS2-RAW.dumpxml.final.xml
+- HA-MIX01-LVM-TO-GFS2-RAW.summary.txt
+
+Status: PASS
+```
+
+### HA-MIX02-LVM-TO-GFS2-QCOW2
+
+```text
+Test ID: HA-MIX02-LVM-TO-GFS2-QCOW2
+Date: 2026-04-13
+Mode: HA
+VM Name: rocky10-mix-lvm-gfs2-qcow2
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Image Type: single-disk Linux qcow2 with mixed source/target storage kinds
+Storage Backend: primary LVM qcow2 block source -> secondary GFS2 qcow2 file target
+Profile Path: /etc/ablestack/ftctl.d/rocky10-mix-lvm-gfs2-qcow2.conf
+
+Preconditions:
+- Transient VM
+- primary source disk on /dev/vg_clvm01/lv_mix_lvm_gfs2_qcow2_src
+- shared-visible target file on /mnt/glue-gfs-1/rocky10-mix-lvm-gfs2-qcow2.qcow2
+- FTCTL_PROFILE_BACKEND_MODE="shared-blockcopy"
+- FTCTL_PROFILE_TARGET_STORAGE_SCOPE="shared"
+
+Actual Result:
+- the source disk was block-backed (`type='block'`) and the mirror target was file-backed (`type='file'`)
+- runtime XML exposed a file mirror to /mnt/glue-gfs-1/rocky10-mix-lvm-gfs2-qcow2.qcow2
+- runtime blockcopy state recorded `copy|yes`
+- after reconcile, the VM reached protection_state=protected and transport_state=mirroring
+
+Evidence:
+- HA-MIX02-LVM-TO-GFS2-QCOW2.status.final.json
+- HA-MIX02-LVM-TO-GFS2-QCOW2.dumpxml.final.xml
+- HA-MIX02-LVM-TO-GFS2-QCOW2.summary.txt
+
+Status: PASS
 ```
 
 ### HA-IMG03-ST01

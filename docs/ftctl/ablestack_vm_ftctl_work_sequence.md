@@ -223,13 +223,16 @@ Completed items:
   - Per-VM/target deterministic remote NBD port allocation and firewalld service range support are now in place; multi-disk concurrency validation is the next priority.
   - Multi-disk `remote-nbd` validation is now complete for transient qcow2 VMs; persistent single-disk validation is also complete.
   - Shared-visible HA validation is now complete for the single-disk persistent case.
-  - Local-block validation is now complete for the single-disk transient case.
+  - Local-block validation is now complete for the single-disk transient case, including qcow2-on-block and raw-on-block.
   - Shared multipath now works on the tested stack when:
     - both source and target LVs are created on one host
     - activation ownership is split by role
     - secondary block-target activation performs stale dm cleanup and VG refresh before `lvchange -ay`
   - `remote-nbd` works for both raw-on-block and qcow2-on-block under that owner-separated model.
   - `shared-blockcopy` also works for raw-on-block and qcow2-on-block after switching block targets to XML `<disk type='block'>` descriptors instead of plain path arguments.
+  - Mixed-kind HA validation is now complete for:
+    - LVM raw block source -> GFS2 raw file target
+    - LVM qcow2 block source -> GFS2 qcow2 file target
   - Windows qcow2 baseline is now complete after fixing UEFI/TPM VM generation.
   - Windows raw validation is now complete on the same UEFI/TPM generation path.
   - Mixed-size multi-disk validation is now complete for the transient local-file case.

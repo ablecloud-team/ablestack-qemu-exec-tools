@@ -218,6 +218,7 @@ Every `Test ID` should end with:
   - Observation:
     - The local block backend required a secondary-local block target rather than a shared-visible path model.
     - An explicit `FTCTL_PROFILE_DISK_MAP` to the secondary LV path allowed `remote-nbd` to export a block device target and mirror the primary block-backed root disk over NBD.
+    - The same model was also validated for a qcow2-on-block source LV.
   - Follow-up improvement:
     - Validate the same backend for persistent local-block VMs.
     - Validate multi-disk local-block behavior and failover/failback.
