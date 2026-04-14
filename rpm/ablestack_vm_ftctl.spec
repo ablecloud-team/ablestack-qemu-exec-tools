@@ -20,6 +20,9 @@ Requires:       libvirt-client
 Requires:       openssh-clients
 Requires:       python3
 Requires:       qemu-img
+Requires:       firewalld
+Requires:       nmap-ncat
+Requires:       socat
 Requires:       systemd
 Requires:       util-linux
 

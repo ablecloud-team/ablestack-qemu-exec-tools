@@ -78,7 +78,7 @@ ftctl_xcolo_qmp_require_ok() {
   local payload="${3-}"
   local stage="${4-}"
   local event="${5-}"
-  local out rc
+  local out rc has_error
 
   if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
     ftctl_log_event "${stage}" "${event}" "skip" "${vm}" "" "reason=dry_run"
@@ -88,7 +88,23 @@ ftctl_xcolo_qmp_require_ok() {
   out=""
   rc=0
   ftctl_xcolo_qmp "${uri}" "${vm}" "${payload}" out rc
-  if [[ "${rc}" != "0" ]]; then
+  has_error="0"
+  if python3 - <<'PY' <<< "${out}" >/dev/null 2>&1; then
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    raise SystemExit(0)
+try:
+    data = json.loads(raw)
+except Exception:
+    raise SystemExit(0)
+raise SystemExit(1 if isinstance(data, dict) and "error" in data else 0)
+PY
+    has_error="0"
+  else
+    has_error="1"
+  fi
+  if [[ "${rc}" != "0" || "${has_error}" == "1" ]]; then
     ftctl_log_event "${stage}" "${event}" "fail" "${vm}" "${rc}" "uri=${uri}"
     return "${rc}"
   fi

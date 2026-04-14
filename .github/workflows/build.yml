@@ -234,6 +234,9 @@ jobs:
           WORKDIR="repo/ftctl-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
           cp -v build/rpm-ftctl/*.rpm "$WORKDIR"/
+          dnf --disablerepo="*" --enablerepo="rocky-vault-9.6-*" download --resolve --alldeps \
+            --destdir="$WORKDIR" \
+            bash jq libvirt-client openssh-clients python3 qemu-img firewalld nmap-ncat socat util-linux || true
           createrepo_c "$WORKDIR"
           mkdir -p release/ftctl-rpm
           mv repo release/ftctl-rpm/
