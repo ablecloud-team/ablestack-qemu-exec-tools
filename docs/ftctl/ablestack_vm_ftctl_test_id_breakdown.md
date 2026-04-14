@@ -125,7 +125,7 @@ Recommended execution order:
 | `OP-DR-01` | DR | mandatory | remote path transient loss | pending |
 | `OP-DR-02` | DR | mandatory | site failover | pending |
 | `OP-DR-03` | DR | recommended | reverse sync / failback after DR | pending |
-| `OP-FT-01` | FT | mandatory | x-colo transient loss / rearm | pending |
+| `OP-FT-01` | FT | mandatory | x-colo transient loss / rearm | pass |
 | `OP-FT-02` | FT | mandatory | x-colo lost-heartbeat failover | pending |
 | `OP-ST-01` | storage | recommended | NFS interruption | pending |
 | `OP-ST-02` | storage | recommended | multipath partial path loss | pending |

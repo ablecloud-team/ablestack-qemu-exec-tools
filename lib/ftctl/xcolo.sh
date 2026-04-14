@@ -133,10 +133,17 @@ PY
 ftctl_xcolo_plan_protect() {
   local vm="${1-}"
   local nbd_host nbd_port
+  local primary_xml_backup standby_xml_seed
 
   ftctl_xcolo_parse_tcp_endpoint "${FTCTL_PROFILE_XCOLO_NBD_ENDPOINT}" nbd_host nbd_port
-  ftctl_standby_materialize_primary_xml "${vm}" || true
-  ftctl_standby_materialize_xml "${vm}" || true
+  primary_xml_backup="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
+  standby_xml_seed="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
+  if [[ -n "${primary_xml_backup}" && -f "${primary_xml_backup}" ]]; then
+    ftctl_standby_materialize_primary_xml "${vm}" || true
+  fi
+  if [[ -n "${standby_xml_seed}" && -f "${standby_xml_seed}" ]]; then
+    ftctl_standby_materialize_xml "${vm}" || true
+  fi
 
   ftctl_state_set "${vm}" \
     "protection_state=colo_preparing" \

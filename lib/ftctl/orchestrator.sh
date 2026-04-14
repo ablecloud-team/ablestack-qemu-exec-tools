@@ -226,7 +226,7 @@ ftctl_orchestrator_reconcile_one() {
   fi
 
   case "${transport}" in
-    broken|lost|disconnected|rearm-requested|colo_rearming)
+    broken|lost|disconnected|rearm-requested|colo_rearming|transient_loss|rearm_backoff)
       ftctl_orchestrator_handle_transport_issue "${vm}" "${mode}" "xcolo_transport_lost" "${peer_host_id}" "${peer_reach}"
       ;;
     *)

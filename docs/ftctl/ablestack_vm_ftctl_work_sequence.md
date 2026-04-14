@@ -260,6 +260,11 @@ Completed items:
   - FT baseline protect/failover is now complete for `FT-IMG01-ST01`:
     - protect reaches `colo_running`
     - failover reaches `failed_over` with `active_side=secondary`
+  - `OP-FT-01` is now complete:
+    - first reconcile after induced transient loss enters `transient_loss` during the grace window
+    - second reconcile after the grace window re-enters `xcolo_rearm()`
+    - final FT state returns to `colo_running` / `mirroring` with `rearm_count=1`
+  - FT `xcolo` planning now suppresses misleading standby materialization errors when `standby_xml_seed` is absent and the FT pair is pre-provisioned externally.
   - On the `10.10.1.x` RBD hosts, `krbd + remote-nbd` required:
     - `firewalld` enabled on both hosts
     - `10809-10872/tcp` opened on both hosts

@@ -48,7 +48,6 @@ If FAIL:
 - `OP-HA-04`
 - `OP-DR-01`
 - `OP-DR-02`
-- `OP-FT-01`
 - `OP-FT-02`
 
 ### In Progress
@@ -77,6 +76,7 @@ If FAIL:
 - `HA-IMG07-ST01`
 - `HA-IMG01-ST06`
 - `FT-IMG01-ST01`
+- `OP-FT-01`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
@@ -1482,4 +1482,73 @@ If FAIL:
   - passed after x-colo block-graph provisioning and firewalld/packaging updates
 - Remaining gap:
   x-colo transient-loss rearm and explicit heartbeat-loss operational tests remain separate.
+```
+
+### OP-FT-01
+
+```text
+Test ID: OP-FT-01
+Date: 2026-04-14
+Mode: FT
+VM Name: rocky10-ft-img01-st01
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Area: x-colo transient loss / rearm
+
+Preconditions:
+- `FT-IMG01-ST01` baseline already reaches `colo_running`
+- sacrificial primary/secondary VM pair created with distinct qcow2 backing files
+- x-colo endpoints configured:
+  - proxy `tcp:10.10.1.2:9000`
+  - nbd `tcp:10.10.1.2:10809`
+  - migrate `tcp:10.10.1.2:9998`
+- firewalld enabled and x-colo ports opened on both hosts
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-ft-img01-st01 --mode ft --peer qemu+ssh://10.10.1.2/system
+- secondary QMP: `{"execute":"nbd-server-stop"}`
+- force state transition to `transport_state=rearm-requested`
+- ablestack_vm_ftctl reconcile --vm rocky10-ft-img01-st01 --json
+- sleep beyond grace window
+- ablestack_vm_ftctl reconcile --vm rocky10-ft-img01-st01 --json
+- ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json
+
+Expected Result:
+- first reconcile during grace window may leave `transient_loss`
+- second reconcile after grace window should invoke `xcolo_rearm()`
+- final state returns to:
+  - `protection_state=colo_running`
+  - `transport_state=mirroring`
+  - `rearm_count=1`
+
+Actual Result:
+- initial implementation failed to re-enter `xcolo_rearm()` once FT transport had transitioned to `transient_loss`
+- root cause: FT reconcile only treated `broken|lost|disconnected|rearm-requested|colo_rearming` as rearm triggers
+- after updating the FT reconcile branch to also treat:
+  - `transient_loss`
+  - `rearm_backoff`
+  as x-colo transport-loss states, the same scenario succeeded
+- final FT state returned to:
+  - `protection_state=colo_running`
+  - `transport_state=mirroring`
+  - `rearm_count=1`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json` after reconcile.1
+- `ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json` after reconcile.2
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st01.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st01.state.xcolo`
+
+Status: PASS
+
+If FAIL:
+- Root cause:
+  FT reconcile state machine did not route `transient_loss` back into `xcolo_rearm()`.
+- Files changed:
+  - lib/ftctl/orchestrator.sh
+  - lib/ftctl/xcolo.sh
+- Re-test result:
+  - passed after FT transport-state classification fix
+- Remaining gap:
+  explicit heartbeat-loss failover remains separate in `OP-FT-02`.
 ```
