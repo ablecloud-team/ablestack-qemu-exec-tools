@@ -260,10 +260,16 @@ Completed items:
   - FT baseline protect/failover is now complete for `FT-IMG01-ST01`:
     - protect reaches `colo_running`
     - failover reaches `failed_over` with `active_side=secondary`
+  - FT persistent baseline is now complete for `FT-IMG09-ST01`
+  - FT raw baseline is now complete for `FT-IMG02-ST02`
+    - raw sources work when the secondary replication chain uses qcow2 overlays
   - `OP-FT-01` is now complete:
     - first reconcile after induced transient loss enters `transient_loss` during the grace window
     - second reconcile after the grace window re-enters `xcolo_rearm()`
     - final FT state returns to `colo_running` / `mirroring` with `rearm_count=1`
+  - `OP-FT-02` is now complete:
+    - explicit `x-colo-lost-heartbeat` failover promotes the secondary side
+    - final FT state reaches `failed_over` / `colo_failover`
   - FT `xcolo` planning now suppresses misleading standby materialization errors when `standby_xml_seed` is absent and the FT pair is pre-provisioned externally.
   - On the `10.10.1.x` RBD hosts, `krbd + remote-nbd` required:
     - `firewalld` enabled on both hosts

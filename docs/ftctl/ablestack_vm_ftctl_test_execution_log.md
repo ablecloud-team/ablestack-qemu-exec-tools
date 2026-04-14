@@ -42,13 +42,11 @@ If FAIL:
 
 ### Pending
 
-- `FT-IMG09-ST01`
 - `OP-HA-01`
 - `OP-HA-02`
 - `OP-HA-04`
 - `OP-DR-01`
 - `OP-DR-02`
-- `OP-FT-02`
 
 ### In Progress
 
@@ -76,7 +74,10 @@ If FAIL:
 - `HA-IMG07-ST01`
 - `HA-IMG01-ST06`
 - `FT-IMG01-ST01`
+- `FT-IMG09-ST01`
+- `FT-IMG02-ST02`
 - `OP-FT-01`
+- `OP-FT-02`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
@@ -1551,4 +1552,146 @@ If FAIL:
   - passed after FT transport-state classification fix
 - Remaining gap:
   explicit heartbeat-loss failover remains separate in `OP-FT-02`.
+```
+
+### OP-FT-02
+
+```text
+Test ID: OP-FT-02
+Date: 2026-04-14
+Mode: FT
+VM Name: rocky10-ft-img01-st01
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Area: x-colo lost-heartbeat failover
+
+Preconditions:
+- `FT-IMG01-ST01` baseline already reaches `colo_running`
+- sacrificial primary/secondary VM pair created with distinct qcow2 backing files
+- x-colo endpoints configured and reachable
+- `peer-virsh-destroy` fencing policy enabled for the baseline failover exercise
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-ft-img01-st01 --mode ft --peer qemu+ssh://10.10.1.2/system
+- ablestack_vm_ftctl failover --vm rocky10-ft-img01-st01 --force
+- ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json
+
+Expected Result:
+- `x-colo-lost-heartbeat` failover path should promote the secondary side
+- final state should become:
+  - `active_side=secondary`
+  - `protection_state=failed_over`
+  - `transport_state=colo_failover`
+
+Actual Result:
+- failover succeeded on the sacrificial FT pair
+- final state became:
+  - `active_side=secondary`
+  - `protection_state=failed_over`
+  - `transport_state=colo_failover`
+  - `fencing_state=fenced`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json` after failover
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st01.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st01.state.xcolo`
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  persistent FT and raw FT baselines remain separate.
+```
+
+### FT-IMG09-ST01
+
+```text
+Test ID: FT-IMG09-ST01
+Date: 2026-04-14
+Mode: FT
+VM Name: rocky10-ft-img09-st01
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Image Type: persistent Linux qcow2
+Storage Backend: FT/x-colo baseline with host-separated sacrificial qcow2 pair
+
+Preconditions:
+- persistent sacrificial FT pair created on both hosts
+- primary/secondary use different qcow2 backing files
+- x-colo block graph nodes prepared via qemu commandline
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-ft-img09-st01 --mode ft --peer qemu+ssh://10.10.1.2/system
+- ablestack_vm_ftctl status --vm rocky10-ft-img09-st01 --json
+
+Expected Result:
+- persistent FT baseline should reach `colo_running / mirroring`
+
+Actual Result:
+- protect succeeded
+- final state reached:
+  - `protection_state=colo_running`
+  - `transport_state=mirroring`
+  - `active_side=primary`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-ft-img09-st01 --json`
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  persistent FT failover/failback remains a separate operational path.
+```
+
+### FT-IMG02-ST02
+
+```text
+Test ID: FT-IMG02-ST02
+Date: 2026-04-14
+Mode: FT
+VM Name: rocky10-ft-img02-st02
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Image Type: Linux raw
+Storage Backend: FT/x-colo baseline with raw source and qcow2 secondary replication overlays
+
+Preconditions:
+- raw FT pair created on both hosts
+- source disk path uses raw image
+- secondary replication chain uses qcow2 overlays because the replication driver requires a backing-capable layer
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-ft-img02-st02 --mode ft --peer qemu+ssh://10.10.1.2/system
+- ablestack_vm_ftctl status --vm rocky10-ft-img02-st02 --json
+
+Expected Result:
+- raw FT baseline should still reach `colo_running / mirroring`
+
+Actual Result:
+- protect succeeded on the raw FT pair
+- final state reached:
+  - `protection_state=colo_running`
+  - `transport_state=mirroring`
+  - `active_side=primary`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-ft-img02-st02 --json`
+
+Status: PASS
+
+If FAIL:
+- Root cause:
+  raw secondaries cannot use raw backing chains for the `replication` node because backing files are required.
+- Files changed: n/a
+- Re-test result:
+  - passed after using qcow2 overlays on the secondary side while keeping the source raw
+- Remaining gap:
+  raw FT failover/failback remains a separate operational path.
 ```
