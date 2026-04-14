@@ -42,7 +42,6 @@ If FAIL:
 
 ### Pending
 
-- `FT-IMG01-ST01`
 - `FT-IMG09-ST01`
 - `OP-HA-01`
 - `OP-HA-02`
@@ -77,6 +76,7 @@ If FAIL:
 - `HA-IMG04-ST02`
 - `HA-IMG07-ST01`
 - `HA-IMG01-ST06`
+- `FT-IMG01-ST01`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
@@ -1417,4 +1417,69 @@ If FAIL:
   - passed after krbd remote-nbd target preparation fixes and explicit firewalld/NBD range handling on the 10.10.1.x hosts
 - Remaining gap:
   FT/x-colo validation remains separate.
+```
+
+### FT-IMG01-ST01
+
+```text
+Test ID: FT-IMG01-ST01
+Date: 2026-04-14
+Mode: FT
+VM Name: rocky10-ft-img01-st01
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Image Type: single-disk Linux qcow2
+Storage Backend: FT/x-colo baseline with host-separated sacrificial qcow2 pair
+Profile Path: /etc/ablestack/ftctl.d/rocky10-ft-img01-st01.conf
+
+Preconditions:
+- sacrificial VM pair created with the same domain name on both hosts
+- primary and secondary use different qcow2 files
+- primary QEMU commandline creates `parent0` and `colo-disk0`
+- secondary QEMU commandline creates `parent0`, `childs0`, and `colo-disk0`
+- firewalld enabled and ports `9000/tcp`, `9998/tcp`, `10809/tcp` opened on both hosts
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-ft-img01-st01 --mode ft --peer qemu+ssh://10.10.1.2/system
+- ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json
+- ablestack_vm_ftctl failover --vm rocky10-ft-img01-st01 --force
+- ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json
+
+Expected Result:
+- protect reaches `colo_running` with `transport_state=mirroring`
+- failover fences the primary side and promotes the secondary side through `x-colo-lost-heartbeat`
+
+Actual Result:
+- protect succeeded and FT state reached:
+  - `protection_state=colo_running`
+  - `transport_state=mirroring`
+  - `active_side=primary`
+- failover succeeded and FT state reached:
+  - `protection_state=failed_over`
+  - `transport_state=colo_failover`
+  - `active_side=secondary`
+  - `fencing_state=fenced`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json` after protect
+- `ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json` after failover
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st01.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st01.state.xcolo`
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed:
+  - lib/ftctl/xcolo.sh
+  - bin/ablestack_vm_ftctl_firewalld.sh
+  - etc/ablestack-vm-ftctl.conf
+  - rpm/ablestack_vm_ftctl.spec
+  - rpm/v2k_baseline_pkgs_ablestack_9.6.txt
+  - rpm/v2k_baseline_pkgs_ablestack_9.7.txt
+  - .github/workflows/build.yml
+- Re-test result:
+  - passed after x-colo block-graph provisioning and firewalld/packaging updates
+- Remaining gap:
+  x-colo transient-loss rearm and explicit heartbeat-loss operational tests remain separate.
 ```

@@ -108,7 +108,7 @@ Recommended execution order:
 
 | Test ID | Image | Storage | Priority | Purpose | Status |
 |---|---|---|---|---|---|
-| `FT-IMG01-ST01` | `IMG01` | `ST01` | mandatory | FT baseline Linux qcow2 | pending |
+| `FT-IMG01-ST01` | `IMG01` | `ST01` | mandatory | FT baseline Linux qcow2 | pass |
 | `FT-IMG02-ST02` | `IMG02` | `ST02` | recommended | FT Linux raw | pending |
 | `FT-IMG09-ST01` | `IMG09` | `ST01` | mandatory | FT persistent VM behavior | pending |
 | `FT-IMG01-ST03` | `IMG01` | `ST03` | recommended | FT local block backend | pending |

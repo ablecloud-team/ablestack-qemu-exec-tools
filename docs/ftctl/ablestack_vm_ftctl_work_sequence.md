@@ -253,6 +253,13 @@ Completed items:
     - `librbd` shared-visible mirroring
     - `krbd` shared-visible mirroring
     - `krbd` host-separated `remote-nbd`
+  - FT/x-colo readiness is now complete on the `10.10.1.x` hosts:
+    - sacrificial primary/secondary VM pair created with different backing qcow2 files
+    - `parent0` / `colo-disk0` block graph created through qemu commandline
+    - firewalld ports `9000/tcp`, `9998/tcp`, `10809/tcp` opened
+  - FT baseline protect/failover is now complete for `FT-IMG01-ST01`:
+    - protect reaches `colo_running`
+    - failover reaches `failed_over` with `active_side=secondary`
   - On the `10.10.1.x` RBD hosts, `krbd + remote-nbd` required:
     - `firewalld` enabled on both hosts
     - `10809-10872/tcp` opened on both hosts

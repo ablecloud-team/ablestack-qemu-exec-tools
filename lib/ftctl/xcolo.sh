@@ -78,7 +78,7 @@ ftctl_xcolo_qmp_require_ok() {
   local payload="${3-}"
   local stage="${4-}"
   local event="${5-}"
-  local out rc has_error
+  local out rc allow_already_negotiated has_error
 
   if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
     ftctl_log_event "${stage}" "${event}" "skip" "${vm}" "" "reason=dry_run"
@@ -88,6 +88,10 @@ ftctl_xcolo_qmp_require_ok() {
   out=""
   rc=0
   ftctl_xcolo_qmp "${uri}" "${vm}" "${payload}" out rc
+  allow_already_negotiated="0"
+  if [[ "${payload}" == '{"execute":"qmp_capabilities"}' ]]; then
+    allow_already_negotiated="1"
+  fi
   has_error="0"
   if python3 - <<'PY' <<< "${out}" >/dev/null 2>&1; then
 import json, sys
@@ -103,6 +107,21 @@ PY
     has_error="0"
   else
     has_error="1"
+  fi
+  if [[ "${has_error}" == "1" && "${allow_already_negotiated}" == "1" ]]; then
+    if python3 - <<'PY' <<< "${out}" >/dev/null 2>&1; then
+import json, sys
+raw = sys.stdin.read().strip()
+try:
+    data = json.loads(raw)
+except Exception:
+    raise SystemExit(1)
+err = data.get("error") if isinstance(data, dict) else None
+desc = (err or {}).get("desc", "")
+raise SystemExit(0 if "Capabilities negotiation is already complete" in desc else 1)
+PY
+      has_error="0"
+    fi
   fi
   if [[ "${rc}" != "0" || "${has_error}" == "1" ]]; then
     ftctl_log_event "${stage}" "${event}" "fail" "${vm}" "${rc}" "uri=${uri}"
