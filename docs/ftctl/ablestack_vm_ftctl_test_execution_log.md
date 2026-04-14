@@ -43,10 +43,11 @@ If FAIL:
 ### Pending
 
 - `OP-HA-01`
-- `OP-HA-02`
+
+### Deferred
+
 - `OP-HA-04`
-- `OP-DR-01`
-- `OP-DR-02`
+  - deferred until an out-of-band recovery path is prepared for the physical source host shutdown scenario
 
 ### In Progress
 
@@ -78,6 +79,11 @@ If FAIL:
 - `FT-IMG02-ST02`
 - `OP-FT-01`
 - `OP-FT-02`
+- `OP-HA-02`
+- `OP-HA-03`
+- `OP-DR-01`
+- `OP-DR-02`
+- `OP-DR-03`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
@@ -1605,6 +1611,272 @@ If FAIL:
 - Remaining gap:
   persistent FT and raw FT baselines remain separate.
 ```
+
+### OP-HA-02
+
+```text
+Test ID: OP-HA-02
+Date: 2026-04-14
+Mode: HA
+VM Name: rocky10-op-ha-02
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: 2-second replication network blip
+
+Preconditions:
+- transient HA baseline created on `remote-nbd`
+- secondary export port identified from the runtime state
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-ha-02 --mode ha --peer qemu+ssh://10.10.31.2/system
+- on secondary host, insert an iptables `REJECT` rule on the active export port for 2 seconds
+- ablestack_vm_ftctl reconcile --vm rocky10-op-ha-02 --json
+- sleep 4
+- ablestack_vm_ftctl reconcile --vm rocky10-op-ha-02 --json
+- ablestack_vm_ftctl status --vm rocky10-op-ha-02 --json
+
+Expected Result:
+- 2-second replication interruption should stay within the controller grace/recovery policy
+- final state should return to `protected / mirroring`
+
+Actual Result:
+- the 2-second export-port blip was absorbed without failover
+- final state reached:
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+  - `rearm_count=0`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-op-ha-02 --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-ha-02.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-ha-02.state.blockcopy`
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  longer HA network-loss windows still need separate validation.
+```
+
+### OP-HA-03
+
+```text
+Test ID: OP-HA-03
+Date: 2026-04-14
+Mode: HA
+VM Name: rocky10-op-ha-03
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: 5-second replication network blip
+
+Preconditions:
+- transient HA baseline created on `remote-nbd`
+- secondary export port identified from the runtime state
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-ha-03 --mode ha --peer qemu+ssh://10.10.31.2/system
+- on secondary host, insert an iptables `REJECT` rule on the active export port for 5 seconds
+- ablestack_vm_ftctl reconcile --vm rocky10-op-ha-03 --json
+- sleep 4
+- ablestack_vm_ftctl reconcile --vm rocky10-op-ha-03 --json
+- ablestack_vm_ftctl status --vm rocky10-op-ha-03 --json
+
+Expected Result:
+- a short but longer replication interruption should still recover through the HA transport/rearm policy
+- final state should return to `protected / mirroring`
+
+Actual Result:
+- the 5-second export-port blip was also recovered without failover
+- final state reached:
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+  - `rearm_count=0`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-op-ha-03 --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-ha-03.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-ha-03.state.blockcopy`
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  host-failure and source-VM-destroy HA cases remain separate.
+```
+
+### OP-DR-01
+
+```text
+Test ID: OP-DR-01
+Date: 2026-04-14
+Mode: DR
+VM Name: rocky10-op-dr-01
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: remote path transient loss
+
+Preconditions:
+- transient DR baseline created on `remote-nbd`
+- secondary export port identified from the runtime state
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-dr-01 --mode dr --peer qemu+ssh://10.10.31.2/system
+- on secondary host, insert an iptables `REJECT` rule on the active export port for 2 seconds
+- ablestack_vm_ftctl reconcile --vm rocky10-op-dr-01 --json
+- sleep 4
+- ablestack_vm_ftctl reconcile --vm rocky10-op-dr-01 --json
+- ablestack_vm_ftctl status --vm rocky10-op-dr-01 --json
+
+Expected Result:
+- the DR transport should recover from a short remote-path loss without failover
+- final state should return to `protected / mirroring`
+
+Actual Result:
+- the 2-second remote path interruption recovered successfully
+- final state reached:
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+  - `rearm_count=0`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-op-dr-01 --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-dr-01.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-dr-01.state.blockcopy`
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  DR site failover and reverse sync / failback remain separate.
+```
+
+### OP-DR-02
+
+```text
+Test ID: OP-DR-02
+Date: 2026-04-14
+Mode: DR
+VM Name: rocky10-op-dr-02
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: site failover
+
+Preconditions:
+- transient DR baseline created on `remote-nbd`
+- `FENCING_POLICY=peer-virsh-destroy`
+- secondary `qemu-nbd` export must be torn down before standby activation
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-dr-02 --mode dr --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl failover --vm rocky10-op-dr-02 --force
+- ablestack_vm_ftctl status --vm rocky10-op-dr-02 --json
+
+Expected Result:
+- source side is fenced
+- secondary standby activates and verify succeeds
+- final state should reach `failed_over / failed_over`
+
+Actual Result:
+- initial runs exposed two engine issues:
+  - remote-nbd export teardown was not reliably complete before standby activation
+  - `ftctl_verify_domain_state_on_uri()` shadowed the caller's state variable and always returned `unknown`
+- after fixing export teardown and the verify helper, failover completed successfully
+- final state reached:
+  - `active_side=secondary`
+  - `protection_state=failed_over`
+  - `transport_state=failed_over`
+  - `standby_state=running`
+  - `standby_verify_state=running-network-unknown`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-op-dr-02 --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-dr-02.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-dr-02.state.blockcopy`
+
+Status: PASS
+
+If FAIL:
+- Root cause:
+  - fixed in engine:
+    - remote-nbd export release on DR failover
+    - standby verify helper state propagation bug
+- Files changed:
+  - `lib/ftctl/blockcopy.sh`
+  - `lib/ftctl/standby.sh`
+  - `lib/ftctl/failover.sh`
+  - `lib/ftctl/verify.sh`
+- Re-test result:
+  - pass
+- Remaining gap:
+  reverse sync / failback remains separate.
+```
+
+### OP-DR-03
+
+```text
+Test ID: OP-DR-03
+Date: 2026-04-14
+Mode: DR
+VM Name: rocky10-op-dr-03
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: reverse sync / failback after DR
+
+Preconditions:
+- transient DR baseline created on `remote-nbd`
+- failover must first succeed so that `active_side=secondary`
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-dr-03 --mode dr --peer qemu+ssh://10.10.31.2/system
+- ablestack_vm_ftctl failover --vm rocky10-op-dr-03 --force
+- ablestack_vm_ftctl failback --vm rocky10-op-dr-03 --force
+- ablestack_vm_ftctl status --vm rocky10-op-dr-03 --json
+
+Expected Result:
+- failback request should start reverse sync from secondary to primary
+- final state should enter the documented in-progress failback state
+
+Actual Result:
+- failover completed successfully after the same DR remote-nbd teardown / verify fixes used by `OP-DR-02`
+- failback started reverse sync as designed
+- final state reached:
+  - `active_side=secondary`
+  - `protection_state=failing_back`
+  - `transport_state=reverse_syncing`
+  - `last_error=reverse_sync_pending`
+- reverse sync state file was created:
+  - `.state.blockcopy.reverse`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-op-dr-03 --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-dr-03.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-dr-03.state.blockcopy.reverse`
+
+Status: PASS
+
+If FAIL:
+- Root cause:
+  - fixed in the same DR failover path as `OP-DR-02`
+- Files changed:
+  - `lib/ftctl/blockcopy.sh`
+  - `lib/ftctl/standby.sh`
+  - `lib/ftctl/failover.sh`
+  - `lib/ftctl/verify.sh`
+- Re-test result:
+  - pass
+- Remaining gap:
+  full automatic reverse sync completion and primary return are not yet implemented in this test.
+```
+
 
 ### FT-IMG09-ST01
 

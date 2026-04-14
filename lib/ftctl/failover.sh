@@ -45,6 +45,11 @@ ftctl_failover_request() {
         return 0
       fi
 
+      if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+        ftctl_blockcopy_stop_remote_nbd_exports "${vm}" || true
+        sleep 2
+      fi
+
       if ! ftctl_standby_activate "${vm}"; then
         ftctl_state_set "${vm}" \
           "protection_state=error" \
@@ -63,6 +68,7 @@ ftctl_failover_request() {
       fi
       ftctl_state_set "${vm}" \
         "protection_state=failed_over" \
+        "transport_state=failed_over" \
         "last_error="
       ftctl_log_event "failover" "failover.request" "ok" "${vm}" "" \
         "reason=${reason} failover_count=${count} fencing=complete standby=running"

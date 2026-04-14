@@ -352,6 +352,16 @@ ftctl_standby_activate() {
     return 0
   fi
 
+  if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+    ftctl_blockcopy_stop_remote_nbd_exports "${vm}" || true
+    ftctl_blockcopy_wait_remote_nbd_release "${vm}" || {
+      ftctl_state_set "${vm}" \
+        "standby_state=release-timeout" \
+        "last_error=remote_nbd_release_timeout"
+      return 1
+    }
+  fi
+
   out=""
   err=""
   rc=0

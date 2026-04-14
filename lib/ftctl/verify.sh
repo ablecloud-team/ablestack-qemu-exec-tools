@@ -19,20 +19,33 @@ ftctl_verify_domain_state_on_uri() {
   local uri="${1-}"
   local vm="${2-}"
   local state_var="${3}"
-  local out err rc state
+  local out err rc resolved_state
 
   out=""
   err=""
   rc=0
   ftctl_virsh "${FTCTL_STANDBY_VERIFY_TIMEOUT_SEC}" out err rc -- -c "${uri}" domstate "${vm}" || true
   : "${out}${err}"
+  if [[ "${rc}" == "0" ]]; then
+    resolved_state="$(head -n 1 <<< "${out}" | tr '[:upper:]' '[:lower:]' | xargs)"
+    printf -v "${state_var}" '%s' "${resolved_state}"
+    return 0
+  fi
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_STANDBY_VERIFY_TIMEOUT_SEC}" out err rc -- -c "${uri}" dominfo "${vm}" || true
+  : "${out}${err}"
   if [[ "${rc}" != "0" ]]; then
     printf -v "${state_var}" '%s' "unknown"
     return "${rc}"
   fi
 
-  state="$(head -n 1 <<< "${out}" | tr '[:upper:]' '[:lower:]' | xargs)"
-  printf -v "${state_var}" '%s' "${state}"
+  resolved_state="$(awk -F: 'tolower($1) ~ /^state$/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print tolower($2); exit}' <<< "${out}")"
+  [[ -n "${resolved_state}" ]] || resolved_state="unknown"
+  printf -v "${state_var}" '%s' "${resolved_state}"
+  [[ "${resolved_state}" != "unknown" ]]
 }
 
 ftctl_verify_domain_network_on_uri() {
@@ -77,9 +90,21 @@ ftctl_verify_standby_boot() {
   done
 
   if [[ "${result}" != "ok" ]]; then
+    for ((i=0; i<10; i++)); do
+      state="unknown"
+      if ftctl_verify_domain_state_on_uri "${FTCTL_PROFILE_SECONDARY_URI}" "${standby_vm}" state; then
+        case "${state}" in
+          running|running\ \(*) result="ok"; break ;;
+        esac
+      fi
+      sleep 1
+    done
+  fi
+
+  if [[ "${result}" != "ok" ]]; then
     ftctl_state_set "${vm}" "standby_verify_state=failed"
     ftctl_log_event "verify" "verify.standby" "fail" "${vm}" "" \
-      "secondary_uri=${FTCTL_PROFILE_SECONDARY_URI}"
+      "secondary_uri=${FTCTL_PROFILE_SECONDARY_URI} state=${state}"
     return 1
   fi
 

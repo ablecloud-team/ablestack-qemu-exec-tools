@@ -118,13 +118,13 @@ Recommended execution order:
 | Test ID | Area | Priority | Purpose | Status |
 |---|---|---|---|---|
 | `OP-HA-01` | HA | mandatory | 1-second replication network blip | pending |
-| `OP-HA-02` | HA | mandatory | 2-second replication network blip | pending |
-| `OP-HA-03` | HA | recommended | 5-second replication network blip | pending |
-| `OP-HA-04` | HA | mandatory | source host shutdown | pending |
+| `OP-HA-02` | HA | mandatory | 2-second replication network blip | pass |
+| `OP-HA-03` | HA | recommended | 5-second replication network blip | pass |
+| `OP-HA-04` | HA | mandatory | source host shutdown | blocked |
 | `OP-HA-05` | HA | mandatory | source VM destroy | pending |
-| `OP-DR-01` | DR | mandatory | remote path transient loss | pending |
-| `OP-DR-02` | DR | mandatory | site failover | pending |
-| `OP-DR-03` | DR | recommended | reverse sync / failback after DR | pending |
+| `OP-DR-01` | DR | mandatory | remote path transient loss | pass |
+| `OP-DR-02` | DR | mandatory | site failover | pass |
+| `OP-DR-03` | DR | recommended | reverse sync / failback after DR | pass |
 | `OP-FT-01` | FT | mandatory | x-colo transient loss / rearm | pass |
 | `OP-FT-02` | FT | mandatory | x-colo lost-heartbeat failover | pass |
 | `OP-ST-01` | storage | recommended | NFS interruption | pending |

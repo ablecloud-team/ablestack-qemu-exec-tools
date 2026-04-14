@@ -619,7 +619,8 @@ ftctl_blockcopy_remote_exec() {
   local err_var="${4}"
   local rc_var="${5}"
   local remote_cmd="${6-}"
-  local wrapped_cmd=""
+  local tmp_cmd=""
+  local local_wrapper=""
   [[ -n "${host}" ]] || {
     printf -v "${out_var}" '%s' ""
     printf -v "${err_var}" '%s' "missing_remote_host"
@@ -633,10 +634,17 @@ ftctl_blockcopy_remote_exec() {
     printf -v "${rc_var}" '%s' "2"
     return 2
   }
-  printf -v wrapped_cmd 'bash -lc %q' "${remote_cmd}"
+  tmp_cmd="$(mktemp -t ftctl.remote.XXXXXX)"
+  printf '%s\n' "${remote_cmd}" > "${tmp_cmd}"
+  chmod 0600 "${tmp_cmd}" 2>/dev/null || true
+  printf -v local_wrapper 'ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=%q %q %q < %q' \
+    "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
+    "${user}@${host}" \
+    "bash -s" \
+    "${tmp_cmd}"
   ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" "${out_var}" "${err_var}" "${rc_var}" -- \
-    ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout="${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
-    "${user}@${host}" "${wrapped_cmd}"
+    bash -lc "${local_wrapper}"
+  rm -f -- "${tmp_cmd}" 2>/dev/null || true
 }
 
 ftctl_blockcopy_remote_nbd_prepare_target() {
@@ -1603,6 +1611,122 @@ ftctl_blockcopy_start_reverse_sync() {
   ftctl_state_set "${vm}" \
     "transport_state=reverse_syncing" \
     "last_sync_ts=$(ftctl_now_iso8601)"
+}
+
+ftctl_blockcopy_stop_remote_nbd_exports() {
+  local vm="${1-}"
+  local records=()
+  local record target source dest format job_state ready secondary_dest
+  local host user out err rc pid_file export_name export_port
+
+  ftctl_standby_blockcopy_records "${vm}" records || return 0
+  ftctl_blockcopy_remote_target_host_user host user || return 0
+
+  for record in "${records[@]}"; do
+    target=""; source=""; dest=""; format=""; job_state=""; ready=""; secondary_dest=""
+    IFS='|' read -r target source dest format job_state ready secondary_dest <<< "${record}"
+    pid_file="/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid"
+    export_name="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}"
+    export_port=""
+    if [[ "${dest}" == nbd://* ]]; then
+      ftctl_blockcopy_remote_nbd_port_extract_from_uri "${dest}" export_port || true
+    fi
+
+    out="" err="" rc=0
+    ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "$(cat <<EOF
+set -euo pipefail
+if [[ -f "${pid_file}" ]]; then
+  oldpid="\$(cat "${pid_file}" 2>/dev/null || true)"
+  if [[ -n "\${oldpid}" ]] && kill -0 "\${oldpid}" >/dev/null 2>&1; then
+    kill "\${oldpid}" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+  rm -f "${pid_file}"
+fi
+if [[ -n "${export_port}" ]]; then
+  listener_pids="\$(ss -lntp | awk '/:${export_port}[[:space:]]/ { while (match(\$0, /pid=[0-9]+/)) { print substr(\$0, RSTART+4, RLENGTH-4); \$0=substr(\$0, RSTART+RLENGTH) } }' | sort -u)"
+  for listener_pid in \${listener_pids}; do
+    [[ -n "\${listener_pid}" ]] || continue
+    kill "\${listener_pid}" >/dev/null 2>&1 || true
+    sleep 1
+  done
+fi
+if [[ -n "${secondary_dest}" && -e "${secondary_dest}" ]]; then
+  for lock_pid in \$(fuser "${secondary_dest}" 2>/dev/null || true); do
+    [[ -n "\${lock_pid}" ]] || continue
+    comm="\$(ps -p "\${lock_pid}" -o comm= 2>/dev/null || true)"
+    if [[ "\${comm}" == qemu-nbd* ]]; then
+      kill "\${lock_pid}" >/dev/null 2>&1 || true
+      sleep 1
+    fi
+  done
+fi
+pkill -f "qemu-nbd.*${vm}.*${target}" >/dev/null 2>&1 || true
+EOF
+)" || true
+    : "${out}${err}"
+    [[ "${rc}" == "0" ]] || {
+      [[ -n "${err}" ]] && echo "ERROR: remote-nbd export stop failed: ${err}" >&2
+      return "${rc}"
+    }
+  done
+}
+
+ftctl_blockcopy_wait_remote_nbd_release() {
+  local vm="${1-}"
+  local records=()
+  local record target source dest format job_state ready secondary_dest
+  local host user out err rc pid_file export_name export_uri export_port
+
+  ftctl_standby_blockcopy_records "${vm}" records || return 0
+  ftctl_blockcopy_remote_target_host_user host user || return 0
+
+  for record in "${records[@]}"; do
+    target=""; source=""; dest=""; format=""; job_state=""; ready=""; secondary_dest=""
+    IFS='|' read -r target source dest format job_state ready secondary_dest <<< "${record}"
+    pid_file="/run/ablestack-vm-ftctl/nbd-${vm}-${target}.pid"
+    export_name="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}"
+    export_port=""
+    if [[ "${dest}" == nbd://* ]]; then
+      export_uri="${dest}"
+      ftctl_blockcopy_remote_nbd_port_extract_from_uri "${export_uri}" export_port || true
+    fi
+
+    out="" err="" rc=0
+    ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "$(cat <<EOF
+set -euo pipefail
+for _i in \$(seq 1 20); do
+  busy=0
+  if [[ -f "${pid_file}" ]]; then
+    busy=1
+  fi
+  if [[ -n "${export_port}" ]] && ss -lntp | grep -q ":${export_port}[[:space:]]"; then
+    busy=1
+  fi
+  if [[ -n "${secondary_dest}" && -e "${secondary_dest}" ]]; then
+    for lock_pid in \$(fuser "${secondary_dest}" 2>/dev/null || true); do
+      [[ -n "\${lock_pid}" ]] || continue
+      comm="\$(ps -p "\${lock_pid}" -o comm= 2>/dev/null || true)"
+      if [[ "\${comm}" == qemu-nbd* ]]; then
+        busy=1
+      fi
+    done
+  fi
+  if [[ "\${busy}" == "0" ]]; then
+    exit 0
+  fi
+  sleep 1
+done
+echo "remote_nbd_release_timeout:${secondary_dest}:${export_port}" >&2
+exit 99
+EOF
+)" || true
+    : "${out}${err}"
+    [[ "${rc}" == "0" ]] || {
+      [[ -n "${err}" ]] && echo "ERROR: remote-nbd release wait failed: ${err}" >&2
+      return "${rc}"
+    }
+  done
 }
 
 ftctl_blockcopy_refresh_and_classify() {

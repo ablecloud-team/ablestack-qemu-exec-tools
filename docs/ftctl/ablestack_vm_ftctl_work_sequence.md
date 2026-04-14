@@ -271,6 +271,21 @@ Completed items:
     - explicit `x-colo-lost-heartbeat` failover promotes the secondary side
     - final FT state reaches `failed_over` / `colo_failover`
   - FT `xcolo` planning now suppresses misleading standby materialization errors when `standby_xml_seed` is absent and the FT pair is pre-provisioned externally.
+  - `OP-HA-02` and `OP-HA-03` are now complete on the `10.10.31.x` `remote-nbd` HA baseline:
+    - 2-second and 5-second export-port blips both recovered back to `protected / mirroring`
+    - neither case incremented `rearm_count`
+  - `OP-HA-04` is deferred until an out-of-band recovery path is available for the physical source-host shutdown scenario.
+  - `OP-DR-01` is now complete on the `10.10.31.x` DR baseline:
+    - a 2-second remote-path interruption recovered back to `protected / mirroring`
+    - `rearm_count` remained `0`
+  - `OP-DR-02` is now complete:
+    - DR failover now tears down secondary `qemu-nbd` export handles before standby activation
+    - standby verify no longer false-fails because the verify helper now propagates the observed domain state correctly
+    - final state reaches `failed_over / failed_over`
+  - `OP-DR-03` is now complete to the currently implemented scope:
+    - after DR failover, `failback --force` starts reverse sync successfully
+    - final state reaches `failing_back / reverse_syncing`
+    - `.state.blockcopy.reverse` is created as expected
   - On the `10.10.1.x` RBD hosts, `krbd + remote-nbd` required:
     - `firewalld` enabled on both hosts
     - `10809-10872/tcp` opened on both hosts
