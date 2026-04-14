@@ -88,7 +88,7 @@ Recommended execution order:
 | `HA-IMG01-ST03` | `IMG01` | `ST03` | mandatory | HA local block backend | pass |
 | `HA-IMG01-ST04` | `IMG01` | `ST04` | recommended | HA shared-visible filesystem backend | pass |
 | `HA-IMG01-ST05` | `IMG01` | `ST05` | recommended | HA multipath backend | pass |
-| `HA-IMG01-ST06` | `IMG01` | `ST06` | recommended | HA Ceph RBD backend | pending |
+| `HA-IMG01-ST06` | `IMG01` | `ST06` | recommended | HA Ceph RBD backend | pass |
 
 ## 7. DR Test IDs
 
@@ -100,9 +100,9 @@ Recommended execution order:
 | `DR-IMG08-ST01` | `IMG08` | `ST01` | mandatory | DR transient VM behavior | pass |
 | `DR-IMG09-ST01` | `IMG09` | `ST01` | mandatory | DR persistent VM behavior | pass |
 | `DR-IMG01-ST04` | `IMG01` | `ST04` | mandatory | DR NFS backend | skip |
-| `DR-IMG01-ST06` | `IMG01` | `ST06` | mandatory | DR Ceph RBD backend | pending |
+| `DR-IMG01-ST06` | `IMG01` | `ST06` | mandatory | DR Ceph RBD backend | pass |
 | `DR-IMG05-ST04` | `IMG05` | `ST04` | recommended | DR multi-disk on NFS | skip |
-| `DR-IMG05-ST06` | `IMG05` | `ST06` | recommended | DR multi-disk on Ceph RBD | pending |
+| `DR-IMG05-ST06` | `IMG05` | `ST06` | recommended | DR multi-disk on Ceph RBD | pass |
 
 ## 8. FT Test IDs
 

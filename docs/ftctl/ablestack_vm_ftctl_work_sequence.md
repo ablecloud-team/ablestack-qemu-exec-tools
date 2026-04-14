@@ -242,6 +242,22 @@ Completed items:
   - DR Windows raw validation is now complete on the same remote-nbd backend model.
   - DR persistent VM behavior is now complete on the same remote-nbd backend model.
   - DR Windows qcow2 now completes on the baseline path after secondary-space cleanup and remote-nbd observability/space-preflight hardening.
+  - HA Ceph RBD baseline is now complete for:
+    - `librbd` shared-visible mirroring
+    - `krbd` shared-visible mirroring
+  - DR Ceph RBD baseline is now complete for:
+    - `librbd` shared-visible mirroring
+    - `krbd` shared-visible mirroring
+    - `krbd` host-separated `remote-nbd`
+  - DR multi-disk Ceph RBD validation is now complete for:
+    - `librbd` shared-visible mirroring
+    - `krbd` shared-visible mirroring
+    - `krbd` host-separated `remote-nbd`
+  - On the `10.10.1.x` RBD hosts, `krbd + remote-nbd` required:
+    - `firewalld` enabled on both hosts
+    - `10809-10872/tcp` opened on both hosts
+    - `krbd` secondary-target prepare to skip LVM-specific handoff steps and only perform idempotent `rbd map` plus target-format initialization
+  - In the current multi-disk `krbd + remote-nbd` implementation, only explicitly mapped targets stay on `/dev/rbd/...`; unmapped secondary data disks fall back to file targets under `/var/lib/ablestack-vm-ftctl/remote-nbd-targets/...`, which is acceptable for current coverage but should be tightened if full per-disk krbd ownership is required.
   - NFS-backed DR filesystem cases are skipped in the current environment because GFS2 shared-visible filesystem validation is treated as equivalent coverage.
   - The remaining HA priorities are persistent local-block/raw variants and shared/multipath variants.
 

@@ -68,6 +68,8 @@ ftctl_inventory_detect_disk_format() {
 
   if [[ -z "${fmt}" ]]; then
     case "${source_path}" in
+      rbd:*) fmt="qcow2" ;;
+      rbd/*) fmt="qcow2" ;;
       *.qcow2|*.qcow2.*) fmt="qcow2" ;;
       *.raw) fmt="raw" ;;
       *) fmt="" ;;

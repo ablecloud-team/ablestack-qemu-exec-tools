@@ -452,15 +452,17 @@ ftctl_blockcopy_rbd_parse_spec() {
   local spec="${1-}"
   local pool_var="${2}"
   local image_var="${3}"
-  local body pool image
+  local -n _pool_ref="${pool_var}"
+  local -n _image_ref="${image_var}"
+  local body="" parsed_pool="" parsed_image=""
 
   [[ "${spec}" == rbd:* ]] || return 1
   body="${spec#rbd:}"
-  pool="${body%%/*}"
-  image="${body#*/}"
-  [[ -n "${pool}" && -n "${image}" && "${image}" != "${pool}" ]] || return 1
-  printf -v "${pool_var}" '%s' "${pool}"
-  printf -v "${image_var}" '%s' "${image}"
+  parsed_pool="${body%%/*}"
+  parsed_image="${body#*/}"
+  [[ -n "${parsed_pool}" && -n "${parsed_image}" && "${parsed_image}" != "${parsed_pool}" ]] || return 1
+  _pool_ref="${parsed_pool}"
+  _image_ref="${parsed_image}"
 }
 
 ftctl_blockcopy_rbd_connection_from_xml() {
@@ -496,7 +498,10 @@ for disk in root.findall("./devices/disk"):
         s = auth.find("secret")
         if s is not None:
             secret = s.get("uuid", "")
-    print("\\n".join([host, port, user, secret]))
+    print(host)
+    print(port)
+    print(user)
+    print(secret)
     raise SystemExit(0)
 raise SystemExit(1)' "${xml_path}" "${target}")" || return 1
   printf -v "${host_var}" '%s' "$(sed -n '1p' <<< "${values}")"
@@ -672,11 +677,11 @@ if [[ "${secondary_path}" == /dev/rbd/* ]]; then
     fi
   fi
   if [[ ! -b "${secondary_path}" ]]; then
-    rbd map "${krbd_spec}" >/dev/null
+    rbd map "\${krbd_spec}" >/dev/null
     udevadm settle >/dev/null 2>&1 || true
   fi
 fi
-if [[ -b "${secondary_path}" ]]; then
+if [[ -b "${secondary_path}" && "${secondary_path}" != /dev/rbd/* ]]; then
   secondary_real="\$(readlink -f "${secondary_path}" 2>/dev/null || true)"
   stale_map=""
   if [[ -n "\${secondary_real}" ]]; then
@@ -710,6 +715,13 @@ if [[ -b "${secondary_path}" ]]; then
   if [[ -n "\${secondary_real}" ]]; then
     dmsetup info -c "\${secondary_real}" 2>/dev/null || true
   fi
+  if [[ "${format}" != "raw" ]]; then
+    current_format="\$(qemu-img info --force-share --output=json "${secondary_path}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get(\"format\",\"\"))' 2>/dev/null || true)"
+    if [[ "\${current_format}" != "${format}" ]]; then
+      qemu-img create -f "${format}" "${secondary_path}" "${size}"
+    fi
+  fi
+elif [[ -b "${secondary_path}" && "${secondary_path}" == /dev/rbd/* ]]; then
   if [[ "${format}" != "raw" ]]; then
     current_format="\$(qemu-img info --force-share --output=json "${secondary_path}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get(\"format\",\"\"))' 2>/dev/null || true)"
     if [[ "\${current_format}" != "${format}" ]]; then

@@ -42,7 +42,6 @@ If FAIL:
 
 ### Pending
 
-- `DR-IMG01-ST06`
 - `FT-IMG01-ST01`
 - `FT-IMG09-ST01`
 - `OP-HA-01`
@@ -77,11 +76,14 @@ If FAIL:
 - `HA-IMG06-ST02`
 - `HA-IMG04-ST02`
 - `HA-IMG07-ST01`
+- `HA-IMG01-ST06`
 - `DR-IMG01-ST01`
 - `DR-IMG08-ST01`
 - `DR-IMG09-ST01`
 - `DR-IMG03-ST01`
 - `DR-IMG04-ST02`
+- `DR-IMG01-ST06`
+- `DR-IMG05-ST06`
 
 ## 4. Execution Records
 
@@ -1211,4 +1213,208 @@ If FAIL:
 - Remaining gap:
   DR Windows raw transient validation is now complete.
   Windows persistent DR behavior remains a separate follow-up area.
+```
+
+### HA-IMG01-ST06
+
+```text
+Test ID: HA-IMG01-ST06
+Date: 2026-04-14
+Mode: HA
+VM Names:
+- rocky10-rbd-ha-img01-st06-lib
+- rocky10-rbd-ha-img01-st06-krbd
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Image Type: single-disk Linux qcow2
+Storage Backend: Ceph RBD
+Variants:
+- librbd source/target via protocol='rbd'
+- krbd source/target via /dev/rbd/rbd/<image>
+
+Preconditions:
+- new test images created in pool `rbd`; existing images untouched
+- libvirt secret uuid `11111111-1111-1111-1111-111111111111`
+- Ceph monitor host `scvm:6789`
+- shared-blockcopy target descriptors generated as XML for both network-rbd and block-rbd targets
+
+Commands:
+- ablestack_vm_ftctl check --vm rocky10-rbd-ha-img01-st06-lib
+- ablestack_vm_ftctl protect --vm rocky10-rbd-ha-img01-st06-lib --mode ha --peer qemu+ssh://10.10.1.2/system
+- ablestack_vm_ftctl check --vm rocky10-rbd-ha-img01-st06-krbd
+- ablestack_vm_ftctl protect --vm rocky10-rbd-ha-img01-st06-krbd --mode ha --peer qemu+ssh://10.10.1.2/system
+- ablestack_vm_ftctl status --vm ... --json
+- virsh dumpxml ...
+
+Expected Result:
+- both librbd and krbd single-disk HA baselines reach protected/mirroring
+- runtime XML exposes an active mirror using the correct target kind:
+  - `network rbd` for librbd
+  - `block /dev/rbd/...` for krbd
+
+Actual Result:
+- `HA-IMG01-ST06-LIBRBD`: PASS
+- `HA-IMG01-ST06-KRBD`: PASS
+- librbd runtime state recorded:
+  `vda|rbd/ha-img01-st06-lib-src|rbd:rbd/ha-img01-st06-lib-dst|qcow2|copy|yes|`
+- krbd runtime state recorded:
+  `vda|/dev/rbd/rbd/ha-img01-st06-krbd-src|/dev/rbd/rbd/ha-img01-st06-krbd-dst|qcow2|block|yes|`
+
+Evidence:
+- HA-IMG01-ST06-LIBRBD.status.final.json
+- HA-IMG01-ST06-LIBRBD.dumpxml.final.xml
+- HA-IMG01-ST06-KRBD.status.final.json
+- HA-IMG01-ST06-KRBD.dumpxml.final.xml
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed:
+  - lib/ftctl/blockcopy.sh
+  - lib/ftctl/inventory.sh
+  - lib/ftctl/standby.sh
+- Re-test result:
+  - passed after RBD target XML handling, RBD spec parsing fixes, and krbd map handling
+- Remaining gap:
+  multi-disk Ceph RBD validation remains separate.
+```
+
+### DR-IMG01-ST06
+
+```text
+Test ID: DR-IMG01-ST06
+Date: 2026-04-14
+Mode: DR
+VM Names:
+- rocky10-rbd-dr-img01-st06-lib
+- rocky10-rbd-dr-img01-st06-krbd
+- rocky10-rbd-dr-img01-st06-krbd-remote
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Image Type: single-disk Linux qcow2
+Storage Backend: Ceph RBD
+Variants:
+- librbd shared-visible (`shared-blockcopy`)
+- krbd shared-visible (`shared-blockcopy`)
+- krbd host-separated (`remote-nbd`)
+
+Preconditions:
+- new test images created in pool `rbd`; existing images untouched
+- libvirt secret uuid `11111111-1111-1111-1111-111111111111`
+- Ceph monitor host `scvm:6789`
+- for `remote-nbd`, `firewalld` was enabled on both hosts and `10809-10872/tcp` was opened
+
+Commands:
+- ablestack_vm_ftctl check/protect/status/reconcile on each variant
+- virsh dumpxml ...
+- find /run/ablestack-vm-ftctl -maxdepth 4 -type f -print -exec cat {} \;
+
+Expected Result:
+- DR Ceph baseline should complete for both shared-visible and host-separated transports
+- shared-visible variants should mirror directly to RBD/krbd targets
+- host-separated krbd should mirror to `nbd://10.10.1.2:<port>/...`
+
+Actual Result:
+- `DR-IMG01-ST06-LIBRBD`: PASS
+- `DR-IMG01-ST06-KRBD`: PASS
+- `DR-IMG01-ST06-KRBD-REMOTE`: PASS
+- librbd runtime state recorded:
+  `vda|rbd/dr-img01-st06-lib-src|rbd:rbd/dr-img01-st06-lib-dst|qcow2|copy|yes|`
+- krbd shared runtime state recorded:
+  `vda|/dev/rbd/rbd/dr-img01-st06-krbd-src|/dev/rbd/rbd/dr-img01-st06-krbd-dst|qcow2|block|yes|`
+- krbd remote-nbd runtime state recorded:
+  `vda|/dev/rbd/rbd/dr-img01-st06-krbd-remote3-src|nbd://10.10.1.2:10868/rocky10-rbd-dr-img01-st06-krbd-remote3-vda|qcow2|copy|yes|/dev/rbd/rbd/dr-img01-st06-krbd-remote3-dst`
+
+Evidence:
+- DR-IMG01-ST06-LIBRBD.status.final.json
+- DR-IMG01-ST06-LIBRBD.dumpxml.final.xml
+- DR-IMG01-ST06-KRBD.status.final.json
+- DR-IMG01-ST06-KRBD.dumpxml.final.xml
+- DR-IMG01-ST06-KRBD-REMOTE runtime-state.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed:
+  - lib/ftctl/blockcopy.sh
+  - lib/ftctl/inventory.sh
+  - lib/ftctl/standby.sh
+- Re-test result:
+  - passed after krbd remote-nbd prepare fixes and enabling firewalld/NBD port range on 10.10.1.1/10.10.1.2
+- Remaining gap:
+  multi-disk Ceph RBD DR validation remains separate.
+```
+
+### DR-IMG05-ST06
+
+```text
+Test ID: DR-IMG05-ST06
+Date: 2026-04-14
+Mode: DR
+VM Names:
+- rocky10-rbd-dr-img05-st06-lib
+- rocky10-rbd-dr-img05-st06-krbd
+- rocky10-rbd-dr-img05-st06-krbd-remote
+Primary Host: 10.10.1.1
+Secondary Host: 10.10.1.2
+Image Type: transient Linux multi-disk qcow2
+Storage Backend: Ceph RBD
+Variants:
+- librbd shared-visible (`shared-blockcopy`)
+- krbd shared-visible (`shared-blockcopy`)
+- krbd host-separated (`remote-nbd`)
+
+Preconditions:
+- new test images created in pool `rbd`; existing images untouched
+- three protected disks (`vda`, `vdb`, `vdc`)
+- libvirt secret uuid `11111111-1111-1111-1111-111111111111`
+- Ceph monitor host `scvm:6789`
+- `firewalld` enabled and `10809-10872/tcp` opened on both hosts for the `krbd remote-nbd` variant
+
+Commands:
+- ablestack_vm_ftctl check/protect/status/reconcile on each variant
+- virsh dumpxml ...
+- find /run/ablestack-vm-ftctl -maxdepth 4 -type f -print -exec cat {} \;
+
+Expected Result:
+- multi-disk DR on Ceph RBD should complete for both shared-visible and host-separated transports
+- all three protected disks should expose active mirrors and finish in protected/mirroring
+
+Actual Result:
+- `DR-IMG05-ST06-LIBRBD`: PASS
+- `DR-IMG05-ST06-KRBD`: PASS
+- `DR-IMG05-ST06-KRBD-REMOTE`: PASS
+- librbd shared-visible runtime state recorded:
+  - `vda|rbd/dr-img05-st06-lib-src-vda|rbd:rbd/dr-img05-st06-lib-dst-vda|qcow2|copy|yes|`
+  - `vdb|rbd/dr-img05-st06-lib-src-vdb|rbd:rbd/dr-img05-st06-lib-dst-vdb|qcow2|copy|yes|`
+  - `vdc|rbd/dr-img05-st06-lib-src-vdc|rbd:rbd/dr-img05-st06-lib-dst-vdc|qcow2|copy|yes|`
+- krbd shared-visible runtime state recorded:
+  - `vda|/dev/rbd/rbd/dr-img05-st06-krbd-src-vda|/dev/rbd/rbd/dr-img05-st06-krbd-dst-vda|qcow2|block|yes|`
+  - `vdb|/dev/rbd/rbd/dr-img05-st06-krbd-src-vdb|/dev/rbd/rbd/dr-img05-st06-krbd-dst-vdb|qcow2|block|yes|`
+  - `vdc|/dev/rbd/rbd/dr-img05-st06-krbd-src-vdc|/dev/rbd/rbd/dr-img05-st06-krbd-dst-vdc|qcow2|block|yes|`
+- krbd remote-nbd runtime state recorded:
+  - `vda|/dev/rbd/rbd/dr-img05-st06-krbd-remote-src-vda|nbd://10.10.1.2:10869/rocky10-rbd-dr-img05-st06-krbd-remote-vda|qcow2|copy|yes|/dev/rbd/rbd/dr-img05-st06-krbd-remote-dst-vda`
+  - `vdb|/dev/rbd/rbd/dr-img05-st06-krbd-remote-src-vdb|nbd://10.10.1.2:10849/rocky10-rbd-dr-img05-st06-krbd-remote-vdb|qcow2|copy|yes|/var/lib/ablestack-vm-ftctl/remote-nbd-targets/rocky10-rbd-dr-img05-st06-krbd-remote/vdb-dr-img05-st06-krbd-remote-src-vdb.qcow2`
+  - `vdc|/dev/rbd/rbd/dr-img05-st06-krbd-remote-src-vdc|nbd://10.10.1.2:10861/rocky10-rbd-dr-img05-st06-krbd-remote-vdc|qcow2|copy|yes|/var/lib/ablestack-vm-ftctl/remote-nbd-targets/rocky10-rbd-dr-img05-st06-krbd-remote/vdc-dr-img05-st06-krbd-remote-src-vdc.qcow2`
+
+Evidence:
+- DR-IMG05-ST06-LIBRBD runtime-state.final.txt
+- DR-IMG05-ST06-LIBRBD.dumpxml.final.xml
+- DR-IMG05-ST06-KRBD.status.final.json
+- DR-IMG05-ST06-KRBD.dumpxml.final.xml
+- DR-IMG05-ST06-KRBD-REMOTE.runtime-state.final.txt
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed:
+  - lib/ftctl/blockcopy.sh
+  - lib/ftctl/inventory.sh
+- Re-test result:
+  - passed after krbd remote-nbd target preparation fixes and explicit firewalld/NBD range handling on the 10.10.1.x hosts
+- Remaining gap:
+  FT/x-colo validation remains separate.
 ```
