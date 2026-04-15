@@ -111,17 +111,17 @@ Recommended execution order:
 | `FT-IMG01-ST01` | `IMG01` | `ST01` | mandatory | FT baseline Linux qcow2 | pass |
 | `FT-IMG02-ST02` | `IMG02` | `ST02` | recommended | FT Linux raw | pass |
 | `FT-IMG09-ST01` | `IMG09` | `ST01` | mandatory | FT persistent VM behavior | pass |
-| `FT-IMG01-ST03` | `IMG01` | `ST03` | recommended | FT local block backend | pending |
+| `FT-IMG01-ST03` | `IMG01` | `ST03` | recommended | FT local block backend | pass |
 
 ## 9. Operational / Fault Injection IDs
 
 | Test ID | Area | Priority | Purpose | Status |
 |---|---|---|---|---|
-| `OP-HA-01` | HA | mandatory | 1-second replication network blip | pending |
+| `OP-HA-01` | HA | mandatory | 1-second replication network blip | pass |
 | `OP-HA-02` | HA | mandatory | 2-second replication network blip | pass |
 | `OP-HA-03` | HA | recommended | 5-second replication network blip | pass |
 | `OP-HA-04` | HA | mandatory | source host shutdown | blocked |
-| `OP-HA-05` | HA | mandatory | source VM destroy | pending |
+| `OP-HA-05` | HA | mandatory | source VM destroy | pass |
 | `OP-DR-01` | DR | mandatory | remote path transient loss | pass |
 | `OP-DR-02` | DR | mandatory | site failover | pass |
 | `OP-DR-03` | DR | recommended | reverse sync / failback after DR | pass |
@@ -142,6 +142,10 @@ For each `Test ID`:
 4. Collect evidence
 5. Judge `PASS` / `FAIL` / `BLOCKED`
 6. If failed, fix code and rerun the same `Test ID`
+7. Do not modify the host virtualization service model during testing
+   - do not switch between `libvirtd` and modular libvirt daemons
+   - do not change systemd enable/disable/mask state for libvirt host services as part of a test
+   - if host libvirt health precheck fails, stop the test and mark it `blocked` until the host is restored by an explicit operator action
 
 ## 11. Recording Rule
 

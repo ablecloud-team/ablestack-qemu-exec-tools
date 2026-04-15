@@ -91,8 +91,24 @@ ftctl_orchestrator_handle_transport_issue() {
   local peer_host_id="${4-}"
   local peer_reach="${5-unknown}"
   local rearm_rc=0
+  local active_side standby_state
 
   if ftctl_fencing_is_explicit "${vm}"; then
+    active_side="$(ftctl_state_get "${vm}" "active_side" 2>/dev/null || echo "primary")"
+    standby_state="$(ftctl_state_get "${vm}" "standby_state" 2>/dev/null || echo "unknown")"
+    if [[ "${active_side}" == "secondary" ]]; then
+      case "${standby_state}" in
+        running|start-dry-run|running-network-ok|running-network-unknown)
+          ftctl_state_set "${vm}" \
+            "protection_state=failed_over" \
+            "transport_state=failed_over" \
+            "last_error="
+          ftctl_log_event "failover" "failover.steady" "ok" "${vm}" "" \
+            "reason=source_fenced active_side=secondary standby=${standby_state}"
+          return 0
+          ;;
+      esac
+    fi
     ftctl_state_set "${vm}" \
       "protection_state=failing_over" \
       "transport_state=source_fenced" \
@@ -186,7 +202,8 @@ ftctl_orchestrator_check_vm() {
 
 ftctl_orchestrator_reconcile_one() {
   local vm="${1-}"
-  local admin mode transport refresh_rc peer_host_id peer_mgmt_ip peer_reach
+  local admin mode transport refresh_rc peer_host_id peer_mgmt_ip peer_reach active_side
+  local inventory_probe local_rc peer_rc inventory_result
   admin="$(ftctl_state_get "${vm}" "admin_state" 2>/dev/null || echo "active")"
   [[ "${admin}" == "paused" ]] && {
     ftctl_log_event "rearm" "reconcile.skip" "skip" "${vm}" "" "reason=admin_paused"
@@ -195,6 +212,7 @@ ftctl_orchestrator_reconcile_one() {
 
   mode="$(ftctl_state_get "${vm}" "mode" 2>/dev/null || echo "")"
   transport="$(ftctl_state_get "${vm}" "transport_state" 2>/dev/null || echo "unknown")"
+  active_side="$(ftctl_state_get "${vm}" "active_side" 2>/dev/null || echo "primary")"
 
   ftctl_profile_load_vm "${vm}"
   ftctl_profile_apply_cli "${vm}" "${mode}" "" ""
@@ -203,6 +221,20 @@ ftctl_orchestrator_reconcile_one() {
   ftctl_orchestrator_probe_peer peer_host_id peer_mgmt_ip peer_reach || true
   : "${peer_mgmt_ip}"
   ftctl_state_set "${vm}" "last_reconcile_ts=$(ftctl_now_iso8601)"
+
+  inventory_probe="$(ftctl_inventory_check_vm "${vm}")"
+  local_rc="${inventory_probe%% *}"
+  inventory_probe="${inventory_probe#* }"
+  peer_rc="${inventory_probe%% *}"
+  inventory_result="${inventory_probe##* }"
+  : "${peer_rc}${inventory_result}"
+
+  if [[ "${mode}" == "ha" && "${active_side}" == "primary" && "${local_rc}" != "0" ]]; then
+    ftctl_log_event "failover" "failover.auto" "warn" "${vm}" "" \
+      "reason=primary_domain_missing peer_host=${peer_host_id}"
+    ftctl_failover_request "${vm}" "primary_domain_missing"
+    return 0
+  fi
 
   refresh_rc=0
   if [[ "${mode}" != "ft" ]]; then

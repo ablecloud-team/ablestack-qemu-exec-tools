@@ -133,6 +133,15 @@ ftctl_fencing_provider_peer_virsh_destroy() {
     return 0
   fi
 
+  case "${err}" in
+    *"failed to get domain"*|*"domain is not running"*|*"Domain not found"*)
+      ftctl_state_set "${vm}" "fencing_state=fenced"
+      ftctl_log_event "fencing" "provider.peer_virsh_destroy" "ok" "${vm}" "" \
+        "reason=${reason} source_uri=${source_uri} already_absent=1"
+      return 0
+      ;;
+  esac
+
   ftctl_fencing_mark_failed "${vm}" "peer_virsh_destroy_failed"
   return 1
 }

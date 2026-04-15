@@ -263,6 +263,10 @@ Completed items:
   - FT persistent baseline is now complete for `FT-IMG09-ST01`
   - FT raw baseline is now complete for `FT-IMG02-ST02`
     - raw sources work when the secondary replication chain uses qcow2 overlays
+  - FT local-block baseline is now complete for `FT-IMG01-ST03`
+    - block-backed FT uses cold conversion, not the existing file-backed live protect path
+    - primary and secondary generated XML use block-backed dummy disks with boot order lowered
+    - post-boot QMP attach builds the local-block FT graph before x-colo handshake
   - `OP-FT-01` is now complete:
     - first reconcile after induced transient loss enters `transient_loss` during the grace window
     - second reconcile after the grace window re-enters `xcolo_rearm()`
@@ -271,10 +275,22 @@ Completed items:
     - explicit `x-colo-lost-heartbeat` failover promotes the secondary side
     - final FT state reaches `failed_over` / `colo_failover`
   - FT `xcolo` planning now suppresses misleading standby materialization errors when `standby_xml_seed` is absent and the FT pair is pre-provisioned externally.
-  - `OP-HA-02` and `OP-HA-03` are now complete on the `10.10.31.x` `remote-nbd` HA baseline:
-    - 2-second and 5-second export-port blips both recovered back to `protected / mirroring`
+  - Host virtualization service model must remain untouched during testing:
+    - do not switch hosts between `libvirtd` and modular libvirt daemons
+    - do not enable/disable/mask libvirt host services from test automation
+    - if `systemctl status libvirtd` or `virsh list --all` prechecks fail, stop the test and restore host health first
+  - `OP-HA-01`, `OP-HA-02`, and `OP-HA-03` are now complete on the `10.10.31.x` `remote-nbd` HA baseline:
+    - 1-second, 2-second, and 5-second export-port blips all recovered back to `protected / mirroring`
     - neither case incremented `rearm_count`
   - `OP-HA-04` is deferred until an out-of-band recovery path is available for the physical source-host shutdown scenario.
+  - `OP-HA-05` should be executed only under the following design constraints:
+    - preflight must verify both hosts respond to `virsh list --all` within a bounded timeout
+    - the injected fault is limited to `virsh destroy <primary-vm>` on the protected source VM
+    - test code must not touch host libvirt service-unit configuration or service model
+    - success criteria are secondary standby activation and final HA failover state, not host service recovery
+  - `OP-HA-05` is now complete on the `10.10.31.x` HA baseline:
+    - source VM destroy triggers HA failover
+    - final state reaches `failed_over` with the secondary side running
   - `OP-DR-01` is now complete on the `10.10.31.x` DR baseline:
     - a 2-second remote-path interruption recovered back to `protected / mirroring`
     - `rearm_count` remained `0`
@@ -286,6 +302,10 @@ Completed items:
     - after DR failover, `failback --force` starts reverse sync successfully
     - final state reaches `failing_back / reverse_syncing`
     - `.state.blockcopy.reverse` is created as expected
+  - Block-backed FT now has an explicit product policy split from file-backed FT:
+    - file-backed FT keeps the current validated protect flow
+    - block-backed FT must use cold conversion, not the existing live protect path
+    - the current `FT-IMG01-ST03` direction is generated FT runtime XML plus block-backed restart conversion
   - On the `10.10.1.x` RBD hosts, `krbd + remote-nbd` required:
     - `firewalld` enabled on both hosts
     - `10809-10872/tcp` opened on both hosts

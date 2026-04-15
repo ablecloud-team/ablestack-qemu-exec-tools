@@ -123,6 +123,51 @@ ftctl_inventory_collect_vm_disks() {
   ftctl_log_event "inventory" "inventory.disks" "ok" "${vm}" "" "count=${#_out_array[@]}"
 }
 
+ftctl_inventory_collect_vm_disks_detailed() {
+  local vm="${1-}"
+  local out_array_name="${2}"
+  local out err rc
+  local -n _out_array="${out_array_name}"
+  local line dtype device target source format
+
+  _out_array=()
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" domblklist "${vm}" --details || true
+  if [[ "${rc}" != "0" ]]; then
+    ftctl_log_event "inventory" "inventory.disks_detailed" "fail" "${vm}" "${rc}" \
+      "primary_uri=${FTCTL_PROFILE_PRIMARY_URI}"
+    return "${rc}"
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    case "${line}" in
+      Type*|----*) continue ;;
+    esac
+
+    dtype="$(awk '{print $1}' <<< "${line}")"
+    device="$(awk '{print $2}' <<< "${line}")"
+    target="$(awk '{print $3}' <<< "${line}")"
+    source="$(awk '{print $4}' <<< "${line}")"
+
+    [[ "${device}" == "disk" ]] || continue
+    [[ -n "${target}" && -n "${source}" && "${source}" != "-" ]] || continue
+
+    format=""
+    ftctl_inventory_detect_disk_format "${source}" format
+    _out_array+=("${target}|${source}|${format}|${dtype}")
+  done <<< "${out}"
+
+  if ((${#_out_array[@]} == 0)); then
+    ftctl_log_event "inventory" "inventory.disks_detailed" "warn" "${vm}" "" "count=0"
+    return 3
+  fi
+
+  ftctl_log_event "inventory" "inventory.disks_detailed" "ok" "${vm}" "" "count=${#_out_array[@]}"
+}
+
 ftctl_inventory_xml_backup_path() {
   local vm="${1-}"
   local key

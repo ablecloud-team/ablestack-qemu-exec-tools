@@ -485,3 +485,44 @@ VM癰???쇱젟?? ??μ뵬 ?袁⑸열 conf揶쎛 ?袁⑤빍??`/etc/ablestack/ftc
 
 - libvirt virsh manpage: https://www.libvirt.org/manpages/virsh.html
 - QEMU COLO documentation: https://www.qemu.org/docs/master/system/qemu-colo.html
+
+## 16. Block-Backed FT Conversion Policy
+
+### 16.1 Policy split
+
+- File-backed FT keeps the existing validated protect model.
+  - The current file qcow2/raw FT scenarios rely on a custom x-colo graph that can reopen the same backing file path.
+- Block-backed FT does not use the same live-conversion model.
+  - When the primary disk inventory reports `type=block`, the engine must not assume that the running root disk can be transformed into an FT root graph in place.
+
+### 16.2 Required product behavior
+
+- A block-backed VM that receives an FT request must enter a cold conversion path.
+- The engine must treat block-backed FT as:
+  1. preserve the original VM XML as the authoritative source
+  2. stop the running non-FT VM
+  3. generate primary/secondary FT runtime XML
+  4. start the FT pair from the generated FT runtime XML
+  5. execute FT/x-colo setup from the FT runtime boot state
+
+### 16.3 XML ownership rule
+
+- The original VM XML must not be overwritten in place.
+- FT start uses generated runtime XML only.
+- Generated FT XML is runtime state, not persistent source-of-truth configuration.
+
+### 16.4 Block-backed runtime model
+
+- Secondary side:
+  - local block is exposed to libvirt through a writable XML disk
+  - after boot, QMP `blockdev-add` attaches hidden/active/replication/quorum nodes
+- Primary side:
+  - local block FT must follow the same mediation-friendly policy
+  - the implementation must avoid reopening the same block path through a competing custom graph while the root graph still owns it
+  - the primary FT root therefore belongs to the cold conversion runtime model, not the existing live protect path
+
+### 16.5 Operator-visible rule
+
+- File-backed FT may continue to use the current FT protect flow.
+- Block-backed FT requires restart conversion.
+- The product must surface that a running block-backed VM cannot be converted through the same live path as a file-backed VM.

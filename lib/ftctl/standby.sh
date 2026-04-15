@@ -204,6 +204,124 @@ tree.write(xml_path, encoding="unicode")
 PY
 }
 
+ftctl_xml_remove_qemu_commandline() {
+  local xml_path="${1-}"
+
+  command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: python3 is required for qemu:commandline XML rewrite" >&2
+    return 2
+  }
+
+  XML_PATH="${xml_path}" python3 - <<'PY'
+import os
+import xml.etree.ElementTree as ET
+
+xml_path = os.environ["XML_PATH"]
+qemu_ns = "http://libvirt.org/schemas/domain/qemu/1.0"
+tree = ET.parse(xml_path)
+root = tree.getroot()
+qcmd = root.find(f"{{{qemu_ns}}}commandline")
+if qcmd is not None:
+    root.remove(qcmd)
+tree.write(xml_path, encoding="unicode")
+PY
+}
+
+ftctl_xml_rewrite_first_disk_block_runtime() {
+  local xml_path="${1-}"
+  local dest_path="${2-}"
+  local disk_format="${3-qcow2}"
+  local disk_mode="${4-rw}"
+  local boot_order="${5-}"
+
+  command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: python3 is required for block-backed runtime XML rewrite" >&2
+    return 2
+  }
+
+  XML_PATH="${xml_path}" DEST_PATH="${dest_path}" DISK_FORMAT="${disk_format}" DISK_MODE="${disk_mode}" BOOT_ORDER="${boot_order}" python3 - <<'PY'
+import os
+import xml.etree.ElementTree as ET
+
+xml_path = os.environ["XML_PATH"]
+dest_path = os.environ["DEST_PATH"]
+disk_format = os.environ["DISK_FORMAT"] or "qcow2"
+disk_mode = os.environ["DISK_MODE"] or "rw"
+boot_order = os.environ.get("BOOT_ORDER", "")
+
+tree = ET.parse(xml_path)
+root = tree.getroot()
+devices = root.find("devices")
+if devices is None:
+    raise SystemExit("missing <devices> in xml")
+os_node = root.find("os")
+if os_node is not None and boot_order:
+    for child in list(os_node):
+        if child.tag == "boot":
+            os_node.remove(child)
+
+disk = None
+for candidate in devices.findall("disk"):
+    if candidate.get("device") == "disk":
+        disk = candidate
+        break
+
+if disk is None:
+    raise SystemExit("missing first disk device in xml")
+
+disk.set("type", "block")
+driver = disk.find("driver")
+if driver is None:
+    driver = ET.Element("driver")
+    disk.insert(0, driver)
+driver.set("name", "qemu")
+driver.set("type", disk_format)
+driver.set("discard", "unmap")
+
+source = disk.find("source")
+if source is None:
+    source = ET.Element("source")
+    disk.insert(1, source)
+source.attrib.clear()
+source.set("dev", dest_path)
+
+target = disk.find("target")
+if target is None:
+    target = ET.Element("target")
+    disk.append(target)
+target.set("dev", "sdb")
+target.set("bus", "scsi")
+
+for child in list(disk):
+    if child.tag in {"readonly", "shareable", "boot", "alias", "address"}:
+        disk.remove(child)
+
+if disk_mode in {"ro", "ro-shareable"}:
+    disk.append(ET.Element("readonly"))
+if disk_mode in {"shareable", "ro-shareable"}:
+    disk.append(ET.Element("shareable"))
+if boot_order:
+    boot = ET.Element("boot")
+    boot.set("order", boot_order)
+    disk.append(boot)
+
+has_scsi = False
+for controller in devices.findall("controller"):
+    if controller.get("type") == "scsi":
+        controller.set("model", "virtio-scsi")
+        has_scsi = True
+        break
+if not has_scsi:
+    controller = ET.Element("controller")
+    controller.set("type", "scsi")
+    controller.set("index", "0")
+    controller.set("model", "virtio-scsi")
+    devices.insert(1, controller)
+
+tree.write(xml_path, encoding="unicode")
+PY
+}
+
 ftctl_standby_materialize_primary_xml() {
   local vm="${1-}"
   local primary_xml generated

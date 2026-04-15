@@ -42,8 +42,6 @@ If FAIL:
 
 ### Pending
 
-- `OP-HA-01`
-
 ### Deferred
 
 - `OP-HA-04`
@@ -79,6 +77,7 @@ If FAIL:
 - `FT-IMG02-ST02`
 - `OP-FT-01`
 - `OP-FT-02`
+- `OP-HA-01`
 - `OP-HA-02`
 - `OP-HA-03`
 - `OP-DR-01`
@@ -1661,6 +1660,55 @@ If FAIL:
   longer HA network-loss windows still need separate validation.
 ```
 
+### OP-HA-01
+
+```text
+Test ID: OP-HA-01
+Date: 2026-04-14
+Mode: HA
+VM Name: rocky10-op-ha-01
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: 1-second replication network blip
+
+Preconditions:
+- transient HA baseline created on `remote-nbd`
+- secondary export port identified from the runtime state
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-ha-01 --mode ha --peer qemu+ssh://10.10.31.2/system
+- on secondary host, insert an iptables `REJECT` rule on the active export port for 1 second
+- ablestack_vm_ftctl reconcile --vm rocky10-op-ha-01 --json
+- sleep 2
+- ablestack_vm_ftctl reconcile --vm rocky10-op-ha-01 --json
+- ablestack_vm_ftctl status --vm rocky10-op-ha-01 --json
+
+Expected Result:
+- a 1-second replication interruption should be fully absorbed inside the HA grace/recovery window
+- final state should return to `protected / mirroring`
+
+Actual Result:
+- the 1-second export-port blip was absorbed without failover
+- final state reached:
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+  - `rearm_count=0`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-op-ha-01 --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-ha-01.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-ha-01.state.blockcopy`
+
+Status: PASS
+
+If FAIL:
+- Root cause: n/a
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  source-VM-destroy and host-shutdown HA cases remain separate.
+```
+
 ### OP-HA-03
 
 ```text
@@ -1966,4 +2014,69 @@ If FAIL:
   - passed after using qcow2 overlays on the secondary side while keeping the source raw
 - Remaining gap:
   raw FT failover/failback remains a separate operational path.
+```
+
+### FT-IMG01-ST03
+
+```text
+Test ID: FT-IMG01-ST03
+Date: 2026-04-15
+Mode: FT
+VM Name: rocky10-ft-img01-st03
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.3
+Image Type: single-disk Linux qcow2-on-local-block
+Storage Backend: FT/x-colo local block backend with block-backed cold conversion
+
+Preconditions:
+- primary runs as a normal block-backed VM on local LV
+- secondary target LV exists on a different host-local disk
+- explicit `FTCTL_PROFILE_DISK_MAP` points `vda` to the secondary local LV
+- firewalld enabled and x-colo ports opened on both hosts
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-ft-img01-st03 --mode ft --peer qemu+ssh://10.10.31.3/system
+- ablestack_vm_ftctl status --vm rocky10-ft-img01-st03 --json
+- ablestack_vm_ftctl failover --vm rocky10-ft-img01-st03 --force
+- ablestack_vm_ftctl status --vm rocky10-ft-img01-st03 --json
+
+Expected Result:
+- block-backed FT conversion should cold-restart the pair into FT runtime XML
+- protect reaches `colo_running / mirroring`
+- forced failover promotes the secondary side
+
+Actual Result:
+- protect succeeded through block-backed cold conversion
+- final protect state reached:
+  - `protection_state=colo_running`
+  - `transport_state=mirroring`
+  - `active_side=primary`
+- forced failover succeeded and final state reached:
+  - `protection_state=failed_over`
+  - `transport_state=colo_failover`
+  - `active_side=secondary`
+  - `fencing_state=fenced`
+
+Evidence:
+- `ablestack_vm_ftctl status --vm rocky10-ft-img01-st03 --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st03.state`
+- `/run/ablestack-vm-ftctl/state/rocky10-ft-img01-st03.state.xcolo`
+- primary/secondary QMP `query-block` after protect
+
+Status: PASS
+
+If FAIL:
+- Root cause:
+  block-backed FT cannot use the file-backed live protect path; it requires cold conversion with generated XML, writable/readonly dummy block disks, and post-boot QMP graph attach.
+- Files changed:
+  - lib/ftctl/xcolo.sh
+  - lib/ftctl/standby.sh
+  - docs/ftctl/ablestack_vm_ftctl_design.md
+  - docs/ftctl/ablestack_vm_ftctl_work_sequence.md
+  - etc/ablestack-vm-ftctl.conf
+  - bin/ablestack_vm_ftctl_firewalld.sh
+- Re-test result:
+  - passed after block-backed cold conversion, generated XML rewrite, QMP graph attach, and x-colo handshake integration
+- Remaining gap:
+  none for baseline protect/failover on the tested local-block pair
 ```

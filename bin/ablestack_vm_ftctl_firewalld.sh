@@ -27,6 +27,8 @@ FTCTL_REMOTE_NBD_PORT_BASE="10809"
 FTCTL_REMOTE_NBD_PORT_COUNT="32"
 FTCTL_XCOLO_PROXY_PORT="9000"
 FTCTL_XCOLO_MIGRATE_PORT="9998"
+FTCTL_XCOLO_MIRROR_PORT="9003"
+FTCTL_XCOLO_COMPARE_PORT="9004"
 
 if [[ -f "${CONFIG_PATH}" ]]; then
   set -a
@@ -46,6 +48,8 @@ write_service_file() {
   <description>Remote NBD export range and x-colo control/migrate ports for ABLESTACK VM FTCTL.</description>
   <port protocol="tcp" port="${FTCTL_XCOLO_PROXY_PORT}"/>
   <port protocol="tcp" port="${FTCTL_XCOLO_MIGRATE_PORT}"/>
+  <port protocol="tcp" port="${FTCTL_XCOLO_MIRROR_PORT}"/>
+  <port protocol="tcp" port="${FTCTL_XCOLO_COMPARE_PORT}"/>
   <port protocol="tcp" port="${FTCTL_REMOTE_NBD_PORT_BASE}-${range_end}"/>
 </service>
 EOF
@@ -66,7 +70,7 @@ apply_service() {
       firewall-cmd --reload >/dev/null 2>&1 || true
     fi
   fi
-  echo "[INFO] Firewalld service ensured: ${SERVICE_NAME} (x-colo ${FTCTL_XCOLO_PROXY_PORT}/tcp, ${FTCTL_XCOLO_MIGRATE_PORT}/tcp; remote-nbd ${FTCTL_REMOTE_NBD_PORT_BASE}-${range_end}/tcp)"
+  echo "[INFO] Firewalld service ensured: ${SERVICE_NAME} (x-colo proxy ${FTCTL_XCOLO_PROXY_PORT}/tcp, migrate ${FTCTL_XCOLO_MIGRATE_PORT}/tcp, mirror ${FTCTL_XCOLO_MIRROR_PORT}/tcp, compare ${FTCTL_XCOLO_COMPARE_PORT}/tcp; remote-nbd ${FTCTL_REMOTE_NBD_PORT_BASE}-${range_end}/tcp)"
 }
 
 remove_service() {
