@@ -282,7 +282,10 @@ Completed items:
   - `OP-HA-01`, `OP-HA-02`, and `OP-HA-03` are now complete on the `10.10.31.x` `remote-nbd` HA baseline:
     - 1-second, 2-second, and 5-second export-port blips all recovered back to `protected / mirroring`
     - neither case incremented `rearm_count`
-  - `OP-HA-04` is deferred until an out-of-band recovery path is available for the physical source-host shutdown scenario.
+  - `OP-HA-04` is now complete with IPMI fencing on the `10.10.31.x` HA baseline:
+    - the source host can be powered off through OOB/IPMI
+    - secondary-side reconcile triggers fencing and standby activation
+    - final state reaches `failed_over / failed_over` with the standby domain running on the secondary host
   - `OP-HA-05` should be executed only under the following design constraints:
     - preflight must verify both hosts respond to `virsh list --all` within a bounded timeout
     - the injected fault is limited to `virsh destroy <primary-vm>` on the protected source VM
@@ -311,6 +314,9 @@ Completed items:
   - `OP-ST-03` is now complete on dedicated `mpathl`:
     - all paths can be forced `offline`
     - the engine still remains `protected / mirroring`
+  - `OP-LV-01` is now complete:
+    - restarting `libvirtd` on the primary host during protection does not break the protected pair
+    - after reconcile, the final state returns to `protected / mirroring`
   - Block-backed FT now has an explicit product policy split from file-backed FT:
     - file-backed FT keeps the current validated protect flow
     - block-backed FT must use cold conversion, not the existing live protect path

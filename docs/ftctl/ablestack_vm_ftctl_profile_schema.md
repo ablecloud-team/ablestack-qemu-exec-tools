@@ -265,3 +265,36 @@ between shared-storage blockcopy and remote-local transport designs.
 - Do not point a shared-blockcopy destination into a known primary-local path such as
   `/var/lib/ablestack-vm-ftctl/blockcopy/...`.
 - Use a distinct standby domain name on the secondary host.
+
+### 8.4 IPMI fencing additions
+
+When `FTCTL_PROFILE_FENCING_POLICY=ipmi`, the profile must provide explicit
+out-of-band addresses for both sides so the engine can fence the current
+source host after role reversal.
+
+- `FTCTL_PROFILE_FENCING_IPMI_PRIMARY_HOST`
+  - OOB/IPMI address for the primary host
+- `FTCTL_PROFILE_FENCING_IPMI_SECONDARY_HOST`
+  - OOB/IPMI address for the secondary host
+- `FTCTL_PROFILE_FENCING_IPMI_USER`
+  - default:
+    - global `FTCTL_FENCING_IPMI_USER`
+- `FTCTL_PROFILE_FENCING_IPMI_PASSWORD`
+  - default:
+    - global `FTCTL_FENCING_IPMI_PASSWORD`
+- `FTCTL_PROFILE_FENCING_IPMI_INTERFACE`
+  - default:
+    - global `FTCTL_FENCING_IPMI_INTERFACE`
+  - example:
+    - `lanplus`
+
+Example:
+
+```bash
+FTCTL_PROFILE_FENCING_POLICY="ipmi"
+FTCTL_PROFILE_FENCING_IPMI_PRIMARY_HOST="10.10.31.251"
+FTCTL_PROFILE_FENCING_IPMI_SECONDARY_HOST="10.10.31.252"
+FTCTL_PROFILE_FENCING_IPMI_USER="root"
+FTCTL_PROFILE_FENCING_IPMI_PASSWORD="Ablecloud1!"
+FTCTL_PROFILE_FENCING_IPMI_INTERFACE="lanplus"
+```

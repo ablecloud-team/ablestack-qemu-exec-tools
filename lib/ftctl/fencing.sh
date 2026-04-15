@@ -146,6 +146,97 @@ ftctl_fencing_provider_peer_virsh_destroy() {
   return 1
 }
 
+ftctl_fencing_ipmi_source_host() {
+  local vm="${1-}"
+  local active_side
+  active_side="$(ftctl_state_get "${vm}" "active_side" 2>/dev/null || echo "primary")"
+  if [[ "${active_side}" == "secondary" ]]; then
+    printf '%s\n' "${FTCTL_PROFILE_FENCING_IPMI_SECONDARY_HOST}"
+  else
+    printf '%s\n' "${FTCTL_PROFILE_FENCING_IPMI_PRIMARY_HOST}"
+  fi
+}
+
+ftctl_fencing_ipmi_status() {
+  local host="${1-}"
+  local user="${2-}"
+  local pass="${3-}"
+  local iface="${4-}"
+  local -n out_ref="${5-}"
+  local -n err_ref="${6-}"
+  local -n rc_ref="${7-}"
+  local cmd_out cmd_err cmd_rc
+
+  cmd_out=""
+  cmd_err=""
+  cmd_rc=0
+  ftctl_cmd_run "${FTCTL_FENCING_TIMEOUT_SEC}" cmd_out cmd_err cmd_rc -- \
+    ipmitool -I "${iface}" -H "${host}" -U "${user}" -P "${pass}" chassis power status || true
+  out_ref="${cmd_out}"
+  err_ref="${cmd_err}"
+  rc_ref="${cmd_rc}"
+}
+
+ftctl_fencing_provider_ipmi() {
+  local vm="${1-}"
+  local reason="${2-manual}"
+  local host user pass iface source_uri deadline rc out err status_text
+
+  source_uri="$(ftctl_fencing_source_uri "${vm}")"
+  host="$(ftctl_fencing_ipmi_source_host "${vm}")"
+  user="${FTCTL_PROFILE_FENCING_IPMI_USER}"
+  pass="${FTCTL_PROFILE_FENCING_IPMI_PASSWORD}"
+  iface="${FTCTL_PROFILE_FENCING_IPMI_INTERFACE}"
+
+  if [[ -z "${host}" ]]; then
+    ftctl_fencing_mark_failed "${vm}" "ipmi_target_host_not_found"
+    return 1
+  fi
+
+  if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
+    ftctl_state_set "${vm}" "fencing_state=dry-run"
+    ftctl_log_event "fencing" "provider.ipmi" "skip" "${vm}" "" \
+      "reason=dry_run target=${host} source_uri=${source_uri} interface=${iface}"
+    return 4
+  fi
+
+  if ! command -v ipmitool >/dev/null 2>&1; then
+    ftctl_fencing_mark_failed "${vm}" "ipmitool_not_found"
+    return 1
+  fi
+
+  ftctl_fencing_ipmi_status "${host}" "${user}" "${pass}" "${iface}" out err rc
+  status_text="$(printf '%s %s' "${out}" "${err}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${rc}" == "0" && "${status_text}" == *"chassis power is off"* ]]; then
+    ftctl_state_set "${vm}" "fencing_state=fenced"
+    ftctl_log_event "fencing" "provider.ipmi" "ok" "${vm}" "" \
+      "reason=${reason} target=${host} source_uri=${source_uri} already_off=1 interface=${iface}"
+    return 0
+  fi
+
+  out=""
+  err=""
+  rc=0
+  ftctl_cmd_run "${FTCTL_FENCING_TIMEOUT_SEC}" out err rc -- \
+    ipmitool -I "${iface}" -H "${host}" -U "${user}" -P "${pass}" chassis power off || true
+
+  deadline=$((SECONDS + FTCTL_FENCING_TIMEOUT_SEC))
+  while (( SECONDS <= deadline )); do
+    ftctl_fencing_ipmi_status "${host}" "${user}" "${pass}" "${iface}" out err rc
+    status_text="$(printf '%s %s' "${out}" "${err}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${rc}" == "0" && "${status_text}" == *"chassis power is off"* ]]; then
+      ftctl_state_set "${vm}" "fencing_state=fenced"
+      ftctl_log_event "fencing" "provider.ipmi" "ok" "${vm}" "" \
+        "reason=${reason} target=${host} source_uri=${source_uri} interface=${iface}"
+      return 0
+    fi
+    sleep 1
+  done
+
+  ftctl_fencing_mark_failed "${vm}" "ipmi_provider_failed"
+  return 1
+}
+
 ftctl_fencing_execute() {
   local vm="${1-}"
   local reason="${2-manual}"
@@ -159,8 +250,11 @@ ftctl_fencing_execute() {
     peer-virsh-destroy)
       ftctl_fencing_provider_peer_virsh_destroy "${vm}" "${reason}"
       ;;
-    ipmi|redfish)
-      ftctl_fencing_mark_failed "${vm}" "${FTCTL_PROFILE_FENCING_POLICY}_not_implemented"
+    ipmi)
+      ftctl_fencing_provider_ipmi "${vm}" "${reason}"
+      ;;
+    redfish)
+      ftctl_fencing_mark_failed "${vm}" "redfish_not_implemented"
       return 5
       ;;
     *)

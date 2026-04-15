@@ -647,6 +647,10 @@ ftctl_blockcopy_remote_exec() {
   rm -f -- "${tmp_cmd}" 2>/dev/null || true
 }
 
+ftctl_blockcopy_secondary_uri_is_local_system() {
+  [[ "${FTCTL_PROFILE_SECONDARY_URI}" == "qemu:///system" ]]
+}
+
 ftctl_blockcopy_remote_nbd_prepare_target() {
   local vm="${1-}"
   local target="${2-}"
@@ -1620,7 +1624,9 @@ ftctl_blockcopy_stop_remote_nbd_exports() {
   local host user out err rc pid_file export_name export_port
 
   ftctl_standby_blockcopy_records "${vm}" records || return 0
-  ftctl_blockcopy_remote_target_host_user host user || return 0
+  if ! ftctl_blockcopy_secondary_uri_is_local_system; then
+    ftctl_blockcopy_remote_target_host_user host user || return 0
+  fi
 
   for record in "${records[@]}"; do
     target=""; source=""; dest=""; format=""; job_state=""; ready=""; secondary_dest=""
@@ -1633,7 +1639,8 @@ ftctl_blockcopy_stop_remote_nbd_exports() {
     fi
 
     out="" err="" rc=0
-    ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "$(cat <<EOF
+    local stop_cmd
+    stop_cmd="$(cat <<EOF
 set -euo pipefail
 if [[ -f "${pid_file}" ]]; then
   oldpid="\$(cat "${pid_file}" 2>/dev/null || true)"
@@ -1663,7 +1670,12 @@ if [[ -n "${secondary_dest}" && -e "${secondary_dest}" ]]; then
 fi
 pkill -f "qemu-nbd.*${vm}.*${target}" >/dev/null 2>&1 || true
 EOF
-)" || true
+)"
+    if ftctl_blockcopy_secondary_uri_is_local_system; then
+      ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- bash -lc "${stop_cmd}" || true
+    else
+      ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${stop_cmd}" || true
+    fi
     : "${out}${err}"
     [[ "${rc}" == "0" ]] || {
       [[ -n "${err}" ]] && echo "ERROR: remote-nbd export stop failed: ${err}" >&2
@@ -1679,7 +1691,9 @@ ftctl_blockcopy_wait_remote_nbd_release() {
   local host user out err rc pid_file export_name export_uri export_port
 
   ftctl_standby_blockcopy_records "${vm}" records || return 0
-  ftctl_blockcopy_remote_target_host_user host user || return 0
+  if ! ftctl_blockcopy_secondary_uri_is_local_system; then
+    ftctl_blockcopy_remote_target_host_user host user || return 0
+  fi
 
   for record in "${records[@]}"; do
     target=""; source=""; dest=""; format=""; job_state=""; ready=""; secondary_dest=""
@@ -1693,7 +1707,8 @@ ftctl_blockcopy_wait_remote_nbd_release() {
     fi
 
     out="" err="" rc=0
-    ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "$(cat <<EOF
+    local wait_cmd
+    wait_cmd="$(cat <<EOF
 set -euo pipefail
 for _i in \$(seq 1 20); do
   busy=0
@@ -1720,7 +1735,12 @@ done
 echo "remote_nbd_release_timeout:${secondary_dest}:${export_port}" >&2
 exit 99
 EOF
-)" || true
+)"
+    if ftctl_blockcopy_secondary_uri_is_local_system; then
+      ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- bash -lc "${wait_cmd}" || true
+    else
+      ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${wait_cmd}" || true
+    fi
     : "${out}${err}"
     [[ "${rc}" == "0" ]] || {
       [[ -n "${err}" ]] && echo "ERROR: remote-nbd release wait failed: ${err}" >&2

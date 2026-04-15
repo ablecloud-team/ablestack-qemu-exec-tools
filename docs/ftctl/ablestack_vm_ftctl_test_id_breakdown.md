@@ -120,7 +120,7 @@ Recommended execution order:
 | `OP-HA-01` | HA | mandatory | 1-second replication network blip | pass |
 | `OP-HA-02` | HA | mandatory | 2-second replication network blip | pass |
 | `OP-HA-03` | HA | recommended | 5-second replication network blip | pass |
-| `OP-HA-04` | HA | mandatory | source host shutdown | blocked |
+| `OP-HA-04` | HA | mandatory | source host shutdown | pass |
 | `OP-HA-05` | HA | mandatory | source VM destroy | pass |
 | `OP-DR-01` | DR | mandatory | remote path transient loss | pass |
 | `OP-DR-02` | DR | mandatory | site failover | pass |
@@ -130,7 +130,7 @@ Recommended execution order:
 | `OP-ST-01` | storage | recommended | GFS2 interruption | fail |
 | `OP-ST-02` | storage | recommended | multipath partial path loss | pass |
 | `OP-ST-03` | storage | recommended | multipath all-path loss | pass |
-| `OP-LV-01` | libvirt | recommended | libvirtd restart during protection | pending |
+| `OP-LV-01` | libvirt | recommended | libvirtd restart during protection | pass |
 
 ## 10. Execution Rule
 

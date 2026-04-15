@@ -44,8 +44,7 @@ If FAIL:
 
 ### Deferred
 
-- `OP-HA-04`
-  - deferred until an out-of-band recovery path is prepared for the physical source host shutdown scenario
+- none
 
 ### In Progress
 
@@ -2218,4 +2217,88 @@ Status: PASS
 Notes:
 - This is a product-observation PASS for the tested stack.
 - It indicates the current storage stack keeps the mirrored target path alive despite all-path loss on the selected dedicated test LUN.
+```
+
+```markdown
+## Test ID: OP-LV-01
+Area: libvirtd restart during protection
+
+Environment:
+- Primary Host: 10.10.31.1
+- Secondary Host: 10.10.31.2
+- VM: `rocky10-op-lv-01`
+- Mode: HA
+- Backend: `remote-nbd`
+
+Procedure:
+- create a normal HA baseline on `10.10.31.1`
+- run:
+  - `ablestack_vm_ftctl protect --vm rocky10-op-lv-01 --mode ha --peer qemu+ssh://10.10.31.2/system`
+- confirm baseline reaches `protected / mirroring`
+- restart `libvirtd` on `10.10.31.1`
+- run `ablestack_vm_ftctl reconcile --vm rocky10-op-lv-01`
+
+Expected Result:
+- restarting `libvirtd` on the primary host should not permanently break the protected pair
+- after reconcile, the pair should return to `protected / mirroring`
+
+Actual Result:
+- `libvirtd` restarted successfully on the primary host
+- `virsh list --all` remained available after the restart
+- reconcile returned the pair to:
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+  - `last_error=""`
+
+Status: PASS
+```
+
+```markdown
+## Test ID: OP-HA-04
+Area: source host shutdown
+
+Environment:
+- Primary Host: 10.10.31.1
+- Secondary Host: 10.10.31.2
+- Primary OOB/IPMI: 10.10.31.251
+- Secondary OOB/IPMI: 10.10.31.252
+- VM: `rocky10-op-ha-04`
+- Mode: HA
+- Backend: `remote-nbd`
+- Fencing Policy: `ipmi`
+
+Procedure:
+- create a normal HA baseline on `10.10.31.1`
+- run:
+  - `ablestack_vm_ftctl protect --vm rocky10-op-ha-04 --mode ha --peer qemu+ssh://10.10.31.2/system`
+- confirm baseline reaches `protected / mirroring`
+- seed state and XML bundle to the secondary host for local failover execution
+- power off the source host through IPMI:
+  - `ipmitool -I lanplus -H 10.10.31.251 -U root -P 'Ablecloud1!' chassis power off`
+- on `10.10.31.2`, run reconcile until failover is completed
+- verify the standby domain is running on the secondary host
+- power the primary host back on and restore `libvirtd`
+
+Expected Result:
+- source-host shutdown should be fenced through IPMI
+- secondary-side reconcile should activate the standby domain
+- final state should reach `failed_over`
+
+Actual Result:
+- IPMI fencing succeeded on the source host
+- secondary-side reconcile completed failover
+- final state reached:
+  - `active_side=secondary`
+  - `protection_state=failed_over`
+  - `transport_state=failed_over`
+  - `fencing_state=fenced`
+  - `standby_state=running`
+- `rocky10-op-ha-04-standby` was `running` on `10.10.31.2`
+- the primary host was then powered back on and recovered
+
+Status: PASS
+
+Notes:
+- this validation required product-side `ipmi` fencing provider support
+- this validation also required the `remote-nbd` failover path to support secondary-local execution with `FTCTL_PROFILE_SECONDARY_URI=qemu:///system`
 ```
