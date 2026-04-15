@@ -2080,3 +2080,142 @@ If FAIL:
 - Remaining gap:
   none for baseline protect/failover on the tested local-block pair
 ```
+
+### OP-ST-01
+
+```text
+Test ID: OP-ST-01
+Date: 2026-04-15
+Mode: HA
+VM Name: rocky10-op-st-01b
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: dedicated GFS2 interruption on `/mnt/glue-gfs-2`
+
+Preconditions:
+- source VM disk is local qcow2 on the primary host
+- mirror target is a dedicated file under `/mnt/glue-gfs-2`
+- `glue-gfs-2` / `glue-gfs-2_res` are pacemaker-managed clone resources
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-st-01b --mode ha --peer qemu+ssh://10.10.31.2/system
+- pcs resource disable glue-gfs-2_res
+- pcs resource disable glue-gfs-2
+- ablestack_vm_ftctl reconcile --vm rocky10-op-st-01b --json
+- pcs resource enable glue-gfs-2_res
+- pcs resource enable glue-gfs-2
+- ablestack_vm_ftctl reconcile --vm rocky10-op-st-01b --json
+
+Expected Result:
+- the dedicated shared filesystem interruption should be observable to the HA mirror path
+- the engine should degrade and recover or rearm without irrecoverable failure
+
+Actual Result:
+- interruption was reproduced through pacemaker resource control
+- the engine transitioned to:
+  - `protection_state=error`
+  - `last_error=standby_activate_failed`
+- restoration of the GFS2 resources did not automatically recover the HA state
+
+Evidence:
+- `pcs status --full`
+- `findmnt /mnt/glue-gfs-2`
+- `ablestack_vm_ftctl status --vm rocky10-op-st-01b --json`
+- `/run/ablestack-vm-ftctl/state/rocky10-op-st-01b.state`
+
+Status: FAIL
+
+If FAIL:
+- Root cause:
+  pacemaker-managed GFS2 interruption currently drives the engine into failover/standby activation failure instead of a recoverable storage degradation path.
+- Files changed: n/a
+- Re-test result: n/a
+- Remaining gap:
+  the HA engine needs a storage-fault path that distinguishes shared-filesystem interruption from terminal source failure.
+```
+
+### OP-ST-02
+
+```text
+Test ID: OP-ST-02
+Date: 2026-04-15
+Mode: HA
+VM Name: rocky10-op-st-02
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: dedicated multipath partial path loss on `mpathk`
+
+Preconditions:
+- source VM disk is local qcow2 on the primary host
+- mirror target is the dedicated test multipath device `/dev/mapper/mpathk`
+- one active SCSI path under `mpathk` is selected and forced offline on the primary host only
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-st-02 --mode ha --peer qemu+ssh://10.10.31.2/system
+- `echo offline > /sys/class/scsi_device/<HCTL>/device/state`
+- ablestack_vm_ftctl reconcile --vm rocky10-op-st-02 --json
+- `echo running > /sys/class/scsi_device/<HCTL>/device/state`
+- ablestack_vm_ftctl reconcile --vm rocky10-op-st-02 --json
+
+Expected Result:
+- partial multipath loss should not force failover
+- the engine should remain in `protected / mirroring`
+
+Actual Result:
+- the selected `mpathk` path became `failed faulty offline`
+- the engine remained:
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+- after reinstate, the same state remained healthy
+
+Evidence:
+- `multipath -ll mpathk`
+- `ablestack_vm_ftctl status --vm rocky10-op-st-02 --json`
+
+Status: PASS
+```
+
+### OP-ST-03
+
+```text
+Test ID: OP-ST-03
+Date: 2026-04-15
+Mode: HA
+VM Name: rocky10-op-st-03
+Primary Host: 10.10.31.1
+Secondary Host: 10.10.31.2
+Area: dedicated multipath all-path loss on `mpathl`
+
+Preconditions:
+- source VM disk is local qcow2 on the primary host
+- mirror target is the dedicated test multipath device `/dev/mapper/mpathl`
+- every SCSI path under `mpathl` is forced offline on the primary host
+
+Commands:
+- ablestack_vm_ftctl protect --vm rocky10-op-st-03 --mode ha --peer qemu+ssh://10.10.31.2/system
+- offline every `/sys/class/scsi_device/<HCTL>/device/state` belonging to `mpathl`
+- ablestack_vm_ftctl reconcile --vm rocky10-op-st-03 --json
+- restore every path to `running`
+- ablestack_vm_ftctl reconcile --vm rocky10-op-st-03 --json
+
+Expected Result:
+- all-path loss on the dedicated test multipath LUN should be observable
+- the engine should either degrade or fail over according to storage-fault policy
+
+Actual Result:
+- every `mpathl` path became `faulty offline`
+- the engine still remained:
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+- after restore, the same healthy state remained
+
+Evidence:
+- `multipath -ll mpathl`
+- `ablestack_vm_ftctl status --vm rocky10-op-st-03 --json`
+
+Status: PASS
+
+Notes:
+- This is a product-observation PASS for the tested stack.
+- It indicates the current storage stack keeps the mirrored target path alive despite all-path loss on the selected dedicated test LUN.
+```

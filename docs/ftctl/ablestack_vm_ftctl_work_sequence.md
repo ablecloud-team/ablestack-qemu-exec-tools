@@ -302,6 +302,15 @@ Completed items:
     - after DR failover, `failback --force` starts reverse sync successfully
     - final state reaches `failing_back / reverse_syncing`
     - `.state.blockcopy.reverse` is created as expected
+  - `OP-ST-01` is now reproducible on the dedicated `glue-gfs-2` filesystem path and currently fails:
+    - pacemaker-managed GFS2 interruption is reproduced through cluster resource control
+    - the engine currently ends in `standby_activate_failed`
+  - `OP-ST-02` is now complete on dedicated `mpathk`:
+    - one path can be forced `offline`
+    - the engine remains `protected / mirroring`
+  - `OP-ST-03` is now complete on dedicated `mpathl`:
+    - all paths can be forced `offline`
+    - the engine still remains `protected / mirroring`
   - Block-backed FT now has an explicit product policy split from file-backed FT:
     - file-backed FT keeps the current validated protect flow
     - block-backed FT must use cold conversion, not the existing live protect path
