@@ -317,7 +317,9 @@ Completed items:
     - final state returns to `protected / mirroring`
   - `OP-ST-01` is now reproducible on the dedicated `glue-gfs-2` filesystem path and currently fails:
     - pacemaker-managed GFS2 interruption is reproduced through cluster resource control
-    - the engine currently ends in `standby_activate_failed`
+    - the engine first enters `standby_activate_failed`
+    - after storage resource restore and another reconcile, it converges to secondary `failed_over / failed_over`
+    - this still remains a FAIL because storage interruption escalates to failover instead of staying on a recoverable degradation path
   - `OP-ST-02` is now complete on dedicated `mpathk`:
     - one path can be forced `offline`
     - the engine remains `protected / mirroring`

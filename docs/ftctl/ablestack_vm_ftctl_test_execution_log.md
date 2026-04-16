@@ -2129,7 +2129,12 @@ Actual Result:
 - the engine transitioned to:
   - `protection_state=error`
   - `last_error=standby_activate_failed`
-- restoration of the GFS2 resources did not automatically recover the HA state
+- on a fresh rerun with `rocky10-op-st-01c`, the same interruption was reproduced again
+- after the GFS2 resources were restored and `reconcile` was executed again, the engine converged to:
+  - `active_side=secondary`
+  - `protection_state=failed_over`
+  - `transport_state=failed_over`
+- this is still treated as FAIL for `OP-ST-01` because the interruption path does not stay recoverable; it escalates through `standby_activate_failed` before converging to failover
 
 Evidence:
 - `pcs status --full`
@@ -2146,7 +2151,7 @@ If FAIL:
 - Re-test result: n/a
 - Remaining gap:
   the HA engine needs a storage-fault path that distinguishes shared-filesystem interruption from terminal source failure.
-```
+``` 
 
 ### OP-ST-02
 
