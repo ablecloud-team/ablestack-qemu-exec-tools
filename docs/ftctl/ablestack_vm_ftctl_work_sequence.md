@@ -271,7 +271,9 @@ Completed items:
     - block-backed FT uses cold conversion, not the existing file-backed live protect path
     - primary and secondary generated XML use block-backed dummy disks with boot order lowered
     - post-boot QMP attach builds the local-block FT graph before x-colo handshake
-    - block-backed FT failback is still not implemented and remains a separate gap
+    - a fresh block-backed full failback validation now also completes:
+      - `failback --force` returns the pair to `active_side=primary`
+      - final state returns to `colo_running / mirroring`
   - `OP-FT-01` is now complete:
     - first reconcile after induced transient loss enters `transient_loss` during the grace window
     - second reconcile after the grace window re-enters `xcolo_rearm()`

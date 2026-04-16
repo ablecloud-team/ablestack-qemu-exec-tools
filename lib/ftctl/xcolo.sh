@@ -976,7 +976,7 @@ PY
   ftctl_log_event "colo" "block_conversion.binding" "ok" "${vm}" "" \
     "primary_base=${primary_base_node} secondary_base=${secondary_base_node}"
 
-  ftctl_xcolo_attach_secondary_block_graph "${vm}" "${secondary_base_node}" "${secondary_hidden}" "${secondary_active}" || {
+  ftctl_xcolo_attach_secondary_block_graph "${secondary_vm}" "${secondary_base_node}" "${secondary_hidden}" "${secondary_active}" || {
     ftctl_log_event "colo" "block_conversion.secondary_attach" "fail" "${vm}" "" \
       "base=${secondary_base_node}"
     ftctl_state_set "${vm}" "last_error=xcolo_block_secondary_attach_failed"
@@ -1300,6 +1300,10 @@ ftctl_xcolo_rearm() {
 
 ftctl_xcolo_failover() {
   local vm="${1-}"
+  local secondary_vm=""
+
+  secondary_vm="$(ftctl_state_get "${vm}" "secondary_vm_name" 2>/dev/null || true)"
+  [[ -n "${secondary_vm}" ]] || secondary_vm="${vm}"
 
   if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
     ftctl_state_set "${vm}" \
@@ -1310,9 +1314,9 @@ ftctl_xcolo_failover() {
     return 0
   fi
 
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${secondary_vm}" \
     '{"execute":"nbd-server-stop"}' "failover" "secondary.nbd_server_stop" || true
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${secondary_vm}" \
     '{"execute":"x-colo-lost-heartbeat"}' "failover" "secondary.x_colo_lost_heartbeat" || return 1
 
   ftctl_state_set "${vm}" \
@@ -1325,6 +1329,11 @@ ftctl_xcolo_failover() {
 ftctl_xcolo_failback_policy() {
   local vm="${1-}"
   local disk_kind primary_target primary_source primary_format
+  disk_kind="$(ftctl_state_get "${vm}" "primary_disk_type" 2>/dev/null || true)"
+  if [[ "${disk_kind}" == "block" ]]; then
+    printf '%s\n' "block-ft-cold-cutback"
+    return 0
+  fi
   if ftctl_xcolo_detect_block_backed_ft "${vm}" disk_kind primary_target primary_source primary_format; then
     printf '%s\n' "block-ft-cold-cutback"
   else
@@ -1612,6 +1621,56 @@ ftctl_xcolo_file_failback_sync_disks() {
   ftctl_xcolo_remote_copy_file_to_primary "${vm}" "vda" "${secondary_active}" "${primary_source}" "${format:-qcow2}" || return 1
 }
 
+ftctl_xcolo_copy_block_active_back_to_primary() {
+  local vm="${1-}"
+  local secondary_active="${2-}"
+  local primary_dest="${3-}"
+  local secondary_host="" secondary_user=""
+  local remote_stage="" local_stage="" remote_cmd="" out="" err="" rc=0
+
+  [[ -n "${secondary_active}" && -n "${primary_dest}" ]] || return 1
+  ftctl_blockcopy_remote_target_host_user secondary_host secondary_user || return 1
+
+  remote_stage="/tmp/${vm}-block-failback.qcow2"
+  local_stage="/tmp/${vm}-block-failback.qcow2"
+
+  remote_cmd="$(cat <<EOF
+set -euo pipefail
+rm -f $(printf '%q' "${remote_stage}")
+qemu-img convert -p -f qcow2 -O qcow2 $(printf '%q' "${secondary_active}") $(printf '%q' "${remote_stage}")
+EOF
+)"
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${secondary_host}" "${secondary_user}" out err rc "${remote_cmd}" || true
+  : "${out}${err}"
+  [[ "${rc}" == "0" ]] || return 1
+
+  out=""
+  err=""
+  rc=0
+  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- \
+    scp -o BatchMode=yes -o StrictHostKeyChecking=no "${secondary_user}@${secondary_host}:${remote_stage}" "${local_stage}" || true
+  : "${out}${err}"
+  if [[ "${rc}" != "0" ]]; then
+    ftctl_blockcopy_remote_exec "${secondary_host}" "${secondary_user}" out err rc "rm -f $(printf '%q' "${remote_stage}")" || true
+    return 1
+  fi
+
+  out=""
+  err=""
+  rc=0
+  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- \
+    qemu-img convert -p -f qcow2 -O qcow2 "${local_stage}" "${primary_dest}" || true
+  : "${out}${err}"
+
+  rm -f -- "${local_stage}" >/dev/null 2>&1 || true
+  ftctl_blockcopy_remote_exec "${secondary_host}" "${secondary_user}" out err rc "rm -f $(printf '%q' "${remote_stage}")" || true
+
+  [[ "${rc}" == "0" ]]
+}
+
 ftctl_xcolo_activate_secondary_seed_same_name() {
   local vm="${1-}"
   local seed content_b64 host="" user="" remote_cmd out="" err="" rc=0
@@ -1721,15 +1780,83 @@ ftctl_xcolo_failback_file() {
 
 ftctl_xcolo_failback_block() {
   local vm="${1-}"
+  local primary_source="" secondary_active=""
+
+  primary_source="$(ftctl_state_get "${vm}" "primary_disk_source" 2>/dev/null || true)"
+  secondary_active="$(ftctl_xcolo_secondary_active_overlay_path "${vm}")"
+  [[ -n "${primary_source}" && -n "${secondary_active}" ]] || {
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "block-ft-cold-cutback" \
+      "missing-paths" \
+      "ft_reverse_syncing" \
+      "xcolo_block_failback_missing_paths"
+    return 1
+  }
 
   ftctl_xcolo_failback_record_state "${vm}" \
     "block-ft-cold-cutback" \
-    "design-required" \
+    "secondary-stop" \
     "ft_reverse_syncing" \
-    "xcolo_block_failback_not_implemented"
-  ftctl_log_event "failback" "xcolo.failback.block" "warn" "${vm}" "" \
-    "reason=not_implemented"
-  return 1
+    ""
+  if ! ftctl_standby_deactivate "${vm}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "block-ft-cold-cutback" \
+      "secondary-stop-failed" \
+      "ft_reverse_syncing" \
+      "xcolo_block_failback_secondary_stop_failed"
+    return 1
+  fi
+
+  ftctl_xcolo_failback_record_state "${vm}" \
+    "block-ft-cold-cutback" \
+    "reverse-sync-copy" \
+    "ft_reverse_syncing" \
+    ""
+  if ! ftctl_xcolo_copy_block_active_back_to_primary "${vm}" "${secondary_active}" "${primary_source}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "block-ft-cold-cutback" \
+      "reverse-sync-copy-failed" \
+      "ft_reverse_syncing" \
+      "xcolo_block_failback_copy_failed"
+    return 1
+  fi
+
+  ftctl_xcolo_failback_record_state "${vm}" \
+    "block-ft-cold-cutback" \
+    "primary-activate" \
+    "ft_cutback_switching" \
+    ""
+  if ! ftctl_primary_activate_from_backup "${vm}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "block-ft-cold-cutback" \
+      "primary-activate-failed" \
+      "ft_cutback_switching" \
+      "xcolo_block_failback_primary_activate_failed"
+    return 1
+  fi
+
+  ftctl_xcolo_failback_record_state "${vm}" \
+    "block-ft-cold-cutback" \
+    "reprotect" \
+    "ft_cutback_switching" \
+    ""
+  if ! ftctl_xcolo_plan_protect_block_cold_conversion "${vm}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "block-ft-cold-cutback" \
+      "reprotect-failed" \
+      "ft_cutback_switching" \
+      "xcolo_block_failback_reprotect_failed"
+    return 1
+  fi
+
+  ftctl_state_set "${vm}" \
+    "active_side=primary" \
+    "protection_state=colo_running" \
+    "transport_state=mirroring" \
+    "last_error="
+  ftctl_log_event "failback" "xcolo.failback.block" "ok" "${vm}" "" \
+    "reason=cold_cutback_complete"
+  return 0
 }
 
 ftctl_xcolo_failback() {

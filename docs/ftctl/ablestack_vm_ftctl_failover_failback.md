@@ -64,8 +64,8 @@ Preconditions:
   - `failback --force` is implemented as a full cutback path.
   - the engine stages the active secondary qcow2 back onto the original primary, re-activates the original primary, re-activates the secondary seed VM, and re-enters the validated prebuilt COLO protect flow.
 - block-backed FT:
-  - failback is not implemented yet.
-  - current status is `block-ft-cold-cutback` placeholder and must be treated as unsupported.
+  - `failback --force` is implemented as a cold-cutback path.
+  - the engine stops the active secondary block-backed FT VM, copies the secondary active overlay state back to the original primary block source, re-activates the original primary VM, and re-enters the validated block-backed cold conversion protect flow.
 
 ## 2.1 FT file-based alignment note
 
@@ -126,4 +126,4 @@ FTCTL_PROFILE_FAILBACK_DISK_MAP="vda=/primary/demo-vda.qcow2;vdb=/primary/demo-v
   - `protection_state=protected`
   - `transport_state=mirroring`
 - `remote-nbd` failback requires reverse NBD export orchestration and primary-side handoff.
-- FT block-backed failback remains a separate future feature.
+- FT block-backed failback now depends on the same cold conversion runtime XML and post-boot QMP graph attach path that is used for baseline protect.

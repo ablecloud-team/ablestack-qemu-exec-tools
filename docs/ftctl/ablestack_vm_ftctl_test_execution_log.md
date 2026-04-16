@@ -2060,6 +2060,16 @@ Actual Result:
   - `transport_state=colo_failover`
   - `active_side=secondary`
   - `fencing_state=fenced`
+- a fresh block-backed full failback validation was also completed on the same local-block model:
+  - `failback --force` returned the pair to:
+    - `active_side=primary`
+    - `protection_state=colo_running`
+    - `transport_state=mirroring`
+  - the block-backed failback path uses cold cutback:
+    - stop active secondary
+    - copy secondary active overlay state back to the original primary block source
+    - re-activate the original primary
+    - re-enter block-backed cold conversion protect
 
 Evidence:
 - `ablestack_vm_ftctl status --vm rocky10-ft-img01-st03 --json`
@@ -2082,8 +2092,8 @@ If FAIL:
 - Re-test result:
   - passed after block-backed cold conversion, generated XML rewrite, QMP graph attach, and x-colo handshake integration
 - Remaining gap:
-  none for baseline protect/failover on the tested local-block pair
-```
+  none for baseline protect/failover/full failback on the tested local-block pair
+``` 
 
 ### OP-ST-01
 
