@@ -78,7 +78,7 @@ ftctl_xcolo_qmp_require_ok() {
   local payload="${3-}"
   local stage="${4-}"
   local event="${5-}"
-  local out rc allow_already_negotiated has_error
+  local out rc allow_already_negotiated has_error error_desc
 
   if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
     ftctl_log_event "${stage}" "${event}" "skip" "${vm}" "" "reason=dry_run"
@@ -93,38 +93,37 @@ ftctl_xcolo_qmp_require_ok() {
     allow_already_negotiated="1"
   fi
   has_error="0"
-  if python3 - <<'PY' <<< "${out}" >/dev/null 2>&1; then
+  error_desc="$(python3 - <<'PY' "${out}"
 import json, sys
-raw = sys.stdin.read().strip()
-if not raw:
+raw = sys.argv[1]
+if not raw.strip():
     raise SystemExit(0)
 try:
     data = json.loads(raw)
 except Exception:
     raise SystemExit(0)
-raise SystemExit(1 if isinstance(data, dict) and "error" in data else 0)
+if isinstance(data, dict) and "error" in data:
+    err = data.get("error") or {}
+    print((err.get("desc") or "").strip())
+    raise SystemExit(10)
+raise SystemExit(0)
 PY
-    has_error="0"
-  else
-    has_error="1"
-  fi
+)" || {
+    rc="$?"
+    if [[ "${rc}" == "10" ]]; then
+      has_error="1"
+      rc=0
+    fi
+  }
   if [[ "${has_error}" == "1" && "${allow_already_negotiated}" == "1" ]]; then
-    if python3 - <<'PY' <<< "${out}" >/dev/null 2>&1; then
-import json, sys
-raw = sys.stdin.read().strip()
-try:
-    data = json.loads(raw)
-except Exception:
-    raise SystemExit(1)
-err = data.get("error") if isinstance(data, dict) else None
-desc = (err or {}).get("desc", "")
-raise SystemExit(0 if "Capabilities negotiation is already complete" in desc else 1)
-PY
+    if [[ "${error_desc}" == *"Capabilities negotiation is already complete"* ]]; then
       has_error="0"
+      error_desc=""
     fi
   fi
   if [[ "${rc}" != "0" || "${has_error}" == "1" ]]; then
-    ftctl_log_event "${stage}" "${event}" "fail" "${vm}" "${rc}" "uri=${uri}"
+    ftctl_log_event "${stage}" "${event}" "fail" "${vm}" "${rc}" "uri=${uri} desc=${error_desc:-qmp_error}"
+    [[ "${rc}" == "0" ]] && rc=1
     return "${rc}"
   fi
   ftctl_log_event "${stage}" "${event}" "ok" "${vm}" "" "uri=${uri}"
@@ -172,6 +171,191 @@ PY
   [[ -n "${payload%%|*}" ]]
 }
 
+ftctl_xcolo_query_running_flag() {
+  local uri="${1-}"
+  local vm="${2-}"
+  local running_var="${3}"
+  local out rc payload
+
+  out=""
+  rc=0
+  ftctl_xcolo_qmp "${uri}" "${vm}" '{"execute":"query-status"}' out rc
+  if [[ "${rc}" != "0" || -z "${out}" ]]; then
+    printf -v "${running_var}" '%s' ""
+    return 1
+  fi
+  payload="$(python3 - <<'PY' "${out}"
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit(0)
+ret = data.get("return") if isinstance(data, dict) else {}
+running = ret.get("running")
+if isinstance(running, bool):
+    print("true" if running else "false")
+else:
+    print("")
+PY
+)" || payload=""
+  printf -v "${running_var}" '%s' "${payload}"
+  [[ "${payload}" == "true" || "${payload}" == "false" ]]
+}
+
+ftctl_xcolo_query_status_name() {
+  local uri="${1-}"
+  local vm="${2-}"
+  local status_var="${3}"
+  local out rc payload
+
+  out=""
+  rc=0
+  ftctl_xcolo_qmp "${uri}" "${vm}" '{"execute":"query-status"}' out rc
+  if [[ "${rc}" != "0" || -z "${out}" ]]; then
+    printf -v "${status_var}" '%s' ""
+    return 1
+  fi
+  payload="$(python3 - <<'PY' "${out}"
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit(0)
+ret = data.get("return") if isinstance(data, dict) else {}
+print(ret.get("status", "") if isinstance(ret, dict) else "")
+PY
+)" || payload=""
+  printf -v "${status_var}" '%s' "${payload}"
+  [[ -n "${payload}" ]]
+}
+
+ftctl_xcolo_query_colo_mode() {
+  local uri="${1-}"
+  local vm="${2-}"
+  local mode_var="${3}"
+  local out rc payload
+
+  out=""
+  rc=0
+  ftctl_xcolo_qmp "${uri}" "${vm}" '{"execute":"query-colo-status"}' out rc
+  if [[ "${rc}" != "0" || -z "${out}" ]]; then
+    printf -v "${mode_var}" '%s' ""
+    return 1
+  fi
+  payload="$(python3 - <<'PY' "${out}"
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit(0)
+ret = data.get("return") if isinstance(data, dict) else {}
+print(ret.get("mode", "") if isinstance(ret, dict) else "")
+PY
+)" || payload=""
+  printf -v "${mode_var}" '%s' "${payload}"
+  [[ -n "${payload}" ]]
+}
+
+ftctl_xcolo_capture_runtime_snapshot() {
+  local vm="${1-}"
+  local prefix="${2-}"
+  local primary_running="" secondary_running=""
+  local primary_status="" secondary_status=""
+  local primary_colo="" secondary_colo=""
+
+  ftctl_xcolo_query_running_flag "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" primary_running || true
+  ftctl_xcolo_query_running_flag "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" secondary_running || true
+  ftctl_xcolo_query_status_name "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" primary_status || true
+  ftctl_xcolo_query_status_name "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" secondary_status || true
+  ftctl_xcolo_query_colo_mode "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" primary_colo || true
+  ftctl_xcolo_query_colo_mode "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" secondary_colo || true
+
+  if [[ -n "${prefix}" ]]; then
+    ftctl_state_set "${vm}" \
+      "${prefix}_primary_running=${primary_running}" \
+      "${prefix}_secondary_running=${secondary_running}" \
+      "${prefix}_primary_status=${primary_status}" \
+      "${prefix}_secondary_status=${secondary_status}" \
+      "${prefix}_primary_colo_mode=${primary_colo}" \
+      "${prefix}_secondary_colo_mode=${secondary_colo}"
+  else
+    ftctl_state_set "${vm}" \
+      "xcolo_primary_running=${primary_running}" \
+      "xcolo_secondary_running=${secondary_running}" \
+      "xcolo_primary_status=${primary_status}" \
+      "xcolo_secondary_status=${secondary_status}" \
+      "xcolo_primary_colo_mode=${primary_colo}" \
+      "xcolo_secondary_colo_mode=${secondary_colo}"
+  fi
+}
+
+ftctl_xcolo_wait_pair_running() {
+  local vm="${1-}"
+  local timeout="${2:-30}"
+  local secondary_vm="${3:-$vm}"
+  local i primary_running secondary_running
+
+  for ((i=0; i<timeout; i++)); do
+    primary_running=""
+    secondary_running=""
+    ftctl_xcolo_query_running_flag "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" primary_running || true
+    ftctl_xcolo_query_running_flag "${FTCTL_PROFILE_SECONDARY_URI}" "${secondary_vm}" secondary_running || true
+    if [[ "${primary_running}" == "true" && "${secondary_running}" == "true" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+ftctl_xcolo_prebuilt_secondary_stage() {
+  local vm="${1-}"
+  local nbd_host="${2-}"
+  local nbd_port="${3-}"
+
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
+    '{"execute":"qmp_capabilities"}' "colo" "secondary.qmp_capabilities" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
+    '{"execute":"migrate-set-capabilities","arguments":{"capabilities":[{"capability":"return-path","state":true},{"capability":"x-colo","state":true}]}}' \
+    "colo" "secondary.migrate_set_capabilities" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
+    "{\"execute\":\"nbd-server-start\",\"arguments\":{\"addr\":{\"type\":\"inet\",\"data\":{\"host\":\"${nbd_host}\",\"port\":\"${nbd_port}\"}}}}" \
+    "colo" "secondary.nbd_server_start" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
+    "{\"execute\":\"nbd-server-add\",\"arguments\":{\"device\":\"${FTCTL_PROFILE_XCOLO_PRIMARY_DISK_NODE}\",\"writable\":true}}" \
+    "colo" "secondary.nbd_server_add" || return 1
+}
+
+ftctl_xcolo_prebuilt_primary_stage() {
+  local vm="${1-}"
+  local nbd_host="${2-}"
+  local nbd_port="${3-}"
+
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
+    '{"execute":"qmp_capabilities"}' "colo" "primary.qmp_capabilities" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
+    "{\"execute\":\"blockdev-add\",\"arguments\":{\"driver\":\"nbd\",\"node-name\":\"${FTCTL_PROFILE_XCOLO_NBD_NODE}\",\"server\":{\"type\":\"inet\",\"host\":\"${nbd_host}\",\"port\":\"${nbd_port}\"},\"export\":\"${FTCTL_PROFILE_XCOLO_PRIMARY_DISK_NODE}\",\"detect-zeroes\":\"on\"}}" \
+    "colo" "primary.blockdev_add" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
+    "{\"execute\":\"x-blockdev-change\",\"arguments\":{\"parent\":\"${FTCTL_PROFILE_XCOLO_PARENT_BLOCK_NODE}\",\"node\":\"${FTCTL_PROFILE_XCOLO_NBD_NODE}\"}}" \
+    "colo" "primary.x_blockdev_change" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
+    '{"execute":"migrate-set-capabilities","arguments":{"capabilities":[{"capability":"return-path","state":true},{"capability":"x-colo","state":true}]}}' \
+    "colo" "primary.migrate_set_capabilities" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
+    "{\"execute\":\"migrate\",\"arguments\":{\"uri\":\"${FTCTL_PROFILE_XCOLO_MIGRATE_URI}\"}}" \
+    "colo" "primary.migrate" || return 1
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
+    "{\"execute\":\"migrate-set-parameters\",\"arguments\":{\"x-checkpoint-delay\":${FTCTL_PROFILE_XCOLO_CHECKPOINT_DELAY}}}" \
+    "colo" "primary.migrate_set_parameters" || return 1
+}
+
 ftctl_xcolo_primary_domain_state() {
   local vm="${1-}"
   local out err rc
@@ -190,10 +374,10 @@ ftctl_xcolo_primary_domain_state() {
 
 ftctl_xcolo_local_record() {
   local out_var="${1}"
-  local record=""
+  local item=""
   ftctl_cluster_load || return 1
-  ftctl_cluster_find_record_by_host_id "${FTCTL_LOCAL_HOST_ID}" record || return 1
-  printf -v "${out_var}" '%s' "${record}"
+  ftctl_cluster_find_record_by_host_id "${FTCTL_LOCAL_HOST_ID}" item || return 1
+  printf -v "${out_var}" '%s' "${item}"
 }
 
 ftctl_xcolo_primary_listen_host() {
@@ -251,7 +435,8 @@ ftctl_xcolo_build_primary_qemu_args() {
   compare_local_port="${FTCTL_XCOLO_COMPARE_LOCAL_PORT:-9001}"
   compare_out_port="${FTCTL_XCOLO_COMPARE_OUT_PORT:-9005}"
 
-  printf '%s\n' "-S;-chardev;socket,id=mirror0,host=0.0.0.0,port=${mirror_port},server=on,wait=off;-chardev;socket,id=compare1,host=0.0.0.0,port=${compare_port},server=on,wait=off;-chardev;socket,id=compare0,host=127.0.0.1,port=${compare_local_port},server=on,wait=off;-chardev;socket,id=compare0-0,host=127.0.0.1,port=${compare_local_port};-chardev;socket,id=compare_out,host=127.0.0.1,port=${compare_out_port},server=on,wait=off;-chardev;socket,id=compare_out0,host=127.0.0.1,port=${compare_out_port};-object;filter-mirror,id=m0,netdev=hostnet0,queue=tx,outdev=mirror0;-object;filter-redirector,id=redire0,netdev=hostnet0,queue=rx,indev=compare_out;-object;filter-redirector,id=redire1,netdev=hostnet0,queue=rx,outdev=compare0;-object;iothread,id=iothread1;-object;colo-compare,id=comp0,primary_in=compare0-0,secondary_in=compare1,outdev=compare_out0,iothread=iothread1"
+  # Match the QEMU COLO startup procedure: mirror0 is non-blocking, compare1 blocks until connected.
+  printf '%s\n' "-S;-chardev;socket,id=mirror0,host=0.0.0.0,port=${mirror_port},server=on,wait=off;-chardev;socket,id=compare1,host=0.0.0.0,port=${compare_port},server=on,wait=on;-chardev;socket,id=compare0,host=127.0.0.1,port=${compare_local_port},server=on,wait=off;-chardev;socket,id=compare0-0,host=127.0.0.1,port=${compare_local_port};-chardev;socket,id=compare_out,host=127.0.0.1,port=${compare_out_port},server=on,wait=off;-chardev;socket,id=compare_out0,host=127.0.0.1,port=${compare_out_port};-object;filter-mirror,id=m0,netdev=hostnet0,queue=tx,outdev=mirror0;-object;filter-redirector,id=redire0,netdev=hostnet0,queue=rx,indev=compare_out;-object;filter-redirector,id=redire1,netdev=hostnet0,queue=rx,outdev=compare0;-object;iothread,id=iothread1;-object;colo-compare,id=comp0,primary_in=compare0-0,secondary_in=compare1,outdev=compare_out0,iothread=iothread1"
 }
 
 ftctl_xcolo_build_secondary_qemu_args() {
@@ -265,7 +450,85 @@ ftctl_xcolo_build_secondary_qemu_args() {
   mirror_port="${FTCTL_XCOLO_MIRROR_PORT:-9003}"
   compare_port="${FTCTL_XCOLO_COMPARE_PORT:-9004}"
 
-  printf '%s\n' "-S;-chardev;socket,id=red0,host=${connect_ctrl},port=${mirror_port},reconnect-ms=1000;-chardev;socket,id=red1,host=${connect_data},port=${compare_port},reconnect-ms=1000;-object;filter-redirector,id=f1,netdev=hostnet0,queue=tx,indev=red0;-object;filter-redirector,id=f2,netdev=hostnet0,queue=rx,outdev=red1;-object;filter-rewriter,id=rew0,netdev=hostnet0,queue=all;-incoming;${FTCTL_PROFILE_XCOLO_MIGRATE_URI}"
+  # Match the QEMU COLO startup procedure: the secondary does not use -S during startup.
+  printf '%s\n' "-chardev;socket,id=red0,host=${connect_ctrl},port=${mirror_port},reconnect-ms=1000;-chardev;socket,id=red1,host=${connect_data},port=${compare_port},reconnect-ms=1000;-object;filter-redirector,id=f1,netdev=hostnet0,queue=tx,indev=red0;-object;filter-redirector,id=f2,netdev=hostnet0,queue=rx,outdev=red1;-object;filter-rewriter,id=rew0,netdev=hostnet0,queue=all;-incoming;${FTCTL_PROFILE_XCOLO_MIGRATE_URI}"
+}
+
+ftctl_xcolo_doc_alignment_summary() {
+  cat <<'EOF'
+COLO startup alignment checklist
+1. Primary startup:
+   - mirror0 server wait=off
+   - compare1 server wait=on
+   - compare0 / compare0-0 / compare_out / compare_out0 loopback sockets
+   - filter-mirror / filter-redirector / colo-compare objects present
+   - root disk on if=ide quorum node
+   - startup paused with -S
+2. Secondary startup:
+   - red0 / red1 reconnect sockets toward primary
+   - filter-redirector / filter-rewriter objects present
+   - parent0 / childs0 / colo-disk0 disk graph present
+   - incoming migration URI present
+   - no -S on secondary startup
+3. Protect QMP sequence:
+   - secondary qmp_capabilities
+   - secondary migrate-set-capabilities x-colo
+   - secondary nbd-server-start
+   - secondary nbd-server-add parent0
+   - primary qmp_capabilities
+   - primary blockdev-add nbd0
+   - primary x-blockdev-change parent=colo-disk0 node=nbd0
+   - primary migrate-set-capabilities x-colo
+   - primary migrate
+EOF
+}
+
+ftctl_xcolo_backup_prebuilt_pair_xml() {
+  local vm="${1-}"
+  local bundle_dir primary_xml standby_xml meta_file out err rc checksum persistence
+
+  bundle_dir="$(ftctl_inventory_xml_backup_path "${vm}")"
+  ftctl_ensure_dir "${bundle_dir}" "0755"
+  primary_xml="${bundle_dir}/primary.xml"
+  standby_xml="${bundle_dir}/standby.xml"
+  meta_file="${bundle_dir}/meta"
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" dumpxml --security-info "${vm}" || true
+  : "${err}"
+  [[ "${rc}" == "0" ]] || return "${rc}"
+  printf '%s\n' "${out}" > "${primary_xml}"
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_SECONDARY_URI}" dumpxml --security-info "${vm}" || true
+  : "${err}"
+  [[ "${rc}" == "0" ]] || return "${rc}"
+  printf '%s\n' "${out}" > "${standby_xml}"
+
+  persistence="no"
+  checksum=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    checksum="$(sha256sum "${primary_xml}" | awk '{print $1}')"
+  fi
+  cat > "${meta_file}" <<EOF
+vm=${vm}
+primary_uri=${FTCTL_PROFILE_PRIMARY_URI}
+secondary_uri=${FTCTL_PROFILE_SECONDARY_URI}
+primary_xml=${primary_xml}
+standby_xml=${standby_xml}
+persistent=${persistence}
+xml_sha256=${checksum}
+EOF
+  chmod 0644 "${primary_xml}" "${standby_xml}" "${meta_file}" 2>/dev/null || true
+  ftctl_state_set "${vm}" \
+    "xml_bundle_dir=${bundle_dir}" \
+    "primary_xml_backup=${primary_xml}" \
+    "standby_xml_seed=${standby_xml}" \
+    "primary_persistence=${persistence}"
 }
 
 ftctl_xcolo_prepare_block_generated_xmls() {
@@ -392,7 +655,7 @@ ftctl_xcolo_disk_virtual_size_bytes() {
   out=""
   err=""
   rc=0
-  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- qemu-img info --output=json "${path}" || true
+  ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- qemu-img info --force-share --output=json "${path}" || true
   : "${err}"
   if [[ "${rc}" != "0" || -z "${out}" ]]; then
     return 1
@@ -402,6 +665,23 @@ import json, sys
 data = json.loads(sys.argv[1])
 print(data.get("virtual-size", ""))
 PY
+}
+
+ftctl_xcolo_remote_disk_virtual_size_bytes() {
+  local host="${1-}"
+  local user="${2-}"
+  local path="${3-}"
+  local out="" err="" rc=0 cmd=""
+
+  cmd="$(cat <<EOF
+set -euo pipefail
+qemu-img info --force-share --output=json $(printf '%q' "${path}") | python3 -c 'import json,sys; print(json.load(sys.stdin).get("virtual-size",""))'
+EOF
+)"
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${cmd}" || true
+  : "${err}"
+  [[ "${rc}" == "0" ]] || return 1
+  printf '%s\n' "$(printf '%s' "${out}" | tr -d '\r' | xargs)"
 }
 
 ftctl_xcolo_collect_disk_binding_on_uri() {
@@ -656,6 +936,12 @@ PY
 )" || secondary_size=""
     fi
   fi
+  if [[ -n "${secondary_size}" && -n "${primary_size}" && "${secondary_size}" != "${primary_size}" ]]; then
+    ftctl_log_event "colo" "block_conversion.size_validation" "fail" "${vm}" "" \
+      "primary_size=${primary_size} secondary_size=${secondary_size}"
+    ftctl_state_set "${vm}" "last_error=xcolo_block_preflight_size_mismatch"
+    return 1
+  fi
   if [[ -z "${secondary_size}" ]]; then
     secondary_size="${primary_size}"
   fi
@@ -787,47 +1073,33 @@ ftctl_xcolo_plan_protect_prebuilt() {
   ftctl_xcolo_parse_tcp_endpoint "${FTCTL_PROFILE_XCOLO_NBD_ENDPOINT}" nbd_host nbd_port
   primary_xml_backup="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
   standby_xml_seed="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
-  if [[ -n "${primary_xml_backup}" && -f "${primary_xml_backup}" ]]; then
-    ftctl_standby_materialize_primary_xml "${vm}" || true
-  fi
-  if [[ -n "${standby_xml_seed}" && -f "${standby_xml_seed}" ]]; then
-    ftctl_standby_materialize_xml "${vm}" || true
+  if [[ -z "${primary_xml_backup}" || -z "${standby_xml_seed}" || ! -f "${primary_xml_backup}" || ! -f "${standby_xml_seed}" ]]; then
+    ftctl_xcolo_backup_prebuilt_pair_xml "${vm}" || return 1
+    primary_xml_backup="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
+    standby_xml_seed="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
   fi
 
   ftctl_state_set "${vm}" \
     "protection_state=colo_preparing" \
     "transport_state=planned" \
+    "xcolo_protect_stage=secondary-stage" \
     "last_error="
 
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
-    '{"execute":"qmp_capabilities"}' "colo" "secondary.qmp_capabilities" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
-    '{"execute":"migrate-set-capabilities","arguments":{"capabilities":[{"capability":"return-path","state":true},{"capability":"x-colo","state":true}]}}' \
-    "colo" "secondary.migrate_set_capabilities" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
-    "{\"execute\":\"nbd-server-start\",\"arguments\":{\"addr\":{\"type\":\"inet\",\"data\":{\"host\":\"${nbd_host}\",\"port\":\"${nbd_port}\"}}}}" \
-    "colo" "secondary.nbd_server_start" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
-    "{\"execute\":\"nbd-server-add\",\"arguments\":{\"device\":\"${FTCTL_PROFILE_XCOLO_PRIMARY_DISK_NODE}\",\"writable\":true}}" \
-    "colo" "secondary.nbd_server_add" || return 1
+  if ! ftctl_xcolo_validate_prebuilt_file_pair_sizes "${vm}"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "transport_state=planned" \
+      "last_error=xcolo_preflight_size_mismatch"
+    ftctl_log_event "colo" "xcolo.protect" "fail" "${vm}" "" \
+      "reason=preflight_size_mismatch"
+    return 1
+  fi
 
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
-    '{"execute":"qmp_capabilities"}' "colo" "primary.qmp_capabilities" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
-    "{\"execute\":\"blockdev-add\",\"arguments\":{\"driver\":\"nbd\",\"node-name\":\"${FTCTL_PROFILE_XCOLO_NBD_NODE}\",\"server\":{\"type\":\"inet\",\"host\":\"${nbd_host}\",\"port\":\"${nbd_port}\"},\"export\":\"${FTCTL_PROFILE_XCOLO_PRIMARY_DISK_NODE}\",\"detect-zeroes\":\"on\"}}" \
-    "colo" "primary.blockdev_add" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
-    "{\"execute\":\"x-blockdev-change\",\"arguments\":{\"parent\":\"${FTCTL_PROFILE_XCOLO_PARENT_BLOCK_NODE}\",\"node\":\"${FTCTL_PROFILE_XCOLO_NBD_NODE}\"}}" \
-    "colo" "primary.x_blockdev_change" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
-    '{"execute":"migrate-set-capabilities","arguments":{"capabilities":[{"capability":"return-path","state":true},{"capability":"x-colo","state":true}]}}' \
-    "colo" "primary.migrate_set_capabilities" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
-    "{\"execute\":\"migrate-set-parameters\",\"arguments\":{\"x-checkpoint-delay\":${FTCTL_PROFILE_XCOLO_CHECKPOINT_DELAY}}}" \
-    "colo" "primary.migrate_set_parameters" || return 1
-  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" \
-    "{\"execute\":\"migrate\",\"arguments\":{\"uri\":\"${FTCTL_PROFILE_XCOLO_MIGRATE_URI}\"}}" \
-    "colo" "primary.migrate" || return 1
+  ftctl_xcolo_prebuilt_secondary_stage "${vm}" "${nbd_host}" "${nbd_port}" || return 1
+  ftctl_xcolo_capture_runtime_snapshot "${vm}" "xcolo_after_secondary"
+  ftctl_state_set "${vm}" "xcolo_protect_stage=primary-stage"
+  ftctl_xcolo_prebuilt_primary_stage "${vm}" "${nbd_host}" "${nbd_port}" || return 1
+  ftctl_xcolo_capture_runtime_snapshot "${vm}" "xcolo_after_primary"
 
   ftctl_xcolo_state_write "${vm}" \
     "proxy_endpoint=${FTCTL_PROFILE_XCOLO_PROXY_ENDPOINT}" \
@@ -838,10 +1110,22 @@ ftctl_xcolo_plan_protect_prebuilt() {
     "nbd_node=${FTCTL_PROFILE_XCOLO_NBD_NODE}"
 
   ftctl_state_set "${vm}" \
+    "xcolo_protect_stage=wait-running" \
     "protection_state=colo_running" \
     "transport_state=mirroring" \
     "last_sync_ts=$(ftctl_now_iso8601)" \
     "last_error="
+  ftctl_xcolo_capture_runtime_snapshot "${vm}"
+  if ! ftctl_xcolo_wait_pair_running "${vm}" "20" "${vm}"; then
+    ftctl_xcolo_capture_runtime_snapshot "${vm}"
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "transport_state=planned" \
+      "last_error=xcolo_protect_not_running"
+    ftctl_log_event "colo" "xcolo.protect" "fail" "${vm}" "" \
+      "reason=pair_not_running"
+    return 1
+  fi
   ftctl_log_event "colo" "xcolo.protect" "ok" "${vm}" "" \
     "qmp_timeout=${FTCTL_XCOLO_QMP_TIMEOUT_SEC}"
 }
@@ -1036,4 +1320,452 @@ ftctl_xcolo_failover() {
     "active_side=secondary" \
     "transport_state=colo_failover"
   ftctl_log_event "failover" "xcolo.failover" "ok" "${vm}" "" "active_side=secondary"
+}
+
+ftctl_xcolo_failback_policy() {
+  local vm="${1-}"
+  local disk_kind primary_target primary_source primary_format
+  if ftctl_xcolo_detect_block_backed_ft "${vm}" disk_kind primary_target primary_source primary_format; then
+    printf '%s\n' "block-ft-cold-cutback"
+  else
+    printf '%s\n' "file-ft-runtime-cutback"
+  fi
+}
+
+ftctl_xcolo_failback_record_state() {
+  local vm="${1-}"
+  local policy="${2-}"
+  local stage="${3-}"
+  local transport="${4-}"
+  local reason="${5-}"
+  local prev_transport
+
+  prev_transport="$(ftctl_state_get "${vm}" "transport_state" 2>/dev/null || echo "unknown")"
+  ftctl_state_set "${vm}" \
+    "protection_state=failing_back" \
+    "transport_state=${transport}" \
+    "last_error=${reason}" \
+    "xcolo_failback_policy=${policy}" \
+    "xcolo_failback_stage=${stage}" \
+    "xcolo_failback_prev_transport=${prev_transport}"
+}
+
+ftctl_xcolo_collect_disks_on_uri() {
+  local uri="${1-}"
+  local vm="${2-}"
+  local out_array_name="${3}"
+  local out err rc
+  local -n _out_array="${out_array_name}"
+  local line dtype device target source
+
+  _out_array=()
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${uri}" domblklist "${vm}" --details || true
+  if [[ "${rc}" != "0" ]]; then
+    return "${rc}"
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    case "${line}" in
+      Type*|----*) continue ;;
+    esac
+    dtype="$(awk '{print $1}' <<< "${line}")"
+    device="$(awk '{print $2}' <<< "${line}")"
+    target="$(awk '{print $3}' <<< "${line}")"
+    source="$(awk '{print $4}' <<< "${line}")"
+    [[ "${device}" == "disk" ]] || continue
+    [[ -n "${target}" && -n "${source}" && "${source}" != "-" ]] || continue
+    _out_array+=("${target}|${source}|${dtype}")
+  done <<< "${out}"
+  ((${#_out_array[@]} > 0))
+}
+
+ftctl_xcolo_collect_disks_from_xml() {
+  local xml_path="${1-}"
+  local out_array_name="${2}"
+  local -n _out_array="${out_array_name}"
+
+  _out_array=()
+  [[ -n "${xml_path}" && -f "${xml_path}" ]] || return 1
+
+  mapfile -t _out_array < <(python3 - <<'PY' "${xml_path}"
+import sys, xml.etree.ElementTree as ET
+xml_path = sys.argv[1]
+root = ET.parse(xml_path).getroot()
+for disk in root.findall("./devices/disk"):
+    if disk.get("device") != "disk":
+        continue
+    target = disk.find("target")
+    source = disk.find("source")
+    if target is None or source is None:
+        continue
+    dev = target.get("dev", "")
+    path = source.get("file") or source.get("dev") or ""
+    if dev and path:
+        print(f"{dev}|{path}|xml")
+PY
+)
+  ((${#_out_array[@]} > 0))
+}
+
+ftctl_xcolo_collect_prebuilt_file_pair_paths() {
+  local vm="${1-}"
+  local primary_parent_var="${2}"
+  local secondary_active_var="${3}"
+  local primary_xml secondary_xml payload
+
+  primary_xml="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
+  secondary_xml="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
+  [[ -n "${primary_xml}" && -f "${primary_xml}" && -n "${secondary_xml}" && -f "${secondary_xml}" ]] || return 1
+
+  payload="$(python3 - <<'PY' "${primary_xml}" "${secondary_xml}"
+import sys, xml.etree.ElementTree as ET
+qns = {'qemu': 'http://libvirt.org/schemas/domain/qemu/1.0'}
+primary_xml, secondary_xml = sys.argv[1], sys.argv[2]
+
+def collect(xml_path):
+    root = ET.parse(xml_path).getroot()
+    vals = []
+    for node in root.findall('.//qemu:arg', qns):
+        v = node.get('value', '')
+        if v:
+            vals.append(v)
+    return vals
+
+primary_args = collect(primary_xml)
+secondary_args = collect(secondary_xml)
+primary_parent = ''
+secondary_active = ''
+for v in primary_args:
+    if 'id=parent0' in v and 'file.filename=' in v:
+        part = v.split('file.filename=', 1)[1]
+        primary_parent = part.split(',', 1)[0]
+        break
+    if 'id=colo-disk0' in v and 'children.0.file.filename=' in v:
+        part = v.split('children.0.file.filename=', 1)[1]
+        primary_parent = part.split(',', 1)[0]
+        break
+for v in secondary_args:
+    if 'file.file.filename=' in v:
+        part = v.split('file.file.filename=', 1)[1]
+        secondary_active = part.split(',', 1)[0]
+        break
+print(primary_parent + '|' + secondary_active)
+PY
+)" || payload="|"
+
+  printf -v "${primary_parent_var}" '%s' "${payload%%|*}"
+  printf -v "${secondary_active_var}" '%s' "${payload##*|}"
+  [[ -n "${payload%%|*}" && -n "${payload##*|}" ]]
+}
+
+ftctl_xcolo_collect_prebuilt_file_pair_detail() {
+  local vm="${1-}"
+  local primary_parent_var="${2}"
+  local secondary_parent_var="${3}"
+  local secondary_hidden_var="${4}"
+  local secondary_active_var="${5}"
+  local primary_xml secondary_xml payload
+
+  primary_xml="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
+  secondary_xml="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
+  [[ -n "${primary_xml}" && -f "${primary_xml}" && -n "${secondary_xml}" && -f "${secondary_xml}" ]] || return 1
+
+  payload="$(python3 - <<'PY' "${primary_xml}" "${secondary_xml}"
+import sys, xml.etree.ElementTree as ET
+qns = {'qemu': 'http://libvirt.org/schemas/domain/qemu/1.0'}
+primary_xml, secondary_xml = sys.argv[1], sys.argv[2]
+
+def collect(xml_path):
+    root = ET.parse(xml_path).getroot()
+    vals = []
+    for node in root.findall('.//qemu:arg', qns):
+        v = node.get('value', '')
+        if v:
+            vals.append(v)
+    return vals
+
+primary_args = collect(primary_xml)
+secondary_args = collect(secondary_xml)
+primary_parent = ''
+secondary_parent = ''
+secondary_hidden = ''
+secondary_active = ''
+
+for v in primary_args:
+    if 'id=parent0' in v and 'file.filename=' in v:
+        part = v.split('file.filename=', 1)[1]
+        primary_parent = part.split(',', 1)[0]
+        break
+    if 'id=colo-disk0' in v and 'children.0.file.filename=' in v:
+        part = v.split('children.0.file.filename=', 1)[1]
+        primary_parent = part.split(',', 1)[0]
+        break
+
+for v in secondary_args:
+    if 'id=parent0' in v and 'file.filename=' in v:
+        part = v.split('file.filename=', 1)[1]
+        secondary_parent = part.split(',', 1)[0]
+    if 'file.file.filename=' in v:
+        part = v.split('file.file.filename=', 1)[1]
+        secondary_active = part.split(',', 1)[0]
+    if 'file.backing.file.filename=' in v:
+        part = v.split('file.backing.file.filename=', 1)[1]
+        secondary_hidden = part.split(',', 1)[0]
+
+print("|".join([primary_parent, secondary_parent, secondary_hidden, secondary_active]))
+PY
+)" || payload="|||"
+
+  printf -v "${primary_parent_var}" '%s' "${payload%%|*}"
+  payload="${payload#*|}"
+  printf -v "${secondary_parent_var}" '%s' "${payload%%|*}"
+  payload="${payload#*|}"
+  printf -v "${secondary_hidden_var}" '%s' "${payload%%|*}"
+  printf -v "${secondary_active_var}" '%s' "${payload##*|}"
+  [[ -n "${!primary_parent_var}" && -n "${!secondary_parent_var}" && -n "${!secondary_hidden_var}" && -n "${!secondary_active_var}" ]]
+}
+
+ftctl_xcolo_validate_prebuilt_file_pair_sizes() {
+  local vm="${1-}"
+  local primary_parent="" secondary_parent="" secondary_hidden="" secondary_active=""
+  local primary_size="" secondary_parent_size="" secondary_hidden_size="" secondary_active_size=""
+  local secondary_host="" secondary_user=""
+
+  ftctl_xcolo_collect_prebuilt_file_pair_detail "${vm}" primary_parent secondary_parent secondary_hidden secondary_active || return 1
+  ftctl_blockcopy_remote_target_host_user secondary_host secondary_user || return 1
+
+  primary_size="$(ftctl_xcolo_disk_virtual_size_bytes "${primary_parent}" 2>/dev/null || true)"
+  secondary_parent_size="$(ftctl_xcolo_remote_disk_virtual_size_bytes "${secondary_host}" "${secondary_user}" "${secondary_parent}" 2>/dev/null || true)"
+  secondary_hidden_size="$(ftctl_xcolo_remote_disk_virtual_size_bytes "${secondary_host}" "${secondary_user}" "${secondary_hidden}" 2>/dev/null || true)"
+  secondary_active_size="$(ftctl_xcolo_remote_disk_virtual_size_bytes "${secondary_host}" "${secondary_user}" "${secondary_active}" 2>/dev/null || true)"
+
+  ftctl_state_set "${vm}" \
+    "xcolo_primary_source_path=${primary_parent}" \
+    "xcolo_secondary_parent_path=${secondary_parent}" \
+    "xcolo_secondary_hidden_path=${secondary_hidden}" \
+    "xcolo_secondary_active_path=${secondary_active}" \
+    "xcolo_primary_source_size=${primary_size}" \
+    "xcolo_secondary_parent_size=${secondary_parent_size}" \
+    "xcolo_secondary_hidden_size=${secondary_hidden_size}" \
+    "xcolo_secondary_active_size=${secondary_active_size}"
+
+  [[ -n "${primary_size}" && -n "${secondary_parent_size}" && -n "${secondary_hidden_size}" && -n "${secondary_active_size}" ]] || return 1
+  [[ "${primary_size}" == "${secondary_parent_size}" ]] || return 1
+  [[ "${primary_size}" == "${secondary_hidden_size}" ]] || return 1
+  [[ "${primary_size}" == "${secondary_active_size}" ]]
+}
+
+ftctl_xcolo_remote_copy_file_to_primary() {
+  local vm="${1-}"
+  local target="${2-}"
+  local secondary_source="${3-}"
+  local primary_dest="${4-}"
+  local format="${5-}"
+  local host="" user="" primary_host="" primary_user="" out="" err="" rc=0
+  local tmp_dest="" remote_cmd=""
+
+  [[ -n "${secondary_source}" && -n "${primary_dest}" ]] || return 1
+  ftctl_blockcopy_remote_target_host_user host user || return 1
+  if ! ftctl_blockcopy_primary_target_host_user primary_host primary_user 2>/dev/null || [[ -z "${primary_host}" ]]; then
+    primary_host="$(ftctl_xcolo_primary_listen_host control 2>/dev/null || true)"
+    primary_user="${FTCTL_PROFILE_FENCING_SSH_USER:-root}"
+  fi
+  [[ -n "${primary_host}" ]] || return 1
+  tmp_dest="${primary_dest}.ftfb.tmp"
+
+  remote_cmd="$(cat <<EOF
+set -euo pipefail
+src=$(printf '%q' "${secondary_source}")
+dst=$(printf '%q' "${primary_dest}")
+tmp_dst=$(printf '%q' "${tmp_dest}")
+primary_host=$(printf '%q' "${primary_host}")
+primary_user=$(printf '%q' "${primary_user}")
+stage=\$(mktemp /tmp/${vm}-${target}-ftfb.XXXXXX.${format})
+cleanup() {
+  rm -f "\${stage}" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+qemu-img convert --force-share -p -f $(printf '%q' "${format}") -O $(printf '%q' "${format}") "\${src}" "\${stage}"
+scp -o BatchMode=yes -o StrictHostKeyChecking=no "\${stage}" "\${primary_user}@\${primary_host}:\${tmp_dst}"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=no "\${primary_user}@\${primary_host}" "mv -f \${tmp_dst} \${dst}"
+EOF
+)"
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
+  : "${out}${err}"
+  [[ "${rc}" == "0" ]]
+}
+
+ftctl_xcolo_file_failback_sync_disks() {
+  local vm="${1-}"
+  local primary_source secondary_active format
+
+  ftctl_xcolo_collect_prebuilt_file_pair_paths "${vm}" primary_source secondary_active || return 1
+  format=""
+  ftctl_inventory_detect_disk_format "${primary_source}" format
+  ftctl_xcolo_remote_copy_file_to_primary "${vm}" "vda" "${secondary_active}" "${primary_source}" "${format:-qcow2}" || return 1
+}
+
+ftctl_xcolo_activate_secondary_seed_same_name() {
+  local vm="${1-}"
+  local seed content_b64 host="" user="" remote_cmd out="" err="" rc=0
+
+  seed="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
+  [[ -n "${seed}" && -f "${seed}" ]] || return 1
+  ftctl_blockcopy_remote_target_host_user host user || return 1
+  content_b64="$(base64 -w0 "${seed}")"
+  remote_cmd="$(cat <<EOF
+set -euo pipefail
+xml_path="/tmp/${vm}-ft-failback.xml"
+printf '%s' '${content_b64}' | base64 -d > "\${xml_path}"
+virsh destroy ${vm@Q} >/dev/null 2>&1 || true
+virsh undefine ${vm@Q} >/dev/null 2>&1 || true
+virsh create "\${xml_path}"
+EOF
+)"
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
+  : "${out}${err}"
+  [[ "${rc}" == "0" ]]
+}
+
+ftctl_xcolo_failback_file() {
+  local vm="${1-}"
+  local primary_generated out err rc
+
+  primary_generated="$(ftctl_primary_generated_xml_path "${vm}")"
+
+  ftctl_standby_materialize_primary_xml "${vm}" || {
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "file-ft-runtime-cutback" \
+      "materialize-primary-failed" \
+      "ft_reverse_syncing" \
+      "xcolo_file_failback_primary_xml_failed"
+    return 1
+  }
+
+  ftctl_xcolo_failback_record_state "${vm}" \
+    "file-ft-runtime-cutback" \
+    "reverse-sync-copy" \
+    "ft_reverse_syncing" \
+    ""
+
+  if ! ftctl_xcolo_file_failback_sync_disks "${vm}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "file-ft-runtime-cutback" \
+      "reverse-sync-copy-failed" \
+      "ft_reverse_syncing" \
+      "xcolo_file_failback_copy_failed"
+    return 1
+  fi
+
+  ftctl_xcolo_failback_record_state "${vm}" \
+    "file-ft-runtime-cutback" \
+    "cutback-switching" \
+    "ft_cutback_switching" \
+    ""
+
+  ftctl_xcolo_qmp_require_ok "${FTCTL_PROFILE_SECONDARY_URI}" "${vm}" \
+    '{"execute":"nbd-server-stop"}' "failback" "secondary.nbd_server_stop" || true
+
+  if ! ftctl_xcolo_activate_secondary_seed_same_name "${vm}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "file-ft-runtime-cutback" \
+      "secondary-activate-failed" \
+      "ft_cutback_switching" \
+      "xcolo_file_failback_secondary_activate_failed"
+    return 1
+  fi
+
+  if ! ftctl_activate_domain_from_xml "${FTCTL_PROFILE_PRIMARY_URI}" "${vm}" "${primary_generated}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "file-ft-runtime-cutback" \
+      "primary-activate-failed" \
+      "ft_cutback_switching" \
+      "xcolo_file_failback_primary_activate_failed"
+    return 1
+  fi
+
+  if ! ftctl_xcolo_plan_protect_prebuilt "${vm}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "file-ft-runtime-cutback" \
+      "reprotect-failed" \
+      "ft_cutback_switching" \
+      "xcolo_file_failback_reprotect_failed"
+    return 1
+  fi
+
+  if ! ftctl_xcolo_wait_pair_running "${vm}" "20" "${vm}"; then
+    ftctl_xcolo_failback_record_state "${vm}" \
+      "file-ft-runtime-cutback" \
+      "reprotect-not-running" \
+      "ft_cutback_switching" \
+      "xcolo_file_failback_reprotect_not_running"
+    return 1
+  fi
+
+  ftctl_state_set "${vm}" \
+    "active_side=primary" \
+    "protection_state=colo_running" \
+    "transport_state=mirroring" \
+    "last_error="
+  ftctl_log_event "failback" "xcolo.failback.file" "ok" "${vm}" "" \
+    "reason=cutback_complete"
+  return 0
+}
+
+ftctl_xcolo_failback_block() {
+  local vm="${1-}"
+
+  ftctl_xcolo_failback_record_state "${vm}" \
+    "block-ft-cold-cutback" \
+    "design-required" \
+    "ft_reverse_syncing" \
+    "xcolo_block_failback_not_implemented"
+  ftctl_log_event "failback" "xcolo.failback.block" "warn" "${vm}" "" \
+    "reason=not_implemented"
+  return 1
+}
+
+ftctl_xcolo_failback() {
+  local vm="${1-}"
+  local policy transport
+
+  policy="$(ftctl_xcolo_failback_policy "${vm}")"
+  transport="$(ftctl_state_get "${vm}" "transport_state" 2>/dev/null || echo "unknown")"
+
+  if ! ftctl_verify_xcolo_failback_ready "${vm}"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "last_error=xcolo_failback_precheck_failed"
+    return 1
+  fi
+
+  case "${policy}" in
+    file-ft-runtime-cutback)
+      ftctl_log_event "failback" "xcolo.failback" "warn" "${vm}" "" \
+        "policy=${policy} transport=${transport} dispatch=file"
+      ftctl_xcolo_failback_file "${vm}"
+      ;;
+    block-ft-cold-cutback)
+      ftctl_log_event "failback" "xcolo.failback" "warn" "${vm}" "" \
+        "policy=${policy} transport=${transport} dispatch=block"
+      ftctl_xcolo_failback_block "${vm}"
+      ;;
+    *)
+      ftctl_xcolo_failback_record_state "${vm}" \
+        "${policy}" \
+        "invalid-policy" \
+        "ft_reverse_syncing" \
+        "xcolo_failback_unknown_policy"
+      ftctl_log_event "failback" "xcolo.failback" "fail" "${vm}" "" \
+        "policy=${policy} transport=${transport} reason=unknown_policy"
+      return 1
+      ;;
+  esac
 }

@@ -158,6 +158,14 @@ ftctl_failback_request() {
   local vm="${1-}"
   local reason="${2-manual}"
   local mode="${FTCTL_PROFILE_MODE:-ha}"
+  if [[ "${mode}" == "ft" ]]; then
+    if ! ftctl_xcolo_failback "${vm}"; then
+      ftctl_log_event "failback" "failback.request" "fail" "${vm}" "" \
+        "reason=${reason} xcolo=failback_failed"
+      return 1
+    fi
+    return 0
+  fi
   if ! ftctl_verify_failback_ready "${vm}"; then
     ftctl_state_set "${vm}" \
       "protection_state=error" \

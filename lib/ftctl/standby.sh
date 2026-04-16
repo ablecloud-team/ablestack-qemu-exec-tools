@@ -587,3 +587,35 @@ ftctl_primary_activate_from_backup() {
   ftctl_log_event "primary" "primary.activate" "ok" "${vm}" "" \
     "primary_uri=${FTCTL_PROFILE_PRIMARY_URI}"
 }
+
+ftctl_activate_domain_from_xml() {
+  local uri="${1-}"
+  local vm_name="${2-}"
+  local xml_path="${3-}"
+  local out err rc
+
+  [[ -n "${xml_path}" && -f "${xml_path}" ]] || return 2
+
+  if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
+    return 0
+  fi
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${uri}" destroy "${vm_name}" || true
+  : "${out}${err}"
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${uri}" undefine "${vm_name}" || true
+  : "${out}${err}"
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${uri}" create "${xml_path}" || true
+  : "${out}${err}"
+  return "${rc}"
+}

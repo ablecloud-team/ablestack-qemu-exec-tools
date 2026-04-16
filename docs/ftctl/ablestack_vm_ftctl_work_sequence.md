@@ -260,6 +260,10 @@ Completed items:
   - FT baseline protect/failover is now complete for `FT-IMG01-ST01`:
     - protect reaches `colo_running`
     - failover reaches `failed_over` with `active_side=secondary`
+    - a fresh file-based full failback validation now also completes:
+      - `failback --force` returns the pair to `active_side=primary`
+      - final state returns to `colo_running / mirroring`
+    - file-based FT prebuilt pairs now perform explicit source/parent/hidden/active size validation before protect
   - FT persistent baseline is now complete for `FT-IMG09-ST01`
   - FT raw baseline is now complete for `FT-IMG02-ST02`
     - raw sources work when the secondary replication chain uses qcow2 overlays
@@ -267,6 +271,7 @@ Completed items:
     - block-backed FT uses cold conversion, not the existing file-backed live protect path
     - primary and secondary generated XML use block-backed dummy disks with boot order lowered
     - post-boot QMP attach builds the local-block FT graph before x-colo handshake
+    - block-backed FT failback is still not implemented and remains a separate gap
   - `OP-FT-01` is now complete:
     - first reconcile after induced transient loss enters `transient_loss` during the grace window
     - second reconcile after the grace window re-enters `xcolo_rearm()`

@@ -1464,6 +1464,15 @@ Actual Result:
   - `transport_state=colo_failover`
   - `active_side=secondary`
   - `fencing_state=fenced`
+- a fresh full failback validation was later completed on `10.10.1.1/10.10.1.2`:
+  - `failback --force` returned the pair to:
+    - `active_side=primary`
+    - `protection_state=colo_running`
+    - `transport_state=mirroring`
+  - primary and secondary both returned to `running`
+- root cause found during this work:
+  - the external sacrificial pair can falsely look valid even when secondary overlay sizes differ from the primary source size
+  - the engine now performs a preflight size validation for file-based FT prebuilt pairs before protect
 
 Evidence:
 - `ablestack_vm_ftctl status --vm rocky10-ft-img01-st01 --json` after protect

@@ -136,6 +136,24 @@ ftctl_verify_failback_ready() {
   esac
 }
 
+ftctl_verify_xcolo_failback_ready() {
+  local vm="${1-}"
+  local active_side transport
+  active_side="$(ftctl_state_get "${vm}" "active_side" 2>/dev/null || echo "primary")"
+  transport="$(ftctl_state_get "${vm}" "transport_state" 2>/dev/null || echo "unknown")"
+  if [[ "${active_side}" != "secondary" ]]; then
+    echo "ERROR: xcolo failback requires active_side=secondary" >&2
+    return 1
+  fi
+  case "${transport}" in
+    colo_failover|colo_failover_dry_run|mirroring|colo_running) return 0 ;;
+    *)
+      echo "ERROR: xcolo failback requires a promoted secondary transport state, got ${transport}" >&2
+      return 1
+      ;;
+  esac
+}
+
 ftctl_verify_vm() {
   local vm="${1-}"
   ftctl_state_set "${vm}" "last_healthy_ts=$(ftctl_now_iso8601)"
