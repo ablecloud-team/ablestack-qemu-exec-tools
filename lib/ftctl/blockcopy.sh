@@ -213,7 +213,7 @@ ftctl_blockcopy_parse_ssh_target_from_uri() {
   local uri="${1-}"
   local host_var="${2}"
   local user_var="${3}"
-  local rest parsed_host parsed_user
+  local rest host_value user_value
 
   [[ "${uri}" == qemu+ssh://* ]] || {
     echo "ERROR: remote-nbd requires qemu+ssh secondary URI" >&2
@@ -222,19 +222,19 @@ ftctl_blockcopy_parse_ssh_target_from_uri() {
   rest="${uri#qemu+ssh://}"
   rest="${rest%%/*}"
   if [[ "${rest}" == *"@"* ]]; then
-    parsed_user="${rest%@*}"
-    parsed_host="${rest#*@}"
+    user_value="${rest%@*}"
+    host_value="${rest#*@}"
   else
-    parsed_user="${FTCTL_PROFILE_FENCING_SSH_USER}"
-    parsed_host="${rest}"
+    user_value="${FTCTL_PROFILE_FENCING_SSH_USER}"
+    host_value="${rest}"
   fi
-  [[ -n "${parsed_host}" ]] || {
+  [[ -n "${host_value}" ]] || {
     echo "ERROR: could not parse remote host from URI: ${uri}" >&2
     return 2
   }
-  [[ -n "${parsed_user}" ]] || parsed_user="root"
-  printf -v "${host_var}" '%s' "${parsed_host}"
-  printf -v "${user_var}" '%s' "${parsed_user}"
+  [[ -n "${user_value}" ]] || user_value="root"
+  printf -v "${host_var}" '%s' "${host_value}"
+  printf -v "${user_var}" '%s' "${user_value}"
 }
 
 ftctl_blockcopy_remote_target_host_user() {
@@ -243,8 +243,23 @@ ftctl_blockcopy_remote_target_host_user() {
   local record="" host_id="" role="" mgmt_ip="" libvirt_uri="" blockcopy_ip="" xcolo_ctrl="" xcolo_data=""
   local resolved_host="" resolved_user=""
 
+  ftctl_cluster_load || true
   resolved_user="${FTCTL_PROFILE_FENCING_SSH_USER:-root}"
-  if ftctl_cluster_find_peer_record_for_vm record 2>/dev/null; then
+  if [[ "${FTCTL_PROFILE_SECONDARY_URI}" == "qemu:///system" ]]; then
+    resolved_host="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_ADDR:-}"
+    [[ -n "${resolved_host}" ]] || resolved_host="127.0.0.1"
+    printf -v "${host_var}" '%s' "${resolved_host}"
+    printf -v "${user_var}" '%s' "${resolved_user}"
+    return 0
+  fi
+  if [[ "${FTCTL_PROFILE_SECONDARY_URI}" == "qemu:///system" && -n "${FTCTL_LOCAL_HOST_ID:-}" ]]; then
+    if ftctl_cluster_find_record_by_host_id "${FTCTL_LOCAL_HOST_ID}" record 2>/dev/null; then
+      ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+      : "${host_id}${role}${libvirt_uri}${blockcopy_ip}${xcolo_ctrl}${xcolo_data}"
+      resolved_host="${mgmt_ip}"
+    fi
+  fi
+  if [[ -z "${resolved_host}" ]] && ftctl_cluster_find_peer_record_for_vm record 2>/dev/null; then
     ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
     : "${host_id}${role}${libvirt_uri}${blockcopy_ip}${xcolo_ctrl}${xcolo_data}"
     resolved_host="${mgmt_ip}"
@@ -637,11 +652,20 @@ ftctl_blockcopy_remote_exec() {
   tmp_cmd="$(mktemp -t ftctl.remote.XXXXXX)"
   printf '%s\n' "${remote_cmd}" > "${tmp_cmd}"
   chmod 0600 "${tmp_cmd}" 2>/dev/null || true
-  printf -v local_wrapper 'ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=%q %q %q < %q' \
-    "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
-    "${user}@${host}" \
-    "bash -s" \
-    "${tmp_cmd}"
+  if [[ -n "${FTCTL_SSH_PASSWORD:-}" ]] && command -v sshpass >/dev/null 2>&1; then
+    printf -v local_wrapper 'sshpass -p %q ssh -o StrictHostKeyChecking=no -o ConnectTimeout=%q %q %q < %q' \
+      "${FTCTL_SSH_PASSWORD}" \
+      "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
+      "${user}@${host}" \
+      "bash -s" \
+      "${tmp_cmd}"
+  else
+    printf -v local_wrapper 'ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=%q %q %q < %q' \
+      "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" \
+      "${user}@${host}" \
+      "bash -s" \
+      "${tmp_cmd}"
+  fi
   ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" "${out_var}" "${err_var}" "${rc_var}" -- \
     bash -lc "${local_wrapper}"
   rm -f -- "${tmp_cmd}" 2>/dev/null || true
@@ -649,6 +673,201 @@ ftctl_blockcopy_remote_exec() {
 
 ftctl_blockcopy_secondary_uri_is_local_system() {
   [[ "${FTCTL_PROFILE_SECONDARY_URI}" == "qemu:///system" ]]
+}
+
+ftctl_blockcopy_primary_uri_is_local_system() {
+  [[ "${FTCTL_PROFILE_PRIMARY_URI}" == "qemu:///system" ]]
+}
+
+ftctl_blockcopy_primary_target_host_user() {
+  local host_var="${1}"
+  local user_var="${2}"
+  local record="" host_id="" role="" mgmt_ip="" libvirt_uri="" blockcopy_ip="" xcolo_ctrl="" xcolo_data=""
+  local resolved_host="" resolved_user=""
+
+  ftctl_cluster_load || true
+  resolved_user="${FTCTL_PROFILE_FENCING_SSH_USER:-root}"
+  if [[ "${FTCTL_PROFILE_PRIMARY_URI}" == "qemu:///system" && -n "${FTCTL_LOCAL_HOST_ID:-}" ]]; then
+    if ftctl_cluster_find_record_by_host_id "${FTCTL_LOCAL_HOST_ID}" record 2>/dev/null; then
+      ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+      : "${host_id}${role}${libvirt_uri}${blockcopy_ip}${xcolo_ctrl}${xcolo_data}"
+      resolved_host="${mgmt_ip}"
+    fi
+  fi
+  if ftctl_cluster_find_record_by_libvirt_uri "${FTCTL_PROFILE_PRIMARY_URI}" record 2>/dev/null; then
+    ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+    : "${host_id}${role}${libvirt_uri}${xcolo_ctrl}${xcolo_data}"
+    resolved_host="${mgmt_ip}"
+  fi
+  if [[ -z "${resolved_host}" ]]; then
+    ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_PRIMARY_URI}" resolved_host resolved_user || return 2
+  fi
+  printf -v "${host_var}" '%s' "${resolved_host}"
+  printf -v "${user_var}" '%s' "${resolved_user}"
+}
+
+ftctl_blockcopy_primary_export_addr() {
+  local -n out_ref="${1}"
+  local record="" host_id="" role="" mgmt_ip="" libvirt_uri="" blockcopy_ip="" xcolo_ctrl="" xcolo_data=""
+  local result=""
+
+  ftctl_cluster_load || true
+  if [[ "${FTCTL_PROFILE_PRIMARY_URI}" == "qemu:///system" && -n "${FTCTL_LOCAL_HOST_ID:-}" ]]; then
+    if ftctl_cluster_find_record_by_host_id "${FTCTL_LOCAL_HOST_ID}" record 2>/dev/null; then
+      ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+      : "${host_id}${role}${libvirt_uri}${xcolo_ctrl}${xcolo_data}"
+      result="${blockcopy_ip:-${mgmt_ip}}"
+    fi
+  fi
+  if ftctl_cluster_find_record_by_libvirt_uri "${FTCTL_PROFILE_PRIMARY_URI}" record 2>/dev/null; then
+    ftctl_cluster_parse_record "${record}" host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+    : "${host_id}${role}${libvirt_uri}${xcolo_ctrl}${xcolo_data}"
+    result="${blockcopy_ip:-${mgmt_ip}}"
+  fi
+  if [[ -z "${result}" && "${FTCTL_PROFILE_PRIMARY_URI}" == qemu+ssh://* ]]; then
+    local parsed_host="" parsed_user=""
+    ftctl_blockcopy_parse_ssh_target_from_uri "${FTCTL_PROFILE_PRIMARY_URI}" parsed_host parsed_user || return 2
+    : "${parsed_user}"
+    result="${parsed_host}"
+  fi
+  out_ref="${result}"
+}
+
+ftctl_blockcopy_primary_nbd_pick_port() {
+  local vm="${1-}"
+  local target="${2-}"
+  local out_var="${3}"
+  local record="" host="" user="" active_count=0 preferred=0 candidate=0 i=0
+
+  if ftctl_blockcopy_primary_uri_is_local_system; then
+    ftctl_blockcopy_remote_nbd_candidate_port "${vm}" "${target}-reverse" preferred
+    for ((i=0; i<FTCTL_REMOTE_NBD_PORT_COUNT; i++)); do
+      candidate=$((FTCTL_REMOTE_NBD_PORT_BASE + ((preferred - FTCTL_REMOTE_NBD_PORT_BASE + i) % FTCTL_REMOTE_NBD_PORT_COUNT)))
+      if ! ss -lntp | grep -q ":${candidate}[[:space:]]"; then
+        printf -v "${out_var}" '%s' "${candidate}"
+        return 0
+      fi
+    done
+    echo "ERROR: no free primary reverse remote-nbd port available in range ${FTCTL_REMOTE_NBD_PORT_BASE}..$((FTCTL_REMOTE_NBD_PORT_BASE + FTCTL_REMOTE_NBD_PORT_COUNT - 1))" >&2
+    return 4
+  fi
+
+  ftctl_blockcopy_primary_target_host_user host user || return 2
+  ftctl_blockcopy_remote_nbd_active_count "${host}" "${user}" active_count || true
+  if (( active_count >= FTCTL_REMOTE_NBD_MAX_CONCURRENT )); then
+    echo "ERROR: primary reverse remote-nbd active count ${active_count} reached FTCTL_REMOTE_NBD_MAX_CONCURRENT=${FTCTL_REMOTE_NBD_MAX_CONCURRENT}" >&2
+    return 3
+  fi
+
+  ftctl_blockcopy_remote_nbd_candidate_port "${vm}" "${target}-reverse" preferred
+  for ((i=0; i<FTCTL_REMOTE_NBD_PORT_COUNT; i++)); do
+    candidate=$((FTCTL_REMOTE_NBD_PORT_BASE + ((preferred - FTCTL_REMOTE_NBD_PORT_BASE + i) % FTCTL_REMOTE_NBD_PORT_COUNT)))
+    if ! ftctl_blockcopy_remote_nbd_port_in_use "${host}" "${user}" "${candidate}"; then
+      printf -v "${out_var}" '%s' "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "ERROR: no free primary reverse remote-nbd port available in range ${FTCTL_REMOTE_NBD_PORT_BASE}..$((FTCTL_REMOTE_NBD_PORT_BASE + FTCTL_REMOTE_NBD_PORT_COUNT - 1))" >&2
+  return 4
+}
+
+ftctl_blockcopy_primary_nbd_prepare_target() {
+  local vm="${1-}"
+  local target="${2-}"
+  local source="${3-}"
+  local format="${4-}"
+  local primary_path="${5-}"
+  local export_name="${6-}"
+  local export_port="${7-}"
+  local host="" user="" bind_addr="" out="" err="" rc=0 pid_file="" remote_cmd="" debug_cmd=""
+
+  ftctl_blockcopy_primary_target_host_user host user || return 2
+  ftctl_blockcopy_primary_export_addr bind_addr || return 2
+  pid_file="/run/ablestack-vm-ftctl/nbd-reverse-${vm}-${target}.pid"
+  remote_cmd=$(cat <<EOF
+set -euo pipefail
+mkdir -p /run/ablestack-vm-ftctl
+if [[ -b "${primary_path}" && "${primary_path}" != /dev/rbd/* ]]; then
+  primary_real="\$(readlink -f "${primary_path}" 2>/dev/null || true)"
+  stale_map=""
+  if [[ -n "\${primary_real}" ]]; then
+    stale_map="\$(dmsetup info -C --noheadings -o name "\${primary_real}" 2>/dev/null | awk 'NR==1{print \$1}' || true)"
+  fi
+  vg_name="\$(lvs --noheadings -o vg_name "${primary_path}" 2>/dev/null | awk 'NR==1{gsub(/^[ \t]+|[ \t]+$/, "", \$0); print \$0}' || true)"
+  lvchange -an "${primary_path}" >/dev/null 2>&1 || true
+  if [[ -n "\${stale_map}" && -n "\${primary_real}" ]]; then
+    stale_open="\$(dmsetup info -C --noheadings -o open "\${primary_real}" 2>/dev/null | awk 'NR==1{print \$1}' || true)"
+    if [[ "\${stale_open}" == "0" ]]; then
+      dmsetup remove "\${stale_map}" >/dev/null 2>&1 || true
+      udevadm settle >/dev/null 2>&1 || true
+    fi
+  fi
+  if [[ -n "\${vg_name}" ]]; then
+    vgchange --refresh "\${vg_name}" >/dev/null 2>&1 || true
+  fi
+  vgscan --mknodes >/dev/null 2>&1 || true
+  lvchange -ay "${primary_path}"
+  udevadm settle >/dev/null 2>&1 || true
+elif [[ -b "${primary_path}" && "${primary_path}" == /dev/rbd/* ]]; then
+  if [[ ! -b "${primary_path}" ]]; then
+    rbd map "${primary_path#/dev/rbd/}" >/dev/null
+    udevadm settle >/dev/null 2>&1 || true
+  fi
+else
+  mkdir -p "$(dirname "${primary_path}")"
+  if [[ ! -f "${primary_path}" ]]; then
+    echo "missing_reverse_target:${primary_path}" >&2
+    exit 96
+  fi
+fi
+if [[ -f "${pid_file}" ]]; then
+  oldpid="\$(cat "${pid_file}" 2>/dev/null || true)"
+  if [[ -n "\${oldpid}" ]] && kill -0 "\${oldpid}" >/dev/null 2>&1; then
+    kill "\${oldpid}" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+  rm -f "${pid_file}"
+fi
+listener_pids="\$(ss -lntp | awk '/:${export_port}[[:space:]]/ { while (match(\$0, /pid=[0-9]+/)) { print substr(\$0, RSTART+4, RLENGTH-4); \$0=substr(\$0, RSTART+RLENGTH) } }' | sort -u)"
+for listener_pid in \${listener_pids}; do
+  [[ -n "\${listener_pid}" ]] || continue
+  cmdline="\$(tr '\0' ' ' < /proc/\${listener_pid}/cmdline 2>/dev/null || true)"
+  if [[ "\${cmdline}" == *qemu-nbd* ]]; then
+    kill "\${listener_pid}" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+done
+if ss -lntp | grep -q ":${export_port}[[:space:]]"; then
+  echo "port_in_use:${export_port}" >&2
+  exit 98
+fi
+qemu-nbd --fork --persistent --shared=8 \
+  --bind "${bind_addr}" \
+  --port "${export_port}" \
+  --export-name "${export_name}" \
+  --format "${format}" \
+  --pid-file "${pid_file}" \
+  "${primary_path}"
+EOF
+)
+  debug_cmd="$(tr '\n' ' ' <<< "${remote_cmd}" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+
+  out=""
+  err=""
+  rc=0
+  if ftctl_blockcopy_primary_uri_is_local_system; then
+    ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- bash -lc "${remote_cmd}" || true
+  else
+    ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
+  fi
+  : "${out}${err}"
+  [[ "${rc}" == "0" ]] || {
+    echo "ERROR: reverse remote-nbd prepare context: host=${host} user=${user} bind_addr=${bind_addr} format=${format} primary_path=${primary_path} export=${export_name}" >&2
+    echo "ERROR: reverse remote-nbd prepare command: ${debug_cmd}" >&2
+    [[ -n "${err}" ]] && echo "ERROR: reverse remote-nbd prepare failed: ${err}" >&2
+    return "${rc}"
+  }
 }
 
 ftctl_blockcopy_remote_nbd_prepare_target() {
@@ -1094,37 +1313,80 @@ ftctl_blockcopy_job_query() {
   local target="${2-}"
   local state_var="${3}"
   local ready_var="${4}"
-  local out err rc state ready
+  local out err rc payload state_value ready_value
 
   out=""
   err=""
   rc=0
   ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" blockjob "${vm}" "${target}" --info || true
-  if [[ "${rc}" != "0" ]] || grep -qi "no current block job" <<< "${out}${err}"; then
+  payload="${out}"$'\n'"${err}"
+  if [[ "${rc}" != "0" ]] || grep -qi "no current block job" <<< "${payload}"; then
     printf -v "${state_var}" '%s' "unknown"
     printf -v "${ready_var}" '%s' "unknown"
     [[ "${rc}" == "0" ]] && rc=4
     return "${rc}"
   fi
 
-  state="$(awk -F: 'tolower($1) ~ /state/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${out}")"
-  ready="$(awk -F: 'tolower($1) ~ /ready/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${out}")"
-  if [[ -z "${state}" && "${out}" =~ Block[[:space:]]+Copy:[[:space:]]+\[([0-9.]+)[[:space:]]*%\] ]]; then
-    state="copy"
-    ready="no"
+  state_value="$(awk -F: 'tolower($1) ~ /state/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${payload}")"
+  ready_value="$(awk -F: 'tolower($1) ~ /ready/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${payload}")"
+  if [[ -z "${state_value}" && "${payload}" =~ Block[[:space:]]+Copy:[[:space:]]+\[([0-9.]+)[[:space:]]*%\] ]]; then
+    state_value="copy"
+    ready_value="no"
     if [[ "${BASH_REMATCH[1]}" == "100.00" || "${BASH_REMATCH[1]}" == "100" ]]; then
-      ready="yes"
+      ready_value="yes"
     fi
   fi
-  if [[ -z "${state}" && -z "${ready}" ]]; then
+  if [[ -z "${state_value}" && -z "${ready_value}" ]]; then
     printf -v "${state_var}" '%s' "unknown"
     printf -v "${ready_var}" '%s' "unknown"
     return 5
   fi
-  [[ -n "${state}" ]] || state="unknown"
-  [[ -n "${ready}" ]] || ready="unknown"
-  printf -v "${state_var}" '%s' "${state}"
-  printf -v "${ready_var}" '%s' "${ready}"
+  [[ -n "${state_value}" ]] || state_value="unknown"
+  [[ -n "${ready_value}" ]] || ready_value="unknown"
+  printf -v "${state_var}" '%s' "${state_value}"
+  printf -v "${ready_var}" '%s' "${ready_value}"
+}
+
+ftctl_blockcopy_active_domain_on_secondary() {
+  local vm="${1-}"
+  local secondary_vm_name
+  secondary_vm_name="$(ftctl_state_get "${vm}" "secondary_vm_name" 2>/dev/null || ftctl_profile_secondary_vm_name_resolved "${vm}")"
+  printf '%s\n' "${secondary_vm_name}"
+}
+
+ftctl_blockcopy_reverse_job_query() {
+  local vm="${1-}"
+  local target="${2-}"
+  local state_var="${3}"
+  local ready_var="${4}"
+  local active_vm out err rc payload state_value ready_value
+
+  active_vm="$(ftctl_blockcopy_active_domain_on_secondary "${vm}")"
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_SECONDARY_URI}" blockjob "${active_vm}" "${target}" --info || true
+  payload="${out}"$'\n'"${err}"
+  if [[ "${rc}" != "0" ]] || grep -qi "no current block job" <<< "${payload}"; then
+    printf -v "${state_var}" '%s' "unknown"
+    printf -v "${ready_var}" '%s' "unknown"
+    [[ "${rc}" == "0" ]] && rc=4
+    return "${rc}"
+  fi
+
+  state_value="$(awk -F: 'tolower($1) ~ /state/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${payload}")"
+  ready_value="$(awk -F: 'tolower($1) ~ /ready/ {gsub(/^[ \t]+/, "", $2); print tolower($2); exit}' <<< "${payload}")"
+  if [[ -z "${state_value}" && "${payload}" =~ Block[[:space:]]+Copy:[[:space:]]+\[([0-9.]+)[[:space:]]*%\] ]]; then
+    state_value="copy"
+    ready_value="no"
+    if [[ "${BASH_REMATCH[1]}" == "100.00" || "${BASH_REMATCH[1]}" == "100" ]]; then
+      ready_value="yes"
+    fi
+  fi
+  [[ -n "${state_value}" ]] || state_value="unknown"
+  [[ -n "${ready_value}" ]] || ready_value="unknown"
+  printf -v "${state_var}" '%s' "${state_value}"
+  printf -v "${ready_var}" '%s' "${ready_value}"
 }
 
 ftctl_blockcopy_runtime_mirror_query() {
@@ -1560,6 +1822,7 @@ ftctl_blockcopy_start_reverse_sync() {
   local vm="${1-}"
   local path line target source dest format rc_any=0
   local persistence out err rc
+  local active_vm export_name export_port export_addr reverse_xml source_xml
 
   ftctl_blockcopy_prepare_reverse_sync_plan "${vm}" || {
     ftctl_state_set "${vm}" "last_error=reverse_sync_plan_failed"
@@ -1570,6 +1833,7 @@ ftctl_blockcopy_start_reverse_sync() {
   [[ -f "${path}" ]] || return 1
   persistence="$(ftctl_state_get "${vm}" "primary_persistence" 2>/dev/null || echo "unknown")"
 
+  active_vm="$(ftctl_blockcopy_active_domain_on_secondary "${vm}")"
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
     target="${line%%|*}"
@@ -1582,17 +1846,41 @@ ftctl_blockcopy_start_reverse_sync() {
     out=""
     err=""
     rc=0
-    ftctl_blockcopy_start_job \
-      "${FTCTL_PROFILE_SECONDARY_URI}" \
-      "${vm}" \
-      "${target}" \
-      "${dest}" \
-      "${format}" \
-      "1" \
-      "${persistence}" \
-      out \
-      err \
-      rc || true
+    if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+      export_port=""
+      ftctl_blockcopy_primary_nbd_pick_port "${vm}" "${target}" export_port || return $?
+      export_name="${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}-reverse"
+      ftctl_blockcopy_primary_export_addr export_addr || return $?
+      ftctl_blockcopy_primary_nbd_prepare_target "${vm}" "${target}" "${source}" "${format}" "${dest}" "${export_name}" "${export_port}" || return $?
+      reverse_xml=""
+      source_xml="$(ftctl_state_get "${vm}" "standby_xml_seed" 2>/dev/null || true)"
+      ftctl_blockcopy_build_remote_nbd_dest_xml \
+        "${vm}" "${target}" "${format}" \
+        "${export_addr}" "${export_port}" "${export_name}" \
+        "${source_xml}" reverse_xml
+      ftctl_blockcopy_start_remote_nbd_job \
+        "${FTCTL_PROFILE_SECONDARY_URI}" \
+        "${active_vm}" \
+        "${target}" \
+        "${format}" \
+        "${persistence}" \
+        "${reverse_xml}" \
+        out \
+        err \
+        rc || true
+    else
+      ftctl_blockcopy_start_job \
+        "${FTCTL_PROFILE_SECONDARY_URI}" \
+        "${active_vm}" \
+        "${target}" \
+        "${dest}" \
+        "${format}" \
+        "1" \
+        "${persistence}" \
+        out \
+        err \
+        rc || true
+    fi
     if [[ "${rc}" != "0" ]]; then
       rc_any=1
       ftctl_log_event "failback" "reverse_sync.start" "fail" "${vm}" "" \
@@ -1615,6 +1903,119 @@ ftctl_blockcopy_start_reverse_sync() {
   ftctl_state_set "${vm}" \
     "transport_state=reverse_syncing" \
     "last_sync_ts=$(ftctl_now_iso8601)"
+}
+
+ftctl_blockcopy_refresh_reverse_jobs() {
+  local vm="${1-}"
+  local path line target source dest format state ready
+  local all_ready="1"
+  local rc_any=0
+
+  path="$(ftctl_blockcopy_reverse_state_path "${vm}")"
+  [[ -f "${path}" ]] || return 1
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    target="${line%%|*}"
+    line="${line#*|}"
+    source="${line%%|*}"
+    line="${line#*|}"
+    dest="${line%%|*}"
+    format="${line##*|}"
+    state="unknown"
+    ready="unknown"
+    if ! ftctl_blockcopy_reverse_job_query "${vm}" "${target}" state ready; then
+      rc_any=1
+    fi
+    [[ "${ready}" == "yes" ]] || all_ready="0"
+  done < "${path}"
+
+  if [[ "${all_ready}" == "1" && "${rc_any}" == "0" ]]; then
+    ftctl_state_set "${vm}" "transport_state=reverse_sync_ready" "last_sync_ts=$(ftctl_now_iso8601)"
+    return 0
+  fi
+
+  ftctl_state_set "${vm}" "transport_state=reverse_syncing" "last_sync_ts=$(ftctl_now_iso8601)"
+  return 11
+}
+
+ftctl_blockcopy_wait_reverse_sync_ready() {
+  local vm="${1-}"
+  local timeout_sec="${2-120}"
+  local deadline rc
+
+  deadline=$((SECONDS + timeout_sec))
+  while (( SECONDS <= deadline )); do
+    rc=0
+    ftctl_blockcopy_refresh_reverse_jobs "${vm}" || rc=$?
+    if [[ "${rc}" == "0" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+ftctl_blockcopy_wait_forward_sync_ready() {
+  local vm="${1-}"
+  local timeout_sec="${2-120}"
+  local deadline rc
+
+  deadline=$((SECONDS + timeout_sec))
+  while (( SECONDS <= deadline )); do
+    rc=0
+    ftctl_blockcopy_refresh_vm_jobs "${vm}" || rc=$?
+    if [[ "${rc}" == "0" ]] && [[ "$(ftctl_state_get "${vm}" "transport_state" 2>/dev/null || true)" == "mirroring" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+ftctl_blockcopy_stop_primary_reverse_nbd_exports() {
+  local vm="${1-}"
+  local path line target source dest format host="" user="" out="" err="" rc=0
+
+  path="$(ftctl_blockcopy_reverse_state_path "${vm}")"
+  [[ -f "${path}" ]] || return 0
+  if ! ftctl_blockcopy_primary_uri_is_local_system; then
+    ftctl_blockcopy_primary_target_host_user host user || return 0
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    target="${line%%|*}"
+    line="${line#*|}"
+    source="${line%%|*}"
+    line="${line#*|}"
+    dest="${line%%|*}"
+    format="${line##*|}"
+    : "${source}${dest}${format}"
+    out="" err="" rc=0
+    local stop_cmd
+    stop_cmd="$(cat <<EOF
+set -euo pipefail
+pid_file="/run/ablestack-vm-ftctl/nbd-reverse-${vm}-${target}.pid"
+if [[ -f "\${pid_file}" ]]; then
+  oldpid="\$(cat "\${pid_file}" 2>/dev/null || true)"
+  if [[ -n "\${oldpid}" ]] && kill -0 "\${oldpid}" >/dev/null 2>&1; then
+    kill "\${oldpid}" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+  rm -f "\${pid_file}"
+fi
+pkill -f "qemu-nbd.*${FTCTL_PROFILE_REMOTE_NBD_EXPORT_NAME}-${target}-reverse" >/dev/null 2>&1 || true
+EOF
+)"
+    if ftctl_blockcopy_primary_uri_is_local_system; then
+      ftctl_cmd_run "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- bash -lc "${stop_cmd}" || true
+    else
+      ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${stop_cmd}" || true
+    fi
+    : "${out}${err}"
+    [[ "${rc}" == "0" ]] || return "${rc}"
+  done < "${path}"
 }
 
 ftctl_blockcopy_stop_remote_nbd_exports() {

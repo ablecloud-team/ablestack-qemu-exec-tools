@@ -4,20 +4,20 @@
 
 ### HA/DR
 
-흐름:
+Current behavior:
 
-1. fencing 수행
-2. standby XML activate
+1. fencing
+2. standby activate
 3. standby boot verify
-4. `active_side=secondary`
+4. active side promotion to secondary
 
-명령:
+Command:
 
 ```bash
 ablestack_vm_ftctl failover --vm <vm> --force
 ```
 
-수동 fencing 정책일 때:
+If the policy is manual fencing:
 
 ```bash
 ablestack_vm_ftctl fence-confirm --vm <vm>
@@ -25,46 +25,61 @@ ablestack_vm_ftctl fence-confirm --vm <vm>
 
 ### FT/x-colo
 
-흐름:
+Current behavior:
 
-1. fencing 수행
+1. fencing
 2. `x-colo-lost-heartbeat`
-3. secondary 승격
+3. secondary promotion
 
 ## 2. Failback
 
-현재 구현 수준:
+### HA/DR
 
-- failback은 `reverse sync` 시작 경로까지 구현되어 있다.
-- full 자동 복귀 절차는 후속 작업이 필요하다.
+Current behavior:
 
-명령:
+- `failback --force` is now a one-shot full failback path for `ha` and `dr`.
+- The engine performs:
+  1. reverse sync start
+  2. reverse sync completion wait
+  3. cutback to the original primary side
+  4. steady-state return to `protected / mirroring`
+
+Command:
 
 ```bash
 ablestack_vm_ftctl failback --vm <vm> --force
 ```
 
-전제 조건:
+Preconditions:
 
 - `active_side=secondary`
-- standby/secondary가 active-ready 상태
-- reverse sync 대상 경로가 profile에 맞게 정의되어 있음
+- standby/secondary is active-ready
+- reverse sync target path is defined correctly for the profile
+- the original primary host/libvirt path is reachable again before cutback
 
-## 3. Failback disk map
+### FT
 
-기본값:
+- FT failback is not implemented yet.
+
+## 3. Failback Disk Map
+
+Default:
 
 ```bash
 FTCTL_PROFILE_FAILBACK_DISK_MAP="source"
 ```
 
-명시적 매핑 예:
+Explicit mapping example:
 
 ```bash
 FTCTL_PROFILE_FAILBACK_DISK_MAP="vda=/primary/demo-vda.qcow2;vdb=/primary/demo-vdb.qcow2"
 ```
 
-## 4. 운영 메모
+## 4. Operational Notes
 
-- failback은 아직 “reverse sync 시작” 기준이다.
-- production에서는 reverse sync 완료 확인 절차를 별도 운영 runbook으로 가져가는 것이 안전하다.
+- For `ha` and `dr`, failback success means:
+  - `active_side=primary`
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+- `remote-nbd` failback requires reverse NBD export orchestration and primary-side handoff.
+- FT failback remains a separate future feature.

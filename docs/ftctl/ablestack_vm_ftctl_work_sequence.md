@@ -286,6 +286,9 @@ Completed items:
     - the source host can be powered off through OOB/IPMI
     - secondary-side reconcile triggers fencing and standby activation
     - final state reaches `failed_over / failed_over` with the standby domain running on the secondary host
+    - a fresh HA `remote-nbd` pair was then used to validate full failback:
+      - after source-host recovery and cooldown, `failback --force` returned the pair to `active_side=primary`
+      - final state returned to `protected / mirroring`
   - `OP-HA-05` should be executed only under the following design constraints:
     - preflight must verify both hosts respond to `virsh list --all` within a bounded timeout
     - the injected fault is limited to `virsh destroy <primary-vm>` on the protected source VM
@@ -301,10 +304,10 @@ Completed items:
     - DR failover now tears down secondary `qemu-nbd` export handles before standby activation
     - standby verify no longer false-fails because the verify helper now propagates the observed domain state correctly
     - final state reaches `failed_over / failed_over`
-  - `OP-DR-03` is now complete to the currently implemented scope:
-    - after DR failover, `failback --force` starts reverse sync successfully
-    - final state reaches `failing_back / reverse_syncing`
-    - `.state.blockcopy.reverse` is created as expected
+  - `OP-DR-03` is now complete as full failback on the tested `remote-nbd` DR baseline:
+    - after DR failover, `failback --force` completes reverse sync and cutback
+    - final state returns to `active_side=primary`
+    - final state returns to `protected / mirroring`
   - `OP-ST-01` is now reproducible on the dedicated `glue-gfs-2` filesystem path and currently fails:
     - pacemaker-managed GFS2 interruption is reproduced through cluster resource control
     - the engine currently ends in `standby_activate_failed`

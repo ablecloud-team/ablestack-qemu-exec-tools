@@ -275,11 +275,11 @@ ftctl_cluster_host_list_json() {
 ftctl_cluster_find_record_by_libvirt_uri() {
   local uri="${1-}"
   local out_var="${2}"
-  local record
+  local item
   ftctl_cluster_load
-  for record in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
-    if [[ "${record}" == *"|${uri}|"* ]]; then
-      printf -v "${out_var}" '%s' "${record}"
+  for item in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
+    if [[ "${item}" == *"|${uri}|"* ]]; then
+      printf -v "${out_var}" '%s' "${item}"
       return 0
     fi
   done
@@ -289,11 +289,11 @@ ftctl_cluster_find_record_by_libvirt_uri() {
 ftctl_cluster_find_record_by_host_id() {
   local host_id="${1-}"
   local out_var="${2}"
-  local record
+  local item
   ftctl_cluster_load
-  for record in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
-    if [[ "${record%%|*}" == "${host_id}" ]]; then
-      printf -v "${out_var}" '%s' "${record}"
+  for item in "${FTCTL_CLUSTER_HOST_RECORDS[@]}"; do
+    if [[ "${item%%|*}" == "${host_id}" ]]; then
+      printf -v "${out_var}" '%s' "${item}"
       return 0
     fi
   done
@@ -309,28 +309,28 @@ ftctl_cluster_parse_record() {
   local blockcopy_ip_var="${6}"
   local xcolo_ctrl_var="${7}"
   local xcolo_data_var="${8}"
-  local host_id role mgmt_ip libvirt_uri blockcopy_ip xcolo_ctrl xcolo_data
+  local rec_host_id rec_role rec_mgmt_ip rec_libvirt_uri rec_blockcopy_ip rec_xcolo_ctrl rec_xcolo_data
 
-  host_id="${record%%|*}"
+  rec_host_id="${record%%|*}"
   record="${record#*|}"
-  role="${record%%|*}"
+  rec_role="${record%%|*}"
   record="${record#*|}"
-  mgmt_ip="${record%%|*}"
+  rec_mgmt_ip="${record%%|*}"
   record="${record#*|}"
-  libvirt_uri="${record%%|*}"
+  rec_libvirt_uri="${record%%|*}"
   record="${record#*|}"
-  blockcopy_ip="${record%%|*}"
+  rec_blockcopy_ip="${record%%|*}"
   record="${record#*|}"
-  xcolo_ctrl="${record%%|*}"
-  xcolo_data="${record##*|}"
+  rec_xcolo_ctrl="${record%%|*}"
+  rec_xcolo_data="${record##*|}"
 
-  printf -v "${host_id_var}" '%s' "${host_id}"
-  printf -v "${role_var}" '%s' "${role}"
-  printf -v "${mgmt_ip_var}" '%s' "${mgmt_ip}"
-  printf -v "${libvirt_uri_var}" '%s' "${libvirt_uri}"
-  printf -v "${blockcopy_ip_var}" '%s' "${blockcopy_ip}"
-  printf -v "${xcolo_ctrl_var}" '%s' "${xcolo_ctrl}"
-  printf -v "${xcolo_data_var}" '%s' "${xcolo_data}"
+  printf -v "${host_id_var}" '%s' "${rec_host_id}"
+  printf -v "${role_var}" '%s' "${rec_role}"
+  printf -v "${mgmt_ip_var}" '%s' "${rec_mgmt_ip}"
+  printf -v "${libvirt_uri_var}" '%s' "${rec_libvirt_uri}"
+  printf -v "${blockcopy_ip_var}" '%s' "${rec_blockcopy_ip}"
+  printf -v "${xcolo_ctrl_var}" '%s' "${rec_xcolo_ctrl}"
+  printf -v "${xcolo_data_var}" '%s' "${rec_xcolo_data}"
 }
 
 ftctl_cluster_find_peer_record_for_vm() {

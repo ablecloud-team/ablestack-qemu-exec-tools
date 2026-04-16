@@ -1894,14 +1894,12 @@ Expected Result:
 
 Actual Result:
 - failover completed successfully after the same DR remote-nbd teardown / verify fixes used by `OP-DR-02`
-- failback started reverse sync as designed
+- failback completed full reverse sync and cutback as designed
 - final state reached:
-  - `active_side=secondary`
-  - `protection_state=failing_back`
-  - `transport_state=reverse_syncing`
-  - `last_error=reverse_sync_pending`
-- reverse sync state file was created:
-  - `.state.blockcopy.reverse`
+  - `active_side=primary`
+  - `protection_state=protected`
+  - `transport_state=mirroring`
+  - `last_error=""`
 
 Evidence:
 - `ablestack_vm_ftctl status --vm rocky10-op-dr-03 --json`
@@ -1920,8 +1918,6 @@ If FAIL:
   - `lib/ftctl/verify.sh`
 - Re-test result:
   - pass
-- Remaining gap:
-  full automatic reverse sync completion and primary return are not yet implemented in this test.
 ```
 
 
@@ -2301,4 +2297,7 @@ Status: PASS
 Notes:
 - this validation required product-side `ipmi` fencing provider support
 - this validation also required the `remote-nbd` failover path to support secondary-local execution with `FTCTL_PROFILE_SECONDARY_URI=qemu:///system`
+- a follow-up full failback validation was also completed on a fresh HA `remote-nbd` pair:
+  - after source-host recovery and cooldown, `failback --force` returned the pair to `active_side=primary`
+  - final state returned to `protected / mirroring`
 ```

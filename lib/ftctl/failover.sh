@@ -94,9 +94,70 @@ ftctl_failover_request() {
   esac
 }
 
+ftctl_failback_reprotect_from_primary() {
+  local vm="${1-}"
+  local mode="${2-}"
+  local host="" user="" out="" err="" rc=0 remote_cmd="" remote_blockcopy=""
+
+  if [[ "${FTCTL_PROFILE_PRIMARY_URI}" == "qemu:///system" ]]; then
+    ftctl_blockcopy_plan_protect "${vm}" || return 1
+    ftctl_blockcopy_wait_forward_sync_ready "${vm}" "120" || return 1
+    return 0
+  fi
+
+  ftctl_blockcopy_primary_target_host_user host user || return 1
+  remote_cmd="$(cat <<EOF
+set -euo pipefail
+ablestack_vm_ftctl protect --vm ${vm@Q} --mode ${mode@Q}
+for _i in \$(seq 1 60); do
+  ablestack_vm_ftctl reconcile --vm ${vm@Q} >/dev/null 2>&1 || true
+  status_json="\$(ablestack_vm_ftctl status --vm ${vm@Q} --json 2>/dev/null || true)"
+  if [[ "\${status_json}" == *'"protection_state":"protected"'* && "\${status_json}" == *'"transport_state":"mirroring"'* && "\${status_json}" == *'"active_side":"primary"'* ]]; then
+    exit 0
+  fi
+  sleep 2
+done
+echo "primary_reprotect_timeout:${vm}" >&2
+exit 99
+EOF
+)"
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "${remote_cmd}" || true
+  : "${out}${err}"
+  [[ "${rc}" == "0" ]] || {
+    [[ -n "${err}" ]] && echo "ERROR: primary reprotect failed: ${err}" >&2
+    return 1
+  }
+
+  out=""
+  err=""
+  rc=0
+  ftctl_blockcopy_remote_exec "${host}" "${user}" out err rc "cat /run/ablestack-vm-ftctl/state/$(ftctl_state_vm_key "${vm}").state.blockcopy" || true
+  : "${out}${err}"
+  [[ "${rc}" == "0" && -n "${out}" ]] || {
+    [[ -n "${err}" ]] && echo "ERROR: failed to fetch primary blockcopy state: ${err}" >&2
+    return 1
+  }
+  remote_blockcopy="$(ftctl_blockcopy_state_path "${vm}")"
+  printf '%s\n' "${out}" > "${remote_blockcopy}"
+  chmod 0644 "${remote_blockcopy}" 2>/dev/null || true
+
+  ftctl_state_set "${vm}" \
+    "active_side=primary" \
+    "protection_state=protected" \
+    "transport_state=mirroring" \
+    "fencing_state=clear" \
+    "standby_state=prepared-transient" \
+    "last_sync_ts=$(ftctl_now_iso8601)" \
+    "last_error="
+}
+
 ftctl_failback_request() {
   local vm="${1-}"
   local reason="${2-manual}"
+  local mode="${FTCTL_PROFILE_MODE:-ha}"
   if ! ftctl_verify_failback_ready "${vm}"; then
     ftctl_state_set "${vm}" \
       "protection_state=error" \
@@ -111,6 +172,59 @@ ftctl_failback_request() {
       "reason=${reason} reverse_sync=failed"
     return 1
   fi
+  if ! ftctl_blockcopy_wait_reverse_sync_ready "${vm}" "120"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "transport_state=reverse_sync_failed" \
+      "last_error=reverse_sync_timeout"
+    ftctl_log_event "failback" "failback.request" "fail" "${vm}" "" \
+      "reason=${reason} reverse_sync=timeout"
+    return 1
+  fi
+
+  ftctl_state_set "${vm}" \
+    "protection_state=failing_back" \
+    "transport_state=cutback_switching" \
+    "last_error="
+
+  if [[ "${FTCTL_PROFILE_BACKEND_MODE}" == "remote-nbd" ]]; then
+    ftctl_blockcopy_stop_primary_reverse_nbd_exports "${vm}" || true
+    sleep 2
+  fi
+
+  if ! ftctl_standby_deactivate "${vm}"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "last_error=cutback_secondary_stop_failed"
+    ftctl_log_event "failback" "failback.cutback" "fail" "${vm}" "" \
+      "reason=${reason} secondary=stop_failed"
+    return 1
+  fi
+  if ! ftctl_primary_activate_from_backup "${vm}"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "last_error=cutback_primary_activate_failed"
+    ftctl_log_event "failback" "failback.cutback" "fail" "${vm}" "" \
+      "reason=${reason} primary=activate_failed"
+    return 1
+  fi
+
+  ftctl_state_set "${vm}" \
+    "active_side=primary" \
+    "fencing_state=clear" \
+    "protection_state=pairing" \
+    "transport_state=initializing" \
+    "standby_state="
+
+  if ! ftctl_failback_reprotect_from_primary "${vm}" "${mode}"; then
+    ftctl_state_set "${vm}" \
+      "protection_state=error" \
+      "last_error=cutback_reprotect_failed"
+    ftctl_log_event "failback" "failback.cutback" "fail" "${vm}" "" \
+      "reason=${reason} reprotect=failed"
+    return 1
+  fi
+
   ftctl_log_event "failback" "failback.request" "ok" "${vm}" "" \
-    "reason=${reason} reverse_sync=started"
+    "reason=${reason} reverse_sync=completed cutback=done"
 }

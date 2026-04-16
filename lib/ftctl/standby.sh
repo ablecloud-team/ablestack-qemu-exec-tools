@@ -504,3 +504,86 @@ ftctl_standby_activate() {
   ftctl_log_event "standby" "standby.activate" "ok" "${vm}" "" \
     "secondary_uri=${FTCTL_PROFILE_SECONDARY_URI}"
 }
+
+ftctl_standby_deactivate() {
+  local vm="${1-}"
+  local secondary_vm_name out err rc
+
+  secondary_vm_name="$(ftctl_state_get "${vm}" "secondary_vm_name" 2>/dev/null || ftctl_profile_secondary_vm_name_resolved "${vm}")"
+
+  if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
+    ftctl_state_set "${vm}" "standby_state=stopped-dry-run"
+    ftctl_log_event "standby" "standby.deactivate" "skip" "${vm}" "" \
+      "reason=dry_run secondary_uri=${FTCTL_PROFILE_SECONDARY_URI}"
+    return 0
+  fi
+
+  out=""
+  err=""
+  rc=0
+  ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_SECONDARY_URI}" destroy "${secondary_vm_name}" || true
+  : "${out}${err}"
+  if [[ "${rc}" != "0" ]]; then
+    case "${err}" in
+      *"failed to get domain"*|*"domain is not running"*|*"Domain not found"*)
+        rc=0
+        ;;
+    esac
+  fi
+  if [[ "${rc}" != "0" ]]; then
+    ftctl_log_event "standby" "standby.deactivate" "fail" "${vm}" "${rc}" \
+      "secondary_uri=${FTCTL_PROFILE_SECONDARY_URI}"
+    return "${rc}"
+  fi
+
+  ftctl_state_set "${vm}" "standby_state=stopped"
+  ftctl_log_event "standby" "standby.deactivate" "ok" "${vm}" "" \
+    "secondary_uri=${FTCTL_PROFILE_SECONDARY_URI}"
+}
+
+ftctl_primary_activate_from_backup() {
+  local vm="${1-}"
+  local primary_xml persistence out err rc
+
+  primary_xml="$(ftctl_state_get "${vm}" "primary_xml_backup" 2>/dev/null || true)"
+  [[ -n "${primary_xml}" && -f "${primary_xml}" ]] || {
+    echo "ERROR: primary_xml_backup not found for ${vm}" >&2
+    return 2
+  }
+
+  persistence="$(ftctl_state_get "${vm}" "primary_persistence" 2>/dev/null || echo "unknown")"
+
+  if [[ "${FTCTL_DRY_RUN}" == "1" ]]; then
+    ftctl_log_event "primary" "primary.activate" "skip" "${vm}" "" \
+      "reason=dry_run primary_uri=${FTCTL_PROFILE_PRIMARY_URI}"
+    return 0
+  fi
+
+  out=""
+  err=""
+  rc=0
+  if [[ "${persistence}" == "yes" ]]; then
+    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" define "${primary_xml}" || true
+    : "${out}${err}"
+    if [[ "${rc}" != "0" ]]; then
+      ftctl_log_event "primary" "primary.define" "fail" "${vm}" "${rc}" \
+        "primary_uri=${FTCTL_PROFILE_PRIMARY_URI}"
+      return "${rc}"
+    fi
+    out=""
+    err=""
+    rc=0
+    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" start "${vm}" || true
+  else
+    ftctl_virsh "${FTCTL_BLOCKCOPY_WAIT_TIMEOUT_SEC}" out err rc -- -c "${FTCTL_PROFILE_PRIMARY_URI}" create "${primary_xml}" || true
+  fi
+  : "${out}${err}"
+  if [[ "${rc}" != "0" ]]; then
+    ftctl_log_event "primary" "primary.activate" "fail" "${vm}" "${rc}" \
+      "primary_uri=${FTCTL_PROFILE_PRIMARY_URI}"
+    return "${rc}"
+  fi
+
+  ftctl_log_event "primary" "primary.activate" "ok" "${vm}" "" \
+    "primary_uri=${FTCTL_PROFILE_PRIMARY_URI}"
+}
