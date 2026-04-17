@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ABLESTACK VM FT Controller Reconcile periodically
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5s
+Unit=ablestack-vm-ftctl.service
+
+[Install]
+WantedBy=timers.target

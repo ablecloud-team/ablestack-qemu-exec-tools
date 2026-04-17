@@ -1,0 +1,10 @@
+[Unit]
+Description=ABLESTACK VM FT Controller Reconcile
+After=network.target libvirtd.service
+Wants=libvirtd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ablestack_vm_ftctl reconcile
+User=root
+Group=root

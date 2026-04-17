@@ -10,71 +10,76 @@ permissions:
   contents: write
 
 # NOTE (WinPE ISO)
-# - WinPE ISO images are built and managed by dedicated WinPE workflows.
-# - This workflow only packages a prebuilt WinPE ISO when one is already available.
-# - If no WinPE ISO is available, the rest of the release still proceeds.
-
+# - WinPE ISO artifacts are produced by the dedicated WinPE release workflows.
+# - This workflow optionally downloads the released WinPE ISO and bundles it into the final release artifacts.
+# - If the WinPE ISO is unavailable, packaging continues without it.
+# - If the WinPE ISO is not available, packaging continues without it.
 jobs:
-  # ======================================================================
-  # 1) RPM BUILD (Rocky 9 and 10)
+  # 1) RPM BUILD (Rocky 9.6)
+  # 1) RPM BUILD (Rocky 9.6)
   # ======================================================================
   build-rpm:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os_version: [9, 10]
     container:
-      image: rockylinux/rockylinux:${{ matrix.os_version }}
+      image: rockylinux/rockylinux:9
       options: --user 0
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install build deps
+      - name: Install build deps (Rocky 9.6 vault)
         run: |
-          set -e
-          # Keep RPM/OpenSSL packages aligned with the container base image.
-          dnf -y distro-sync
+          set -euo pipefail
+          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
+          [rocky-vault-9.6-baseos]
+          name=Rocky Linux 9.6 - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
 
-          # Install build requirements.
-          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c
+          [rocky-vault-9.6-appstream]
+          name=Rocky Linux 9.6 - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-crb]
+          name=Rocky Linux 9.6 - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
+
+          dnf clean all
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install make rpm-build tar git dnf-plugins-core createrepo_c
 
       - name: Build RPM
         run: make rpm
 
-      - name: Create RPM repo (with dependencies) for Rocky ${{ matrix.os_version }}
+      - name: Create RPM repo (with dependencies) for Rocky 9.6
         run: |
-          set -e
-          WORKDIR="repo/rpm-rocky${{ matrix.os_version }}"
+          set -euo pipefail
+          WORKDIR="repo/rpm-rocky9.6"
           mkdir -p "$WORKDIR"
-
-          # Copy the built RPM artifacts.
           cp rpmbuild/RPMS/*/*.rpm "$WORKDIR"/
 
           echo "[INFO] Downloading runtime dependencies..."
-          # Download runtime dependencies declared by the package.
-          dnf download --resolve --alldeps \
+          dnf --disablerepo="*" --enablerepo="rocky-vault-9.6-*" download --resolve --alldeps \
             --destdir="$WORKDIR" \
             bash jq libvirt-client cloud-init || true
 
           echo "[INFO] Creating repo metadata..."
           createrepo_c "$WORKDIR"
 
-          # Arrange the artifact directory.
           mkdir -p release/rpm
           mv repo release/rpm/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpm-package-${{ matrix.os_version }}
+          name: rpm-package-9.6
           path: release/rpm/**
-
-  # ======================================================================
-  # 1-A) HANGCTL RPM BUILD (Rocky 9 only)
-  #  - : Rocky9 ABLESTACK Host?????spec(%pre ??
-  #  - build.yml???"/ /"?? (?? spec? )
-  # ======================================================================
   build-hangctl-rpm:
     runs-on: ubuntu-latest
     container:
@@ -85,11 +90,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install build deps (hangctl)
+      - name: Install build deps (hangctl, Rocky 9.6 vault)
         run: |
-          set -e
-          dnf -y distro-sync
-          dnf -y install make rpm-build tar git dnf-plugins-core createrepo_c systemd-rpm-macros systemd
+          set -euo pipefail
+          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
+          [rocky-vault-9.6-baseos]
+          name=Rocky Linux 9.6 - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-appstream]
+          name=Rocky Linux 9.6 - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-crb]
+          name=Rocky Linux 9.6 - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
+          dnf clean all
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install make rpm-build tar git dnf-plugins-core createrepo_c systemd-rpm-macros systemd
 
       - name: Build HANGCTL RPM (ablestack_vm_hangctl.spec)
         shell: bash
@@ -98,8 +123,7 @@ jobs:
 
           SPEC="rpm/ablestack_vm_hangctl.spec"
           test -f "${SPEC}" || (echo "[ERR] Missing spec: ${SPEC}" >&2; exit 2)
-
-          # VERSION / RELEASE?repo ??VERSION ?? ????
+          # Read VERSION / RELEASE from the repository VERSION file
           VERSION="$(. ./VERSION; printf "%s" "$VERSION" | tr -d '\r\n[:space:]')"
           RELEASE="$(. ./VERSION; printf "%s" "$RELEASE" | tr -d '\r\n[:space:]')"
           GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
@@ -107,9 +131,8 @@ jobs:
           echo "[INFO] VERSION=${VERSION} RELEASE=${RELEASE} GIT_HASH=${GIT_HASH}"
 
           mkdir -p rpmbuild_hangctl/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-
-          # tarball ???spec??Source0 ??????          #  ?? ?? 'spec ? basename'??prefix??
-          # (??ablestack_vm_hangctl-<version>.tar.gz)
+          # Pack sources to a tarball matching the spec Source0 name
+          # Pack sources to a tarball that matches the spec Source0 name
           NAME_HANGCTL="ablestack_vm_hangctl"
           TMP_TGZ="$(mktemp /tmp/${NAME_HANGCTL}-${VERSION}.tar.gz.XXXXXX)"
           tar czf "${TMP_TGZ}" \
@@ -139,14 +162,13 @@ jobs:
           echo "[INFO] Built RPM(s):"
           ls -lah build/rpm-hangctl || true
 
-      - name: Create HANGCTL RPM repo (Rocky 9)
+      - name: Create HANGCTL RPM repo (Rocky 9.6)
         shell: bash
         run: |
           set -euo pipefail
-          WORKDIR="repo/hangctl-rpm-rocky9"
+          WORKDIR="repo/hangctl-rpm-rocky9.6"
           mkdir -p "$WORKDIR"
-
-          # hangctl RPM 
+          # Copy built hangctl RPMs into the local repository
           cp -v build/rpm-hangctl/*.rpm "$WORKDIR"/
 
           echo "[INFO] Creating repo metadata..."
@@ -159,9 +181,74 @@ jobs:
         with:
           name: hangctl-rpm-package
           path: release/hangctl-rpm/**
-          
+
   # ======================================================================
-  # 1-B) V2K RPM BUILD ( ,   ?? ? ?)
+  # 1-B) FTCTL RPM BUILD (Rocky 9.6)
+  # ======================================================================
+  build-ftctl-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux/rockylinux:9
+      options: --user 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps (ftctl, Rocky 9.6 vault)
+        run: |
+          set -euo pipefail
+          cat > /etc/yum.repos.d/rocky-vault-9.6.repo <<'EOF'
+          [rocky-vault-9.6-baseos]
+          name=Rocky Linux 9.6 - BaseOS (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-appstream]
+          name=Rocky Linux 9.6 - AppStream (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [rocky-vault-9.6-crb]
+          name=Rocky Linux 9.6 - CRB (vault)
+          baseurl=https://dl.rockylinux.org/vault/rocky/9.6/CRB/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
+          dnf clean all
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="rocky-vault-9.6-*" install make rpm-build tar git dnf-plugins-core createrepo_c systemd-rpm-macros systemd
+
+      - name: Build FTCTL RPM (ablestack_vm_ftctl.spec)
+        shell: bash
+        run: |
+          set -euo pipefail
+          make ftctl-rpm
+
+      - name: Create FTCTL RPM repo (Rocky 9.6)
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="repo/ftctl-rpm-rocky9.6"
+          mkdir -p "$WORKDIR"
+          cp -v build/rpm-ftctl/*.rpm "$WORKDIR"/
+          dnf --disablerepo="*" --enablerepo="rocky-vault-9.6-*" download --resolve --alldeps \
+            --destdir="$WORKDIR" \
+            bash jq libvirt-client openssh-clients python3 qemu-img firewalld nmap-ncat socat util-linux || true
+          createrepo_c "$WORKDIR"
+          mkdir -p release/ftctl-rpm
+          mv repo release/ftctl-rpm/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ftctl-rpm-package
+          path: release/ftctl-rpm/**
+
+          
+  # 1-C) V2K RPM BUILD (isolated from other RPM build paths)
+  # 1-C) V2K RPM BUILD (isolated path to avoid overlap with other RPM jobs)
   # ======================================================================
   build-v2k-rpm:
     runs-on: ubuntu-latest
@@ -191,11 +278,8 @@ jobs:
             exit 2
           fi
 
-          # ======================================================================
-          # Rocky 9.x build repos
-          # - 9.6 uses vault because it is an older point release.
-          # - 9.7 uses the normal pub tree because it is the active release.
-          # ======================================================================
+          # Keep V2K build inputs pinned to the intended Rocky minor.
+          # 9.6 uses vault; 9.7 uses the normal public tree.
           cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
           [${REPO_PREFIX}-baseos]
           name=Rocky Linux ${ROCKY_MINOR} - BaseOS
@@ -218,16 +302,14 @@ jobs:
 
           dnf clean all
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" makecache
-
-          # curl  ?: curl-minimal vs curl
-          # - ? ? curl-minimal?? , ? ??allowerasing? 
+          # Handle curl vs curl-minimal replacement in the Rocky container image
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install \
             --allowerasing ca-certificates curl-minimal || true
 
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install \
             make rpm-build tar git dnf-plugins-core createrepo_c
 
-      - name: Configure Rocky ${{ matrix.host_os_minor }} vault repos + enable EPEL (build-time only)
+      - name: Configure Rocky ${{ matrix.host_os_minor }} build repos + enable EPEL (build-time only)
         run: |
           set -euo pipefail
 
@@ -241,9 +323,6 @@ jobs:
             echo "[ERR] Unsupported Rocky minor for V2K build: ${ROCKY_MINOR}" >&2
             exit 2
           fi
-
-          # Use explicit baseurl repos so dependency resolution stays pinned to the
-          # intended Rocky minor even when the default rocky.repo changes upstream.
 
           cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
           [${REPO_PREFIX}-baseos]
@@ -268,19 +347,18 @@ jobs:
           echo "[INFO] Enabled repos (${ROCKY_MINOR}):"
           grep -nE '^\[|^baseurl=' "/etc/yum.repos.d/${REPO_PREFIX}.repo"
 
-          # vault repo? ?
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" makecache
-
-          # EPEL??build-time only (nbd ? ) ??? ?
-          # vault repo  ? ??epel-release ??'dnf install'? ???(No match).
-          #     ??EPEL bootstrap rpm??URL?? ??.
-          #     (/???????,  rpm??ISO???)
+          # Enable EPEL only for build-time dependencies such as nbd-related packages
+          # Install epel-release directly because it may not resolve from vault-only repos.
+          # Detect the active EPEL repo id after installation.
+          # Use that detected repo id for later repoquery/download steps.
+          # Use the detected repo id for later repoquery and download steps.
           EPEL_RPM_URL="https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
           echo "[INFO] Installing EPEL release RPM: ${EPEL_RPM_URL}"
           curl -fL -o /tmp/epel-release.rpm "${EPEL_RPM_URL}"
           rpm -Uvh --nosignature /tmp/epel-release.rpm
 
-          # EPEL repo id ? ?(epel/epel-9/epel-next ?  )
+          # Detect the effective EPEL repository id after epel-release installation
           EPEL_REPO_ID="$(dnf repolist all 2>/dev/null | awk 'tolower($1) ~ /^epel/ {print $1; exit}')"
           if [[ -z "${EPEL_REPO_ID}" ]]; then
             echo "[ERR] EPEL repo id not found after installing epel-release." >&2
@@ -290,13 +368,12 @@ jobs:
           echo "[INFO] Detected EPEL repo id: ${EPEL_REPO_ID}"
           echo "EPEL_REPO_ID=${EPEL_REPO_ID}" >> "$GITHUB_ENV"
 
-          # vault + epel  ?(???repo?
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*","${EPEL_REPO_ID}" makecache
 
       - name: Build V2K RPM (separate path)
         run: |
           set -e
-          # NOTE:  make rpm ?? V2K ?????? ??          #       (??make v2k-rpm)
+          # Build V2K RPM in an isolated path to avoid overlap with other packaging jobs
           make v2k-rpm
  
       - name: Verify ablestack_v2k rpm contains bash completion
@@ -316,7 +393,7 @@ jobs:
           WORKDIR="release/v2k/v2k-rpm-rocky${ROCKY_MINOR}"
           mkdir -p "$WORKDIR"
 
-          # Collect V2K RPM outputs while avoiding files already inside WORKDIR.
+          # Collect the V2K RPM output into the final offline release directory.
           find . -type f -name "*.rpm" \
             ! -path "./${WORKDIR}/*" \
             \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack_v2k*.rpm" \) \
@@ -388,7 +465,6 @@ jobs:
             | xargs -r -n 200 dnf -q "${DNF_COMMON_OPTS[@]}" repoquery --available --qf '%{name}' \
             | sort -u > "${TMP_PREFIX}-to-download-avail.txt"
 
-          # Drop language pack expansions from the final download set.
           grep -vE '^glibc-all-langpacks$|^glibc-langpack-' "${TMP_PREFIX}-to-download-avail.txt" \
             | sort -u > "${TMP_PREFIX}-to-download.txt"
 
@@ -402,14 +478,12 @@ jobs:
           echo "[INFO] Final to-download sample (first 50):"
           head -n 50 "${TMP_PREFIX}-to-download.txt" || true
 
-          # Safety check: key packages must exist either in the baseline or in the download list.
           for p in nbd nbdkit qemu-img; do
             if ! grep -qx "$p" "${TMP_PREFIX}-to-download.txt" && ! grep -qx "$p" "${TMP_PREFIX}-baseline.txt"; then
               echo "[ERR] Required package '$p' is neither in baseline nor in final download list." >&2
               exit 2
             fi
           done
-
           if [[ -s "${TMP_PREFIX}-to-download.txt" ]]; then
             xargs -r dnf "${DNF_COMMON_OPTS[@]}" download --destdir="$WORKDIR" < "${TMP_PREFIX}-to-download.txt"
           else
@@ -454,16 +528,13 @@ jobs:
           set -e
           sudo apt-get update -y
 
-          # ISO??  APT  ? 
           mkdir -p repo/pool
           find build/deb -type f -name "*.deb" -exec cp {} repo/pool/ \;
 
           cd repo/pool
 
           echo "[INFO] Starting dependency collection..."
-          # ?????? ? 
           seen_pkgs=""
-          # ?.deb???? ? 
           new_pkgs=1
           while [ "$new_pkgs" -eq 1 ]; do
             new_pkgs=0
@@ -475,7 +546,6 @@ jobs:
               fi
               seen_pkgs="$seen_pkgs $P"
 
-              # Depends ?:  , / ?, ?|?? ?? :any ?
               DEPS=$(dpkg-deb -f "$deb" Depends | \
                      tr ',' '\n'          | \
                      sed -E 's/\(.*\)//g' | \
@@ -488,7 +558,7 @@ jobs:
 
               for dep in $DEPS; do
                 [ -n "$dep" ] || continue
-                # ?? pool??? ? ???? ?
+                # Download the dependency only if it is not already present in repo/pool
                 if ls -1 ${dep}_*.deb >/dev/null 2>&1; then
                   continue
                 fi
@@ -505,11 +575,11 @@ jobs:
           echo "[INFO] Total pool count: $(ls -1 *.deb | wc -l)"
 
           cd ../..
-          # ???? (repo ? ?? Filename  pool/ ?)
+          # Generate repository metadata using repo/pool as the package source
           mkdir -p repo/dists/stable/main/binary-amd64
           ( cd repo && dpkg-scanpackages pool /dev/null | gzip -9c > dists/stable/main/binary-amd64/Packages.gz )
 
-          # ??????
+          # Build the final DEB repository structure
           mv repo "deb-ubuntu${{ matrix.os_version }}"
           mkdir -p release/deb
           mv deb-ubuntu${{ matrix.os_version }} release/deb/
@@ -544,17 +614,16 @@ jobs:
           path: windows/msi/out/*
 
   # ======================================================================
-  # 4) RELEASE + ISO CREATION (VirtIO ? ?)
+  # 4) RELEASE + ISO CREATION (VirtIO ???? ????
   # ======================================================================
   release:
-    needs: [build-rpm, build-hangctl-rpm, build-deb, build-windows, build-v2k-rpm]
+    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm]
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # workflow_run?   checkout???          # WinPE Release Build ??? ? 
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Resolve tag from workflow_run
@@ -572,7 +641,6 @@ jobs:
           fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
-      # dist/ ??? ?? ?
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -586,8 +654,7 @@ jobs:
           mkdir -p release/winpe
 
           echo "[INFO] Downloading WinPE ISO assets for tag: ${RELEASE_TAG}"
-          # WinPE workflow dist/*.iso ? SHA256SUMS? ????????
-          # ? ?? ? ?????? ?
+          # Download the WinPE ISO artifact from the release when available
           gh release download "${RELEASE_TAG}" \
             -p "*winpe*.iso" \
             -p "SHA256SUMS" \
@@ -608,10 +675,10 @@ jobs:
       - name: Collect artifacts into structured dirs
         run: |
           set -e
-          mkdir -p release/rpm release/deb release/msi release/assets/v2k/wheels release/v2k
+          mkdir -p release/rpm release/deb release/msi release/assets/v2k/wheels release/v2k release/completions release/bin
 
-          echo " Collecting RPM repos..."
-          for ver in 9 10; do
+          echo "[INFO] Collecting RPM repos..."
+          for ver in 9.6; do
             SRC_DIR=$(find dist -type d -path "*/rpm-package-${ver}/release/rpm/repo/rpm-rocky${ver}" | head -n 1)
             if [ -d "$SRC_DIR" ]; then
               echo "[INFO] Found $SRC_DIR"
@@ -629,20 +696,41 @@ jobs:
             fi
           done
 
-          echo " Collecting HANGCTL RPM repo (Rocky 9)..."
+          echo "[INFO] Collecting HANGCTL RPM repo (Rocky 9.6)..."
           HANGCTL_DIR="$(find dist -type d \( \
-                          -path "*/hangctl-rpm-package/release/hangctl-rpm/repo/hangctl-rpm-rocky9" -o \
-                          -path "*/hangctl-rpm-package/repo/hangctl-rpm-rocky9" \
+                          -path "*/hangctl-rpm-package/release/hangctl-rpm/repo/hangctl-rpm-rocky9.6" -o \
+                          -path "*/hangctl-rpm-package/repo/hangctl-rpm-rocky9.6" \
                         \) | head -n 1 || true)"
           if [[ -n "${HANGCTL_DIR}" && -d "${HANGCTL_DIR}" ]]; then
             echo "[INFO] Found ${HANGCTL_DIR}"
-            mkdir -p release/rpm/hangctl-rpm-rocky9
-            cp -r "${HANGCTL_DIR}/." release/rpm/hangctl-rpm-rocky9/
+            mkdir -p release/rpm/hangctl-rpm-rocky9.6
+            cp -r "${HANGCTL_DIR}/." release/rpm/hangctl-rpm-rocky9.6/
           else
             echo "[WARN] No HANGCTL RPM repo found (hangctl-rpm-package)."
           fi
 
-          echo " Collecting DEB repos..."
+          echo "[INFO] Collecting FTCTL RPM repo (Rocky 9.6)..."
+          FTCTL_DIR="$(find dist -type d \( \
+                          -path "*/ftctl-rpm-package/release/ftctl-rpm/repo/ftctl-rpm-rocky9.6" -o \
+                          -path "*/ftctl-rpm-package/repo/ftctl-rpm-rocky9.6" \
+                        \) | head -n 1 || true)"
+          if [[ -n "${FTCTL_DIR}" && -d "${FTCTL_DIR}" ]]; then
+            echo "[INFO] Found ${FTCTL_DIR}"
+            mkdir -p release/rpm/ftctl-rpm-rocky9.6
+            cp -r "${FTCTL_DIR}/." release/rpm/ftctl-rpm-rocky9.6/
+          else
+            echo "[WARN] No FTCTL RPM repo found (ftctl-rpm-package)."
+          fi
+
+          echo "[INFO] Staging bash completion files..."
+          if [[ -f completions/ablestack_v2k ]]; then
+            cp -f completions/ablestack_v2k release/completions/
+          fi
+          if [[ -f completions/ablestack_vm_ftctl ]]; then
+            cp -f completions/ablestack_vm_ftctl release/completions/
+          fi
+
+          echo "[INFO] Collecting DEB repos..."
           for ver in 22.04 24.04; do
             SRC_DIR=$(find dist -type d \( \
                         -path "*/deb-package-${ver}/release/deb/deb-ubuntu${ver}" -o \
@@ -657,8 +745,13 @@ jobs:
             fi
           done
 
-          echo " Collecting MSI artifacts..."
+          echo "[INFO] Collecting MSI artifacts..."
           find dist -type f -path "*/msi-package/*" -exec cp {} release/msi/ \;
+
+          echo "[INFO] Staging helper scripts..."
+          if [[ -f bin/v2k_test_install.sh ]]; then
+            cp -f bin/v2k_test_install.sh release/bin/
+          fi
 
       - name: Collect V2K RPM repos into ISO tree
         shell: bash
@@ -678,7 +771,7 @@ jobs:
             cp -a "${SRC_DIR}/." "release/v2k/v2k-rpm-rocky${ver}/"
           done
 
-      - name: Stage V2K assets from repo ./assets into ISO
+      - name: Stage V2K assets from repo ./assets into ISO (govc, VDDK)
         shell: bash
         run: |
           set -euo pipefail
@@ -688,14 +781,18 @@ jobs:
           if [[ -d assets/compat ]]; then
             cp -a assets/compat/. release/assets/compat/
           fi
-          if [[ -d assets/v2k/wheels ]]; then
-            cp -a assets/v2k/wheels release/assets/v2k/
-          fi
           if [[ -d share/ablestack/v2k/compat ]]; then
             cp -a share/ablestack/v2k/compat release/share/ablestack/v2k/
           fi
 
-      # Download the stable VirtIO Windows ISO and extract amd64 drivers plus guest tools.
+      - name: Prepare pyvmomi offline wheels (Air-Gap)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip download -d release/assets/v2k/wheels "pyvmomi==8.0.3.0.1"
+
+      # VirtIO Windows payload (amd64 drivers and guest tools)
+      # Extract only the payloads required by the Windows installer and WinPE flow.
       - name: Download & extract VirtIO (amd64-only + guest tools)
         run: |
           set -e
@@ -703,7 +800,7 @@ jobs:
           curl -fL -o dist/virtio-win.iso \
             "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 
-          # Extract amd64 driver trees for DISM and WinPE-based injection.
+          # Extract amd64 driver payloads used by DISM/WinPE
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso \
             "viostor/*/amd64/*" \
             "vioscsi/*/amd64/*" \
@@ -715,11 +812,11 @@ jobs:
             "vioinput/*/amd64/*" \
             "vioser/*/amd64/*" || true
 
-          # Extract guest tools packages such as qemu-ga installers.
+          # Extract guest tools installers (exe/msi)
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-guest-tools.exe" || true
           7z x -y -o"dist/virtio-src" dist/virtio-win.iso "virtio-win-gt-*.msi" || true
 
-          # Copy extracted assets into the release tree.
+          # Stage extracted driver trees into release/virtio
           for d in viostor vioscsi NetKVM Balloon qemupciserial viorng pvpanic vioinput vioser; do
             if [[ -d "dist/virtio-src/${d}" ]]; then
               mkdir -p "release/virtio/${d}"
@@ -729,7 +826,6 @@ jobs:
           if [[ -f "dist/virtio-src/virtio-win-guest-tools.exe" ]]; then
             cp -a "dist/virtio-src/virtio-win-guest-tools.exe" "release/virtio/"
           fi
-          # MSI??? ? ??glob 
           shopt -s nullglob
           for m in dist/virtio-src/virtio-win-gt-*.msi; do
             cp -a "$m" "release/virtio/"
@@ -747,9 +843,8 @@ jobs:
           set -euo pipefail
           mkdir -p release/winpe
 
-          # ??
-          #  1)  ??? ??(dist) ? winpe*.iso
-          #  2) ???  ?(assets/winpe/*.iso ? winpe/*.iso)
+          # Search for an existing WinPE ISO in artifacts, assets, or local winpe paths
+          # If not found, continue without bundling WinPE into the final ISO set.
           WINPE_ISO=""
           WINPE_ISO="$(find dist -type f -iname '*.iso' -iname '*winpe*' 2>/dev/null | head -n 1 || true)"
           if [[ -z "$WINPE_ISO" ]]; then
@@ -772,7 +867,7 @@ jobs:
             echo "         * winpe/*.iso"
           fi
 
-      # Windows ? ? ? (: install.ps1/install.bat)
+      # Windows installer script generation (install.ps1 / install.bat)
       - name: Create Windows installer scripts
         shell: bash
         run: |
@@ -831,24 +926,22 @@ jobs:
                   [string]$Message = "ABLESTACK tools installation is complete. The system needs to reboot.",
                   [string]$Title   = "ABLESTACK",
                   [int]   $Options = 0x0,     # 0x0: OK only / 0x4: Yes/No ??
-                  [int]   $TimeoutSeconds = 60  # ???? ? ??? (?
+                  [int]   $TimeoutSeconds = 60
               )
 
               $shell = New-Object -ComObject WScript.Shell
 
-              # ?? ?????? ?
-              # ?
-              #   -1 : ? ??              #    1 : OK
-              #    6 : Yes (0x4 ??)              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
+              # Popup return values:
+              #   -1 = timeout
+              #    1 = OK
+              $result = $shell.Popup($Message, $TimeoutSeconds, $Title, $Options)
 
               if ($result -eq -1 -or $result -eq 1 -or $result -eq 6) {
                   Write-Host "Prompt_Reboot: user accepted or no response within timeout. Rebooting..."
-                  # ??  ????(? ???
+                  # Force reboot after user confirmation or timeout.
                   Restart-Computer -Force
-                  # MSI CustomAction???????? ? ?? ??? ?
-                  #   msiexec /i ... /norestart + REBOOT=ReallySuppress
-                  # ?????????  ?? ?  ? ?
-                  # ????Restart-Computer ?????              }
+                  # MSI installs use /norestart and REBOOT=ReallySuppress; reboot is handled here.
+              }
               else {
                   Write-Host "Prompt_Reboot: user canceled reboot (result = $result)."
               }
@@ -931,7 +1024,7 @@ jobs:
             # Completion message
             if ($global:rebootNeeded) {
               Prompt_Reboot "ABLESTACK tools installation completed. Reboot now?" "ABLESTACK" 0x0 30
-              #  ??30  ?? ??            } else {
+            } else {
               Show-Info "Installation completed successfully. No reboot is required."
             }
           }
@@ -954,7 +1047,7 @@ jobs:
             exit /b 1
           )
           
-          REM --- ? ? ---
+          REM --- Installation marker ---
           mkdir "C:\ProgramData\AbleStack" 2>nul
           echo ok> "C:\ProgramData\AbleStack\autoinstall.done"
           echo [OK] Installation finished.
@@ -968,8 +1061,8 @@ jobs:
           ==================================================
           Contents
             - RPM repos:
-                rpm/rpm-rocky9
-                rpm/rpm-rocky10
+                rpm/rpm-rocky9.6
+                rpm/ftctl-rpm-rocky9.6
             - DEB repos:
                 deb/deb-ubuntu22.04
                 deb/deb-ubuntu24.04
@@ -978,8 +1071,14 @@ jobs:
                 virtio/ (VirtIO Windows drivers + Guest Tools from stable-virtio)
             - Universal installer:
                 install-linux.sh
+                uninstall-linux.sh
+            - Shell completions:
+                completions/ablestack_v2k
+                completions/ablestack_vm_ftctl
             - Windows installers:
                 install.bat / install.ps1
+            - FTCTL (ABLESTACK Host add-on):
+                rpm/ftctl-rpm-rocky9.6
             - V2K (ABLESTACK Host add-on):
                 v2k/v2k-rpm-rocky9.6 (offline RPM repo for ablestack_v2k)
                 v2k/v2k-rpm-rocky9.7 (offline RPM repo for ablestack_v2k)
@@ -998,6 +1097,7 @@ jobs:
           Linux
             1) mount -o loop ablestack-qemu-exec-tools-<VERSION>.iso /mnt
             2) cd /mnt && sudo ./install-linux.sh
+            3) remove with sudo ./uninstall-linux.sh
           EOF
 
       - name: Create install-linux.sh (V2K add-on for ABLESTACK; keep existing flows)
@@ -1033,7 +1133,17 @@ jobs:
               rocky|rhel|centos|almalinux|fedora)
                   echo "[INFO] Detected RPM-based system ($DISTRO $MAJOR_VERSION)"
                   REPO_FILE=/etc/yum.repos.d/ablestack-qemu-exec-tools.repo
-                  REPO_PATH=$(realpath "$ISO_MNT/rpm/rpm-rocky$MAJOR_VERSION")
+                  REPO_PATH=""
+                  for cand in "$ISO_MNT/rpm/rpm-rocky${VERSION_ID}" "$ISO_MNT/rpm/rpm-rocky${MAJOR_VERSION}" "$ISO_MNT/rpm/rpm-rocky9.6"; do
+                      if [[ -d "${cand}" ]]; then
+                          REPO_PATH="$(realpath "${cand}")"
+                          break
+                      fi
+                  done
+                  if [[ -z "${REPO_PATH}" ]]; then
+                      echo "[ERROR] RPM repo not found in ISO for ${DISTRO} ${VERSION_ID}"
+                      exit 1
+                  fi
                   sudo tee "$REPO_FILE" >/dev/null <<EOR
           [ablestack-qemu-exec-tools]
           name=ablestack-qemu-exec-tools
@@ -1047,14 +1157,20 @@ jobs:
                   sudo dnf clean all
 
                   # ======================================================================
-                  # HANGCTL add-on (ABLESTACK Host only, Rocky 9 only)
+                  # HANGCTL add-on (ABLESTACK Host only, Rocky 9.6 preferred)
                   #  - Install ablestack_vm_hangctl from ISO local repo
                   #  - If not ABLESTACK host / not Rocky9 -> skip
                   # ======================================================================
                   if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${MAJOR_VERSION:-}" == "9" ]]; then
                       echo "[INFO] ABLESTACK Host on Rocky 9 detected. Installing HANGCTL add-on..."
 
-                      HANGCTL_REPO_DIR="${ISO_MNT}/rpm/hangctl-rpm-rocky9"
+                      HANGCTL_REPO_DIR=""
+                      for cand in "${ISO_MNT}/rpm/hangctl-rpm-rocky${VERSION_ID}" "${ISO_MNT}/rpm/hangctl-rpm-rocky${MAJOR_VERSION}" "${ISO_MNT}/rpm/hangctl-rpm-rocky9.6"; do
+                          if [[ -d "${cand}" ]]; then
+                              HANGCTL_REPO_DIR="${cand}"
+                              break
+                          fi
+                      done
                       if [[ -d "${HANGCTL_REPO_DIR}" ]]; then
                           HANGCTL_REPO_FILE=/etc/yum.repos.d/ablestack-vm-hangctl.repo
                           sudo tee "${HANGCTL_REPO_FILE}" >/dev/null <<-EOH
@@ -1077,6 +1193,40 @@ jobs:
                       fi
                   else
                       echo "[INFO] HANGCTL add-on skipped (not ABLESTACK host or not Rocky 9)."
+                  fi
+
+                  if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${MAJOR_VERSION:-}" == "9" ]]; then
+                      echo "[INFO] ABLESTACK Host on Rocky 9 detected. Installing FTCTL add-on..."
+
+                      FTCTL_REPO_DIR=""
+                      for cand in "${ISO_MNT}/rpm/ftctl-rpm-rocky${VERSION_ID}" "${ISO_MNT}/rpm/ftctl-rpm-rocky${MAJOR_VERSION}" "${ISO_MNT}/rpm/ftctl-rpm-rocky9.6"; do
+                          if [[ -d "${cand}" ]]; then
+                              FTCTL_REPO_DIR="${cand}"
+                              break
+                          fi
+                      done
+                      if [[ -d "${FTCTL_REPO_DIR}" ]]; then
+                          FTCTL_REPO_FILE=/etc/yum.repos.d/ablestack-vm-ftctl.repo
+                          sudo tee "${FTCTL_REPO_FILE}" >/dev/null <<-EOFCTL
+          [ablestack-vm-ftctl]
+          name=ablestack-vm-ftctl
+          baseurl=file://${FTCTL_REPO_DIR}
+          enabled=1
+          gpgcheck=0
+          EOFCTL
+                          sudo dnf clean all
+                          if sudo dnf -y --disablerepo="*" --enablerepo="ablestack-vm-ftctl" install ablestack_vm_ftctl; then
+                              echo "[OK] ablestack_vm_ftctl installed."
+                          else
+                              echo "[WARN] Failed to install ablestack_vm_ftctl from ISO repo. Continuing."
+                          fi
+                          sudo rm -f "${FTCTL_REPO_FILE}"
+                          sudo dnf clean all
+                      else
+                          echo "[WARN] FTCTL RPM repo not found in ISO: ${FTCTL_REPO_DIR} (skip)"
+                      fi
+                  else
+                      echo "[INFO] FTCTL add-on skipped (not ABLESTACK host or not Rocky 9)."
                   fi
 
                   # ======================================================================
@@ -1125,8 +1275,8 @@ jobs:
                               echo "[WARN] Skipping compatibility profile asset installation."
                           fi
 
-                          # 5) WinPE ISO  (???? ?? /??
-                          # - ? ISO??winpe/*.iso  ???? ?
+                          # Optional WinPE ISO staging for Windows bootstrap scenarios
+                          # Include the first matching winpe ISO found under supported paths.
                           WINPE_SRC_DIR="${ISO_MNT}/winpe"
                           WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
                           WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
@@ -1169,7 +1319,18 @@ jobs:
                   ;;
           esac
 
-          # --- ? ? ---
+          if [[ -d "${ISO_MNT}/completions" ]]; then
+              echo "[INFO] Installing bash completion files from ISO..."
+              sudo mkdir -p /usr/share/bash-completion/completions
+              if [[ -f "${ISO_MNT}/completions/ablestack_v2k" ]]; then
+                  sudo install -m 0644 "${ISO_MNT}/completions/ablestack_v2k" /usr/share/bash-completion/completions/ablestack_v2k
+              fi
+              if [[ -f "${ISO_MNT}/completions/ablestack_vm_ftctl" ]]; then
+                  sudo install -m 0644 "${ISO_MNT}/completions/ablestack_vm_ftctl" /usr/share/bash-completion/completions/ablestack_vm_ftctl
+              fi
+          fi
+
+          # --- Installation marker ---
           mkdir -p /var/lib/ablestack
           echo ok > /var/lib/ablestack/autoinstall.done
           echo "[INFO] Installation complete."
@@ -1180,6 +1341,76 @@ jobs:
         run: |
           set -e
           bash -n release/install-linux.sh
+
+      - name: Create uninstall-linux.sh
+        run: |
+          cat <<'EOF' > release/uninstall-linux.sh
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          echo "[INFO] ABLESTACK QEMU Exec Tools Uninstaller"
+
+          if [[ -f /etc/os-release ]]; then
+            . /etc/os-release
+            DISTRO="${ID:-unknown}"
+            MAJOR_VERSION="$(echo "${VERSION_ID:-0}" | cut -d'.' -f1)"
+          else
+            echo "[ERROR] Cannot detect distribution!"
+            exit 1
+          fi
+
+          remove_path_if_exists() {
+            local path="${1-}"
+            [[ -n "${path}" && -e "${path}" ]] || return 0
+            sudo rm -rf "${path}"
+          }
+
+          case "${DISTRO}" in
+            rocky|rhel|centos|almalinux|fedora)
+              echo "[INFO] Detected RPM-based system (${DISTRO} ${VERSION_ID:-unknown})"
+              sudo dnf -y remove ablestack_v2k ablestack_vm_hangctl ablestack_vm_ftctl ablestack-qemu-exec-tools || true
+              sudo dnf clean all || true
+              ;;
+            ubuntu|debian)
+              echo "[INFO] Detected DEB-based system (${DISTRO} ${VERSION_ID:-unknown})"
+              sudo apt-get -y remove ablestack-qemu-exec-tools || true
+              sudo apt-get -y autoremove || true
+              ;;
+            *)
+              echo "[ERROR] Unsupported distribution: ${DISTRO}"
+              exit 1
+              ;;
+          esac
+
+          remove_path_if_exists /etc/profile.d/v2k-vddk.sh
+          remove_path_if_exists /etc/profile.d/v2k-compat.sh
+          remove_path_if_exists /usr/share/ablestack/v2k
+          remove_path_if_exists /usr/share/bash-completion/completions/ablestack_v2k
+          remove_path_if_exists /usr/share/bash-completion/completions/ablestack_vm_ftctl
+
+          if [[ -L /opt/vmware-vix-disklib-distrib ]]; then
+            sudo rm -f /opt/vmware-vix-disklib-distrib
+          fi
+          if [[ -x /usr/local/bin/govc ]]; then
+            sudo rm -f /usr/local/bin/govc
+          fi
+
+          if compgen -G "/opt/VMware-vix-disklib-*" >/dev/null 2>&1; then
+            for d in /opt/VMware-vix-disklib-*; do
+              [[ -e "${d}" ]] || continue
+              sudo rm -rf "${d}"
+            done
+          fi
+
+          sudo rm -f /var/lib/ablestack/autoinstall.done || true
+          echo "[INFO] Uninstall complete."
+          EOF
+          chmod +x release/uninstall-linux.sh
+
+      - name: Sanity check generated uninstall-linux.sh
+        run: |
+          set -e
+          bash -n release/uninstall-linux.sh
 
       - name: Generate release notes (changelog)
         run: |
@@ -1193,10 +1424,10 @@ jobs:
           echo "${DESC}" >> release_notes.md
           echo >> release_notes.md
 
-          # ? ?  ( ????
-          git fetch --tags --force || true
+          # Build three OS-specific ISOs from staged release content
+          # Each ISO contains only the payload relevant to that operating system.
 
-          #  ?  (??  )
+          # Each ISO contains only the payload relevant to that operating system.
           PREV_TAG="$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)"
 
           if [ -z "$PREV_TAG" ]; then
@@ -1210,25 +1441,129 @@ jobs:
           echo "===== Generated release_notes.md ====="
           cat release_notes.md
 
-      - name: Generate ISO
+      - name: Generate OS-specific ISOs
+        shell: bash
         run: |
+          set -euo pipefail
           VERSION="${RELEASE_TAG}"
-          mkisofs -o ABLESTACK-Tools-${VERSION}.iso \
-            -V "ABLESTACK-Tools" \
-            -r -J release
-          mkdir -p build/iso
-          mv ABLESTACK-Tools-${VERSION}.iso build/iso/
-          ls -lh build/iso
+
+          mkdir -p build/iso/rocky build/iso/ubuntu build/iso/windows
+          rm -rf build/iso-staging
+          mkdir -p build/iso-staging/rocky build/iso-staging/ubuntu build/iso-staging/windows
+
+          cat <<'EOF' > build/iso-staging/rocky/README.txt
+          ABLESTACK QEMU Exec Tools Offline ISO
+          Target OS: Rocky Linux / ABLESTACK Host
+
+          Contents
+            - rpm/rpm-rocky9.6
+            - rpm/hangctl-rpm-rocky9.6
+            - v2k/v2k-rpm-rocky9.6
+            - v2k/v2k-rpm-rocky9.7
+            - assets/
+            - winpe/
+            - completions/
+            - install-linux.sh
+            - uninstall-linux.sh
+          EOF
+
+          cat <<'EOF' > build/iso-staging/ubuntu/README.txt
+          ABLESTACK QEMU Exec Tools Offline ISO
+          Target OS: Ubuntu
+
+          Contents
+            - deb/deb-ubuntu22.04
+            - deb/deb-ubuntu24.04
+            - completions/
+            - install-linux.sh
+            - uninstall-linux.sh
+          EOF
+
+          cat <<'EOF' > build/iso-staging/windows/README.txt
+          ABLESTACK QEMU Exec Tools Offline ISO
+          Target OS: Windows
+
+          Contents
+            - msi/
+            - virtio/
+            - install.bat
+            - install.ps1
+          EOF
+
+          mkdir -p build/iso-staging/rocky/rpm build/iso-staging/rocky/v2k build/iso-staging/rocky/completions build/iso-staging/rocky/bin
+          cp -a release/rpm/rpm-rocky9.6 build/iso-staging/rocky/rpm/
+          if [[ -d release/rpm/hangctl-rpm-rocky9.6 ]]; then
+            cp -a release/rpm/hangctl-rpm-rocky9.6 build/iso-staging/rocky/rpm/
+          fi
+          if [[ -d release/rpm/ftctl-rpm-rocky9.6 ]]; then
+            cp -a release/rpm/ftctl-rpm-rocky9.6 build/iso-staging/rocky/rpm/
+          fi
+          for ver in 9.6 9.7; do
+            if [[ -d "release/v2k/v2k-rpm-rocky${ver}" ]]; then
+              cp -a "release/v2k/v2k-rpm-rocky${ver}" build/iso-staging/rocky/v2k/
+            fi
+          done
+          if [[ -d release/assets ]]; then
+            cp -a release/assets build/iso-staging/rocky/
+          fi
+          if [[ -d release/share ]]; then
+            cp -a release/share build/iso-staging/rocky/
+          fi
+          if [[ -d release/winpe ]]; then
+            cp -a release/winpe build/iso-staging/rocky/
+          fi
+          if [[ -d release/completions ]]; then
+            cp -a release/completions/. build/iso-staging/rocky/completions/
+          fi
+          if [[ -d release/bin ]]; then
+            cp -a release/bin/. build/iso-staging/rocky/bin/
+          fi
+          cp -a release/install-linux.sh build/iso-staging/rocky/
+          cp -a release/uninstall-linux.sh build/iso-staging/rocky/
+
+          mkdir -p build/iso-staging/ubuntu/deb build/iso-staging/ubuntu/completions
+          cp -a release/deb/. build/iso-staging/ubuntu/deb/
+          if [[ -d release/completions ]]; then
+            cp -a release/completions/. build/iso-staging/ubuntu/completions/
+          fi
+          cp -a release/install-linux.sh build/iso-staging/ubuntu/
+          cp -a release/uninstall-linux.sh build/iso-staging/ubuntu/
+
+          mkdir -p build/iso-staging/windows/msi build/iso-staging/windows/virtio
+          if [[ -d release/msi ]]; then
+            cp -a release/msi/. build/iso-staging/windows/msi/
+          fi
+          if [[ -d release/virtio ]]; then
+            cp -a release/virtio/. build/iso-staging/windows/virtio/
+          fi
+          cp -a release/install.bat build/iso-staging/windows/
+          cp -a release/install.ps1 build/iso-staging/windows/
+
+          mkisofs -o "build/iso/rocky/ABLESTACK-Tools-rocky-${VERSION}.iso" \
+            -V "ABLESTACK-Rocky" \
+            -r -J build/iso-staging/rocky
+
+          mkisofs -o "build/iso/ubuntu/ABLESTACK-Tools-ubuntu-${VERSION}.iso" \
+            -V "ABLESTACK-Ubuntu" \
+            -r -J build/iso-staging/ubuntu
+
+          mkisofs -o "build/iso/windows/ABLESTACK-Tools-windows-${VERSION}.iso" \
+            -V "ABLESTACK-Windows" \
+            -r -J build/iso-staging/windows
+
+          find build/iso -type f -name '*.iso' -ls
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # Explicitly pass the resolved tag because this workflow runs via workflow_run.
           tag_name: ${{ env.RELEASE_TAG }}
           body_path: release_notes.md
           files: |
-            build/iso/*.iso
-            release/rpm/rpm-rocky9/ablestack-qemu-exec-tools-*.rpm
-            release/rpm/hangctl-rpm-rocky9/*.rpm
+            build/iso/rocky/*.iso
+            build/iso/ubuntu/*.iso
+            build/iso/windows/*.iso
+            release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm
+            release/rpm/hangctl-rpm-rocky9.6/*.rpm
+            release/rpm/ftctl-rpm-rocky9.6/*.rpm
             release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
             release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.rpm

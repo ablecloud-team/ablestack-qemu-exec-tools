@@ -762,6 +762,7 @@ newt
 nfs-utils
 nftables
 nmap-ncat
+socat
 npth
 nspr
 nss

@@ -10,3 +10,4 @@ Thumbs.db
 
 # Local one-off test scripts and credentials
 tests/local/
+tests/ftctl/
