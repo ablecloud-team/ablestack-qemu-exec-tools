@@ -1,32 +1,33 @@
 # ablestack_vm_ftctl Runbook
 
-## 목적
+## Purpose
 
-이 문서는 `ablestack_vm_ftctl` 운영 시 자주 쓰는 기본 절차를 정리한다.
+This runbook summarizes the operational commands and decision points for
+`ablestack_vm_ftctl`.
 
-## 기본 확인
+## Basic Checks
 
-버전 확인:
+Version:
 
 ```bash
 ablestack_vm_ftctl --version
 ```
 
-cluster/host inventory 확인:
+Cluster and host inventory:
 
 ```bash
 ablestack_vm_ftctl config show
 ablestack_vm_ftctl config host-list
 ```
 
-VM 보호 상태 확인:
+Per-VM protection state:
 
 ```bash
 ablestack_vm_ftctl status --vm <vm>
 ablestack_vm_ftctl check --vm <vm>
 ```
 
-## 보호 시작
+## Start Protection
 
 HA:
 
@@ -46,45 +47,112 @@ FT:
 ablestack_vm_ftctl protect --vm <vm> --mode ft --peer qemu+ssh://peer/system
 ```
 
-## 운영 중 점검
+FT backend note:
 
-주기 reconcile:
+- file-based FT:
+  - uses the prebuilt x-colo path
+  - supports full `failover --force` and full `failback --force`
+- block-backed FT:
+  - uses cold conversion on protect
+  - uses cold-cutback on failback
+  - requires an explicit block-backed `FTCTL_PROFILE_DISK_MAP`
+
+## Reconcile
+
+Global reconcile:
 
 ```bash
 ablestack_vm_ftctl reconcile
 ```
 
-단일 VM만 확인:
+Single-VM reconcile:
 
 ```bash
 ablestack_vm_ftctl reconcile --vm <vm>
 ```
 
-## 수동 fencing 확인
+## Manual Fencing
 
-`manual-block` 정책일 때:
+For `manual-block`:
 
 ```bash
 ablestack_vm_ftctl failover --vm <vm> --force
 ablestack_vm_ftctl fence-confirm --vm <vm>
 ```
 
-fencing 상태 초기화:
+Clear fencing state:
 
 ```bash
 ablestack_vm_ftctl fence-clear --vm <vm>
 ```
 
-## selftest
+## Failback
 
-통합 dry-run/selftest:
+HA/DR:
+
+```bash
+ablestack_vm_ftctl failback --vm <vm> --force
+```
+
+Expected final state:
+
+- `active_side=primary`
+- `protection_state=protected`
+- `transport_state=mirroring`
+
+FT file-based:
+
+```bash
+ablestack_vm_ftctl failback --vm <vm> --force
+```
+
+Expected final state:
+
+- `active_side=primary`
+- `protection_state=colo_running`
+- `transport_state=mirroring`
+
+FT block-backed:
+
+```bash
+ablestack_vm_ftctl failback --vm <vm> --force
+```
+
+Current operational meaning:
+
+1. stop active secondary
+2. copy the active secondary block overlay state back to the original primary block source
+3. re-activate the original primary VM
+4. re-enter the validated block-backed cold conversion protect flow
+
+Expected final state:
+
+- `active_side=primary`
+- `protection_state=colo_running`
+- `transport_state=mirroring`
+
+## Selftest
 
 ```bash
 ablestack_vm_ftctl_selftest
 ```
 
-## 주의사항
+## Operational Notes
 
-- production failover 전에 cluster inventory가 맞는지 먼저 확인한다.
-- `manual-block` 정책이면 운영자 승인이 있기 전까지 승격이 완료되지 않는다.
-- FT/x-colo는 QMP 경로와 libvirt generated XML 경로를 둘 다 확인해야 한다.
+- Verify cluster inventory before any production failover.
+- If `manual-block` is used, do not treat the operation as complete until
+  explicit operator confirmation is recorded.
+- For FT/x-colo, always verify both:
+  - QMP/runtime state
+  - generated XML / runtime graph state
+- File-based FT sacrificial pairs must keep the following virtual sizes
+  identical:
+  - primary source
+  - secondary parent
+  - secondary hidden overlay
+  - secondary active overlay
+- `OP-ST-01` is a shared-storage total-outage scenario, not a one-host path-loss
+  scenario.
+  - standby activation is not expected to succeed during the outage window
+  - PASS means no false-success failover, no split-brain, and deterministic
+    convergence after storage restore

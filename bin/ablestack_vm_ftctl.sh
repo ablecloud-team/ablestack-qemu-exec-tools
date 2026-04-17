@@ -18,7 +18,7 @@
 set -euo pipefail
 
 PROG="ablestack_vm_ftctl"
-PROG_VERSION="0.1.0-skeleton"
+PROG_VERSION="0.1.0"
 
 EXIT_OK=0
 EXIT_USAGE=2
