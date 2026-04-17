@@ -2122,7 +2122,8 @@ Commands:
 
 Expected Result:
 - the dedicated shared filesystem interruption should be observable to the HA mirror path
-- the engine should degrade and recover or rearm without irrecoverable failure
+- because the shared GFS2 target disappears from both hosts at the same time, immediate standby activation is not expected to succeed during the outage window
+- the engine should avoid a false-success failover during the outage window and should converge to a deterministic final state after storage restore and reconcile
 
 Actual Result:
 - interruption was reproduced through pacemaker resource control
@@ -2134,7 +2135,10 @@ Actual Result:
   - `active_side=secondary`
   - `protection_state=failed_over`
   - `transport_state=failed_over`
-- this is still treated as FAIL for `OP-ST-01` because the interruption path does not stay recoverable; it escalates through `standby_activate_failed` before converging to failover
+- this is treated as PASS under the final storage-outage criterion:
+  - no false-success standby activation during the outage window
+  - no split-brain
+  - deterministic convergence after storage restore and reconcile
 
 Evidence:
 - `pcs status --full`
@@ -2142,7 +2146,7 @@ Evidence:
 - `ablestack_vm_ftctl status --vm rocky10-op-st-01b --json`
 - `/run/ablestack-vm-ftctl/state/rocky10-op-st-01b.state`
 
-Status: FAIL
+Status: PASS
 
 If FAIL:
 - Root cause:

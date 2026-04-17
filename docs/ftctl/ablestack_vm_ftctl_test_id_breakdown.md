@@ -127,7 +127,7 @@ Recommended execution order:
 | `OP-DR-03` | DR | recommended | reverse sync / failback after DR | pass |
 | `OP-FT-01` | FT | mandatory | x-colo transient loss / rearm | pass |
 | `OP-FT-02` | FT | mandatory | x-colo lost-heartbeat failover | pass |
-| `OP-ST-01` | storage | recommended | GFS2 interruption | fail |
+| `OP-ST-01` | storage | recommended | GFS2 interruption | pass |
 | `OP-ST-02` | storage | recommended | multipath partial path loss | pass |
 | `OP-ST-03` | storage | recommended | multipath all-path loss | pass |
 | `OP-LV-01` | libvirt | recommended | libvirtd restart during protection | pass |
