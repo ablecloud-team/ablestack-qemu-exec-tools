@@ -1,0 +1,50 @@
+{
+  "extId": "vm-ext-001",
+  "name": "app-01",
+  "powerState": "ON",
+  "numSockets": 2,
+  "numCoresPerSocket": 2,
+  "memorySizeBytes": 8589934592,
+  "bootConfig": {
+    "bootType": "UEFI"
+  },
+  "nics": [
+    {
+      "extId": "nic-ext-001",
+      "macAddress": "52:54:00:12:34:56",
+      "subnetName": "prod-net"
+    }
+  ],
+  "disks": [
+    {
+      "extId": "disk-ext-001",
+      "name": "Boot disk",
+      "sizeBytes": 42949672960,
+      "diskAddress": {
+        "busType": "SCSI",
+        "index": 0
+      },
+      "backingInfo": {
+        "vdiskUuid": "vdisk-001",
+        "storageContainerExtId": "container-001"
+      }
+    },
+    {
+      "extId": "disk-ext-002",
+      "name": "Data disk",
+      "sizeBytes": 107374182400,
+      "diskAddress": {
+        "busType": "SCSI",
+        "index": 1
+      },
+      "backingInfo": {
+        "vdiskUuid": "vdisk-002",
+        "storageContainerExtId": "container-001"
+      }
+    }
+  ],
+  "guestTools": {
+    "guestOs": "linux"
+  },
+  "guestFamily": "linuxGuest"
+}

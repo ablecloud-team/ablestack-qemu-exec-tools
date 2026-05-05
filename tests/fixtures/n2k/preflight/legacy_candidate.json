@@ -1,0 +1,20 @@
+{
+  "api": {
+    "v4": {
+      "vmm": false,
+      "dataprotection": false,
+      "changed_regions": false
+    },
+    "legacy": {
+      "changed_regions": true,
+      "endpoint": "/PrismGateway/services/rest/v2.0/virtual_disks/{vdisk_uuid}/changed_regions",
+      "verified": false
+    }
+  },
+  "cold_export": {
+    "available": true
+  },
+  "manual_disk": {
+    "available": true
+  }
+}

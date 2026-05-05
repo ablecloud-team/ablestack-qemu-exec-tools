@@ -74,6 +74,7 @@ if [[ "${INSTALL_MODE}" == "HOST" ]]; then
     "vm_exec.sh"
     "vm_autoinstall.sh"
     "ablestack_v2k.sh"
+    "ablestack_n2k.sh"
     "ablestack_vm_hangctl.sh"
     "ablestack_vm_ftctl.sh"
     "ablestack_vm_ftctl_selftest.sh"
@@ -87,6 +88,7 @@ else
     "cloud_init_auto.sh"
     "vm_autoinstall.sh"
     "ablestack_v2k.sh"
+    "ablestack_n2k.sh"
     "ablestack_vm_hangctl.sh"
     "ablestack_vm_ftctl.sh"
     "ablestack_vm_ftctl_selftest.sh"
@@ -132,7 +134,7 @@ fi
 if [[ -d "completions" ]]; then
   echo "Installing bash completions into ${COMPLETIONS_TARGET}"
   sudo mkdir -p "${COMPLETIONS_TARGET}"
-  for comp in ablestack_vm_ftctl ablestack_v2k; do
+  for comp in ablestack_vm_ftctl ablestack_v2k ablestack_n2k; do
     if [[ -f "completions/${comp}" ]]; then
       sudo cp -a "completions/${comp}" "${COMPLETIONS_TARGET}/${comp}"
       sudo chmod 644 "${COMPLETIONS_TARGET}/${comp}" 2>/dev/null || true

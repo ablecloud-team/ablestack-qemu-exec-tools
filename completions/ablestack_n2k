@@ -1,0 +1,92 @@
+# bash completion for ablestack_n2k
+
+_ablestack_n2k()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local commands="preflight plan run auto init snapshot sync verify cutover cleanup status"
+    local global_opts="--workdir --run-id --manifest --log --json --dry-run --resume --force -h --help"
+
+    case "${prev}" in
+        --workdir|--manifest|--log|--cred-file|--inventory-file|--source-map-file|--changed-regions-file)
+            _filedir
+            return
+            ;;
+        --mode)
+            COMPREPLY=( $(compgen -W "auto v4-incremental legacy-cbt cold-export manual-disk" -- "${cur}") )
+            return
+            ;;
+        --target-format)
+            COMPREPLY=( $(compgen -W "qcow2 raw" -- "${cur}") )
+            return
+            ;;
+        --target-storage)
+            COMPREPLY=( $(compgen -W "file block rbd" -- "${cur}") )
+            return
+            ;;
+        --inventory-source)
+            COMPREPLY=( $(compgen -W "none fixture api" -- "${cur}") )
+            return
+            ;;
+        --insecure|--v4-vmm|--v4-dataprotection|--legacy-changed-regions|--legacy-endpoint-verified|--cold-export-available|--manual-disk-available)
+            COMPREPLY=( $(compgen -W "0 1" -- "${cur}") )
+            return
+            ;;
+        --shutdown)
+            COMPREPLY=( $(compgen -W "manual guest poweroff" -- "${cur}") )
+            return
+            ;;
+        --run-id|--vm|--pc|--username|--password|--dst|--capability-json|--inventory-json|--target-map-json|--source-map-json|--changed-regions-json|--recovery-point-id|--jobs|--chunk|--coalesce-gap|--samples|--name)
+            return
+            ;;
+    esac
+
+    local cmd=""
+    local i
+    for ((i = 1; i < cword; i++)); do
+        case "${words[i]}" in
+            preflight|plan|run|auto|init|snapshot|sync|verify|cutover|cleanup|status)
+                cmd="${words[i]}"
+                break
+                ;;
+        esac
+    done
+
+    if [[ -z "${cmd}" ]]; then
+        COMPREPLY=( $(compgen -W "${global_opts} ${commands}" -- "${cur}") )
+        return
+    fi
+
+    case "${cmd}" in
+        preflight|plan)
+            COMPREPLY=( $(compgen -W "--pc --vm --username --password --cred-file --insecure --mode --capability-json --v4-vmm --v4-dataprotection --legacy-changed-regions --legacy-endpoint-verified --cold-export-available --manual-disk-available --allow-experimental --json --help" -- "${cur}") )
+            ;;
+        run|auto)
+            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --mode --dst --target-format --target-storage --target-map-json --allow-experimental --help" -- "${cur}") )
+            ;;
+        init)
+            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --username --password --insecure --dst --mode --inventory-json --inventory-file --inventory-source --target-format --target-storage --target-map-json --help" -- "${cur}") )
+            ;;
+        snapshot)
+            COMPREPLY=( $(compgen -W "base incr final --name --help" -- "${cur}") )
+            ;;
+        sync)
+            COMPREPLY=( $(compgen -W "base incr final --jobs --chunk --coalesce-gap --source-map-json --source-map-file --changed-regions-json --changed-regions-file --recovery-point-id --help" -- "${cur}") )
+            ;;
+        verify)
+            COMPREPLY=( $(compgen -W "--mode --samples --help" -- "${cur}") )
+            ;;
+        cutover)
+            COMPREPLY=( $(compgen -W "--shutdown --define-only --apply --start --help" -- "${cur}") )
+            ;;
+        cleanup)
+            COMPREPLY=( $(compgen -W "--keep-source-points --keep-workdir --remove-source-points --remove-workdir --apply --help" -- "${cur}") )
+            ;;
+        status)
+            COMPREPLY=( $(compgen -W "--vm --watch --resume-plan --help" -- "${cur}") )
+            ;;
+    esac
+}
+
+complete -F _ablestack_n2k ablestack_n2k

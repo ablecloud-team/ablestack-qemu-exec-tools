@@ -1,0 +1,16 @@
+{
+  "disks": {
+    "disk-ext-001": [
+      {
+        "offset": 0,
+        "length": 4
+      }
+    ],
+    "disk-ext-002": [
+      {
+        "offset": 4,
+        "length": 4
+      }
+    ]
+  }
+}
