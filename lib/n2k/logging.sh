@@ -27,9 +27,10 @@ n2k_json_string() {
 }
 
 n2k_event() {
-  local level="${1:-INFO}" phase="${2:-}" disk="${3:-}" event="${4:-}" payload="${5:-{}}"
+  local level="${1:-INFO}" phase="${2:-}" disk="${3:-}" event="${4:-}" payload="${5:-}"
   local log="${N2K_EVENTS_LOG:-}"
   [[ -n "${log}" ]] || return 0
+  [[ -n "${payload}" ]] || payload="{}"
 
   mkdir -p "$(dirname "${log}")"
 

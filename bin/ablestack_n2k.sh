@@ -25,11 +25,13 @@ source_n2k_lib() {
   local installed="${ROOT_DIR}/lib/ablestack-qemu-exec-tools/n2k/${name}"
   local source_tree="${ROOT_DIR}/lib/n2k/${name}"
   if [[ -f "${installed}" ]]; then
+    export N2K_LIB_DIR="${ROOT_DIR}/lib/ablestack-qemu-exec-tools/n2k"
     # shellcheck source=/dev/null
     source "${installed}"
     return 0
   fi
   if [[ -f "${source_tree}" ]]; then
+    export N2K_LIB_DIR="${ROOT_DIR}/lib/n2k"
     # shellcheck source=/dev/null
     source "${source_tree}"
     return 0

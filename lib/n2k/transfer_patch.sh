@@ -32,14 +32,14 @@ n2k_load_changed_regions_json() {
 
 n2k_changed_regions_for_disk() {
   local changed_regions="$1" manifest="$2" idx="$3"
-  local disk_id label device_key
+  local disk_id disk_label device_key
   disk_id="$(jq -r ".disks[${idx}].disk_id // empty" "${manifest}")"
-  label="$(jq -r ".disks[${idx}].label // empty" "${manifest}")"
+  disk_label="$(jq -r ".disks[${idx}].label // empty" "${manifest}")"
   device_key="$(jq -r ".disks[${idx}].device_key // empty" "${manifest}")"
 
   jq -c \
     --arg disk_id "${disk_id}" \
-    --arg label "${label}" \
+    --arg disk_label "${disk_label}" \
     --arg device_key "${device_key}" \
     --arg idx "${idx}" \
     '
@@ -53,12 +53,12 @@ n2k_changed_regions_for_disk() {
         (($list // []) | map(normalize_region));
 
       if (.disks? | type) == "object" then
-        normalize_list(.disks[$disk_id] // .disks[$device_key] // .disks[$label] // .disks[$idx])
+        normalize_list(.disks[$disk_id] // .disks[$device_key] // .disks[$disk_label] // .disks[$idx])
       elif ((.disk_id? // .device_key? // .label? // "") as $one_id
-        | (($one_id == $disk_id) or ($one_id == $device_key) or ($one_id == $label) or ($one_id == $idx))) then
+        | (($one_id == $disk_id) or ($one_id == $device_key) or ($one_id == $disk_label) or ($one_id == $idx))) then
         normalize_list(.regions // .changed_regions)
       else
-        normalize_list(.[$disk_id] // .[$device_key] // .[$label] // .[$idx])
+        normalize_list(.[$disk_id] // .[$device_key] // .[$disk_label] // .[$idx])
       end
     ' <<<"${changed_regions}"
 }

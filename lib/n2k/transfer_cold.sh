@@ -41,17 +41,17 @@ n2k_load_source_map_json() {
 
 n2k_source_for_disk() {
   local source_map="$1" manifest="$2" idx="$3"
-  local disk_id label device_key
+  local disk_id disk_label device_key
   disk_id="$(jq -r ".disks[${idx}].disk_id // empty" "${manifest}")"
-  label="$(jq -r ".disks[${idx}].label // empty" "${manifest}")"
+  disk_label="$(jq -r ".disks[${idx}].label // empty" "${manifest}")"
   device_key="$(jq -r ".disks[${idx}].device_key // empty" "${manifest}")"
 
   jq -r \
     --arg disk_id "${disk_id}" \
-    --arg label "${label}" \
+    --arg disk_label "${disk_label}" \
     --arg device_key "${device_key}" \
     --arg idx "${idx}" \
-    '.[$disk_id] // .[$device_key] // .[$label] // .[$idx] // empty' \
+    '.[$disk_id] // .[$device_key] // .[$disk_label] // .[$idx] // empty' \
     <<<"${source_map}"
 }
 

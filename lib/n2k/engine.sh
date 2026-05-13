@@ -18,21 +18,22 @@
 set -euo pipefail
 
 N2K_ROOT_DIR="${N2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+N2K_LIB_DIR="${N2K_LIB_DIR:-${N2K_ROOT_DIR}/lib/n2k}"
 
 # shellcheck source=/dev/null
-source "${N2K_ROOT_DIR}/lib/n2k/logging.sh"
+source "${N2K_LIB_DIR}/logging.sh"
 # shellcheck source=/dev/null
-source "${N2K_ROOT_DIR}/lib/n2k/manifest.sh"
+source "${N2K_LIB_DIR}/manifest.sh"
 # shellcheck source=/dev/null
-source "${N2K_ROOT_DIR}/lib/n2k/preflight.sh"
+source "${N2K_LIB_DIR}/preflight.sh"
 # shellcheck source=/dev/null
-source "${N2K_ROOT_DIR}/lib/n2k/nutanix_api.sh"
+source "${N2K_LIB_DIR}/nutanix_api.sh"
 # shellcheck source=/dev/null
-source "${N2K_ROOT_DIR}/lib/n2k/transfer_cold.sh"
+source "${N2K_LIB_DIR}/transfer_cold.sh"
 # shellcheck source=/dev/null
-source "${N2K_ROOT_DIR}/lib/n2k/transfer_patch.sh"
+source "${N2K_LIB_DIR}/transfer_patch.sh"
 # shellcheck source=/dev/null
-source "${N2K_ROOT_DIR}/lib/n2k/target_libvirt.sh"
+source "${N2K_LIB_DIR}/target_libvirt.sh"
 
 n2k_die() {
   echo "ERROR: $*" >&2
@@ -181,7 +182,7 @@ n2k_cmd_init() {
   elif [[ "${inventory_source}" == "api" ]]; then
     [[ -n "${username}" ]] || n2k_die "API inventory source requires --username or credential file"
     [[ -n "${password}" ]] || n2k_die "API inventory source requires --password or credential file"
-    inventory_raw="$(n2k_nutanix_fetch_v4_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
+    inventory_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
     inventory_json="$(n2k_nutanix_inventory_from_raw "${inventory_raw}" "${vm}")"
   fi
 

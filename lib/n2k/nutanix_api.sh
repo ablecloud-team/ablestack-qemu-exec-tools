@@ -61,6 +61,97 @@ n2k_nutanix_api_get() {
   curl "${args[@]}" "${base}${path}"
 }
 
+n2k_nutanix_api_request_raw() {
+  local method="$1" pc="$2" path="$3" username="$4" password="$5" insecure="$6" body="${7:-}"
+  local base tmp_file err_file code rc err_text
+  base="$(n2k_nutanix_pc_base_url "${pc}")"
+  tmp_file="$(mktemp)"
+  err_file="$(mktemp)"
+
+  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}")
+  if [[ "${insecure}" == "1" ]]; then
+    args+=(--insecure)
+  fi
+  if [[ -n "${username}" || -n "${password}" ]]; then
+    args+=(-u "${username}:${password}")
+  fi
+  case "${method}" in
+    GET) ;;
+    POST) args+=(-X POST -H "Content-Type: application/json" -d "${body}") ;;
+    *)
+      echo "Unsupported HTTP method: ${method}" >&2
+      rm -f "${tmp_file}" "${err_file}"
+      return 2
+      ;;
+  esac
+
+  rc=0
+  code="$(curl "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
+  err_text="$(cat "${err_file}" 2>/dev/null || true)"
+  N2K_NUTANIX_LAST_HTTP_CODE="${code:-000}"
+  N2K_NUTANIX_LAST_ERROR="${err_text}"
+  export N2K_NUTANIX_LAST_HTTP_CODE N2K_NUTANIX_LAST_ERROR
+  cat "${tmp_file}"
+  rm -f "${tmp_file}" "${err_file}"
+  return "${rc}"
+}
+
+n2k_nutanix_api_get_raw() {
+  local pc="$1" path="$2" username="$3" password="$4" insecure="$5"
+  n2k_nutanix_api_request_raw GET "${pc}" "${path}" "${username}" "${password}" "${insecure}"
+}
+
+n2k_nutanix_api_post_raw() {
+  local pc="$1" path="$2" username="$3" password="$4" insecure="$5" body="$6"
+  n2k_nutanix_api_request_raw POST "${pc}" "${path}" "${username}" "${password}" "${insecure}" "${body}"
+}
+
+n2k_nutanix_api_request_capture() {
+  local method="$1" pc="$2" path="$3" username="$4" password="$5" insecure="$6" body="$7"
+  local response_var="$8" status_var="$9" error_var="${10}"
+  local base tmp_file err_file code rc err_text
+  base="$(n2k_nutanix_pc_base_url "${pc}")"
+  tmp_file="$(mktemp)"
+  err_file="$(mktemp)"
+
+  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}")
+  if [[ "${insecure}" == "1" ]]; then
+    args+=(--insecure)
+  fi
+  if [[ -n "${username}" || -n "${password}" ]]; then
+    args+=(-u "${username}:${password}")
+  fi
+  case "${method}" in
+    GET) ;;
+    POST) args+=(-X POST -H "Content-Type: application/json" -d "${body}") ;;
+    *)
+      echo "Unsupported HTTP method: ${method}" >&2
+      rm -f "${tmp_file}" "${err_file}"
+      return 2
+      ;;
+  esac
+
+  rc=0
+  code="$(curl "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
+  err_text="$(cat "${err_file}" 2>/dev/null || true)"
+  printf -v "${response_var}" '%s' "$(cat "${tmp_file}" 2>/dev/null || true)"
+  printf -v "${status_var}" '%s' "${code:-000}"
+  printf -v "${error_var}" '%s' "${err_text}"
+  rm -f "${tmp_file}" "${err_file}"
+  return "${rc}"
+}
+
+n2k_nutanix_http_success() {
+  [[ "${1:-}" =~ ^2[0-9][0-9]$ ]]
+}
+
+n2k_nutanix_http_auth_failure() {
+  case "${1:-}" in
+    401|403) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 n2k_nutanix_fetch_v4_vm_list() {
   local pc="$1" username="$2" password="$3" insecure="$4"
   n2k_nutanix_api_get "${pc}" "/api/vmm/v4.0/ahv/config/vms?\$limit=100" "${username}" "${password}" "${insecure}"
@@ -78,22 +169,80 @@ n2k_nutanix_select_vm_from_list() {
     items
     | map(select(
         ((.name // .spec.name // .status.name // "") == $vm)
-        or ((.extId // .ext_id // .metadata.uuid // .uuid // "") == $vm)
+        or ((.extId // .ext_id // .metadata.uuid // .uuid // .vm_id // "") == $vm)
       ))
     | .[0] // empty
   '
 }
 
-n2k_nutanix_fetch_v4_vm_inventory() {
+n2k_nutanix_fetch_vm_inventory() {
   local pc="$1" vm="$2" username="$3" password="$4" insecure="$5"
-  local list_json vm_json
-  list_json="$(n2k_nutanix_fetch_v4_vm_list "${pc}" "${username}" "${password}" "${insecure}")"
-  vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
-  [[ -n "${vm_json}" ]] || {
-    echo "VM not found in v4 VM list response: ${vm}" >&2
-    return 4
-  }
-  printf '%s' "${vm_json}"
+  local list_json vm_json http_code detail_json vm_uuid attempts api_error
+  local -a attempt_notes=()
+
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/vmm/v4.0/ahv/config/vms?\$limit=100" "${username}" "${password}" "${insecure}" "" list_json http_code api_error || true
+  if n2k_nutanix_http_auth_failure "${http_code}"; then
+    echo "Nutanix v4 VM list authentication failed: HTTP ${http_code}" >&2
+    return 3
+  fi
+  if n2k_nutanix_http_success "${http_code}"; then
+    vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
+    if [[ -n "${vm_json}" ]]; then
+      printf '%s' "${vm_json}"
+      return 0
+    fi
+    attempt_notes+=("v4:http=${http_code}:vm_not_found")
+  else
+    attempt_notes+=("v4:http=${http_code}${api_error:+:${api_error}}")
+  fi
+
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/vms/list" "${username}" "${password}" "${insecure}" '{"kind":"vm","length":100}' list_json http_code api_error || true
+  if n2k_nutanix_http_auth_failure "${http_code}"; then
+    echo "Nutanix v3 VM list authentication failed: HTTP ${http_code}" >&2
+    return 3
+  fi
+  if n2k_nutanix_http_success "${http_code}"; then
+    vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
+    if [[ -n "${vm_json}" ]]; then
+      printf '%s' "${vm_json}"
+      return 0
+    fi
+    attempt_notes+=("v3:http=${http_code}:vm_not_found")
+  else
+    attempt_notes+=("v3:http=${http_code}${api_error:+:${api_error}}")
+  fi
+
+  n2k_nutanix_api_request_capture GET "${pc}" "/PrismGateway/services/rest/v2.0/vms" "${username}" "${password}" "${insecure}" "" list_json http_code api_error || true
+  if n2k_nutanix_http_auth_failure "${http_code}"; then
+    echo "Nutanix v2 VM list authentication failed: HTTP ${http_code}" >&2
+    return 3
+  fi
+  if n2k_nutanix_http_success "${http_code}"; then
+    vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
+    if [[ -n "${vm_json}" ]]; then
+      vm_uuid="$(printf '%s' "${vm_json}" | jq -r '.uuid // .metadata.uuid // empty')"
+      if [[ -n "${vm_uuid}" ]]; then
+        n2k_nutanix_api_request_capture GET "${pc}" "/PrismGateway/services/rest/v2.0/vms/${vm_uuid}?include_vm_disk_config=true" "${username}" "${password}" "${insecure}" "" detail_json http_code api_error || true
+        if n2k_nutanix_http_success "${http_code}" && [[ -n "${detail_json}" ]]; then
+          printf '%s' "${detail_json}"
+          return 0
+        fi
+      fi
+      printf '%s' "${vm_json}"
+      return 0
+    fi
+    attempt_notes+=("v2:http=${http_code}:vm_not_found")
+  else
+    attempt_notes+=("v2:http=${http_code}${api_error:+:${api_error}}")
+  fi
+
+  attempts="$(IFS='; '; printf '%s' "${attempt_notes[*]}")"
+  echo "VM not found in Nutanix API responses: ${vm}; attempts=${attempts}" >&2
+  return 4
+}
+
+n2k_nutanix_fetch_v4_vm_inventory() {
+  n2k_nutanix_fetch_vm_inventory "$@"
 }
 
 n2k_nutanix_load_inventory_json_arg() {
@@ -124,15 +273,21 @@ n2k_nutanix_inventory_from_raw() {
     def disk_items($r):
       ($r.disks
        // $r.disk_list
+       // $r.vm_disk_info
        // $r.storageConfig.disks
        // $r.storage_config.disks
        // $r.resources.disk_list
        // $r.status.resources.disk_list
-       // []);
+       // [])
+      | map(select(
+          ((.is_cdrom // false) != true)
+          and (((.device_properties.device_type // .deviceProperties.deviceType // .device_type // .deviceType // "DISK") | tostring | ascii_upcase) != "CDROM")
+        ));
 
     def nic_items($r):
       ($r.nics
        // $r.nic_list
+       // $r.vm_nics
        // $r.networkInterfaces
        // $r.network_interfaces
        // $r.resources.nic_list
@@ -151,6 +306,7 @@ n2k_nutanix_inventory_from_raw() {
     def cpu_count($r):
       (($r.numCpus
         // $r.num_cpus
+        // $r.num_vcpus
         // $r.numSockets
         // $r.num_sockets
         // $r.resources.num_vcpus_per_socket
@@ -158,6 +314,7 @@ n2k_nutanix_inventory_from_raw() {
         // 0) | tonumber? // 0) as $base
       | (($r.numCoresPerSocket
           // $r.num_cores_per_socket
+          // $r.num_cores_per_vcpu
           // $r.resources.num_sockets
           // $r.status.resources.num_sockets
           // 1) | tonumber? // 1) as $mult
@@ -177,59 +334,81 @@ n2k_nutanix_inventory_from_raw() {
       end;
 
     def firmware($r):
-      (first_nonempty([
-        $r.bootConfig.bootType,
-        $r.boot_config.boot_type,
-        $r.resources.boot_config.boot_type,
-        $r.status.resources.boot_config.boot_type
-      ]) | ascii_downcase) as $fw
-      | if ($fw | test("uefi|efi")) then "efi"
-        elif ($fw | test("legacy|bios")) then "bios"
-        else "" end;
+      if (($r.boot.uefi_boot // false) == true) then "efi"
+      else
+        (first_nonempty([
+          $r.bootConfig.bootType,
+          $r.boot_config.boot_type,
+          $r.resources.boot_config.boot_type,
+          $r.status.resources.boot_config.boot_type
+        ]) | ascii_downcase) as $fw
+        | if ($fw | test("uefi|efi")) then "efi"
+          elif ($fw | test("legacy|bios")) then "bios"
+          else "" end
+      end;
 
     def disk_id($d; $idx):
-      ($d.diskAddress // $d.disk_address // {}) as $a
+      ($d.diskAddress // $d.disk_address // $d.device_properties.disk_address // $d.deviceProperties.diskAddress // {}) as $a
       | first_nonempty([
           $d.disk_id,
           $d.diskId,
           $d.extId,
           $d.ext_id,
+          $d.uuid,
+          $d.device_uuid,
           $d.vdiskUuid,
           $d.vdisk_uuid,
-          (if ($a.busType // $a.bus_type // "") != "" then
-            (($a.busType // $a.bus_type | tostring | ascii_downcase) + "0:" + (($a.index // $a.deviceIndex // $a.device_index // $idx) | tostring))
+          $a.device_uuid,
+          $a.vmdisk_uuid,
+          (if ($a.busType // $a.bus_type // $a.adapter_type // $a.device_bus // "") != "" then
+            (($a.busType // $a.bus_type // $a.adapter_type // $a.device_bus | tostring | ascii_downcase) + "0:" + (($a.index // $a.deviceIndex // $a.device_index // $a.deviceIndex // $idx) | tostring))
           else "" end)
         ]) as $id
       | if $id != "" then $id else ("disk" + ($idx | tostring)) end;
 
     def disk_size($d):
-      ($d.sizeBytes
-       // $d.size_bytes
-       // $d.diskSizeBytes
-       // $d.disk_size_bytes
-       // $d.capacityBytes
-       // $d.capacity_bytes
-       // $d.backingInfo.sizeBytes
-       // $d.backing_info.size_bytes
-       // 0) | tonumber? // 0;
+      if (($d.sizeBytes
+           // $d.size_bytes
+           // $d.diskSizeBytes
+           // $d.disk_size_bytes
+           // $d.capacityBytes
+           // $d.capacity_bytes
+           // $d.backingInfo.sizeBytes
+           // $d.backing_info.size_bytes
+           // $d.size
+           // null) != null) then
+        (($d.sizeBytes
+          // $d.size_bytes
+          // $d.diskSizeBytes
+          // $d.disk_size_bytes
+          // $d.capacityBytes
+          // $d.capacity_bytes
+          // $d.backingInfo.sizeBytes
+          // $d.backing_info.size_bytes
+          // $d.size) | tonumber? // 0)
+      elif (($d.disk_size_mib // $d.size_mib // null) != null) then
+        ((($d.disk_size_mib // $d.size_mib) | tonumber? // 0) * 1048576)
+      else
+        0
+      end;
 
     def normalize_disk($d; $idx):
-      ($d.diskAddress // $d.disk_address // {}) as $a
+      ($d.diskAddress // $d.disk_address // $d.device_properties.disk_address // $d.deviceProperties.diskAddress // {}) as $a
       | {
           disk_id: disk_id($d; $idx),
-          label: first_nonempty([$d.name, $d.label, ("Disk " + (($idx + 1) | tostring))]),
-          device_key: first_nonempty([$d.extId, $d.ext_id, $d.vdiskUuid, $d.vdisk_uuid, ($idx | tostring)]),
+          label: first_nonempty([$d.name, $d.label, $a.disk_label, ("Disk " + (($idx + 1) | tostring))]),
+          device_key: first_nonempty([$d.extId, $d.ext_id, $d.uuid, $d.device_uuid, $d.vdiskUuid, $d.vdisk_uuid, $a.device_uuid, $a.vmdisk_uuid, ($idx | tostring)]),
           controller: {
-            type: first_nonempty([$a.busType, $a.bus_type, $d.busType, $d.bus_type, "scsi"]),
+            type: first_nonempty([$a.busType, $a.bus_type, $a.adapter_type, $a.device_bus, $d.busType, $d.bus_type, "scsi"]),
             bus: (($a.bus // $a.busNumber // $a.bus_number // 0) | tonumber? // 0),
-            unit: (($a.index // $a.deviceIndex // $a.device_index // $d.unit // $d.unitNumber // $idx) | tonumber? // $idx),
-            label: first_nonempty([$a.busType, $a.bus_type, $d.busType, $d.bus_type, ""])
+            unit: (($a.index // $a.deviceIndex // $a.device_index // $a.deviceIndex // $d.unit // $d.unitNumber // $idx) | tonumber? // $idx),
+            label: first_nonempty([$a.disk_label, $a.busType, $a.bus_type, $a.adapter_type, $a.device_bus, $d.busType, $d.bus_type, ""])
           },
           nutanix: {
-            ext_id: first_nonempty([$d.extId, $d.ext_id]),
-            vdisk_uuid: first_nonempty([$d.vdiskUuid, $d.vdisk_uuid, $d.backingInfo.vdiskUuid, $d.backing_info.vdisk_uuid]),
+            ext_id: first_nonempty([$d.extId, $d.ext_id, $d.uuid]),
+            vdisk_uuid: first_nonempty([$d.vdiskUuid, $d.vdisk_uuid, $d.uuid, $d.backingInfo.vdiskUuid, $d.backing_info.vdisk_uuid, $a.vmdisk_uuid, $a.device_uuid]),
             disk_address: $a,
-            storage_container_ext_id: first_nonempty([$d.storageContainerExtId, $d.storage_container_ext_id, $d.backingInfo.storageContainerExtId, $d.backing_info.storage_container_ext_id])
+            storage_container_ext_id: first_nonempty([$d.storageContainerExtId, $d.storage_container_ext_id, $d.storage_container_uuid, $d.backingInfo.storageContainerExtId, $d.backing_info.storage_container_ext_id, $d.storage_config.storage_container_reference.uuid])
           },
           size_bytes: disk_size($d)
         };
@@ -239,7 +418,7 @@ n2k_nutanix_inventory_from_raw() {
         key: ($idx | tostring),
         ext_id: first_nonempty([$n.extId, $n.ext_id, $n.uuid]),
         mac: first_nonempty([$n.macAddress, $n.mac_address, $n.mac]),
-        network: first_nonempty([$n.subnet.name, $n.subnetName, $n.subnet_name, $n.networkName, $n.network_name])
+        network: first_nonempty([$n.subnet.name, $n.subnet_reference.name, $n.subnetName, $n.subnet_name, $n.networkName, $n.network_name])
       };
 
     (vm_root) as $r
