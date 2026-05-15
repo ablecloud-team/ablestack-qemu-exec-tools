@@ -153,6 +153,10 @@
 
 실제 환경 테스트는 별도 승인과 테스트 VM을 사용한다. 원본 VM 삭제, 원본 disk 삭제, 원본 snapshot 전체 삭제는 기본 테스트 범위에 포함하지 않는다.
 
+Nutanix 테스트베드의 VM 종류별 실제 이관 절차와 판정 기준은 `docs/n2k/ablestack_n2k_real_migration_test_scenarios.md`에서 관리한다.
+
+실제 이관 테스트의 주 흐름은 증분 마이그레이션이다. `cold-export`는 증분 capability가 없거나 증분 경로가 실패한 경우의 fallback으로 검증한다. target storage는 RBD, qcow2, block/LVM 순서로 모두 테스트한다.
+
 | ID | 이름 | 환경 | 기대 결과 | 상태 |
 | --- | --- | --- | --- | --- |
 | `N2K-REAL-001` | 구버전 preflight | PC/AOS v4 미지원 환경 | cold fallback 안내 | blocked |

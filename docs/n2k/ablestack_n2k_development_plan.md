@@ -14,6 +14,27 @@
 - 빌드와 패키징 검증은 GitHub Actions에서 수행한다.
 - 바이너리 파일은 명시 요청 없이는 수정하지 않는다.
 
+## 구현 우선순위 재정렬
+
+마지막 갱신: 2026-05-14
+
+다음 구현 라운드는 cold migration이 아니라 증분 마이그레이션을 1순위로 둔다. 상세 설계는 `docs/n2k/ablestack_n2k_incremental_migration_implementation_design.md`에서 관리한다.
+
+우선순위는 다음과 같다.
+
+1. `v4-incremental`
+2. `legacy-cbt`
+3. `cold-export`
+4. `manual-disk`
+
+target storage 구현과 테스트 우선순위는 다음과 같다.
+
+1. RBD
+2. qcow2 file
+3. block/LVM
+
+따라서 다음 개발 단계는 target storage adapter, logical patch writer, v4/legacy changed-region adapter, incremental orchestrator를 먼저 구현한다. `cold-export`는 증분 capability가 없거나 증분 경로가 실패했을 때 사용하는 fallback으로 유지한다.
+
 ## 개발 단계 요약
 
 | 단계 | 이름 | 주요 산출물 | 완료 기준 | 상태 |
@@ -55,6 +76,8 @@
 | `lib/n2k/manifest.sh` | 2단계 완료 | manifest v1 생성, phase 갱신, status summary 생성 |
 | `lib/n2k/preflight.sh` | 3단계 완료 | capability 판정, mode selection, plan generation helper |
 | `lib/n2k/nutanix_api.sh` | 4단계 완료 | Nutanix VM inventory parser, v4 VM list API helper |
+| `lib/n2k/source_adapter.sh` | 진행 중 | v4/legacy source capability probe와 changed-region 정규화 |
+| `lib/n2k/target_storage.sh` | 진행 중 | RBD, qcow2, block/LVM target storage adapter |
 | `lib/n2k/transfer_cold.sh` | 5단계 완료 | manual source-map 기반 cold-export base sync |
 | `lib/n2k/transfer_patch.sh` | 6단계 완료 | changed-region 기반 raw file/block target patch sync |
 | `lib/n2k/target_libvirt.sh` | 5단계 완료 | cold-export target libvirt XML artifact 생성 |
@@ -98,7 +121,8 @@
 - changed-region 입력은 disk id, device key, label, index 기준 매칭을 지원한다.
 - changed-region 입력은 `{ "disks": { "<disk-id>": [...] } }`, `{ "<disk-id>": [...] }`, 단일 disk의 `{ "disk_id": "...", "regions": [...] }` 형태를 지원한다.
 - `sync incr`와 `sync final`은 현재 raw file target과 block target에 대한 offset patch를 지원한다.
-- file target의 qcow2 incremental patch와 rbd incremental patch는 아직 지원하지 않는다.
+- file target의 qcow2 incremental patch는 `qemu-nbd` 기반 logical writer 경로로 분리했다. 실제 환경에서는 NBD kernel device 사용 가능 여부를 확인해야 한다.
+- rbd incremental patch는 `rbd-nbd` 또는 `rbd map` 기반 mapped device writer 경로로 분리했다. 실제 RBD 환경 smoke는 아직 필요하다.
 - `sync incr`와 `sync final`은 manifest에 phase 완료, disk별 증분 순번, 증분 bytes, region 수, recovery point id를 기록한다.
 - 실제 Nutanix recovery point 생성, changed-region API 조회, recovery point disk read path는 아직 구현하지 않았다. 현재 6단계는 fixture/manual source-map 기반 PoC이다.
 - `cleanup`은 기본적으로 계획만 출력하며, `--apply`를 명시한 경우에만 manifest에 기록된 workdir 내부 artifact를 삭제한다.
@@ -117,7 +141,8 @@
 - 실제 Nutanix recovery point 생성과 삭제
 - 실제 Nutanix changed-region API 조회
 - recovery point disk read path
-- qcow2/rbd incremental patch
+- 실제 RBD 환경 incremental patch smoke
+- v4/legacy API에서 받은 changed-region payload와 storage adapter 연결
 - 실제 legacy changed-region API 호출과 데이터 전송
 - 전체 run orchestration
 - GitHub Actions 실제 실행 결과 확인
@@ -365,10 +390,19 @@
 - 2026-04-30: changed-region JSON을 disk id, device key, label, index 기준으로 target disk에 매칭하도록 구현했다.
 - 2026-04-30: `offset`, `start`, `start_offset`와 `length`, `len`, `size` 필드명을 정규화하도록 구현했다.
 - 2026-04-30: raw file target과 block target에 대해 offset 기반 patch를 적용하도록 구현했다.
-- 2026-04-30: file target의 qcow2 incremental patch와 rbd incremental patch는 명시 오류로 중단하도록 구현했다.
+- 2026-05-14: file/qcow2 incremental patch를 직접 파일 쓰기가 아니라 `qemu-nbd` 기반 logical writer 경로로 변경했다.
+- 2026-05-14: rbd incremental patch를 `rbd-nbd` 또는 `rbd map` 기반 mapped device writer 경로로 추가했다.
+- 2026-05-14: changed region type `zero`, `zeros`, `hole`을 zero write로 처리하도록 추가했다.
+- 2026-05-14: legacy PD snapshot path index 간 candidate pair를 생성하고 `changed_regions` endpoint에 검증 요청하는 helper를 추가했다.
+- 2026-05-14: `snapshot incr|final --verify-changed-regions` 옵션으로 검증 결과와 실패 응답을 recovery point metadata에 남기도록 구현했다.
+- 2026-05-14: Prism Element 내부 v3 `vm_snapshots` API의 `snapshot_file_list[].snapshot_file_path`가 `changed_regions`에 필요한 실제 snapshot pathname임을 확인했다.
+- 2026-05-14: `snapshot --source-api v3 --create-vm-snapshot` 명령으로 v3 VM snapshot을 만들고 API 제공 snapshot path index를 manifest에 기록하도록 구현했다.
+- 2026-05-14: 현재 테스트베드에서 v3 VM snapshot current/reference path를 사용한 `changed_regions` 호출이 HTTP `200`으로 성공했다.
+- 2026-05-14: `snapshot --source-api v3 --collect-changed-regions` 명령으로 all-disk changed-regions를 수집해 manifest에 저장하도록 구현했다.
+- 2026-05-14: `sync incr/final`이 `--changed-regions-*` 입력이 없을 때 manifest에 저장된 collected changed-regions를 자동으로 사용하도록 보강했다.
 - 2026-04-30: manifest에 증분 순번, 증분 bytes, region 수, `incr_sync` 또는 `final_sync` phase, recovery point id를 기록하도록 구현했다.
 - 2026-04-30: `tests/fixtures/n2k/changed_regions/non_empty.json` fixture를 추가했다.
-- 2026-04-30: 실제 Nutanix recovery point 생성, changed-region API 조회, recovery point disk read path는 아직 구현하지 않았다. 현재 6단계는 fixture/manual source-map 기반 PoC이다.
+- 2026-05-14: Protection Domain OOB snapshot에서 추정한 path는 `ENTITY_NOT_FOUND`로 거절되므로 fallback 후보로만 유지하고, 실제 증분 검증은 v3 VM snapshot path 기반으로 진행한다.
 
 ## 7단계: legacy fallback 구현
 
@@ -455,6 +489,20 @@
 - 2026-04-30: `completions/ablestack_n2k`를 추가했다.
 - 2026-04-30: `install.sh` source installer에 `ablestack_n2k` 실행 파일과 completion 설치를 추가했다.
 - 2026-04-30: 로컬에서는 실제 RPM/DEB 빌드를 수행하지 않았고, `make -n n2k-rpm`, `make -n n2k-deb`로 target 구조만 확인했다.
+- 2026-05-14: legacy source adapter에 Protection Domain 생성, VM 보호 등록, OOB snapshot 생성, PD snapshot 조회 helper를 추가했다.
+- 2026-05-14: `snapshot --source-api legacy --create-oob-snapshot` 명령이 PD snapshot metadata와 path 후보 index를 manifest recovery point에 기록하도록 구현했다.
+- 2026-05-14: 실제 Nutanix 테스트베드에서 임시 PD/OOB snapshot 생성과 정리는 성공했으나, 후보 `.snapshot/<snapshot_id>/<vm_handle>/...` path는 changed-region API에서 HTTP `400`으로 거절되어 PD 기반 file path 검증은 blocked로 남았다.
+- 2026-05-14: 내부 v3 VM snapshot path 기반 changed-region 검증이 성공했으므로, 다음 구현은 이 경로를 증분 이관의 기본 source snapshot adapter로 사용한다.
+- 2026-05-14: changed-region metadata 수집을 구현했고, `sync incr/final`이 manifest에 저장된 collected changed-regions를 자동으로 재사용하도록 연결했다.
+- 2026-05-14: Prism v3 disk data API가 base64 payload를 반환하는 것을 확인하고, `nutanix-v3-data://<vm_uuid>/<vm_disk_uuid>` source-map URI를 `sync incr/final`에 추가했다.
+- 2026-05-14: 현재 테스트베드에서 v3 disk data API는 `offset > 16777216` 요청을 HTTP `422`로 거절하므로, 이 구현은 작은 구간 read와 data-plane plumbing 검증용으로 제한한다.
+- 2026-05-14: 전체 disk와 snapshot-consistent read를 위해 다음 단계에서 v3 VM snapshot clone, proxy VM hotplug, CVM/NFS export 등 제한 없는 block-level source가 필요하다.
+- 2026-05-14: Nutanix NFS export의 v3 snapshot file path가 raw block file로 읽히는 것을 확인하고, `nutanix-nfs://<host>/<container>/<path>` source-map URI를 base/incr/final sync에 추가했다.
+- 2026-05-14: `sync --source-map-from-v3-nfs --nfs-host <host>` 옵션으로 manifest의 v3 snapshot metadata에서 NFS source-map을 자동 생성하도록 구현했다.
+- 2026-05-14: 실제 `test` VM snapshot file에서 `offset=20971520`, `length=512` 구간을 NFS로 읽어 local target raw file에 patch하고 byte compare를 통과했다.
+- 2026-05-14: `test` VM에서 v3 snapshot + NFS data plane 기반 `base -> incr -> final` sync를 end-to-end로 통과했다. Base sync는 100GiB sparse raw target 기준 `9:17.05`, incr/final은 변경 없음으로 `0` region 처리됐다.
+- 2026-05-14: changed-region metadata의 `base_recovery_point_id`가 current id로 기록되던 문제를 reference id로 기록되도록 수정했다.
+- 2026-05-14: `rhel` VM에서 v3 snapshot + NFS data plane 기반 `base -> incr -> final` sync를 end-to-end로 통과했다. 실행 중인 guest에서 incr `32` regions/`356352` bytes, final `1` region/`16384` bytes가 관측되어 실제 changed-region patch 경로를 검증했다.
 
 ## 구현 후 테스트 단계
 

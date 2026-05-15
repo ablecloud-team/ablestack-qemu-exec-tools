@@ -78,6 +78,7 @@ n2k_nutanix_api_request_raw() {
   case "${method}" in
     GET) ;;
     POST) args+=(-X POST -H "Content-Type: application/json" -d "${body}") ;;
+    DELETE) args+=(-X DELETE) ;;
     *)
       echo "Unsupported HTTP method: ${method}" >&2
       rm -f "${tmp_file}" "${err_file}"
@@ -106,6 +107,11 @@ n2k_nutanix_api_post_raw() {
   n2k_nutanix_api_request_raw POST "${pc}" "${path}" "${username}" "${password}" "${insecure}" "${body}"
 }
 
+n2k_nutanix_api_delete_raw() {
+  local pc="$1" path="$2" username="$3" password="$4" insecure="$5"
+  n2k_nutanix_api_request_raw DELETE "${pc}" "${path}" "${username}" "${password}" "${insecure}"
+}
+
 n2k_nutanix_api_request_capture() {
   local method="$1" pc="$2" path="$3" username="$4" password="$5" insecure="$6" body="$7"
   local response_var="$8" status_var="$9" error_var="${10}"
@@ -124,6 +130,7 @@ n2k_nutanix_api_request_capture() {
   case "${method}" in
     GET) ;;
     POST) args+=(-X POST -H "Content-Type: application/json" -d "${body}") ;;
+    DELETE) args+=(-X DELETE) ;;
     *)
       echo "Unsupported HTTP method: ${method}" >&2
       rm -f "${tmp_file}" "${err_file}"
@@ -138,6 +145,36 @@ n2k_nutanix_api_request_capture() {
   printf -v "${status_var}" '%s' "${code:-000}"
   printf -v "${error_var}" '%s' "${err_text}"
   rm -f "${tmp_file}" "${err_file}"
+  return "${rc}"
+}
+
+n2k_nutanix_api_get_to_file() {
+  local pc="$1" path="$2" username="$3" password="$4" insecure="$5" output_file="$6"
+  local status_var="${7:-}" error_var="${8:-}"
+  local base err_file code rc err_text
+  base="$(n2k_nutanix_pc_base_url "${pc}")"
+  err_file="$(mktemp)"
+
+  mkdir -p "$(dirname "${output_file}")"
+
+  local -a args=(--silent --show-error --output "${output_file}" --write-out "%{http_code}")
+  if [[ "${insecure}" == "1" ]]; then
+    args+=(--insecure)
+  fi
+  if [[ -n "${username}" || -n "${password}" ]]; then
+    args+=(-u "${username}:${password}")
+  fi
+
+  rc=0
+  code="$(curl "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
+  err_text="$(cat "${err_file}" 2>/dev/null || true)"
+  if [[ -n "${status_var}" ]]; then
+    printf -v "${status_var}" '%s' "${code:-000}"
+  fi
+  if [[ -n "${error_var}" ]]; then
+    printf -v "${error_var}" '%s' "${err_text}"
+  fi
+  rm -f "${err_file}"
   return "${rc}"
 }
 
@@ -342,7 +379,7 @@ n2k_nutanix_inventory_from_raw() {
           $r.resources.boot_config.boot_type,
           $r.status.resources.boot_config.boot_type
         ]) | ascii_downcase) as $fw
-        | if ($fw | test("uefi|efi")) then "efi"
+        | if ($fw | test("uefi|efi|secure")) then "efi"
           elif ($fw | test("legacy|bios")) then "bios"
           else "" end
       end;
@@ -429,7 +466,18 @@ n2k_nutanix_inventory_from_raw() {
           uuid: first_nonempty([$r.uuid, $r.metadata.uuid, $r.extId, $r.ext_id, $r.vm.uuid]),
           power_state: power_state($r),
           firmware: firmware($r),
-          secure_boot: (($r.secureBoot // $r.secure_boot // $r.resources.secure_boot // false) | if type == "boolean" then . else false end),
+          secure_boot: (
+            ($r.secureBoot // $r.secure_boot // $r.resources.secure_boot // null) as $secure
+            | if ($secure | type) == "boolean" then $secure
+              else
+                (first_nonempty([
+                  $r.bootConfig.bootType,
+                  $r.boot_config.boot_type,
+                  $r.resources.boot_config.boot_type,
+                  $r.status.resources.boot_config.boot_type
+                ]) | ascii_downcase | test("secure"))
+              end
+          ),
           tpm: (($r.tpmPresent // $r.tpm_present // $r.resources.tpm_present // false) | if type == "boolean" then . else false end),
           cpu: cpu_count($r),
           memory_mb: memory_mb($r),

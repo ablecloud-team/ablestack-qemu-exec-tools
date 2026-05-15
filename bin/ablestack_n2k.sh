@@ -85,6 +85,9 @@ Options:
   --cred-file <file>      Credential file
   --insecure <0|1>        Skip TLS verification when set to 1
   --mode <mode>           auto|v4-incremental|legacy-cbt|cold-export|manual-disk
+  --target-storage <type> auto|rbd|file|block
+  --target-format <fmt>   qcow2|raw
+  --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --capability-json <js>  Capability JSON string or file path
   --v4-vmm <0|1>          Override v4 vmm capability
   --v4-dataprotection <0|1>
@@ -97,6 +100,7 @@ Options:
                            Override cold export availability
   --manual-disk-available <0|1>
                            Override manual disk availability
+  --probe-legacy-cbt      Accept legacy changed-region probe request
   --allow-experimental    Allow experimental legacy paths
 
 Notes:
@@ -115,7 +119,11 @@ Options:
   --pc <host>             Prism Central host
   --cred-file <file>      Credential file
   --mode <mode>           auto|v4-incremental|legacy-cbt|cold-export|manual-disk
+  --target-storage <type> auto|rbd|file|block
+  --target-format <fmt>   qcow2|raw
+  --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --capability-json <js>  Capability JSON string or file path
+  --probe-legacy-cbt      Probe legacy changed-region endpoint when credentials are provided
   --v4-vmm <0|1>          Override v4 vmm capability
   --v4-dataprotection <0|1>
                            Override v4 dataprotection capability
@@ -150,11 +158,29 @@ Options:
   --target-format <fmt>   qcow2|raw
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
+  --rbd-access-mode <m>   librbd|krbd for target VM RBD access
+  --split <mode>          full|phase1|phase2
+  --source-api <api>      v3 (current run orchestration)
+  --nfs-host <host>       Nutanix container NFS host for v3 snapshot files
+  --nfs-mount-root <dir>  Local NFS mount root
+  --deadline-sec <sec>    Phase2 incremental round deadline before final sync
+  --max-incr-phase2 <n>   Maximum Phase2 incremental rounds
+  --max-final-bytes <n>   Optional changed-byte threshold for Phase2 final gate
+  --shutdown <policy>     manual|none|guest|poweroff
+  --shutdown-timeout-sec <sec>
+                          Wait time for guest/poweroff shutdown completion
+                          guest falls back to poweroff on failure/timeout
+  --shutdown-poll-sec <sec>
+                           Power-state polling interval after shutdown request
+  --cutover-args <args>   Arguments forwarded to cutover, defaults to --define-only
+  --skip-plan             Skip preflight/plan recording before Phase1
   --allow-experimental    Allow experimental legacy paths
 
 Notes:
   - With global --resume, this command prints the manifest-based resume plan.
-  - Full orchestration is planned after preflight, manifest, and transfer layers.
+  - Phase1 performs base sync and the first incremental sync, then exits.
+  - Phase2 requires the Phase1 marker, loops incremental sync until the
+    deadline gate is met, then performs final sync and cutover artifact creation.
 EOF
 }
 
@@ -178,6 +204,7 @@ Options:
   --target-format <fmt>   qcow2|raw
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
+  --rbd-access-mode <m>   librbd|krbd for target VM RBD access
 
 Notes:
   - This command creates the initial n2k manifest.
@@ -192,9 +219,35 @@ Usage:
 
 Options:
   --name <name>           Snapshot or recovery point name
+  --recovery-point-id <id>
+                           Recovery point identifier to record
+  --source-api <api>      manual|v4|v3|legacy
+  --pc <host>             Prism host for API snapshot creation
+  --vm <name|uuid>        Source VM for snapshot creation or legacy PD membership
+  --cred-file <file>      Credential file
+  --username <user>       Prism username
+  --password <pass>       Prism password
+  --insecure <0|1>        Skip TLS verification when set to 1
+  --create-vm-snapshot    Create an internal v3 VM snapshot
+  --snapshot-type <type>   CRASH_CONSISTENT|APPLICATION_CONSISTENT
+  --pd-name <name>        Legacy Protection Domain name
+  --create-pd             Create the PD when it does not exist
+  --protect-vm            Add the VM to the PD before snapshot
+  --create-oob-snapshot   Create a legacy PD out-of-band snapshot
+  --verify-changed-regions
+                           Probe legacy changed-region path pairs after snapshot
+  --collect-changed-regions
+                           Store changed-region metadata for this snapshot pair
+  --reference-kind <kind>  Reference recovery point kind: base|incr|final
+  --wait-seconds <N>      Wait timeout for PD snapshot materialization
+  --retention-seconds <N> Legacy PD snapshot retention time
+  --app-consistent        Request app-consistent legacy snapshot
 
 Notes:
-  - Nutanix snapshot/recovery point support is planned in later phases.
+  - Manual mode records a recovery point reference in the manifest.
+  - v3 mode can create an internal VM snapshot and records API-provided disk snapshot paths.
+  - Legacy mode can create a PD OOB snapshot and records its snapshot metadata.
+  - Legacy changed-region path verification records rejected path attempts in metadata.
 EOF
 }
 
@@ -210,6 +263,15 @@ Options:
   --source-map-json <js>  Cold-export source map JSON
   --source-map-file <file>
                            Cold-export source map JSON file
+  --pc <host-or-url>       Prism endpoint for Nutanix API source URIs
+  --cred-file <file>       Credential file for Nutanix API source URIs
+  --username <user>        Prism username for Nutanix API source URIs
+  --password <pass>        Prism password for Nutanix API source URIs
+  --insecure <0|1>         Allow insecure TLS for Prism API source URIs
+  --source-map-from-v3-nfs
+                           Build source map from v3 snapshot metadata and NFS
+  --nfs-host <host>        Nutanix NFS host for v3 snapshot file paths
+  --nfs-mount-root <path>  Local mount root for Nutanix NFS sources
   --changed-regions-json <js>
                            Changed-region JSON for incr/final sync
   --changed-regions-file <file>
@@ -220,6 +282,12 @@ Options:
 Notes:
   - base sync supports cold-export/manual-disk source maps.
   - incr/final sync currently supports raw file or block targets.
+  - incr/final sync can reuse manifest-collected changed regions when no
+    --changed-regions-* option is provided.
+  - incr/final source maps may use nutanix-v3-data://<vm_uuid>/<disk_uuid>
+    for experimental Prism v3 disk data reads.
+  - base/incr/final source maps may use nutanix-nfs://<host>/<container>/...
+    for full-offset vDisk reads through Nutanix NFS exports.
 EOF
 }
 
@@ -247,6 +315,7 @@ Options:
   --define-only           Define target VM without starting it
   --apply                 Run virsh define for the generated XML
   --start                 Start target VM after definition
+  --rbd-access-mode <m>   Override manifest RBD access mode: librbd|krbd
 
 Notes:
   - Without --apply, this command only generates the libvirt XML artifact.

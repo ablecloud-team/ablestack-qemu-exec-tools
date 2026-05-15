@@ -22,6 +22,7 @@ N2K_SCHEMA_ID="ablestack-n2k/manifest-v1"
 n2k_manifest_init() {
   local manifest="$1" run_id="$2" workdir="$3" vm="$4" pc="$5" mode="$6" dst="$7" target_format="$8" target_storage="$9" target_map_json="${10}"
   local inventory_json="${11:-}"
+  local rbd_access_mode="${12:-librbd}"
   local created_at
   created_at="$(n2k_now_iso)"
 
@@ -54,6 +55,7 @@ n2k_manifest_init() {
     --arg dst "${dst}" \
     --arg target_format "${target_format}" \
     --arg target_storage "${target_storage}" \
+    --arg rbd_access_mode "${rbd_access_mode}" \
     --argjson target_map "${map_compact}" \
     --argjson inv "${inv_compact}" \
     '
@@ -73,6 +75,8 @@ n2k_manifest_init() {
             $mapped
           elif $target_storage == "file" then
             ($dst + "/" + safe_name($vm) + "-disk" + ($idx | tostring) + "." + $target_format)
+          elif $target_storage == "rbd" and ($dst | startswith("rbd:")) then
+            ($dst + "-disk" + ($idx | tostring))
           else
             ""
           end;
@@ -138,6 +142,9 @@ n2k_manifest_init() {
         dst_root: $dst,
         storage: {
           type: $target_storage,
+          rbd_access_mode: $rbd_access_mode,
+          priority: (if $target_storage == "rbd" then 1 elif $target_storage == "file" and $target_format == "qcow2" then 2 elif $target_storage == "block" then 3 else 9 end),
+          prepared: false,
           map: $target_map
         },
         libvirt: {
@@ -157,6 +164,19 @@ n2k_manifest_init() {
       },
       runtime: {
         selected_mode: $mode,
+        sync: {
+          mode: (if ($mode == "v4-incremental" or $mode == "legacy-cbt") then "incremental" elif $mode == "cold-export" then "cold" else "manual" end),
+          round: 0,
+          base_recovery_point_id: "",
+          last_recovery_point_id: "",
+          last_changed_bytes: 0,
+          last_region_count: 0,
+          final_ready: false
+        },
+        split: {
+          phase1: {done: false, ts: ""},
+          phase2: {done: false, ts: ""}
+        },
         progress: {percent: 0, last_step: "init"},
         cleanup: {items: []},
         sync_issues: [],
@@ -176,6 +196,112 @@ n2k_manifest_phase_done() {
     | .phases[$phase].ts = $ts
     | .runtime.progress.last_step = $phase
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_manifest_mark_split_done() {
+  local manifest="$1" which="$2"
+  local ts tmp
+  case "${which}" in
+    phase1|phase2) ;;
+    *)
+      echo "Unsupported split phase: ${which}" >&2
+      return 2
+      ;;
+  esac
+  ts="$(n2k_now_iso)"
+  tmp="$(mktemp)"
+  jq --arg which "${which}" --arg ts "${ts}" '
+    .runtime.split = (.runtime.split // {phase1:{done:false,ts:""},phase2:{done:false,ts:""}})
+    | .runtime.split[$which].done = true
+    | .runtime.split[$which].ts = $ts
+    | .runtime.progress.last_step = ($which + "_done")
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_manifest_split_is_done() {
+  local manifest="$1" which="$2"
+  jq -e -r --arg which "${which}" '.runtime.split[$which].done // false' "${manifest}" >/dev/null 2>&1
+}
+
+n2k_manifest_record_split_iteration() {
+  local manifest="$1" which="$2" iter="$3" elapsed_sec="$4" changed_bytes="$5" changed_regions="$6" ready="$7"
+  local ts tmp ready_json
+  case "${which}" in
+    phase1|phase2) ;;
+    *)
+      echo "Unsupported split phase: ${which}" >&2
+      return 2
+      ;;
+  esac
+  case "${ready}" in
+    true|1) ready_json=true ;;
+    false|0) ready_json=false ;;
+    *)
+      echo "Invalid split ready value: ${ready}" >&2
+      return 2
+      ;;
+  esac
+  ts="$(n2k_now_iso)"
+  tmp="$(mktemp)"
+  jq \
+    --arg which "${which}" \
+    --arg ts "${ts}" \
+    --argjson iter "${iter}" \
+    --argjson elapsed_sec "${elapsed_sec}" \
+    --argjson changed_bytes "${changed_bytes}" \
+    --argjson changed_regions "${changed_regions}" \
+    --argjson ready "${ready_json}" \
+    '
+      .runtime.split = (.runtime.split // {phase1:{done:false,ts:""},phase2:{done:false,ts:""}})
+      | .runtime.split[$which].last_iteration = {
+          iter: $iter,
+          elapsed_sec: $elapsed_sec,
+          changed_bytes: $changed_bytes,
+          changed_regions: $changed_regions,
+          ready_for_cutover: $ready,
+          ts: $ts
+        }
+    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_manifest_record_source_shutdown() {
+  local manifest="$1" policy="$2" transition="$3" before_state="$4" after_state="$5" ok="$6" response_json="${7:-}"
+  local ts tmp ok_json response_compact
+  case "${ok}" in
+    true|1) ok_json=true ;;
+    false|0) ok_json=false ;;
+    *)
+      echo "Invalid source shutdown ok value: ${ok}" >&2
+      return 2
+      ;;
+  esac
+  if [[ -z "${response_json}" ]]; then
+    response_json="{}"
+  fi
+  if ! response_compact="$(printf '%s' "${response_json}" | jq -c . 2>/dev/null)"; then
+    response_compact="{}"
+  fi
+  ts="$(n2k_now_iso)"
+  tmp="$(mktemp)"
+  jq \
+    --arg policy "${policy}" \
+    --arg transition "${transition}" \
+    --arg before_state "${before_state}" \
+    --arg after_state "${after_state}" \
+    --arg ts "${ts}" \
+    --argjson ok "${ok_json}" \
+    --argjson response "${response_compact}" \
+    '
+      .runtime.source_shutdown = {
+        policy: $policy,
+        transition: $transition,
+        before_state: $before_state,
+        after_state: $after_state,
+        ok: $ok,
+        response: $response,
+        ts: $ts
+      }
+    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 
 n2k_manifest_record_artifact() {
@@ -225,6 +351,8 @@ n2k_manifest_resume_summary() {
         {completed: false, can_resume: true, next_step: "cleanup", next_command: "cleanup", reason: "target definition step is complete"}
       elif done("final_sync") then
         {completed: false, can_resume: true, next_step: "cutover", next_command: "cutover --define-only", reason: "final sync is complete"}
+      elif (($m.runtime.split.phase1.done // false) and (($m.runtime.split.phase2.done // false) | not)) then
+        {completed: false, can_resume: true, next_step: "run-phase2", next_command: "run --split phase2", reason: "split phase1 is complete"}
       elif done("incr_sync") then
         {completed: false, can_resume: true, next_step: "sync-final", next_command: "sync final", reason: "incremental sync is complete"}
       elif done("base_sync") then
@@ -339,6 +467,98 @@ n2k_manifest_mark_patch_done() {
         else
           .
         end
+    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_manifest_record_sync_summary() {
+  local manifest="$1" phase="$2" bytes_written="$3" regions="$4" recovery_point_id="${5:-}"
+  local tmp final_ready
+  tmp="$(mktemp)"
+  case "${phase}" in
+    final_sync) final_ready=true ;;
+    *) final_ready=false ;;
+  esac
+
+  jq \
+    --arg phase "${phase}" \
+    --arg recovery_point_id "${recovery_point_id}" \
+    --argjson bytes_written "${bytes_written}" \
+    --argjson regions "${regions}" \
+    --argjson final_ready "${final_ready}" \
+    '
+      .runtime.sync = (.runtime.sync // {})
+      | .runtime.sync.round = ((.runtime.sync.round // 0) + 1)
+      | .runtime.sync.last_phase = $phase
+      | .runtime.sync.last_changed_bytes = $bytes_written
+      | .runtime.sync.last_region_count = $regions
+      | .runtime.sync.final_ready = $final_ready
+      | if ($recovery_point_id | length) > 0 then
+          .runtime.sync.last_recovery_point_id = $recovery_point_id
+          | if $final_ready then
+              .runtime.sync.final_recovery_point_id = $recovery_point_id
+            else
+              .
+            end
+        else
+          .
+        end
+    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_manifest_record_recovery_point() {
+  local manifest="$1" kind="$2" recovery_point_id="$3" name="${4:-}" source_api="${5:-manual}" metadata_json="${6:-}"
+  local ts tmp rp_key
+  ts="$(n2k_now_iso)"
+  tmp="$(mktemp)"
+  if [[ -z "${metadata_json}" ]]; then
+    metadata_json="{}"
+  fi
+
+  case "${kind}" in
+    base) rp_key="base" ;;
+    incr) rp_key="incr" ;;
+    final) rp_key="final" ;;
+    *)
+      echo "Unsupported recovery point kind: ${kind}" >&2
+      return 2
+      ;;
+  esac
+  if ! printf '%s' "${metadata_json}" | jq empty >/dev/null 2>&1; then
+    echo "Invalid recovery point metadata JSON." >&2
+    rm -f "${tmp}"
+    return 2
+  fi
+
+  jq \
+    --arg rp_key "${rp_key}" \
+    --arg recovery_point_id "${recovery_point_id}" \
+    --arg name "${name}" \
+    --arg source_api "${source_api}" \
+    --arg ts "${ts}" \
+    --argjson metadata "${metadata_json}" \
+    '
+      .runtime.sync = (.runtime.sync // {})
+      | .runtime.sync.last_recovery_point_id = $recovery_point_id
+      | .runtime.sync.last_recovery_point_kind = $rp_key
+      | .runtime.sync.last_recovery_point_source_api = $source_api
+      | if $rp_key == "base" then
+          .runtime.sync.base_recovery_point_id = $recovery_point_id
+        elif $rp_key == "final" then
+          .runtime.sync.final_recovery_point_id = $recovery_point_id
+        else
+          .
+        end
+      | .runtime.recovery_points = (.runtime.recovery_points // {})
+      | .runtime.recovery_points[$rp_key] = {
+          id: $recovery_point_id,
+          name: $name,
+          source_api: $source_api,
+          recorded_at: $ts,
+          metadata: $metadata
+        }
+      | .disks = (.disks | map(
+          .recovery_points[$rp_key].id = $recovery_point_id
+        ))
     ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 

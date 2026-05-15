@@ -25,6 +25,10 @@ _ablestack_n2k()
             COMPREPLY=( $(compgen -W "file block rbd" -- "${cur}") )
             return
             ;;
+        --rbd-access-mode)
+            COMPREPLY=( $(compgen -W "librbd krbd" -- "${cur}") )
+            return
+            ;;
         --inventory-source)
             COMPREPLY=( $(compgen -W "none fixture api" -- "${cur}") )
             return
@@ -63,10 +67,10 @@ _ablestack_n2k()
             COMPREPLY=( $(compgen -W "--pc --vm --username --password --cred-file --insecure --mode --capability-json --v4-vmm --v4-dataprotection --legacy-changed-regions --legacy-endpoint-verified --cold-export-available --manual-disk-available --allow-experimental --json --help" -- "${cur}") )
             ;;
         run|auto)
-            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --mode --dst --target-format --target-storage --target-map-json --allow-experimental --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --mode --dst --target-format --target-storage --target-map-json --rbd-access-mode --allow-experimental --help" -- "${cur}") )
             ;;
         init)
-            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --username --password --insecure --dst --mode --inventory-json --inventory-file --inventory-source --target-format --target-storage --target-map-json --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --username --password --insecure --dst --mode --inventory-json --inventory-file --inventory-source --target-format --target-storage --target-map-json --rbd-access-mode --help" -- "${cur}") )
             ;;
         snapshot)
             COMPREPLY=( $(compgen -W "base incr final --name --help" -- "${cur}") )
@@ -78,7 +82,7 @@ _ablestack_n2k()
             COMPREPLY=( $(compgen -W "--mode --samples --help" -- "${cur}") )
             ;;
         cutover)
-            COMPREPLY=( $(compgen -W "--shutdown --define-only --apply --start --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--shutdown --define-only --apply --start --rbd-access-mode --help" -- "${cur}") )
             ;;
         cleanup)
             COMPREPLY=( $(compgen -W "--keep-source-points --keep-workdir --remove-source-points --remove-workdir --apply --help" -- "${cur}") )

@@ -34,7 +34,7 @@ jobs:
       - name: Install validation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq shellcheck
+          sudo apt-get install -y jq shellcheck qemu-utils
 
       - name: Shell syntax
         run: bash -n bin/ablestack_n2k.sh lib/n2k/*.sh
@@ -88,6 +88,88 @@ jobs:
           jq -e '.phases.incr_sync.done == true and .disks[0].metrics.incr_bytes_written == 4' "${tmpdir}/work/manifest.json" >/dev/null
           test "$(cat "${tmpdir}/target/app-01-disk0.raw")" = "ZZZZbbbb"
           test "$(cat "${tmpdir}/target/app-01-disk1.raw")" = "1111YYYY"
+
+          qcow_dir="$(mktemp -d)"
+          bin/ablestack_n2k.sh --workdir "${qcow_dir}/work" --run-id n2k-ci-qcow2 --manifest "${qcow_dir}/work/manifest.json" init \
+            --vm app-01 --pc pc.example --dst "${qcow_dir}/target" \
+            --inventory-file tests/fixtures/n2k/inventory/vm_linux.json \
+            --target-format qcow2 --target-storage file >/dev/null
+          bin/ablestack_n2k.sh --workdir "${qcow_dir}/work" --manifest "${qcow_dir}/work/manifest.json" sync base \
+            --source-map-json "${base_map}" >/dev/null
+          qemu-img info "${qcow_dir}/target/app-01-disk0.qcow2" | grep -q 'file format: qcow2'
+          bin/ablestack_n2k.sh --dry-run --workdir "${qcow_dir}/work" --manifest "${qcow_dir}/work/manifest.json" sync incr \
+            --source-map-json "${incr_map}" \
+            --changed-regions-file tests/fixtures/n2k/changed_regions/non_empty.json >/dev/null
+          api_map="$(jq -nc --arg d0 'nutanix-v3-data://vm-ci/disk-ext-001' --arg d1 "${tmpdir}/disk1-incr.raw" '{"disk-ext-001":$d0,"disk-ext-002":$d1}')"
+          api_changed="$(jq -nc '{"disks":{"disk-ext-001":[{"offset":4,"length":4,"type":"regular"}],"disk-ext-002":[]}}')"
+          bin/ablestack_n2k.sh --dry-run --workdir "${tmpdir}/work" --manifest "${tmpdir}/work/manifest.json" sync incr \
+            --source-map-json "${api_map}" \
+            --changed-regions-json "${api_changed}" \
+            --pc pc.example --username user --password pass >/dev/null
+
+          rbd_dir="$(mktemp -d)"
+          bin/ablestack_n2k.sh --workdir "${rbd_dir}/work" --run-id n2k-ci-rbd --manifest "${rbd_dir}/work/manifest.json" init \
+            --vm app-01 --pc pc.example --dst rbd:pool/n2k-app-01 \
+            --inventory-file tests/fixtures/n2k/inventory/vm_linux.json \
+            --target-format raw --target-storage rbd >/dev/null
+          jq -e '.target.storage.type == "rbd" and .target.storage.priority == 1 and (.disks[0].transfer.target_path | startswith("rbd:pool/n2k-app-01-disk0"))' "${rbd_dir}/work/manifest.json" >/dev/null
+
+          bin/ablestack_n2k.sh --json plan --vm app-01 --pc pc.example --mode v4-incremental \
+            --v4-vmm 1 --v4-dataprotection 1 --target-storage auto --target-format qcow2 \
+            | jq -e '.target.selected_storage == "file" and (.steps | index("prepare-target-storage") != null)' >/dev/null
+
+          source lib/n2k/engine.sh
+          n2k_source_nfs_uri_parts 'nutanix-nfs://10.10.131.10/Storage-Container/.snapshot/21/id/.acropolis/vmdisk/disk-1' \
+            | jq -e '.host == "10.10.131.10" and .container == "Storage-Container" and .rel == ".snapshot/21/id/.acropolis/vmdisk/disk-1"' >/dev/null
+          nfs_changed="$(jq -nc '{disk_mappings:{"disk-ext-001":{snapshot_file_path:"/Storage-Container/.snapshot/21/id/.acropolis/vmdisk/disk-1"}}}')"
+          n2k_source_map_from_v3_nfs_changed_regions "${nfs_changed}" 10.10.131.10 \
+            | jq -e '."disk-ext-001" == "nutanix-nfs://10.10.131.10/Storage-Container/.snapshot/21/id/.acropolis/vmdisk/disk-1"' >/dev/null
+          n2k_patch_source_nutanix_v3_data_uri_parts 'nutanix-v3-data://vm-ci/disk-ext-001?ignored=true' \
+            | jq -e '.vm_uuid == "vm-ci" and .disk_uuid == "disk-ext-001"' >/dev/null
+          printf 'ZZZZAPII\n' > "${tmpdir}/disk0-api.raw"
+          n2k_nutanix_api_get_to_file() {
+            local path="$2" output_file="$6" status_var="$7" error_var="$8"
+            local offset length
+            offset="${path#*offset=}"
+            offset="${offset%%&*}"
+            length="${path#*length=}"
+            length="${length%%&*}"
+            dd if="${tmpdir}/disk0-api.raw" bs=1 skip="${offset}" count="${length}" status=none | base64 -w0 > "${output_file}"
+            printf -v "${status_var}" '%s' "200"
+            printf -v "${error_var}" '%s' ""
+          }
+          export N2K_WORKDIR="${tmpdir}/work"
+          export N2K_NUTANIX_PC=pc.example N2K_NUTANIX_USERNAME=user N2K_NUTANIX_PASSWORD=pass N2K_NUTANIX_INSECURE=1
+          materialized="$(n2k_patch_source_materialize_nutanix_v3_data 'nutanix-v3-data://vm-ci/disk-ext-001' '[{"offset":4,"length":4,"type":"regular"}]' disk-ext-001 incr)"
+          test "$(dd if="${materialized}" bs=1 skip=4 count=4 status=none)" = "APII"
+          n2k_transfer_patch_all "${tmpdir}/work/manifest.json" incr "${api_map}" "${api_changed}" rp-ci-api
+          test "$(cat "${tmpdir}/target/app-01-disk0.raw")" = "ZZZZAPII"
+          legacy_body="$(n2k_source_legacy_changed_regions_body /Container/.snapshot/1/id/.acropolis/vmdisk/disk-1 "" 0 4096)"
+          printf '%s' "${legacy_body}" | jq -e '(has("reference_snapshot_file_path") | not) and (.end_offset == 4096)' >/dev/null
+          n2k_source_legacy_changed_regions_to_canonical disk-ext-001 '{"file_size":8,"next_offset":8,"region_list":[{"offset":0,"length":4,"type":"REGULAR"}]}' rp-base rp-ref \
+            | jq -e '.disks["disk-ext-001"][0].type == "regular"' >/dev/null
+          pd_snapshot='{"protection_domain_name":"pd-ci","snapshot_id":"44","snapshot_uuid":"snap-ci","snapshot_create_time_usecs":1,"state":"AVAILABLE","vms":[{"vm_name":"app-01","vm_id":"vm-ci","vm_handle":9,"consistency_group":"app-01","vm_files":["/Container/.acropolis/vmdisk/disk-1"]}]}'
+          n2k_source_legacy_pd_snapshot_paths_from_json "${pd_snapshot}" \
+            | jq -e '.disk_count == 1 and .disks["disk-1"].candidate_paths[0] == "/Container/.snapshot/44/9/.acropolis/vmdisk/disk-1"' >/dev/null
+          v3_snapshot='{"metadata":{"uuid":"snap-v3"},"status":{"name":"snap-name","snapshot_type":"CRASH_CONSISTENT","state":"COMPLETE","resources":{"entity_uuid":"vm-ci"},"snapshot_file_list":[{"file_path":"/Container/.acropolis/vmdisk/disk-1","snapshot_file_path":"/Container/.snapshot/07/long-id/.acropolis/vmdisk/disk-1"}]}}'
+          n2k_source_v3_vm_snapshot_paths_from_json "${v3_snapshot}" \
+            | jq -e '.path_status == "api_provided" and .disks["disk-1"].candidate_paths[0] == "/Container/.snapshot/07/long-id/.acropolis/vmdisk/disk-1"' >/dev/null
+          jq -nc '{disks:[{disk_id:"disk-1",size_bytes:8,nutanix:{vdisk_uuid:"source-vdisk-1"}}]}' > "${tmpdir}/map-manifest.json"
+          test "$(n2k_source_manifest_disk_id_for_snapshot_file "${tmpdir}/map-manifest.json" source-vdisk-1 8 0)" = "disk-1"
+          current_paths='{"disks":{"disk-1":{"candidate_paths":["/Container/.snapshot/45/9/.acropolis/vmdisk/disk-1"]}}}'
+          reference_paths='{"disks":{"disk-1":{"candidate_paths":["/Container/.snapshot/44/9/.acropolis/vmdisk/disk-1"]}}}'
+          n2k_source_legacy_changed_region_candidate_pairs_from_indexes "${current_paths}" "${reference_paths}" 1 \
+            | jq -e 'length == 1 and .[0].snapshot_file_path == "/Container/.snapshot/45/9/.acropolis/vmdisk/disk-1" and .[0].reference_snapshot_file_path == "/Container/.snapshot/44/9/.acropolis/vmdisk/disk-1"' >/dev/null
+          n2k_source_v3_collect_changed_regions_from_indexes pc.example user pass 1 '{"disks":{}}' '{"disks":{}}' "${tmpdir}/map-manifest.json" rp-current rp-reference \
+            | jq -e '.current_recovery_point_id == "rp-current" and .base_recovery_point_id == "rp-reference" and .reference_recovery_point_id == "rp-reference"' >/dev/null
+          bin/ablestack_n2k.sh --dry-run --workdir "${tmpdir}/work" --manifest "${tmpdir}/work/manifest.json" --json snapshot base \
+            --source-api v3 --create-vm-snapshot --pc pc.example --vm app-01 \
+            --verify-changed-regions --collect-changed-regions --username user --password pass \
+            | jq -e '.payload.metadata.dry_run == true and .payload.metadata.v3.create_vm_snapshot == true and .payload.metadata.v3.collect_changed_regions == true and .payload.source_api == "v3"' >/dev/null
+          bin/ablestack_n2k.sh --dry-run --workdir "${tmpdir}/work" --manifest "${tmpdir}/work/manifest.json" --json snapshot base \
+            --source-api legacy --create-oob-snapshot --pc pc.example --vm app-01 --pd-name pd-ci \
+            --verify-changed-regions --reference-kind base --username user --password pass \
+            | jq -e '.payload.metadata.dry_run == true and .payload.metadata.legacy.verify_changed_regions == true and .payload.source_api == "legacy"' >/dev/null
 
   build-rpm:
     runs-on: ubuntu-latest

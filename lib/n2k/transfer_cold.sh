@@ -19,11 +19,7 @@ set -euo pipefail
 
 n2k_file_size_bytes() {
   local path="$1"
-  if stat -c '%s' "${path}" >/dev/null 2>&1; then
-    stat -c '%s' "${path}"
-  else
-    stat -f '%z' "${path}"
-  fi
+  n2k_storage_file_size_bytes "${path}"
 }
 
 n2k_load_source_map_json() {
@@ -55,48 +51,147 @@ n2k_source_for_disk() {
     <<<"${source_map}"
 }
 
-n2k_copy_to_file_target() {
-  local source_path="$1" target_path="$2" target_format="$3"
-  mkdir -p "$(dirname "${target_path}")"
-
-  case "${target_format}" in
-    raw)
-      if [[ -b "${source_path}" ]]; then
-        dd if="${source_path}" of="${target_path}" bs=16M status=none conv=sparse
-      else
-        cp -f "${source_path}" "${target_path}"
-      fi
-      ;;
-    qcow2)
-      command -v qemu-img >/dev/null 2>&1 || {
-        echo "qemu-img is required for qcow2 cold-export target." >&2
-        return 2
-      }
-      qemu-img convert -p -O qcow2 "${source_path}" "${target_path}"
-      ;;
-    *)
-      echo "Unsupported target format: ${target_format}" >&2
-      return 2
-      ;;
-  esac
+n2k_source_is_nutanix_nfs_uri() {
+  [[ "${1:-}" == nutanix-nfs://* ]]
 }
 
-n2k_copy_to_block_target() {
-  local source_path="$1" target_path="$2"
-  [[ -b "${target_path}" ]] || {
-    echo "Block target is not a block device: ${target_path}" >&2
+n2k_source_nfs_uri_from_path() {
+  local host="$1" snapshot_path="$2"
+  [[ -n "${host}" ]] || {
+    echo "NFS host is required for Nutanix NFS source paths." >&2
     return 2
   }
-  dd if="${source_path}" of="${target_path}" bs=16M status=none conv=fsync
+  [[ "${snapshot_path}" == /* ]] || {
+    echo "Nutanix NFS source path must start with /: ${snapshot_path}" >&2
+    return 2
+  }
+  printf 'nutanix-nfs://%s%s' "${host}" "${snapshot_path}"
 }
 
-n2k_copy_to_rbd_target() {
-  local source_path="$1" target_path="$2"
-  command -v qemu-img >/dev/null 2>&1 || {
-    echo "qemu-img is required for rbd cold-export target." >&2
+n2k_source_nfs_uri_parts() {
+  local uri="$1" rest host path container rel
+  n2k_source_is_nutanix_nfs_uri "${uri}" || {
+    echo "Invalid Nutanix NFS source URI: ${uri}" >&2
     return 2
   }
-  qemu-img convert -p -O raw "${source_path}" "${target_path}"
+
+  rest="${uri#nutanix-nfs://}"
+  host="${rest%%/*}"
+  path="/${rest#*/}"
+  container="${path#/}"
+  container="${container%%/*}"
+  rel="${path#/"${container}"/}"
+  [[ -n "${host}" && -n "${container}" && "${rel}" != "${path}" ]] || {
+    echo "Nutanix NFS URI must be nutanix-nfs://<host>/<container>/<path>" >&2
+    return 2
+  }
+
+  jq -nc \
+    --arg host "${host}" \
+    --arg path "${path}" \
+    --arg container "${container}" \
+    --arg rel "${rel}" \
+    '{host:$host,path:$path,container:$container,rel:$rel}'
+}
+
+n2k_source_nfs_safe_name() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_'
+}
+
+n2k_source_nfs_mounts_file() {
+  printf '%s' "${N2K_SOURCE_NFS_MOUNTS_FILE:-${N2K_WORKDIR:-/tmp}/n2k-nfs-mounts.list}"
+}
+
+n2k_source_nfs_mount_uri() {
+  local uri="$1" parts host container rel mount_root mount_point mounts_file mounted_here=0
+  parts="$(n2k_source_nfs_uri_parts "${uri}")"
+  host="$(jq -r '.host' <<<"${parts}")"
+  container="$(jq -r '.container' <<<"${parts}")"
+  rel="$(jq -r '.rel' <<<"${parts}")"
+  mount_root="${N2K_NUTANIX_NFS_MOUNT_ROOT:-/mnt/ablestack-n2k-nfs}"
+  mount_point="${mount_root}/$(n2k_source_nfs_safe_name "${host}")/$(n2k_source_nfs_safe_name "${container}")"
+  mounts_file="$(n2k_source_nfs_mounts_file)"
+
+  n2k_storage_require_command mount "Nutanix NFS source mount"
+  n2k_storage_require_command mountpoint "Nutanix NFS source mount check"
+
+  mkdir -p "${mount_point}" "$(dirname "${mounts_file}")"
+  if ! mountpoint -q "${mount_point}"; then
+    mount -t nfs -o "${N2K_NUTANIX_NFS_OPTIONS:-ro,vers=3,nolock,proto=tcp}" "${host}:/${container}" "${mount_point}"
+    mounted_here=1
+  fi
+  if [[ "${mounted_here}" -eq 1 ]]; then
+    printf '%s\n' "${mount_point}" >>"${mounts_file}"
+  fi
+  printf '%s/%s' "${mount_point}" "${rel}"
+}
+
+n2k_source_cleanup_nfs_mounts() {
+  local mounts_file mount_point
+  mounts_file="$(n2k_source_nfs_mounts_file)"
+  [[ -f "${mounts_file}" ]] || return 0
+  tac "${mounts_file}" 2>/dev/null | awk '!seen[$0]++' | while IFS= read -r mount_point; do
+    [[ -n "${mount_point}" ]] || continue
+    if mountpoint -q "${mount_point}"; then
+      umount "${mount_point}" >/dev/null 2>&1 || true
+    fi
+  done
+  rm -f "${mounts_file}"
+}
+
+n2k_source_prepare_file_path() {
+  local source_path="$1"
+  if n2k_source_is_nutanix_nfs_uri "${source_path}"; then
+    n2k_source_nfs_mount_uri "${source_path}"
+  else
+    printf '%s' "${source_path}"
+  fi
+}
+
+n2k_source_map_from_v3_nfs_changed_regions() {
+  local changed_regions_json="$1" nfs_host="$2"
+  [[ -n "${nfs_host}" ]] || {
+    echo "NFS host is required to build source-map from v3 changed-region metadata." >&2
+    return 2
+  }
+  jq -c --arg host "${nfs_host}" '
+    (.disk_mappings // {}) as $m
+    | reduce ($m | keys[]) as $disk_id ({};
+        ($m[$disk_id].snapshot_file_path // "") as $path
+        | if ($path | startswith("/")) then
+            . + {($disk_id):("nutanix-nfs://" + $host + $path)}
+          else
+            .
+          end
+      )
+  ' <<<"${changed_regions_json}"
+}
+
+n2k_source_map_from_v3_nfs_path_index() {
+  local manifest="$1" path_index_json="$2" nfs_host="$3"
+  local entries count idx item vdisk_uuid snapshot_file_path uri local_path file_size disk_id source_map="{}"
+  [[ -n "${nfs_host}" ]] || {
+    echo "NFS host is required to build source-map from v3 path index." >&2
+    return 2
+  }
+  entries="$(jq -c '.disks // {} | to_entries' <<<"${path_index_json}")"
+  count="$(jq -r 'length' <<<"${entries}")"
+  for ((idx=0; idx<count; idx++)); do
+    item="$(jq -c --argjson idx "${idx}" '.[$idx]' <<<"${entries}")"
+    vdisk_uuid="$(jq -r '.key' <<<"${item}")"
+    snapshot_file_path="$(jq -r '.value.snapshot_file_path // empty' <<<"${item}")"
+    [[ -n "${snapshot_file_path}" ]] || continue
+    uri="$(n2k_source_nfs_uri_from_path "${nfs_host}" "${snapshot_file_path}")"
+    if ! local_path="$(n2k_source_nfs_mount_uri "${uri}" 2>/dev/null)"; then
+      continue
+    fi
+    [[ -e "${local_path}" ]] || continue
+    file_size="$(n2k_storage_file_size_bytes "${local_path}")"
+    disk_id="$(n2k_source_manifest_disk_id_for_snapshot_file "${manifest}" "${vdisk_uuid}" "${file_size}" "${idx}")"
+    [[ -n "${disk_id}" ]] || continue
+    source_map="$(jq -c --arg disk_id "${disk_id}" --arg uri "${uri}" '. + {($disk_id):$uri}' <<<"${source_map}")"
+  done
+  printf '%s' "${source_map}"
 }
 
 n2k_transfer_cold_base_all() {
@@ -108,6 +203,7 @@ n2k_transfer_cold_base_all() {
     return 2
   }
 
+  trap 'n2k_source_cleanup_nfs_mounts' RETURN
   for ((idx=0; idx<count; idx++)); do
     n2k_transfer_cold_base_one "${manifest}" "${source_map_json}" "${idx}"
   done
@@ -115,6 +211,8 @@ n2k_transfer_cold_base_all() {
   if [[ "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
     n2k_manifest_phase_done "${manifest}" "base_sync"
   fi
+  n2k_source_cleanup_nfs_mounts
+  trap - RETURN
 }
 
 n2k_transfer_cold_base_one() {
@@ -131,7 +229,10 @@ n2k_transfer_cold_base_one() {
     echo "Missing cold-export source path for disk: ${disk_id}" >&2
     return 2
   }
-  [[ -e "${source_path}" ]] || {
+  if [[ "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
+    source_path="$(n2k_source_prepare_file_path "${source_path}")"
+  fi
+  [[ "${N2K_DRY_RUN:-0}" -eq 1 || -e "${source_path}" ]] || {
     echo "Cold-export source path not found: ${source_path}" >&2
     return 2
   }
@@ -148,21 +249,7 @@ n2k_transfer_cold_base_one() {
     return 0
   fi
 
-  case "${target_storage}" in
-    file)
-      n2k_copy_to_file_target "${source_path}" "${target_path}" "${target_format}"
-      ;;
-    block)
-      n2k_copy_to_block_target "${source_path}" "${target_path}"
-      ;;
-    rbd)
-      n2k_copy_to_rbd_target "${source_path}" "${target_path}"
-      ;;
-    *)
-      echo "Unsupported target storage: ${target_storage}" >&2
-      return 2
-      ;;
-  esac
+  n2k_storage_copy_base "${source_path}" "${target_path}" "${target_storage}" "${target_format}"
 
   bytes_written="$(n2k_file_size_bytes "${source_path}")"
   n2k_manifest_set_cold_source "${manifest}" "${idx}" "${source_path}"

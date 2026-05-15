@@ -34,7 +34,20 @@
 | `cold-export` | 전체 디스크 복제 기반 마이그레이션 | 높음 | 정식 fallback |
 | `manual-disk` | 사용자가 제공한 디스크 이미지를 KVM VM으로 구성 | 사용자 의존 | 정식 rescue |
 
-기본 실행 모드인 `auto`는 `preflight` 결과를 바탕으로 가능한 최선의 모드를 선택한다. 단, 실험적 모드인 `legacy-cbt`는 명시 옵션 없이는 자동 선택하지 않는다.
+기본 실행 모드인 `auto`는 `preflight` 결과를 바탕으로 가능한 최선의 모드를 선택한다. 기능 우선순위는 증분 마이그레이션을 1순위로 둔다. `cold-export`는 증분 capability가 없거나 증분 경로가 실패했을 때 사용하는 차선 fallback이다. 단, 실험적 모드인 `legacy-cbt`는 명시 옵션 없이는 자동 선택하지 않는다.
+
+구현과 테스트의 주 흐름은 다음 순서를 따른다.
+
+1. `v4-incremental`
+2. `legacy-cbt`
+3. `cold-export`
+4. `manual-disk`
+
+target storage의 구현과 테스트 우선순위는 다음 순서를 따른다.
+
+1. RBD
+2. qcow2 file
+3. block/LVM
 
 ## Nutanix API 전략
 
@@ -49,6 +62,8 @@ Nutanix v4 API는 Prism Central 중심의 최신 API이며, VM 관리와 Data Pr
 - Prism Element redirect/JWT 기반 changed regions 조회
 
 `v4-incremental`은 `ablestack_v2k`의 base/incr/final 흐름에 가장 가깝다.
+
+증분 마이그레이션의 표준 흐름은 source VM을 운영 상태로 둔 채 base sync와 반복 incremental sync를 수행하고, 마지막에 source VM을 짧게 중단한 뒤 final sync와 target VM start를 수행하는 것이다.
 
 ### legacy API 고려
 
