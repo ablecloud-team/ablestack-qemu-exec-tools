@@ -92,6 +92,7 @@ Options:
   --v4-vmm <0|1>          Override v4 vmm capability
   --v4-dataprotection <0|1>
                            Override v4 dataprotection capability
+  --v4-data-plane <0|1>   Override verified v4 recovery-point data-plane capability
   --legacy-changed-regions <0|1>
                            Override legacy changed-region capability
   --legacy-endpoint-verified <0|1>
@@ -127,6 +128,7 @@ Options:
   --v4-vmm <0|1>          Override v4 vmm capability
   --v4-dataprotection <0|1>
                            Override v4 dataprotection capability
+  --v4-data-plane <0|1>   Override verified v4 recovery-point data-plane capability
   --legacy-changed-regions <0|1>
                            Override legacy changed-region capability
   --legacy-endpoint-verified <0|1>

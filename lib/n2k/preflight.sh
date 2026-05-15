@@ -61,9 +61,9 @@ n2k_detect_host_dependencies() {
 n2k_preflight_result_json() {
   local pc="$1" vm="$2" requested_mode="$3" allow_experimental="$4"
   local capability_json="$5" deps_json="$6"
-  local v4_vmm_override="$7" v4_dp_override="$8" legacy_override="$9"
-  local legacy_verified_override="${10}" cold_override="${11}" manual_override="${12}"
-  local requested_storage="${13:-auto}" requested_format="${14:-qcow2}"
+  local v4_vmm_override="$7" v4_dp_override="$8" v4_data_plane_override="$9"
+  local legacy_override="${10}" legacy_verified_override="${11}" cold_override="${12}" manual_override="${13}"
+  local requested_storage="${14:-auto}" requested_format="${15:-qcow2}"
 
   jq -nc \
     --arg pc "${pc}" \
@@ -74,6 +74,7 @@ n2k_preflight_result_json() {
     --argjson deps "${deps_json}" \
     --arg v4_vmm_override "${v4_vmm_override}" \
     --arg v4_dp_override "${v4_dp_override}" \
+    --arg v4_data_plane_override "${v4_data_plane_override}" \
     --arg legacy_override "${legacy_override}" \
     --arg legacy_verified_override "${legacy_verified_override}" \
     --arg cold_override "${cold_override}" \
@@ -141,6 +142,7 @@ n2k_preflight_result_json() {
     (override_bool($v4_vmm_override; cap_v4_vmm)) as $v4_vmm
     | (override_bool($v4_dp_override; cap_v4_dp)) as $v4_dp
     | (cap_v4_changed_regions or $v4_dp) as $v4_changed_regions
+    | (override_bool($v4_data_plane_override; cap_v4_data_plane)) as $v4_data_plane
     | (cap_v3_vm_snapshots) as $v3_vm_snapshots
     | (override_bool($legacy_override; cap_legacy_changed_regions)) as $legacy_candidate
     | (override_bool($legacy_verified_override; cap_legacy_verified)) as $legacy_verified
@@ -161,7 +163,7 @@ n2k_preflight_result_json() {
        elif $selected_storage == "file" then $file_available
        elif $selected_storage == "block" then $block_available
        else false end) as $storage_available
-    | ($v4_vmm and $v4_dp and $v4_changed_regions) as $v4_incremental_available
+    | ($v4_vmm and $v4_dp and $v4_changed_regions and $v4_data_plane) as $v4_incremental_available
     | ($legacy_candidate and $legacy_verified and $allow_experimental) as $legacy_available
     | (if $cold_available then "cold-export"
        elif $manual_available then "manual-disk"
@@ -223,7 +225,7 @@ n2k_preflight_result_json() {
             dataprotection: $v4_dp,
             clustermgmt: cap_v4_clustermgmt,
             changed_regions: $v4_changed_regions,
-            data_plane: cap_v4_data_plane,
+            data_plane: $v4_data_plane,
             revisions: ($cap.api.v4.revisions // $cap.v4.revisions // {}),
             probe: ($cap.api.v4.probe // $cap.v4.probe // {})
           },
@@ -252,7 +254,7 @@ n2k_preflight_result_json() {
         },
         warnings: (
           []
-          + (if $v4_incremental_available and (cap_v4_data_plane | not) then ["v4 control-plane APIs are available, but v4 recovery-point data plane is not verified; use the validated v3 source path for E2E until data-plane support is completed"] else [] end)
+          + (if $v4_vmm and $v4_dp and $v4_changed_regions and ($v4_data_plane | not) then ["v4 control-plane APIs are available, but v4 recovery-point data plane is not verified; use the validated v3 source path for E2E until data-plane support is completed"] else [] end)
           + (if $legacy_candidate and ($legacy_verified | not) then ["legacy-cbt is only a candidate because endpoint verification is missing"] else [] end)
           + (if $legacy_candidate and $legacy_verified and ($allow_experimental | not) then ["legacy-cbt is blocked because experimental mode is not enabled"] else [] end)
           + (if $selected_mode == "legacy-cbt" and ($can_run | not) and $fallback_mode != "unavailable" then ["fallback mode is " + $fallback_mode] else [] end)

@@ -127,7 +127,7 @@ jobs:
           jq -e '.target.storage.type == "rbd" and .target.storage.priority == 1 and (.disks[0].transfer.target_path | startswith("rbd:pool/n2k-app-01-disk0"))' "${rbd_dir}/work/manifest.json" >/dev/null
 
           bin/ablestack_n2k.sh --json plan --vm app-01 --pc pc.example --mode v4-incremental \
-            --v4-vmm 1 --v4-dataprotection 1 --target-storage auto --target-format qcow2 \
+            --v4-vmm 1 --v4-dataprotection 1 --v4-data-plane 1 --target-storage auto --target-format qcow2 \
             | jq -e '.target.selected_storage == "file" and (.steps | index("prepare-target-storage") != null)' >/dev/null
 
           source lib/n2k/engine.sh

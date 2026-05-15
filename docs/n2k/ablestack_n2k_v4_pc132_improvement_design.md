@@ -66,6 +66,9 @@ Important network finding:
   `ablestack_n2k init` against `10.10.132.100`.
 - ICMP ping still succeeded from the workstation, so the host was reachable but
   Prism Gateway on `9440` was not accepting connections at that later check.
+- After Prism Gateway was restored, host-side reachability was rechecked on
+  2026-05-15. ABLESTACK host `10.10.22.1` could open TCP `9440` to both
+  `10.10.132.100` and the legacy PC `10.10.131.11`.
 
 This means v4 support must include both API capability discovery and run-host
 connectivity validation. A successful probe from the operator workstation is not
@@ -320,6 +323,9 @@ Implemented the safe foundation for Phase A and part of Phase B:
   - `nics[].networkInfo.subnet.extId`
 - v4 probe output records selected namespace revisions and HTTP probe status.
 - v2/v3 fallback order is preserved after v4 attempts.
+- `plan` now requires a verified v4 recovery-point data plane before treating
+  `v4-incremental` as runnable. The CLI includes `--v4-data-plane <0|1>` only
+  as an explicit fixture/test override.
 
 Validation results:
 
@@ -330,11 +336,29 @@ Validation results:
   - Data Protection: `v4.1`
   - Cluster Management: `v4.0`
 - v4 fixture smoke covers UEFI secure boot and Legacy BIOS VM inventory shapes.
+- Host-side connectivity from `10.10.22.1` to `10.10.132.100:9440` and
+  `10.10.131.11:9440` passed.
+- Full PC `10.10.132.100` inventory matrix passed with `init --inventory-source api`:
+
+| VM | Firmware | Secure Boot | vTPM | CPU | Memory MiB | Disks | First Bus | First Size Bytes | NICs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `rhel` | `efi` | true | false | 1 | 4096 | 1 | SCSI | 107374182400 | 1 |
+| `win10` | `efi` | true | false | 4 | 4096 | 1 | SCSI | 107374182400 | 1 |
+| `centos7-bios-ide` | `bios` | false | false | 1 | 4096 | 1 | IDE | 107374182400 | 1 |
+| `PC-NameOption-1` | `bios` | false | false | 6 | 28672 | 7 | SCSI | 15728640 | 2 |
+| `windows11` | `efi` | true | true | 4 | 16384 | 1 | SCSI | 107374182400 | 1 |
+
+- PC `10.10.132.100` plan matrix detected v4 VMM, Data Protection, Cluster
+  Management, and changed-region control-plane availability on all observed VMs,
+  with revisions `v4.1`, `v4.1`, and `v4.0`. Because the v4 data plane is still
+  `false`, automatic planning selected `manual-disk`, and explicit
+  `--mode v4-incremental` returned `can_run=false`.
 
 The run data plane for official v4 recovery points remains an open item. The
 current implementation improves API detection, inventory, and path selection,
-while the already validated v3/NFS source path remains the runnable migration
-path.
+while deliberately blocking v4 incremental runs until recovery-point disk bytes
+are verified. The already validated v3/NFS source path remains the runnable
+migration path.
 
 ### Phase A - Safe v4 inventory readiness
 
@@ -422,12 +446,12 @@ Acceptance:
 
 ## Open items
 
-1. Restore or stabilize Prism Gateway on `10.10.132.100:9440` before live
-   implementation testing. The first probe succeeded, but later checks returned
-   TCP connection refused.
-2. Confirm whether `10.10.22.1`, `10.10.22.2`, and `10.10.22.3` should reach
-   `10.10.132.100:9440` directly. If yes, routing/firewall must be fixed before
-   E2E source operations can run from those hosts.
+1. Keep Prism Gateway on `10.10.132.100:9440` under observation during live
+   testing. It recovered and passed host-side connectivity checks, but earlier
+   probes saw TCP connection refused.
+2. Repeat host-side reachability checks from `10.10.22.2` and `10.10.22.3`
+   before using either host for v4 source operations. `10.10.22.1` has already
+   reached `10.10.132.100:9440` successfully.
 3. Confirm the official or supported byte-stream data plane for v4 recovery
    point disks. Changed-region APIs identify what changed, but `n2k` still needs
    a reliable way to read the corresponding bytes.

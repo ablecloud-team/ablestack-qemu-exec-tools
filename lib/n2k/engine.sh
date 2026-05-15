@@ -275,7 +275,7 @@ n2k_build_preflight_result_from_args() {
 
   local pc="" vm="" mode="auto" allow_experimental=false capability_json_arg=""
   local cred_file="" username="" password="" insecure="1" probe_legacy=false
-  local v4_vmm="auto" v4_dp="auto" legacy="auto" legacy_verified="auto" cold="auto" manual="auto"
+  local v4_vmm="auto" v4_dp="auto" v4_data_plane="auto" legacy="auto" legacy_verified="auto" cold="auto" manual="auto"
   local target_storage="auto" target_format="qcow2" rbd_access_mode="librbd"
   local parsed_bool=""
 
@@ -306,6 +306,12 @@ n2k_build_preflight_result_from_args() {
         parsed_bool="$(n2k_bool_arg "${2:-}" || true)"
         [[ -n "${parsed_bool}" ]] || n2k_die "Invalid --v4-dataprotection value"
         v4_dp="${parsed_bool}"
+        shift 2
+        ;;
+      --v4-data-plane)
+        parsed_bool="$(n2k_bool_arg "${2:-}" || true)"
+        [[ -n "${parsed_bool}" ]] || n2k_die "Invalid --v4-data-plane value"
+        v4_data_plane="${parsed_bool}"
         shift 2
         ;;
       --legacy-changed-regions)
@@ -377,7 +383,7 @@ n2k_build_preflight_result_from_args() {
 
   n2k_preflight_result_json "${pc}" "${vm}" "${mode}" "${allow_experimental}" \
     "${capability_json}" "${deps_json}" \
-    "${v4_vmm}" "${v4_dp}" "${legacy}" "${legacy_verified}" "${cold}" "${manual}" \
+    "${v4_vmm}" "${v4_dp}" "${v4_data_plane}" "${legacy}" "${legacy_verified}" "${cold}" "${manual}" \
     "${target_storage}" "${target_format}"
 }
 
