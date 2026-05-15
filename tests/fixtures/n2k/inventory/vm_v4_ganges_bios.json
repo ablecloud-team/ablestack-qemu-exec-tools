@@ -1,0 +1,46 @@
+{
+  "$objectType": "vmm.v4.ahv.config.Vm",
+  "extId": "92c03e06-e400-40f1-b000-e9be3b0c92b1",
+  "name": "centos7-bios-ide",
+  "powerState": "ON",
+  "numSockets": 1,
+  "numCoresPerSocket": 1,
+  "memorySizeBytes": 4294967296,
+  "bootConfig": {
+    "$objectType": "vmm.v4.ahv.config.LegacyBoot"
+  },
+  "nics": [
+    {
+      "$objectType": "vmm.v4.ahv.config.Nic",
+      "extId": "b9ad77d5-84e9-4821-8c67-27c9a78c57b4",
+      "backingInfo": {
+        "$objectType": "vmm.v4.ahv.config.EmulatedNic",
+        "macAddress": "50:6b:8d:01:02:03"
+      },
+      "networkInfo": {
+        "subnet": {
+          "extId": "f44f350c-2313-4861-89ed-d26b0b576690"
+        }
+      }
+    }
+  ],
+  "disks": [
+    {
+      "$objectType": "vmm.v4.ahv.config.Disk",
+      "extId": "76a9be73-9cb4-4b93-b27b-eed82d6b14c0",
+      "backingInfo": {
+        "$objectType": "vmm.v4.ahv.config.VmDisk",
+        "diskExtId": "76a9be73-9cb4-4b93-b27b-eed82d6b14c0",
+        "diskSizeBytes": 42949672960,
+        "storageContainer": {
+          "extId": "8fe1da89-3dd2-4419-8b7f-313959eae441"
+        }
+      },
+      "diskAddress": {
+        "$objectType": "vmm.v4.ahv.config.DiskAddress",
+        "busType": "IDE",
+        "index": 0
+      }
+    }
+  ]
+}

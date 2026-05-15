@@ -76,6 +76,18 @@ jobs:
             --vm app-01 --pc pc.example --dst "${tmpdir}/target" \
             --inventory-file tests/fixtures/n2k/inventory/vm_linux.json \
             --target-format raw --target-storage file >/dev/null
+          v4_dir="$(mktemp -d)"
+          bin/ablestack_n2k.sh --workdir "${v4_dir}/work" --run-id n2k-ci-v4 --manifest "${v4_dir}/work/manifest.json" init \
+            --vm rhel --pc pc.example --dst "${v4_dir}/target" \
+            --inventory-file tests/fixtures/n2k/inventory/vm_v4_ganges_uefi.json \
+            --target-format raw --target-storage file >/dev/null
+          jq -e '.source.vm.firmware == "efi" and .source.vm.secure_boot == true and .source.vm.cpu == 1 and .source.vm.memory_mb == 4096 and (.source.vm.nics[0].mac == "50:6b:8d:bb:91:08") and (.disks | length) == 1 and .disks[0].size_bytes == 107374182400 and .disks[0].nutanix.vdisk_uuid == "ae29c318-5dca-44b3-93c6-f3f3714177ec" and .disks[0].nutanix.storage_container_ext_id == "8fe1da89-3dd2-4419-8b7f-313959eae441"' "${v4_dir}/work/manifest.json" >/dev/null
+          v4_bios_dir="$(mktemp -d)"
+          bin/ablestack_n2k.sh --workdir "${v4_bios_dir}/work" --run-id n2k-ci-v4-bios --manifest "${v4_bios_dir}/work/manifest.json" init \
+            --vm centos7-bios-ide --pc pc.example --dst "${v4_bios_dir}/target" \
+            --inventory-file tests/fixtures/n2k/inventory/vm_v4_ganges_bios.json \
+            --target-format raw --target-storage file >/dev/null
+          jq -e '.source.vm.firmware == "bios" and .source.vm.secure_boot == false and .disks[0].controller.type == "IDE" and .disks[0].size_bytes == 42949672960' "${v4_bios_dir}/work/manifest.json" >/dev/null
           bin/ablestack_n2k.sh --workdir "${tmpdir}/work" --manifest "${tmpdir}/work/manifest.json" sync base \
             --source-map-json "${base_map}" >/dev/null
           printf 'ZZZZbbbb\n' > "${tmpdir}/disk0-incr.raw"

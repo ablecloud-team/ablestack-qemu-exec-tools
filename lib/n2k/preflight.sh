@@ -102,8 +102,12 @@ n2k_preflight_result_json() {
       ($cap.api.v4.vmm // $cap.v4.vmm // $cap.namespaces.vmm // false) | truthy;
     def cap_v4_dp:
       ($cap.api.v4.dataprotection // $cap.v4.dataprotection // $cap.namespaces.dataprotection // false) | truthy;
+    def cap_v4_clustermgmt:
+      ($cap.api.v4.clustermgmt // $cap.v4.clustermgmt // $cap.namespaces.clustermgmt // false) | truthy;
     def cap_v4_changed_regions:
       ($cap.api.v4.changed_regions // $cap.v4.changed_regions // $cap.changed_regions.v4 // cap_v4_dp) | truthy;
+    def cap_v4_data_plane:
+      ($cap.api.v4.data_plane // $cap.v4.data_plane // false) | truthy;
     def cap_v3_vm_snapshots:
       ($cap.api.v3.vm_snapshots // $cap.v3.vm_snapshots // $cap.api.v3.available // $cap.v3.available // false) | truthy;
     def cap_legacy_changed_regions:
@@ -217,7 +221,11 @@ n2k_preflight_result_json() {
           v4: {
             vmm: $v4_vmm,
             dataprotection: $v4_dp,
-            changed_regions: $v4_changed_regions
+            clustermgmt: cap_v4_clustermgmt,
+            changed_regions: $v4_changed_regions,
+            data_plane: cap_v4_data_plane,
+            revisions: ($cap.api.v4.revisions // $cap.v4.revisions // {}),
+            probe: ($cap.api.v4.probe // $cap.v4.probe // {})
           },
           v3: {
             vm_snapshots: $v3_vm_snapshots
@@ -244,6 +252,7 @@ n2k_preflight_result_json() {
         },
         warnings: (
           []
+          + (if $v4_incremental_available and (cap_v4_data_plane | not) then ["v4 control-plane APIs are available, but v4 recovery-point data plane is not verified; use the validated v3 source path for E2E until data-plane support is completed"] else [] end)
           + (if $legacy_candidate and ($legacy_verified | not) then ["legacy-cbt is only a candidate because endpoint verification is missing"] else [] end)
           + (if $legacy_candidate and $legacy_verified and ($allow_experimental | not) then ["legacy-cbt is blocked because experimental mode is not enabled"] else [] end)
           + (if $selected_mode == "legacy-cbt" and ($can_run | not) and $fallback_mode != "unavailable" then ["fallback mode is " + $fallback_mode] else [] end)
@@ -265,7 +274,10 @@ n2k_preflight_text_summary() {
     "Can run selected mode: " + ((.can_run // false) | tostring) + "\n" +
     "v4 vmm: " + ((.api.v4.vmm // false) | tostring) + "\n" +
     "v4 dataprotection: " + ((.api.v4.dataprotection // false) | tostring) + "\n" +
+    "v4 clustermgmt: " + ((.api.v4.clustermgmt // false) | tostring) + "\n" +
+    "v4 revisions: vmm=" + (.api.v4.revisions.vmm // "") + ", dataprotection=" + (.api.v4.revisions.dataprotection // "") + ", clustermgmt=" + (.api.v4.revisions.clustermgmt // "") + "\n" +
     "v4 changed regions: " + ((.api.v4.changed_regions // false) | tostring) + "\n" +
+    "v4 data plane: " + ((.api.v4.data_plane // false) | tostring) + "\n" +
     "v3 vm snapshots: " + ((.api.v3.vm_snapshots // false) | tostring) + "\n" +
     "legacy changed regions: " + ((.api.legacy.changed_regions // false) | tostring) + "\n" +
     "legacy verified: " + ((.api.legacy.verified // false) | tostring) + "\n" +

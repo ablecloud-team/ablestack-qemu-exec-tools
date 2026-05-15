@@ -47,10 +47,12 @@ n2k_nutanix_curl_auth_args() {
 
 n2k_nutanix_api_get() {
   local pc="$1" path="$2" username="$3" password="$4" insecure="$5"
-  local base
+  local base connect_timeout max_time
   base="$(n2k_nutanix_pc_base_url "${pc}")"
+  connect_timeout="${N2K_NUTANIX_CONNECT_TIMEOUT:-10}"
+  max_time="${N2K_NUTANIX_MAX_TIME:-120}"
 
-  local -a args=(--silent --show-error --fail)
+  local -a args=(--silent --show-error --fail --connect-timeout "${connect_timeout}" --max-time "${max_time}")
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
@@ -63,12 +65,14 @@ n2k_nutanix_api_get() {
 
 n2k_nutanix_api_request_raw() {
   local method="$1" pc="$2" path="$3" username="$4" password="$5" insecure="$6" body="${7:-}"
-  local base tmp_file err_file code rc err_text
+  local base tmp_file err_file code rc err_text connect_timeout max_time
   base="$(n2k_nutanix_pc_base_url "${pc}")"
+  connect_timeout="${N2K_NUTANIX_CONNECT_TIMEOUT:-10}"
+  max_time="${N2K_NUTANIX_MAX_TIME:-120}"
   tmp_file="$(mktemp)"
   err_file="$(mktemp)"
 
-  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}")
+  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}" --connect-timeout "${connect_timeout}" --max-time "${max_time}")
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
@@ -115,12 +119,14 @@ n2k_nutanix_api_delete_raw() {
 n2k_nutanix_api_request_capture() {
   local method="$1" pc="$2" path="$3" username="$4" password="$5" insecure="$6" body="$7"
   local response_var="$8" status_var="$9" error_var="${10}"
-  local base tmp_file err_file code rc err_text
+  local base tmp_file err_file code rc err_text connect_timeout max_time
   base="$(n2k_nutanix_pc_base_url "${pc}")"
+  connect_timeout="${N2K_NUTANIX_CONNECT_TIMEOUT:-10}"
+  max_time="${N2K_NUTANIX_MAX_TIME:-120}"
   tmp_file="$(mktemp)"
   err_file="$(mktemp)"
 
-  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}")
+  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}" --connect-timeout "${connect_timeout}" --max-time "${max_time}")
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
@@ -151,13 +157,15 @@ n2k_nutanix_api_request_capture() {
 n2k_nutanix_api_get_to_file() {
   local pc="$1" path="$2" username="$3" password="$4" insecure="$5" output_file="$6"
   local status_var="${7:-}" error_var="${8:-}"
-  local base err_file code rc err_text
+  local base err_file code rc err_text connect_timeout max_time
   base="$(n2k_nutanix_pc_base_url "${pc}")"
+  connect_timeout="${N2K_NUTANIX_CONNECT_TIMEOUT:-10}"
+  max_time="${N2K_NUTANIX_MAX_TIME:-120}"
   err_file="$(mktemp)"
 
   mkdir -p "$(dirname "${output_file}")"
 
-  local -a args=(--silent --show-error --output "${output_file}" --write-out "%{http_code}")
+  local -a args=(--silent --show-error --output "${output_file}" --write-out "%{http_code}" --connect-timeout "${connect_timeout}" --max-time "${max_time}")
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
@@ -189,9 +197,58 @@ n2k_nutanix_http_auth_failure() {
   esac
 }
 
+n2k_nutanix_v4_candidate_revisions() {
+  local namespace="${1:-}"
+  case "${namespace}" in
+    vmm|dataprotection) printf '%s\n' v4.1 v4.0 ;;
+    clustermgmt) printf '%s\n' v4.0 ;;
+    *) printf '%s\n' v4.1 v4.0 ;;
+  esac
+}
+
+n2k_nutanix_v4_probe_path() {
+  local namespace="$1" revision="$2"
+  case "${namespace}" in
+    vmm) printf "/api/vmm/%s/ahv/config/vms?\$limit=1" "${revision}" ;;
+    dataprotection) printf "/api/dataprotection/%s/config/recovery-points?\$limit=1" "${revision}" ;;
+    clustermgmt) printf "/api/clustermgmt/%s/config/clusters?\$limit=1" "${revision}" ;;
+    *)
+      echo "Unsupported Nutanix v4 namespace: ${namespace}" >&2
+      return 2
+      ;;
+  esac
+}
+
+n2k_nutanix_v4_select_revision() {
+  local namespace="$1" pc="$2" username="$3" password="$4" insecure="$5"
+  local revision path response http_code api_error
+  for revision in $(n2k_nutanix_v4_candidate_revisions "${namespace}"); do
+    path="$(n2k_nutanix_v4_probe_path "${namespace}" "${revision}")"
+    # shellcheck disable=SC2034 # populated indirectly by n2k_nutanix_api_request_capture
+    response=""
+    api_error=""
+    n2k_nutanix_api_request_capture GET "${pc}" "${path}" \
+      "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+    if n2k_nutanix_http_auth_failure "${http_code}"; then
+      echo "Nutanix ${namespace} ${revision} authentication failed: HTTP ${http_code}" >&2
+      return 3
+    fi
+    if n2k_nutanix_http_success "${http_code}"; then
+      printf '%s' "${revision}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 n2k_nutanix_fetch_v4_vm_list() {
   local pc="$1" username="$2" password="$3" insecure="$4"
-  n2k_nutanix_api_get "${pc}" "/api/vmm/v4.0/ahv/config/vms?\$limit=100" "${username}" "${password}" "${insecure}"
+  local revision="${5:-}" path
+  if [[ -z "${revision}" ]]; then
+    revision="$(n2k_nutanix_v4_select_revision vmm "${pc}" "${username}" "${password}" "${insecure}")" || revision="v4.0"
+  fi
+  path="/api/vmm/${revision}/ahv/config/vms?\$limit=100"
+  n2k_nutanix_api_get "${pc}" "${path}" "${username}" "${password}" "${insecure}"
 }
 
 n2k_nutanix_select_vm_from_list() {
@@ -214,24 +271,26 @@ n2k_nutanix_select_vm_from_list() {
 
 n2k_nutanix_fetch_vm_inventory() {
   local pc="$1" vm="$2" username="$3" password="$4" insecure="$5"
-  local list_json vm_json http_code detail_json vm_uuid attempts api_error
+  local list_json vm_json http_code detail_json vm_uuid attempts api_error revision
   local -a attempt_notes=()
 
-  n2k_nutanix_api_request_capture GET "${pc}" "/api/vmm/v4.0/ahv/config/vms?\$limit=100" "${username}" "${password}" "${insecure}" "" list_json http_code api_error || true
-  if n2k_nutanix_http_auth_failure "${http_code}"; then
-    echo "Nutanix v4 VM list authentication failed: HTTP ${http_code}" >&2
-    return 3
-  fi
-  if n2k_nutanix_http_success "${http_code}"; then
-    vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
-    if [[ -n "${vm_json}" ]]; then
-      printf '%s' "${vm_json}"
-      return 0
+  for revision in $(n2k_nutanix_v4_candidate_revisions vmm); do
+    n2k_nutanix_api_request_capture GET "${pc}" "/api/vmm/${revision}/ahv/config/vms?\$limit=100" "${username}" "${password}" "${insecure}" "" list_json http_code api_error || true
+    if n2k_nutanix_http_auth_failure "${http_code}"; then
+      echo "Nutanix ${revision} VM list authentication failed: HTTP ${http_code}" >&2
+      return 3
     fi
-    attempt_notes+=("v4:http=${http_code}:vm_not_found")
-  else
-    attempt_notes+=("v4:http=${http_code}${api_error:+:${api_error}}")
-  fi
+    if n2k_nutanix_http_success "${http_code}"; then
+      vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
+      if [[ -n "${vm_json}" ]]; then
+        printf '%s' "${vm_json}"
+        return 0
+      fi
+      attempt_notes+=("${revision}:http=${http_code}:vm_not_found")
+    else
+      attempt_notes+=("${revision}:http=${http_code}${api_error:+:${api_error}}")
+    fi
+  done
 
   n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/vms/list" "${username}" "${password}" "${insecure}" '{"kind":"vm","length":100}' list_json http_code api_error || true
   if n2k_nutanix_http_auth_failure "${http_code}"; then
@@ -373,15 +432,21 @@ n2k_nutanix_inventory_from_raw() {
     def firmware($r):
       if (($r.boot.uefi_boot // false) == true) then "efi"
       else
+        ($r.bootConfig["$objectType"] // $r.boot_config["$objectType"] // "") as $boot_object_type
+        | if (($boot_object_type | tostring) | test("UefiBoot|UEFI"; "i")) then "efi"
+          elif (($boot_object_type | tostring) | test("LegacyBoot|LEGACY|BIOS"; "i")) then "bios"
+          else
         (first_nonempty([
           $r.bootConfig.bootType,
           $r.boot_config.boot_type,
+          $r.bootConfig.boot_type,
           $r.resources.boot_config.boot_type,
           $r.status.resources.boot_config.boot_type
         ]) | ascii_downcase) as $fw
         | if ($fw | test("uefi|efi|secure")) then "efi"
           elif ($fw | test("legacy|bios")) then "bios"
           else "" end
+          end
       end;
 
     def disk_id($d; $idx):
@@ -395,6 +460,8 @@ n2k_nutanix_inventory_from_raw() {
           $d.device_uuid,
           $d.vdiskUuid,
           $d.vdisk_uuid,
+          $d.backingInfo.diskExtId,
+          $d.backing_info.disk_ext_id,
           $a.device_uuid,
           $a.vmdisk_uuid,
           (if ($a.busType // $a.bus_type // $a.adapter_type // $a.device_bus // "") != "" then
@@ -410,6 +477,8 @@ n2k_nutanix_inventory_from_raw() {
            // $d.disk_size_bytes
            // $d.capacityBytes
            // $d.capacity_bytes
+           // $d.backingInfo.diskSizeBytes
+           // $d.backing_info.disk_size_bytes
            // $d.backingInfo.sizeBytes
            // $d.backing_info.size_bytes
            // $d.size
@@ -420,6 +489,8 @@ n2k_nutanix_inventory_from_raw() {
           // $d.disk_size_bytes
           // $d.capacityBytes
           // $d.capacity_bytes
+          // $d.backingInfo.diskSizeBytes
+          // $d.backing_info.disk_size_bytes
           // $d.backingInfo.sizeBytes
           // $d.backing_info.size_bytes
           // $d.size) | tonumber? // 0)
@@ -443,9 +514,9 @@ n2k_nutanix_inventory_from_raw() {
           },
           nutanix: {
             ext_id: first_nonempty([$d.extId, $d.ext_id, $d.uuid]),
-            vdisk_uuid: first_nonempty([$d.vdiskUuid, $d.vdisk_uuid, $d.uuid, $d.backingInfo.vdiskUuid, $d.backing_info.vdisk_uuid, $a.vmdisk_uuid, $a.device_uuid]),
+            vdisk_uuid: first_nonempty([$d.vdiskUuid, $d.vdisk_uuid, $d.uuid, $d.backingInfo.diskExtId, $d.backing_info.disk_ext_id, $d.backingInfo.vdiskUuid, $d.backing_info.vdisk_uuid, $a.vmdisk_uuid, $a.device_uuid]),
             disk_address: $a,
-            storage_container_ext_id: first_nonempty([$d.storageContainerExtId, $d.storage_container_ext_id, $d.storage_container_uuid, $d.backingInfo.storageContainerExtId, $d.backing_info.storage_container_ext_id, $d.storage_config.storage_container_reference.uuid])
+            storage_container_ext_id: first_nonempty([$d.storageContainerExtId, $d.storage_container_ext_id, $d.storage_container_uuid, $d.backingInfo.storageContainerExtId, $d.backingInfo.storageContainer.extId, $d.backing_info.storage_container_ext_id, $d.backing_info.storage_container.ext_id, $d.storage_config.storage_container_reference.uuid])
           },
           size_bytes: disk_size($d)
         };
@@ -454,8 +525,8 @@ n2k_nutanix_inventory_from_raw() {
       {
         key: ($idx | tostring),
         ext_id: first_nonempty([$n.extId, $n.ext_id, $n.uuid]),
-        mac: first_nonempty([$n.macAddress, $n.mac_address, $n.mac]),
-        network: first_nonempty([$n.subnet.name, $n.subnet_reference.name, $n.subnetName, $n.subnet_name, $n.networkName, $n.network_name])
+        mac: first_nonempty([$n.macAddress, $n.mac_address, $n.mac, $n.backingInfo.macAddress, $n.backing_info.mac_address]),
+        network: first_nonempty([$n.subnet.name, $n.subnet_reference.name, $n.subnetName, $n.subnet_name, $n.networkName, $n.network_name, $n.networkInfo.subnet.name, $n.networkInfo.subnet.extId, $n.network_info.subnet.ext_id])
       };
 
     (vm_root) as $r
@@ -467,7 +538,7 @@ n2k_nutanix_inventory_from_raw() {
           power_state: power_state($r),
           firmware: firmware($r),
           secure_boot: (
-            ($r.secureBoot // $r.secure_boot // $r.resources.secure_boot // null) as $secure
+            ($r.secureBoot // $r.secure_boot // $r.bootConfig.isSecureBootEnabled // $r.boot_config.is_secure_boot_enabled // $r.resources.secure_boot // null) as $secure
             | if ($secure | type) == "boolean" then $secure
               else
                 (first_nonempty([
@@ -478,7 +549,7 @@ n2k_nutanix_inventory_from_raw() {
                 ]) | ascii_downcase | test("secure"))
               end
           ),
-          tpm: (($r.tpmPresent // $r.tpm_present // $r.resources.tpm_present // false) | if type == "boolean" then . else false end),
+          tpm: (($r.tpmPresent // $r.tpm_present // $r.vtpmConfig.isVtpmEnabled // $r.vtpm_config.is_vtpm_enabled // $r.resources.tpm_present // false) | if type == "boolean" then . else false end),
           cpu: cpu_count($r),
           memory_mb: memory_mb($r),
           nics: (nic_items($r) | to_entries | map(normalize_nic(.value; .key))),

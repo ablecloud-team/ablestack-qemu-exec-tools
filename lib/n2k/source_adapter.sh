@@ -39,26 +39,81 @@ n2k_source_urlencode() {
 
 n2k_source_probe_v4() {
   local pc="$1" username="$2" password="$3" insecure="$4"
-  local response="" http_code="" api_error="" vmm=false dataprotection=false
+  local response="" http_code="" api_error=""
+  local revision path
+  local vmm=false dataprotection=false clustermgmt=false
+  local vmm_revision="" dataprotection_revision="" clustermgmt_revision=""
+  local vmm_http_code="000" dataprotection_http_code="000" clustermgmt_http_code="000"
 
-  n2k_nutanix_api_request_capture GET "${pc}" "/api/vmm/v4.0/ahv/config/vms?\$limit=1" \
-    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
-  if n2k_nutanix_http_success "${http_code}"; then
-    vmm=true
-  fi
+  for revision in $(n2k_nutanix_v4_candidate_revisions vmm); do
+    path="$(n2k_nutanix_v4_probe_path vmm "${revision}")"
+    response=""
+    api_error=""
+    n2k_nutanix_api_request_capture GET "${pc}" "${path}" \
+      "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+    vmm_http_code="${http_code:-000}"
+    if n2k_nutanix_http_success "${http_code}"; then
+      vmm=true
+      vmm_revision="${revision}"
+      break
+    fi
+  done
 
-  response=""
-  api_error=""
-  n2k_nutanix_api_request_capture GET "${pc}" "/api/dataprotection/v4.0/config/recovery-points?\$limit=1" \
-    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
-  if n2k_nutanix_http_success "${http_code}"; then
-    dataprotection=true
-  fi
+  for revision in $(n2k_nutanix_v4_candidate_revisions dataprotection); do
+    path="$(n2k_nutanix_v4_probe_path dataprotection "${revision}")"
+    response=""
+    api_error=""
+    n2k_nutanix_api_request_capture GET "${pc}" "${path}" \
+      "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+    dataprotection_http_code="${http_code:-000}"
+    if n2k_nutanix_http_success "${http_code}"; then
+      dataprotection=true
+      dataprotection_revision="${revision}"
+      break
+    fi
+  done
+
+  for revision in $(n2k_nutanix_v4_candidate_revisions clustermgmt); do
+    path="$(n2k_nutanix_v4_probe_path clustermgmt "${revision}")"
+    response=""
+    api_error=""
+    n2k_nutanix_api_request_capture GET "${pc}" "${path}" \
+      "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+    clustermgmt_http_code="${http_code:-000}"
+    if n2k_nutanix_http_success "${http_code}"; then
+      clustermgmt=true
+      clustermgmt_revision="${revision}"
+      break
+    fi
+  done
 
   jq -nc \
     --argjson vmm "${vmm}" \
     --argjson dataprotection "${dataprotection}" \
-    '{vmm:$vmm,dataprotection:$dataprotection,changed_regions:$dataprotection}'
+    --argjson clustermgmt "${clustermgmt}" \
+    --arg vmm_revision "${vmm_revision}" \
+    --arg dataprotection_revision "${dataprotection_revision}" \
+    --arg clustermgmt_revision "${clustermgmt_revision}" \
+    --arg vmm_http_code "${vmm_http_code}" \
+    --arg dataprotection_http_code "${dataprotection_http_code}" \
+    --arg clustermgmt_http_code "${clustermgmt_http_code}" \
+    '{
+      vmm:$vmm,
+      dataprotection:$dataprotection,
+      clustermgmt:$clustermgmt,
+      changed_regions:$dataprotection,
+      data_plane:false,
+      revisions:{
+        vmm:$vmm_revision,
+        dataprotection:$dataprotection_revision,
+        clustermgmt:$clustermgmt_revision
+      },
+      probe:{
+        vmm:{http_code:$vmm_http_code},
+        dataprotection:{http_code:$dataprotection_http_code},
+        clustermgmt:{http_code:$clustermgmt_http_code}
+      }
+    }'
 }
 
 n2k_source_power_state_normalize() {

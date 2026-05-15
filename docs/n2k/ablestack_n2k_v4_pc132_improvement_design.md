@@ -298,6 +298,44 @@ available from the workstation, but later `9440` refused connections, and
 
 ## Implementation phases
 
+## Implementation update - 2026-05-15
+
+Implemented the safe foundation for Phase A and part of Phase B:
+
+- v4 namespace revision selection now prefers `v4.1` and falls back to `v4.0`
+  for VMM and Data Protection.
+- Cluster Management v4 probing uses `v4.0`.
+- API calls now have configurable curl timeout guards:
+  - `N2K_NUTANIX_CONNECT_TIMEOUT`, default `10`
+  - `N2K_NUTANIX_MAX_TIME`, default `120`
+- v4 VM inventory normalization supports the observed Ganges/AOS 7.3 field
+  layout:
+  - `bootConfig.$objectType`
+  - `bootConfig.isSecureBootEnabled`
+  - `vtpmConfig.isVtpmEnabled`
+  - `disks[].backingInfo.diskExtId`
+  - `disks[].backingInfo.diskSizeBytes`
+  - `disks[].backingInfo.storageContainer.extId`
+  - `nics[].backingInfo.macAddress`
+  - `nics[].networkInfo.subnet.extId`
+- v4 probe output records selected namespace revisions and HTTP probe status.
+- v2/v3 fallback order is preserved after v4 attempts.
+
+Validation results:
+
+- Legacy PC `10.10.131.11` API inventory smoke still passed for `rhel`.
+- v4 PC `10.10.132.100` API inventory smoke passed for `rhel`.
+- v4 PC selected revisions:
+  - VMM: `v4.1`
+  - Data Protection: `v4.1`
+  - Cluster Management: `v4.0`
+- v4 fixture smoke covers UEFI secure boot and Legacy BIOS VM inventory shapes.
+
+The run data plane for official v4 recovery points remains an open item. The
+current implementation improves API detection, inventory, and path selection,
+while the already validated v3/NFS source path remains the runnable migration
+path.
+
 ### Phase A - Safe v4 inventory readiness
 
 Deliverables:
