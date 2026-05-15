@@ -230,6 +230,7 @@ Options:
   --username <user>       Prism username
   --password <pass>       Prism password
   --insecure <0|1>        Skip TLS verification when set to 1
+  --create-recovery-point Create a v4 Recovery Point
   --create-vm-snapshot    Create an internal v3 VM snapshot
   --snapshot-type <type>   CRASH_CONSISTENT|APPLICATION_CONSISTENT
   --pd-name <name>        Legacy Protection Domain name
@@ -247,6 +248,8 @@ Options:
 
 Notes:
   - Manual mode records a recovery point reference in the manifest.
+  - v4 mode can create a Recovery Point and records top-level, VM, and disk
+    recovery point metadata.
   - v3 mode can create an internal VM snapshot and records API-provided disk snapshot paths.
   - Legacy mode can create a PD OOB snapshot and records its snapshot metadata.
   - Legacy changed-region path verification records rejected path attempts in metadata.

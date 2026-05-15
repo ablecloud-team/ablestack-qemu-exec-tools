@@ -875,6 +875,387 @@ n2k_source_v3_vm_snapshot_paths_from_json() {
       }'
 }
 
+n2k_source_v4_revision_or_select() {
+  local namespace="$1" revision="${2:-}" pc="$3" username="$4" password="$5" insecure="$6"
+  if [[ -n "${revision}" ]]; then
+    printf '%s' "${revision}"
+    return 0
+  fi
+  n2k_nutanix_v4_select_revision "${namespace}" "${pc}" "${username}" "${password}" "${insecure}"
+}
+
+n2k_source_v4_create_recovery_point_body() {
+  local name="$1" vm_ext_id="$2" retention_seconds="$3"
+  local expiration_time
+
+  [[ "${retention_seconds}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid v4 recovery point retention seconds: ${retention_seconds}" >&2
+    return 2
+  }
+  expiration_time="$(date -u -d "+${retention_seconds} seconds" +%Y-%m-%dT%H:%M:%SZ)"
+  jq -nc \
+    --arg name "${name}" \
+    --arg expiration_time "${expiration_time}" \
+    --arg vm_ext_id "${vm_ext_id}" \
+    '{
+      name:$name,
+      expirationTime:$expiration_time,
+      vmRecoveryPoints:[{vmExtId:$vm_ext_id}]
+    }'
+}
+
+n2k_source_v4_create_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" vm_ext_id="$5" name="$6"
+  local retention_seconds="${7:-3600}" revision="${8:-}"
+  local body response="" http_code="" api_error="" endpoint
+
+  [[ -n "${vm_ext_id}" ]] || {
+    echo "VM extId is required for v4 recovery point creation." >&2
+    return 2
+  }
+  [[ -n "${name}" ]] || {
+    echo "Recovery point name is required for v4 recovery point creation." >&2
+    return 2
+  }
+
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  body="$(n2k_source_v4_create_recovery_point_body "${name}" "${vm_ext_id}" "${retention_seconds}")"
+  endpoint="/api/dataprotection/${revision}/config/recovery-points"
+  n2k_nutanix_api_request_capture POST "${pc}" "${endpoint}" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point create failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    printf '%s' "${response}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_get_task() {
+  local pc="$1" username="$2" password="$3" insecure="$4" task_ext_id="$5"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${task_ext_id}" ]] || {
+    echo "Task extId is required." >&2
+    return 2
+  }
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/prism/v4.0/config/tasks/${task_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 task lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_wait_task() {
+  local pc="$1" username="$2" password="$3" insecure="$4" task_ext_id="$5" timeout_seconds="${6:-180}"
+  local start now response status
+
+  start="$(date +%s)"
+  while true; do
+    response="$(n2k_source_v4_get_task "${pc}" "${username}" "${password}" "${insecure}" "${task_ext_id}")"
+    status="$(printf '%s' "${response}" | jq -r '.data.status // ""')"
+    case "${status}" in
+      SUCCEEDED)
+        printf '%s' "${response}"
+        return 0
+        ;;
+      FAILED|CANCELED|CANCELLED)
+        echo "v4 task failed: ${task_ext_id} status=${status}" >&2
+        printf '%s' "${response}" >&2
+        return 4
+        ;;
+    esac
+    now="$(date +%s)"
+    if (( now - start >= timeout_seconds )); then
+      echo "Timed out waiting for v4 task: ${task_ext_id}" >&2
+      return 4
+    fi
+    sleep 3
+  done
+}
+
+n2k_source_v4_list_recovery_points() {
+  local pc="$1" username="$2" password="$3" insecure="$4" revision="${5:-}" limit="${6:-100}"
+  local response="" http_code="" api_error=""
+
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/dataprotection/${revision}/config/recovery-points?\$limit=${limit}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point list failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_find_recovery_point_by_name() {
+  local pc="$1" username="$2" password="$3" insecure="$4" name="$5" vm_ext_id="$6" revision="${7:-}"
+  local list_json
+
+  list_json="$(n2k_source_v4_list_recovery_points "${pc}" "${username}" "${password}" "${insecure}" "${revision}" 100)"
+  printf '%s' "${list_json}" | jq -c --arg name "${name}" --arg vm_ext_id "${vm_ext_id}" '
+    [
+      .data[]?
+      | select((.name // "") == $name)
+      | select(
+          $vm_ext_id == ""
+          or (([.vmRecoveryPoints[]?.vmExtId] | index($vm_ext_id)) != null)
+        )
+    ]
+    | sort_by(.creationTime // "")
+    | last // empty
+  '
+}
+
+n2k_source_v4_get_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" revision="${6:-}"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_get_vm_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" vm_recovery_point_ext_id="$6" revision="${7:-}"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required." >&2
+    return 2
+  }
+  [[ -n "${vm_recovery_point_ext_id}" ]] || {
+    echo "VM recovery point extId is required." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}/vm-recovery-points/${vm_recovery_point_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 VM recovery point lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_delete_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" revision="${6:-}"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture DELETE "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point delete failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_recovery_point_index_from_json() {
+  local recovery_point_json="$1" vm_recovery_point_json="$2"
+
+  jq -nc \
+    --argjson rp "${recovery_point_json}" \
+    --argjson vmrp "${vm_recovery_point_json}" \
+    '
+      def root($x): if ($x.data | type) == "object" then $x.data else $x end;
+      def first_nonempty(xs):
+        reduce xs[] as $x (""; if . != "" then . elif ($x // "") != "" then ($x | tostring) else . end);
+      (root($rp)) as $r
+      | (root($vmrp)) as $v
+      | (
+          if (($v | type) == "object" and (($v.extId // "") != "")) then $v
+          else (($r.vmRecoveryPoints // []) | .[0] // {})
+          end
+        ) as $vm
+      | (($vm.diskRecoveryPoints // []) | map({
+          disk_recovery_point_ext_id: first_nonempty([.diskRecoveryPointExtId, .disk_recovery_point_ext_id, .extId, .ext_id]),
+          disk_ext_id: first_nonempty([.diskExtId, .disk_ext_id]),
+          capacity_bytes: (
+            (.capacityBytes // .capacity_bytes // .sizeBytes // .size_bytes // null) as $capacity
+            | if $capacity == null then null else ($capacity | tonumber? // null) end
+          ),
+          status: (.status // ""),
+          recovery_point_ext_id: ($r.extId // ""),
+          vm_recovery_point_ext_id: ($vm.extId // ""),
+          vm_ext_id: ($vm.vmExtId // "")
+        })) as $disk_list
+      | {
+          schema:"ablestack-n2k/v4-recovery-point-index-v1",
+          source_api:"v4",
+          path_status:"metadata_only_data_plane_unverified",
+          recovery_point_ext_id:($r.extId // ""),
+          recovery_point_name:($r.name // ""),
+          status:($r.status // ""),
+          creation_time:($r.creationTime // null),
+          expiration_time:($r.expirationTime // null),
+          vm_recovery_point_ext_id:($vm.extId // ""),
+          vm_ext_id:($vm.vmExtId // ""),
+          disk_count:($disk_list | length),
+          disks:(($disk_list | map({((if (.disk_ext_id // "") != "" then .disk_ext_id else .disk_recovery_point_ext_id end)): .}) | add) // {})
+        }
+    '
+}
+
+n2k_source_v4_vm_disk_recovery_point_ref_json() {
+  local recovery_point_ext_id="$1" vm_recovery_point_ext_id="$2" disk_recovery_point_ext_id="$3"
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required for v4 disk reference." >&2
+    return 2
+  }
+  [[ -n "${vm_recovery_point_ext_id}" ]] || {
+    echo "VM recovery point extId is required for v4 disk reference." >&2
+    return 2
+  }
+  [[ -n "${disk_recovery_point_ext_id}" ]] || {
+    echo "Disk recovery point extId is required for v4 disk reference." >&2
+    return 2
+  }
+
+  jq -nc \
+    --arg recovery_point_ext_id "${recovery_point_ext_id}" \
+    --arg vm_recovery_point_ext_id "${vm_recovery_point_ext_id}" \
+    --arg disk_recovery_point_ext_id "${disk_recovery_point_ext_id}" \
+    '{
+      "$objectType":"dataprotection.v4.content.VmDiskRecoveryPointReference",
+      recoveryPointExtId:$recovery_point_ext_id,
+      vmRecoveryPointExtId:$vm_recovery_point_ext_id,
+      diskRecoveryPointExtId:$disk_recovery_point_ext_id
+    }'
+}
+
+n2k_source_v4_discover_changed_regions_body() {
+  local disk_ref_json="$1" reference_disk_ref_json="${2:-}"
+  local reference_arg="null"
+
+  if [[ -n "${reference_disk_ref_json}" ]]; then
+    reference_arg="${reference_disk_ref_json}"
+  fi
+  jq -nc \
+    --argjson disk_ref "${disk_ref_json}" \
+    --argjson reference_disk_ref "${reference_arg}" \
+    '{
+      "$objectType":"dataprotection.v4.content.ClusterDiscoverSpec",
+      operation:"COMPUTE_CHANGED_REGIONS",
+      "$specItemDiscriminator":"dataprotection.v4.content.ComputeChangedRegionsClusterDiscoverSpec",
+      spec:({
+        "$objectType":"dataprotection.v4.content.ComputeChangedRegionsClusterDiscoverSpec",
+        diskRecoveryPoint:$disk_ref
+      } + (
+        if $reference_disk_ref == null then {}
+        else {referenceDiskRecoveryPoint:$reference_disk_ref}
+        end
+      ))
+    }'
+}
+
+n2k_source_v4_discover_changed_regions_cluster() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" disk_ref_json="$6"
+  local reference_disk_ref_json="${7:-}" revision="${8:-}"
+  local body response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required for v4 discover-cluster." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  body="$(n2k_source_v4_discover_changed_regions_body "${disk_ref_json}" "${reference_disk_ref_json}")"
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}/\$actions/discover-cluster" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 discover-cluster failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    printf '%s' "${response}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_compute_changed_regions_body() {
+  local reference_disk_ref_json="${1:-}" offset="${2:-0}" length="${3:-}" block_size="${4:-32768}"
+
+  [[ "${offset}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid v4 changed-region offset: ${offset}" >&2
+    return 2
+  }
+  [[ -z "${length}" || "${length}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid v4 changed-region length: ${length}" >&2
+    return 2
+  }
+  case "${block_size}" in
+    32768|65536|131072|262144) ;;
+    *) echo "Invalid v4 changed-region block size: ${block_size}" >&2; return 2 ;;
+  esac
+
+  jq -nc \
+    --argjson offset "${offset}" \
+    --arg length "${length}" \
+    --argjson block_size "${block_size}" \
+    --argjson reference_disk_ref "${reference_disk_ref_json:-null}" \
+    '{
+      "$objectType":"dataprotection.v4.content.VmRecoveryPointChangedRegionsComputeSpec",
+      offset:$offset,
+      blockSizeByte:$block_size
+    }
+    + (if $length == "" then {} else {length:($length | tonumber)} end)
+    + (if $reference_disk_ref == null then {} else {
+        referenceRecoveryPointExtId:$reference_disk_ref.recoveryPointExtId,
+        referenceVmRecoveryPointExtId:$reference_disk_ref.vmRecoveryPointExtId,
+        referenceDiskRecoveryPointExtId:$reference_disk_ref.diskRecoveryPointExtId
+      } end)'
+}
+
+n2k_source_v4_changed_regions_to_canonical() {
+  local disk_id="$1" response_json="$2" current_ref_json="$3" reference_ref_json="${4:-null}"
+
+  jq -c \
+    --arg disk_id "${disk_id}" \
+    --argjson current_ref "${current_ref_json}" \
+    --argjson reference_ref "${reference_ref_json:-null}" \
+    '
+      def metadata_value($name):
+        ((.metadata.extraInfo // .metadata.extra_info // [])
+          | map(select((.name // "") == $name))
+          | .[0].value // null);
+      def normalize_region:
+        {
+          offset:(.offset // .start // .startOffset),
+          length:(.length // .len // .size),
+          type:((.regionType // .region_type // .type // "regular") | tostring | ascii_downcase)
+        };
+      def number_or_null($v):
+        if $v == null then null else ($v | tonumber? // null) end;
+      {
+        schema:"ablestack-n2k/changed-regions-v1",
+        source_api:"v4",
+        current_recovery_point_id:($current_ref.recoveryPointExtId // ""),
+        base_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+        reference_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+        file_size:number_or_null(metadata_value("fileSize")),
+        next_offset:number_or_null(metadata_value("nextOffset")),
+        disks:{
+          ($disk_id):((.data // .regions // .changedRegions // .regionList // []) | map(normalize_region))
+        }
+      }
+    ' <<<"${response_json}"
+}
+
 n2k_source_legacy_changed_region_candidate_pairs_from_indexes() {
   local current_index_json="$1" reference_index_json="$2" max_pairs="${3:-40}"
 

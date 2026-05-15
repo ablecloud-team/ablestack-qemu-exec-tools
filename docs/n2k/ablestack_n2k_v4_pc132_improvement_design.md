@@ -354,6 +354,48 @@ Validation results:
   `false`, automatic planning selected `manual-disk`, and explicit
   `--mode v4-incremental` returned `can_run=false`.
 
+Additional Recovery Point PoC results:
+
+- Data Protection v4 create/delete requests require `NTNX-Request-Id`.
+- `POST /api/dataprotection/v4.1/config/recovery-points` accepted the minimal
+  VM Recovery Point payload:
+  - `name`
+  - `expirationTime`
+  - `vmRecoveryPoints[].vmExtId`
+- Create and delete both return Prism task references. The create task's
+  `completionDetails` includes `recoveryPointExtId`, which is more reliable than
+  resolving the new Recovery Point by list/name.
+- `GET /api/dataprotection/v4.1/config/recovery-points/{extId}` works.
+- `GET /api/dataprotection/v4.1/config/recovery-points/{rpExtId}/vm-recovery-points/{vmRpExtId}`
+  works.
+- A live `rhel` Recovery Point produced:
+  - top-level Recovery Point extId
+  - VM Recovery Point extId
+  - three disk recovery point identifiers
+  - source VM disk correlation for the primary vDisk through `diskExtId`
+- Delete cleanup completed successfully through the returned delete task.
+
+Additional changed-region PoC results:
+
+- PC `discover-cluster` works for `COMPUTE_CHANGED_REGIONS` when the request body
+  includes:
+  - top-level `$objectType`:
+    `dataprotection.v4.content.ClusterDiscoverSpec`
+  - `spec.$objectType`:
+    `dataprotection.v4.content.ComputeChangedRegionsClusterDiscoverSpec`
+  - VM disk references with `$objectType`:
+    `dataprotection.v4.content.VmDiskRecoveryPointReference`
+- PC `10.10.132.100` returned PE `10.10.132.10`, a JWT, and a redirection link
+  for the PE compute call.
+- The PE compute call is not yet runnable in this environment:
+  - v4.1 discover returns a v4.1 redirection URL, but the JWT scope is
+    `/api/dataprotection/v4.0/content`; PE returns HTTP `401` with
+    `Scope claim value does not match API base path`.
+  - v4.0 discover returns a v4.0 redirection URL with matching JWT scope, but PE
+    returns HTTP `404` for the v4.0 content endpoint.
+- Therefore `data_plane=false` remains correct, and `v4-incremental` must stay
+  blocked until the PE content API revision/scope mismatch is resolved.
+
 The run data plane for official v4 recovery points remains an open item. The
 current implementation improves API detection, inventory, and path selection,
 while deliberately blocking v4 incremental runs until recovery-point disk bytes
@@ -412,6 +454,8 @@ Acceptance:
 - Each VM disk maps to a v4 disk recovery point extId.
 - Recovery points are cleaned up or expire according to policy.
 
+Status: implemented and live-validated for `rhel` on PC `10.10.132.100`.
+
 ### Phase D - v4 changed-region PoC
 
 Deliverables:
@@ -427,6 +471,9 @@ Acceptance:
 - base recovery point alone returns full changed-region coverage.
 - incremental recovery point against base returns only changed regions.
 - zero-region metadata is preserved.
+
+Status: PC discover-cluster is live-validated. PE compute is blocked by the
+observed JWT scope/API revision mismatch and remains open.
 
 ### Phase E - v4 data-plane and E2E
 
@@ -455,7 +502,12 @@ Acceptance:
 3. Confirm the official or supported byte-stream data plane for v4 recovery
    point disks. Changed-region APIs identify what changed, but `n2k` still needs
    a reliable way to read the corresponding bytes.
-4. Decide whether v4.1 should become the default preferred revision when both
+4. Resolve the PC132 changed-region compute mismatch:
+   - v4.1 redirection with v4.0 JWT scope returns HTTP `401`.
+   - v4.0 redirection with matching scope returns HTTP `404`.
+   - This must be resolved before setting v4 `changed_regions` and `data_plane`
+     to fully runnable for E2E.
+5. Decide whether v4.1 should become the default preferred revision when both
    v4.1 and v4.0 are available. Based on this environment, v4.1 is available and
    v4.2 is not.
 

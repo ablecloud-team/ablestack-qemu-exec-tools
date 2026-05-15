@@ -832,7 +832,7 @@ n2k_cmd_snapshot() {
 
   local name="" recovery_point_id="" source_api="manual"
   local pc="" vm="" cred_file="" username="" password="" insecure="1" pd_name=""
-  local create_pd=false protect_vm=false create_oob_snapshot=false create_vm_snapshot=false
+  local create_pd=false protect_vm=false create_oob_snapshot=false create_vm_snapshot=false create_recovery_point=false
   local verify_changed_regions=false collect_changed_regions=false reference_kind=""
   local wait_seconds="180" retention_seconds="3600" app_consistent=false snapshot_type="CRASH_CONSISTENT"
   while [[ $# -gt 0 ]]; do
@@ -851,6 +851,7 @@ n2k_cmd_snapshot() {
       --protect-vm) protect_vm=true; shift 1 ;;
       --create-oob-snapshot) create_oob_snapshot=true; shift 1 ;;
       --create-vm-snapshot) create_vm_snapshot=true; shift 1 ;;
+      --create-recovery-point) create_recovery_point=true; shift 1 ;;
       --verify-changed-regions) verify_changed_regions=true; shift 1 ;;
       --collect-changed-regions) collect_changed_regions=true; shift 1 ;;
       --reference-kind) reference_kind="${2:-}"; shift 2 ;;
@@ -986,6 +987,86 @@ n2k_cmd_snapshot() {
         --argjson validation "${validation_json}" \
         --argjson changed_regions "${changed_regions_json}" \
         '{v3:{create_response:$create_response,snapshot:$snapshot,path_index:$paths,changed_regions_validation:$validation,changed_regions:$changed_regions}}')"
+    fi
+  elif [[ "${source_api}" == "v4" && ( "${create_recovery_point}" == "true" || "${create_vm_snapshot}" == "true" ) ]]; then
+    case "${insecure}" in
+      0|1) ;;
+      *) n2k_die "Invalid --insecure: ${insecure}" ;;
+    esac
+    [[ "${wait_seconds}" =~ ^[0-9]+$ ]] || n2k_die "Invalid --wait-seconds: ${wait_seconds}"
+    [[ "${retention_seconds}" =~ ^[0-9]+$ ]] || n2k_die "Invalid --retention-seconds: ${retention_seconds}"
+
+    if [[ -z "${pc}" ]]; then
+      pc="$(jq -r '.source.pc // empty' "${N2K_MANIFEST}")"
+    fi
+    if [[ -z "${vm}" ]]; then
+      vm="$(jq -r '.source.vm.name // empty' "${N2K_MANIFEST}")"
+    fi
+    [[ -n "${pc}" ]] || n2k_die "v4 recovery point creation requires --pc or manifest source pc"
+    [[ -n "${vm}" ]] || n2k_die "v4 recovery point creation requires --vm or manifest source vm"
+
+    if [[ -n "${cred_file}" ]]; then
+      n2k_nutanix_load_cred_file "${cred_file}"
+      username="${username:-${NUTANIX_USERNAME:-${N2K_PC_USERNAME:-}}}"
+      password="${password:-${NUTANIX_PASSWORD:-${N2K_PC_PASSWORD:-}}}"
+    fi
+    [[ -n "${username}" ]] || n2k_die "v4 recovery point creation requires --username or --cred-file"
+    [[ -n "${password}" ]] || n2k_die "v4 recovery point creation requires --password or --cred-file"
+
+    if [[ "${N2K_DRY_RUN:-0}" -eq 1 ]]; then
+      metadata_json="$(jq -nc \
+        --arg pc "${pc}" \
+        --arg vm "${vm}" \
+        --argjson collect_changed_regions "${collect_changed_regions}" \
+        '{dry_run:true,source:{pc:$pc,vm:$vm},v4:{create_recovery_point:true,collect_changed_regions:$collect_changed_regions}}')"
+    else
+      local vm_raw vm_ext_id revision rp_name create_response task_ext_id task_json rp_projection rp_ext_id rp_json vmrp_ext_id vmrp_json path_index changed_regions_json
+      vm_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
+      vm_ext_id="$(n2k_source_vm_uuid_from_inventory_raw "${vm_raw}")"
+      [[ -n "${vm_ext_id}" ]] || n2k_die "v4 recovery point creation could not resolve VM extId: ${vm}"
+
+      revision="$(n2k_nutanix_v4_select_revision dataprotection "${pc}" "${username}" "${password}" "${insecure}")"
+      rp_name="${name:-n2k-${which}-${N2K_RUN_ID:-$(date +%Y%m%d-%H%M%S)}}"
+      create_response="$(n2k_source_v4_create_recovery_point \
+        "${pc}" "${username}" "${password}" "${insecure}" \
+        "${vm_ext_id}" "${rp_name}" "${retention_seconds}" "${revision}")"
+      task_ext_id="$(printf '%s' "${create_response}" | jq -r '.data.extId // empty')"
+      [[ -n "${task_ext_id}" ]] || n2k_die "v4 recovery point create response did not include a task extId"
+      task_json="$(n2k_source_v4_wait_task "${pc}" "${username}" "${password}" "${insecure}" "${task_ext_id}" "${wait_seconds}")"
+      rp_ext_id="$(printf '%s' "${task_json}" | jq -r '.data.completionDetails[]? | select((.name // "") == "recoveryPointExtId") | .value // empty' | head -n1)"
+      if [[ -z "${rp_ext_id}" ]]; then
+        rp_projection="$(n2k_source_v4_find_recovery_point_by_name "${pc}" "${username}" "${password}" "${insecure}" "${rp_name}" "${vm_ext_id}" "${revision}")"
+        rp_ext_id="$(printf '%s' "${rp_projection}" | jq -r '.extId // empty')"
+      fi
+      [[ -n "${rp_ext_id}" ]] || n2k_die "v4 recovery point task succeeded but the recovery point could not be found by name: ${rp_name}"
+      rp_json="$(n2k_source_v4_get_recovery_point "${pc}" "${username}" "${password}" "${insecure}" "${rp_ext_id}" "${revision}")"
+      vmrp_ext_id="$(printf '%s' "${rp_json}" | jq -r --arg vm_ext_id "${vm_ext_id}" '.data.vmRecoveryPoints[]? | select((.vmExtId // "") == $vm_ext_id) | .extId // empty' | head -n1)"
+      if [[ -n "${vmrp_ext_id}" ]]; then
+        vmrp_json="$(n2k_source_v4_get_vm_recovery_point "${pc}" "${username}" "${password}" "${insecure}" "${rp_ext_id}" "${vmrp_ext_id}" "${revision}")"
+      else
+        vmrp_json="$(jq -nc '{data:{}}')"
+      fi
+      path_index="$(n2k_source_v4_recovery_point_index_from_json "${rp_json}" "${vmrp_json}")"
+      changed_regions_json="$(jq -nc '{ok:false,skipped:true,reason:"v4 changed-region collection is not implemented in this step",disks:{}}')"
+
+      if [[ "${collect_changed_regions}" == "true" ]]; then
+        changed_regions_json="$(jq -nc '{ok:false,skipped:true,reason:"v4 changed-region collection requires the next data-plane/discover-cluster implementation step",disks:{}}')"
+      fi
+      if [[ -z "${recovery_point_id}" ]]; then
+        recovery_point_id="${rp_ext_id}"
+      fi
+      if [[ -z "${name}" ]]; then
+        name="${rp_name}"
+      fi
+      metadata_json="$(jq -nc \
+        --arg revision "${revision}" \
+        --argjson create_response "${create_response}" \
+        --argjson task "${task_json}" \
+        --argjson recovery_point "${rp_json}" \
+        --argjson vm_recovery_point "${vmrp_json}" \
+        --argjson paths "${path_index}" \
+        --argjson changed_regions "${changed_regions_json}" \
+        '{v4:{revision:$revision,create_response:$create_response,task:$task,recovery_point:$recovery_point,path_index:$paths,vm_recovery_point:$vm_recovery_point,changed_regions:$changed_regions}}')"
     fi
   elif [[ "${source_api}" == "legacy" && "${create_oob_snapshot}" == "true" ]]; then
     case "${insecure}" in

@@ -45,6 +45,21 @@ n2k_nutanix_curl_auth_args() {
   fi
 }
 
+n2k_nutanix_request_id() {
+  local hex
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    tr '[:upper:]' '[:lower:]' </proc/sys/kernel/random/uuid
+    return 0
+  fi
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+    return 0
+  fi
+  hex="$(head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  printf '%s-%s-%s-%s-%s\n' \
+    "${hex:0:8}" "${hex:8:4}" "${hex:12:4}" "${hex:16:4}" "${hex:20:12}"
+}
+
 n2k_nutanix_api_get() {
   local pc="$1" path="$2" username="$3" password="$4" insecure="$5"
   local base connect_timeout max_time
@@ -81,8 +96,8 @@ n2k_nutanix_api_request_raw() {
   fi
   case "${method}" in
     GET) ;;
-    POST) args+=(-X POST -H "Content-Type: application/json" -d "${body}") ;;
-    DELETE) args+=(-X DELETE) ;;
+    POST) args+=(-X POST -H "Content-Type: application/json" -H "NTNX-Request-Id: $(n2k_nutanix_request_id)" -d "${body}") ;;
+    DELETE) args+=(-X DELETE -H "NTNX-Request-Id: $(n2k_nutanix_request_id)") ;;
     *)
       echo "Unsupported HTTP method: ${method}" >&2
       rm -f "${tmp_file}" "${err_file}"
@@ -135,8 +150,8 @@ n2k_nutanix_api_request_capture() {
   fi
   case "${method}" in
     GET) ;;
-    POST) args+=(-X POST -H "Content-Type: application/json" -d "${body}") ;;
-    DELETE) args+=(-X DELETE) ;;
+    POST) args+=(-X POST -H "Content-Type: application/json" -H "NTNX-Request-Id: $(n2k_nutanix_request_id)" -d "${body}") ;;
+    DELETE) args+=(-X DELETE -H "NTNX-Request-Id: $(n2k_nutanix_request_id)") ;;
     *)
       echo "Unsupported HTTP method: ${method}" >&2
       rm -f "${tmp_file}" "${err_file}"
