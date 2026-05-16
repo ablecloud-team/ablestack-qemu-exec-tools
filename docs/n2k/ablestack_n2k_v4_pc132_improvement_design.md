@@ -566,6 +566,44 @@ Byte-source validation on 2026-05-16:
   source path remains the runnable E2E path until a supported v4 byte source is
   confirmed or restore-to-temporary-VM is deliberately validated.
 
+Restore-to-temporary-VM adapter design on 2026-05-16:
+
+- The SDK exposes `restore_recovery_point(extId, body)` with a
+  `RecoveryPointRestorationSpec` body.
+- The body supports `vmRecoveryPointRestoreOverrides[]`, and each VM override can
+  include:
+  - `vmRecoveryPointExtId`
+  - `isStrictMode`
+  - `vmOverrideSpec`
+- For AHV, `vmOverrideSpec` can be an `AhvVmOverrideSpec`, which includes a
+  replacement VM name. This is the safe way to avoid overwriting or colliding
+  with the source VM during a byte-source validation restore.
+- `n2k` now has a shell helper that builds this body and posts to:
+
+```text
+/api/dataprotection/{revision}/config/recovery-points/{rpExtId}/$actions/restore
+```
+
+- The CLI surface is intentionally gated:
+  - `snapshot ... --source-api v4 --create-recovery-point --restore-to-temp-vm`
+    requires global `--force`.
+  - `--dry-run` can render the intended metadata without creating a Nutanix VM.
+  - `--temp-vm-name` sets the restored VM name; otherwise `n2k` generates an
+    `n2k-restore-*` name.
+  - `--restore-cluster-id` can pin the restore target cluster extId when the
+    default Recovery Point location is not sufficient.
+- A completed restore records the restore response, restore task, temporary VM
+  name, and temporary VM extId in the manifest under:
+
+```text
+runtime.recovery_points.<kind>.metadata.v4.restore_to_temp_vm
+```
+
+- This still does not mark v4 `byte_source=true` or `data_plane=true`. The next
+  validation must prove which API or host-side access path can read bytes from
+  the restored temporary VM disk and must also prove cleanup of that temporary
+  VM.
+
 ### Phase E - v4 data-plane and E2E
 
 Deliverables:
@@ -614,3 +652,9 @@ Acceptance:
   `https://developers.nutanix.com/api/v1/sdk/namespaces/main/dataprotection/versions/v4.0/languages/python/ntnx_dataprotection_py_client.api.recovery_points_api.html`
 - Nutanix Data Protection SDK recovery point API, v4.2 reference:
   `https://developers.nutanix.com/api/v1/sdk/namespaces/main/dataprotection/versions/v4.2/languages/python/ntnx_dataprotection_py_client.api.recovery_points_api.html`
+- Nutanix Data Protection SDK RecoveryPointRestorationSpec:
+  `https://developers.nutanix.com/api/v1/sdk/namespaces/main/dataprotection/versions/v4.2/languages/python/ntnx_dataprotection_py_client.models.dataprotection.v4.config.RecoveryPointRestorationSpec.html`
+- Nutanix Data Protection SDK VmRecoveryPointRestoreOverride:
+  `https://developers.nutanix.com/api/v1/sdk/namespaces/main/dataprotection/versions/v4.2/languages/python/ntnx_dataprotection_py_client.models.dataprotection.v4.config.VmRecoveryPointRestoreOverride.html`
+- Nutanix Data Protection SDK AhvVmOverrideSpec:
+  `https://developers.nutanix.com/api/v1/sdk/namespaces/main/dataprotection/versions/v4.2/languages/python/ntnx_dataprotection_py_client.models.dataprotection.v4.config.AhvVmOverrideSpec.html`

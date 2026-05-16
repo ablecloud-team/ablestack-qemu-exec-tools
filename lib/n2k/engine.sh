@@ -834,6 +834,7 @@ n2k_cmd_snapshot() {
   local pc="" vm="" cred_file="" username="" password="" insecure="1" pd_name=""
   local create_pd=false protect_vm=false create_oob_snapshot=false create_vm_snapshot=false create_recovery_point=false
   local verify_changed_regions=false collect_changed_regions=false reference_kind=""
+  local restore_to_temp_vm=false temp_vm_name="" restore_cluster_id="" restore_strict_mode=false
   local wait_seconds="180" retention_seconds="3600" app_consistent=false snapshot_type="CRASH_CONSISTENT"
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -855,6 +856,10 @@ n2k_cmd_snapshot() {
       --verify-changed-regions) verify_changed_regions=true; shift 1 ;;
       --collect-changed-regions) collect_changed_regions=true; shift 1 ;;
       --reference-kind) reference_kind="${2:-}"; shift 2 ;;
+      --restore-to-temp-vm) restore_to_temp_vm=true; shift 1 ;;
+      --temp-vm-name) temp_vm_name="${2:-}"; shift 2 ;;
+      --restore-cluster-id) restore_cluster_id="${2:-}"; shift 2 ;;
+      --restore-strict-mode) restore_strict_mode="$(n2k_parse_bool "${2:-}")"; [[ -n "${restore_strict_mode}" ]] || n2k_die "Invalid --restore-strict-mode value"; shift 2 ;;
       --wait-seconds) wait_seconds="${2:-}"; shift 2 ;;
       --retention-seconds) retention_seconds="${2:-}"; shift 2 ;;
       --snapshot-type) snapshot_type="${2:-}"; shift 2 ;;
@@ -871,6 +876,10 @@ n2k_cmd_snapshot() {
     manual|v4|v3|legacy) ;;
     *) n2k_die "Invalid --source-api: ${source_api}" ;;
   esac
+  if [[ "${restore_to_temp_vm}" == "true" ]]; then
+    [[ "${source_api}" == "v4" ]] || n2k_die "--restore-to-temp-vm is only valid with --source-api v4"
+    [[ "${create_recovery_point}" == "true" || "${create_vm_snapshot}" == "true" ]] || n2k_die "--restore-to-temp-vm requires --create-recovery-point"
+  fi
 
   if [[ -z "${N2K_MANIFEST:-}" && -n "${N2K_WORKDIR:-}" ]]; then
     N2K_MANIFEST="${N2K_WORKDIR}/manifest.json"
@@ -1012,16 +1021,27 @@ n2k_cmd_snapshot() {
     fi
     [[ -n "${username}" ]] || n2k_die "v4 recovery point creation requires --username or --cred-file"
     [[ -n "${password}" ]] || n2k_die "v4 recovery point creation requires --password or --cred-file"
+    if [[ "${restore_to_temp_vm}" == "true" ]]; then
+      [[ -n "${temp_vm_name}" ]] || temp_vm_name="n2k-restore-${which}-${N2K_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
+      if [[ "${N2K_DRY_RUN:-0}" -ne 1 && "${N2K_FORCE:-0}" -ne 1 ]]; then
+        n2k_die "snapshot --restore-to-temp-vm creates a Nutanix VM and requires global --force"
+      fi
+    fi
 
     if [[ "${N2K_DRY_RUN:-0}" -eq 1 ]]; then
       metadata_json="$(jq -nc \
         --arg pc "${pc}" \
         --arg vm "${vm}" \
         --argjson collect_changed_regions "${collect_changed_regions}" \
-        '{dry_run:true,source:{pc:$pc,vm:$vm},v4:{create_recovery_point:true,collect_changed_regions:$collect_changed_regions}}')"
+        --argjson restore_to_temp_vm "${restore_to_temp_vm}" \
+        --arg temp_vm_name "${temp_vm_name}" \
+        --arg restore_cluster_id "${restore_cluster_id}" \
+        --argjson restore_strict_mode "${restore_strict_mode}" \
+        '{dry_run:true,source:{pc:$pc,vm:$vm},v4:{create_recovery_point:true,collect_changed_regions:$collect_changed_regions,restore_to_temp_vm:{requested:$restore_to_temp_vm,temp_vm_name:$temp_vm_name,cluster_ext_id:$restore_cluster_id,strict_mode:$restore_strict_mode}}}')"
     else
       local vm_raw vm_ext_id revision rp_name create_response task_ext_id task_json rp_projection rp_ext_id rp_json vmrp_ext_id vmrp_json path_index changed_regions_json
-      local ref_index resolved_reference_kind reference_recovery_point_id
+      local ref_index resolved_reference_kind reference_recovery_point_id restore_to_temp_vm_json
+      local restore_response restore_task_ext_id restore_task_json temp_vm_raw temp_vm_ext_id
       vm_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
       vm_ext_id="$(n2k_source_vm_uuid_from_inventory_raw "${vm_raw}")"
       [[ -n "${vm_ext_id}" ]] || n2k_die "v4 recovery point creation could not resolve VM extId: ${vm}"
@@ -1049,6 +1069,31 @@ n2k_cmd_snapshot() {
       fi
       path_index="$(n2k_source_v4_recovery_point_index_from_json "${rp_json}" "${vmrp_json}")"
       changed_regions_json="$(jq -nc '{ok:false,skipped:true,reason:"v4 changed-region collection was not requested",disks:{}}')"
+      restore_to_temp_vm_json="$(jq -nc '{requested:false,performed:false}')"
+
+      if [[ "${restore_to_temp_vm}" == "true" ]]; then
+        [[ -n "${vmrp_ext_id}" ]] || n2k_die "v4 restore-to-temp-vm requires a VM recovery point extId"
+        restore_response="$(n2k_source_v4_restore_recovery_point \
+          "${pc}" "${username}" "${password}" "${insecure}" \
+          "${rp_ext_id}" "${vmrp_ext_id}" "${temp_vm_name}" "${restore_cluster_id}" "${restore_strict_mode}" "${revision}")"
+        restore_task_ext_id="$(printf '%s' "${restore_response}" | jq -r '.data.extId // empty')"
+        [[ -n "${restore_task_ext_id}" ]] || n2k_die "v4 recovery point restore response did not include a task extId"
+        restore_task_json="$(n2k_source_v4_wait_task "${pc}" "${username}" "${password}" "${insecure}" "${restore_task_ext_id}" "${wait_seconds}")"
+        temp_vm_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${temp_vm_name}" "${username}" "${password}" "${insecure}" 2>/dev/null || true)"
+        temp_vm_ext_id=""
+        if [[ -n "${temp_vm_raw}" ]]; then
+          temp_vm_ext_id="$(n2k_source_vm_uuid_from_inventory_raw "${temp_vm_raw}")"
+        fi
+        restore_to_temp_vm_json="$(jq -nc \
+          --arg temp_vm_name "${temp_vm_name}" \
+          --arg temp_vm_ext_id "${temp_vm_ext_id}" \
+          --arg cluster_ext_id "${restore_cluster_id}" \
+          --argjson strict_mode "${restore_strict_mode}" \
+          --argjson response "${restore_response}" \
+          --argjson task "${restore_task_json}" \
+          --argjson temp_vm "$(if [[ -n "${temp_vm_raw}" ]]; then printf '%s' "${temp_vm_raw}"; else printf '{}'; fi)" \
+          '{requested:true,performed:true,temp_vm_name:$temp_vm_name,temp_vm_ext_id:$temp_vm_ext_id,cluster_ext_id:$cluster_ext_id,strict_mode:$strict_mode,response:$response,task:$task,temp_vm:$temp_vm,found:($temp_vm_ext_id != "")}')"
+      fi
 
       if [[ "${collect_changed_regions}" == "true" ]]; then
         ref_index="null"
@@ -1087,7 +1132,8 @@ n2k_cmd_snapshot() {
         --argjson vm_recovery_point "${vmrp_json}" \
         --argjson paths "${path_index}" \
         --argjson changed_regions "${changed_regions_json}" \
-        '{v4:{revision:$revision,create_response:$create_response,task:$task,recovery_point:$recovery_point,path_index:$paths,vm_recovery_point:$vm_recovery_point,changed_regions:$changed_regions}}')"
+        --argjson restore_to_temp_vm "${restore_to_temp_vm_json}" \
+        '{v4:{revision:$revision,create_response:$create_response,task:$task,recovery_point:$recovery_point,path_index:$paths,vm_recovery_point:$vm_recovery_point,changed_regions:$changed_regions,restore_to_temp_vm:$restore_to_temp_vm}}')"
     fi
   elif [[ "${source_api}" == "legacy" && "${create_oob_snapshot}" == "true" ]]; then
     case "${insecure}" in

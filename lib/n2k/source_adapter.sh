@@ -109,7 +109,7 @@ n2k_source_probe_v4() {
       byte_source_candidates:{
         direct_disk_data:false,
         recovery_point_export:false,
-        restore_to_temp_vm:false
+        restore_to_temp_vm:true
       },
       data_plane:false,
       revisions:{
@@ -126,7 +126,7 @@ n2k_source_probe_v4() {
           verified:false,
           direct_disk_data:{verified:false,reason:"no v4 VMM disk data endpoint is verified"},
           recovery_point_export:{verified:false,reason:"no v4 recovery point disk export endpoint is verified"},
-          restore_to_temp_vm:{verified:false,reason:"recovery point restore is a candidate but requires explicit live restore and cleanup validation"}
+          restore_to_temp_vm:{candidate:true,verified:false,reason:"recovery point restore is a documented candidate but requires explicit live restore and cleanup validation"}
         }
       }
     }'
@@ -1078,6 +1078,68 @@ n2k_source_v4_delete_recovery_point() {
     "${username}" "${password}" "${insecure}" "" response http_code api_error || true
   if ! n2k_nutanix_http_success "${http_code}"; then
     echo "v4 recovery point delete failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_restore_recovery_point_body() {
+  local recovery_point_ext_id="$1" vm_recovery_point_ext_id="$2" temp_vm_name="$3"
+  local cluster_ext_id="${4:-}" strict_mode="${5:-false}"
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required for v4 restore." >&2
+    return 2
+  }
+  [[ -n "${vm_recovery_point_ext_id}" ]] || {
+    echo "VM recovery point extId is required for v4 restore." >&2
+    return 2
+  }
+  case "${strict_mode}" in
+    true|false) ;;
+    0) strict_mode=false ;;
+    1) strict_mode=true ;;
+    *)
+      echo "Invalid v4 restore strict mode: ${strict_mode}" >&2
+      return 2
+      ;;
+  esac
+
+  jq -nc \
+    --arg cluster_ext_id "${cluster_ext_id}" \
+    --arg vm_recovery_point_ext_id "${vm_recovery_point_ext_id}" \
+    --arg temp_vm_name "${temp_vm_name}" \
+    --argjson strict_mode "${strict_mode}" \
+    '{
+      vmRecoveryPointRestoreOverrides:[
+        {
+          vmRecoveryPointExtId:$vm_recovery_point_ext_id,
+          isStrictMode:$strict_mode,
+          vmOverrideSpec:(
+            {
+              "$objectType":"dataprotection.v4.config.AhvVmOverrideSpec",
+              description:"n2k temporary restore VM for recovery-point byte-source validation"
+            }
+            + (if $temp_vm_name != "" then {name:$temp_vm_name} else {} end)
+          )
+        }
+      ]
+    }
+    | if $cluster_ext_id != "" then . + {clusterExtId:$cluster_ext_id} else . end'
+}
+
+n2k_source_v4_restore_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5"
+  local vm_recovery_point_ext_id="$6" temp_vm_name="$7" cluster_ext_id="${8:-}" strict_mode="${9:-false}" revision="${10:-}"
+  local body response="" http_code="" api_error=""
+
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  body="$(n2k_source_v4_restore_recovery_point_body "${recovery_point_ext_id}" "${vm_recovery_point_ext_id}" "${temp_vm_name}" "${cluster_ext_id}" "${strict_mode}")"
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}/\$actions/restore" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point restore failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    printf '%s' "${response}" >&2
     return 4
   fi
   printf '%s' "${response}"

@@ -242,6 +242,13 @@ Options:
   --collect-changed-regions
                            Store changed-region metadata for this snapshot pair
   --reference-kind <kind>  Reference recovery point kind: base|incr|final
+  --restore-to-temp-vm     Restore v4 Recovery Point to a temporary VM
+                           Requires global --force unless --dry-run is used
+  --temp-vm-name <name>    Temporary VM name for v4 restore validation
+  --restore-cluster-id <id>
+                           Target cluster extId for v4 restore, optional
+  --restore-strict-mode <0|1>
+                           Use strict mode for v4 VM restore override
   --wait-seconds <N>      Wait timeout for PD snapshot materialization
   --retention-seconds <N> Legacy PD snapshot retention time
   --app-consistent        Request app-consistent legacy snapshot
@@ -250,6 +257,8 @@ Notes:
   - Manual mode records a recovery point reference in the manifest.
   - v4 mode can create a Recovery Point and records top-level, VM, and disk
     recovery point metadata.
+  - v4 restore-to-temp-vm is intended only for byte-source validation and
+    records the temporary VM identity when the restore task completes.
   - v3 mode can create an internal VM snapshot and records API-provided disk snapshot paths.
   - Legacy mode can create a PD OOB snapshot and records its snapshot metadata.
   - Legacy changed-region path verification records rejected path attempts in metadata.
