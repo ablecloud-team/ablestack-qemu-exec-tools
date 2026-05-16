@@ -105,6 +105,12 @@ n2k_source_probe_v4() {
       dp_discover_cluster:false,
       dp_compute_changed_regions:false,
       changed_regions:false,
+      byte_source:false,
+      byte_source_candidates:{
+        direct_disk_data:false,
+        recovery_point_export:false,
+        restore_to_temp_vm:false
+      },
       data_plane:false,
       revisions:{
         vmm:$vmm_revision,
@@ -115,7 +121,13 @@ n2k_source_probe_v4() {
         vmm:{http_code:$vmm_http_code},
         dataprotection:{http_code:$dataprotection_http_code},
         clustermgmt:{http_code:$clustermgmt_http_code},
-        dataprotection_content:{verified:false,reason:"recovery point content APIs require a live recovery point and PE data-plane validation"}
+        dataprotection_content:{verified:false,reason:"recovery point content APIs require a live recovery point and PE data-plane validation"},
+        byte_source:{
+          verified:false,
+          direct_disk_data:{verified:false,reason:"no v4 VMM disk data endpoint is verified"},
+          recovery_point_export:{verified:false,reason:"no v4 recovery point disk export endpoint is verified"},
+          restore_to_temp_vm:{verified:false,reason:"recovery point restore is a candidate but requires explicit live restore and cleanup validation"}
+        }
       }
     }'
 }

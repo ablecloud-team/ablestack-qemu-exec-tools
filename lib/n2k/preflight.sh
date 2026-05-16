@@ -109,6 +109,8 @@ n2k_preflight_result_json() {
       ($cap.api.v4.dp_compute_changed_regions // $cap.api.v4.changed_regions // $cap.v4.changed_regions // $cap.changed_regions.v4 // false) | truthy;
     def cap_v4_data_plane:
       ($cap.api.v4.data_plane // $cap.v4.data_plane // false) | truthy;
+    def cap_v4_byte_source:
+      ($cap.api.v4.byte_source // $cap.v4.byte_source // $cap.api.v4.data_plane // $cap.v4.data_plane // false) | truthy;
     def cap_v3_vm_snapshots:
       ($cap.api.v3.vm_snapshots // $cap.v3.vm_snapshots // $cap.api.v3.available // $cap.v3.available // false) | truthy;
     def cap_legacy_changed_regions:
@@ -142,6 +144,7 @@ n2k_preflight_result_json() {
     (override_bool($v4_vmm_override; cap_v4_vmm)) as $v4_vmm
     | (override_bool($v4_dp_override; cap_v4_dp)) as $v4_dp
     | (cap_v4_changed_regions) as $v4_changed_regions
+    | (cap_v4_byte_source) as $v4_byte_source
     | (override_bool($v4_data_plane_override; cap_v4_data_plane)) as $v4_data_plane
     | (cap_v3_vm_snapshots) as $v3_vm_snapshots
     | (override_bool($legacy_override; cap_legacy_changed_regions)) as $legacy_candidate
@@ -228,6 +231,8 @@ n2k_preflight_result_json() {
             dp_discover_cluster: (($cap.api.v4.dp_discover_cluster // $cap.v4.dp_discover_cluster // false) | truthy),
             dp_compute_changed_regions: (($cap.api.v4.dp_compute_changed_regions // $cap.v4.dp_compute_changed_regions // false) | truthy),
             changed_regions: $v4_changed_regions,
+            byte_source: $v4_byte_source,
+            byte_source_candidates: ($cap.api.v4.byte_source_candidates // $cap.v4.byte_source_candidates // {}),
             data_plane: $v4_data_plane,
             revisions: ($cap.api.v4.revisions // $cap.v4.revisions // {}),
             probe: ($cap.api.v4.probe // $cap.v4.probe // {})
@@ -258,6 +263,7 @@ n2k_preflight_result_json() {
         warnings: (
           []
           + (if $v4_vmm and $v4_dp and ($v4_changed_regions | not) then ["v4 Data Protection recovery point APIs are available, but changed-region compute is not verified; keep using the validated v3 source path for E2E"] else [] end)
+          + (if $v4_vmm and $v4_dp and ($v4_byte_source | not) then ["v4 recovery-point disk byte source is not verified; direct v4 disk data/export is unavailable in the current validation"] else [] end)
           + (if $v4_vmm and $v4_dp and $v4_changed_regions and ($v4_data_plane | not) then ["v4 changed-region control plane is available, but v4 recovery-point data plane is not verified; use the validated v3 source path for E2E until data-plane support is completed"] else [] end)
           + (if $legacy_candidate and ($legacy_verified | not) then ["legacy-cbt is only a candidate because endpoint verification is missing"] else [] end)
           + (if $legacy_candidate and $legacy_verified and ($allow_experimental | not) then ["legacy-cbt is blocked because experimental mode is not enabled"] else [] end)
@@ -283,6 +289,7 @@ n2k_preflight_text_summary() {
     "v4 clustermgmt: " + ((.api.v4.clustermgmt // false) | tostring) + "\n" +
     "v4 revisions: vmm=" + (.api.v4.revisions.vmm // "") + ", dataprotection=" + (.api.v4.revisions.dataprotection // "") + ", clustermgmt=" + (.api.v4.revisions.clustermgmt // "") + "\n" +
     "v4 changed regions: " + ((.api.v4.changed_regions // false) | tostring) + "\n" +
+    "v4 byte source: " + ((.api.v4.byte_source // false) | tostring) + "\n" +
     "v4 data plane: " + ((.api.v4.data_plane // false) | tostring) + "\n" +
     "v3 vm snapshots: " + ((.api.v3.vm_snapshots // false) | tostring) + "\n" +
     "legacy changed regions: " + ((.api.legacy.changed_regions // false) | tostring) + "\n" +

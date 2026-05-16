@@ -525,6 +525,47 @@ Endpoint variant validation on 2026-05-16:
   from changed-region compute/data-plane readiness. A reachable recovery point
   list endpoint no longer implies `changed_regions=true`.
 
+Byte-source validation on 2026-05-16:
+
+- Officially visible v4 Data Protection APIs expose Recovery Point config
+  operations and changed-region/VSS metadata operations, but no direct Recovery
+  Point disk byte-stream or disk download operation was found in the referenced
+  SDK/API pages.
+- The documented v4 CBT/CRT flow returns changed-region metadata. It identifies
+  changed offsets and lengths, but it does not provide the corresponding disk
+  bytes needed by `n2k` writers.
+- PC132 live probe against `rhel` confirmed that v4 VM and disk identities are
+  visible:
+  - VM extId: `c571852a-43ab-42e4-a58b-a5e38a459b06`
+  - disk extId: `ae29c318-5dca-44b3-93c6-f3f3714177ec`
+- Direct v4 disk byte/export candidates are not available on PC132:
+  - `/api/vmm/v4.1/ahv/config/vms/{vmExtId}/disks/{diskExtId}/data` -> HTTP
+    `404`
+  - `/api/vmm/v4.1/ahv/content/vms/{vmExtId}/disks/{diskExtId}/data` -> HTTP
+    `404`
+  - `/api/vmm/v4.1/ahv/content/vms/{vmExtId}/disks/{diskExtId}/$actions/export`
+    -> HTTP `404`
+  - the same v4.0 endpoint variants also returned HTTP `404`
+- The same VM's legacy v3 live disk data endpoint returned HTTP `200` with
+  `application/octet-stream`, proving the account, VM selection, and network
+  path were valid during the probe. The missing result is specific to the v4
+  direct byte-source candidates.
+- Top-level Recovery Point restore and replicate action routes appear to exist:
+  - bogus Recovery Point restore POST returned HTTP `404` with a Recovery Point
+    not found message, which means the route was parsed.
+  - bogus Recovery Point replicate POST returned HTTP `400` asking for `pcExtId`,
+    which means schema validation was reached.
+- A restore-to-temporary-VM approach is therefore the only currently visible v4
+  data-plane candidate. It is not enabled in code because it creates or modifies
+  Nutanix VM state and needs an explicit destructive/live restore test,
+  post-restore byte-source selection, and cleanup policy.
+- `n2k_source_probe_v4` now reports `byte_source=false` and structured
+  byte-source candidate fields separately from `changed_regions` and
+  `data_plane`.
+- Current conclusion: keep v4 `data_plane=false` on PC132. The validated v3
+  source path remains the runnable E2E path until a supported v4 byte source is
+  confirmed or restore-to-temporary-VM is deliberately validated.
+
 ### Phase E - v4 data-plane and E2E
 
 Deliverables:
@@ -571,3 +612,5 @@ Acceptance:
   `https://www.nutanix.dev/2025/01/15/nutanix-v4-disaster-recovery-api-series-part-2-changed-blocks-tracking-cbt-and-changed-regions-tracking-crt/`
 - Nutanix Data Protection SDK recovery point API:
   `https://developers.nutanix.com/api/v1/sdk/namespaces/main/dataprotection/versions/v4.0/languages/python/ntnx_dataprotection_py_client.api.recovery_points_api.html`
+- Nutanix Data Protection SDK recovery point API, v4.2 reference:
+  `https://developers.nutanix.com/api/v1/sdk/namespaces/main/dataprotection/versions/v4.2/languages/python/ntnx_dataprotection_py_client.api.recovery_points_api.html`
