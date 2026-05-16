@@ -1256,6 +1256,407 @@ n2k_source_v4_changed_regions_to_canonical() {
     ' <<<"${response_json}"
 }
 
+n2k_source_v4_base64url_decode() {
+  local value="${1:-}" rem pad=""
+  value="${value//-/+}"
+  value="${value//_/\/}"
+  rem=$(( ${#value} % 4 ))
+  if (( rem > 0 )); then
+    pad="$(printf '=%.0s' $(seq 1 $((4 - rem))))"
+  fi
+  printf '%s' "${value}${pad}" | base64 -d 2>/dev/null || true
+}
+
+n2k_source_v4_jwt_content_revision() {
+  local jwt="${1:-}" payload decoded
+  payload="${jwt#*.}"
+  payload="${payload%%.*}"
+  decoded="$(n2k_source_v4_base64url_decode "${payload}")"
+  [[ -n "${decoded}" ]] || return 0
+  jq -r '
+    def values:
+      if type == "array" then .[]
+      elif type == "string" then .
+      else empty
+      end;
+    [(.scope | values), (.scp | values), (.aud | values)]
+    | map(tostring)
+    | map(capture("/api/dataprotection/(?<revision>[^/]+)/content").revision?)
+    | map(select(. != null and length > 0))
+    | .[0] // empty
+  ' <<<"${decoded}" 2>/dev/null || true
+}
+
+n2k_source_v4_discover_cluster_ip() {
+  local discover_json="$1"
+  jq -r '
+    .data.clusterIp.ipv4.value
+    // .data.clusterIp.ipv4.ipAddress.value
+    // .data.clusterIp.ipv4
+    // .data.clusterIp.value
+    // .data.clusterIp
+    // empty
+  ' <<<"${discover_json}"
+}
+
+n2k_source_v4_discover_jwt() {
+  local discover_json="$1"
+  jq -r '.data.jwtToken // .jwtToken // empty' <<<"${discover_json}"
+}
+
+n2k_source_v4_discover_compute_path() {
+  local discover_json="$1"
+  jq -r '
+    def href_path:
+      capture("^https?://[^/]+(?<path>/.*)$").path? // .;
+    [
+      .data.links[]?,
+      .links[]?
+    ]
+    | map(select(((.rel // .name // "") | test("compute|changed"; "i"))))
+    | .[0].href // empty
+    | if length > 0 then href_path else empty end
+  ' <<<"${discover_json}" 2>/dev/null || true
+}
+
+n2k_source_v4_compute_changed_regions_path() {
+  local revision="$1" recovery_point_ext_id="$2" vm_recovery_point_ext_id="$3" disk_recovery_point_ext_id="$4"
+  printf "/api/dataprotection/%s/content/recovery-points/%s/vm-recovery-points/%s/disk-recovery-points/%s/\$actions/compute-changed-regions" \
+    "${revision}" "${recovery_point_ext_id}" "${vm_recovery_point_ext_id}" "${disk_recovery_point_ext_id}"
+}
+
+n2k_source_v4_compute_changed_regions_capture() {
+  local pe_ip="$1" jwt="$2" path="$3" insecure="$4" body="$5"
+  local response_var="$6" status_var="$7" error_var="$8"
+  local tmp_file err_file code rc err_text connect_timeout max_time
+  tmp_file="$(mktemp)"
+  err_file="$(mktemp)"
+  connect_timeout="${N2K_NUTANIX_CONNECT_TIMEOUT:-10}"
+  max_time="${N2K_NUTANIX_MAX_TIME:-120}"
+
+  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}" --connect-timeout "${connect_timeout}" --max-time "${max_time}")
+  if [[ "${insecure}" == "1" ]]; then
+    args+=(--insecure)
+  fi
+  args+=(
+    -X POST
+    -H "Content-Type: application/json"
+    -H "Accept: application/json"
+    -H "cookie: NTNX_IGW_SESSION=${jwt}"
+    -H "NTNX-Request-Id: $(n2k_nutanix_request_id)"
+    -d "${body}"
+  )
+
+  rc=0
+  code="$(curl "${args[@]}" "https://${pe_ip}:9440${path}" 2>"${err_file}")" || rc=$?
+  err_text="$(cat "${err_file}" 2>/dev/null || true)"
+  printf -v "${response_var}" '%s' "$(cat "${tmp_file}" 2>/dev/null || true)"
+  printf -v "${status_var}" '%s' "${code:-000}"
+  printf -v "${error_var}" '%s' "${err_text}"
+  rm -f "${tmp_file}" "${err_file}"
+  return "${rc}"
+}
+
+n2k_source_v4_changed_region_pairs_from_indexes() {
+  local current_index_json="$1" reference_index_json="${2:-null}"
+
+  jq -nc \
+    --argjson current "${current_index_json}" \
+    --argjson reference "${reference_index_json:-null}" \
+    '
+      def ref($rp; $vm; $d): {
+        "$objectType":"dataprotection.v4.content.VmDiskRecoveryPointReference",
+        recoveryPointExtId:$rp,
+        vmRecoveryPointExtId:$vm,
+        diskRecoveryPointExtId:($d.disk_recovery_point_ext_id // "")
+      };
+      def find_reference($key; $disk):
+        if ($reference | type) != "object" then null
+        elif ($reference.disks[$key] // null) != null then $reference.disks[$key]
+        elif (($disk.disk_ext_id // "") | length) > 0 then
+          ([$reference.disks | to_entries[]? | select((.value.disk_ext_id // "") == $disk.disk_ext_id) | .value] | .[0] // null)
+        else null
+        end;
+      ($current.recovery_point_ext_id // "") as $current_rp
+      | ($current.vm_recovery_point_ext_id // "") as $current_vmrp
+      | ($reference.recovery_point_ext_id // "") as $reference_rp
+      | ($reference.vm_recovery_point_ext_id // "") as $reference_vmrp
+      | [
+          $current.disks | to_entries[]?
+          | select((.value.disk_recovery_point_ext_id // "") != "")
+          | . as $entry
+          | (find_reference($entry.key; $entry.value)) as $reference_disk
+          | {
+              disk_key:$entry.key,
+              capacity_bytes:($entry.value.capacity_bytes // null),
+              disk_ext_id:($entry.value.disk_ext_id // ""),
+              current_ref:ref($current_rp; $current_vmrp; $entry.value),
+              reference_ref:(
+                if $reference_disk == null or (($reference_disk.disk_recovery_point_ext_id // "") == "") then null
+                else ref($reference_rp; $reference_vmrp; $reference_disk)
+                end
+              )
+            }
+        ]'
+}
+
+n2k_source_v4_compute_changed_regions_for_pair() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local current_ref_json="$5" reference_ref_json="${6:-null}" revision="${7:-}" max_pages="${8:-256}" block_size="${9:-32768}"
+  local recovery_point_ext_id vm_recovery_point_ext_id disk_recovery_point_ext_id
+  local discover_json pe_ip jwt jwt_revision compute_revision compute_path
+  local discover_error_file discover_error
+  local start_offset=0 page_count=0 body response="" http_code="" api_error="" response_json regions="[]"
+  local file_size="null" next_offset="" region_count bytes_total
+
+  recovery_point_ext_id="$(jq -r '.recoveryPointExtId // empty' <<<"${current_ref_json}")"
+  vm_recovery_point_ext_id="$(jq -r '.vmRecoveryPointExtId // empty' <<<"${current_ref_json}")"
+  disk_recovery_point_ext_id="$(jq -r '.diskRecoveryPointExtId // empty' <<<"${current_ref_json}")"
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+
+  discover_error_file="$(mktemp)"
+  if ! discover_json="$(n2k_source_v4_discover_changed_regions_cluster \
+    "${pc}" "${username}" "${password}" "${insecure}" \
+    "${recovery_point_ext_id}" "${current_ref_json}" "${reference_ref_json}" "${revision}" 2>"${discover_error_file}")"; then
+    discover_error="$(cat "${discover_error_file}" 2>/dev/null || true)"
+    rm -f "${discover_error_file}"
+    jq -nc \
+      --arg status "discover_failed" \
+      --arg error "${discover_error}" \
+      --arg revision "${revision}" \
+      --argjson current_ref "${current_ref_json}" \
+      --argjson reference_ref "${reference_ref_json:-null}" \
+      '{ok:false,status:$status,error:$error,revision:$revision,current_ref:$current_ref,reference_ref:$reference_ref,response:null}'
+    return 0
+  fi
+  rm -f "${discover_error_file}"
+  pe_ip="$(n2k_source_v4_discover_cluster_ip "${discover_json}")"
+  jwt="$(n2k_source_v4_discover_jwt "${discover_json}")"
+  if [[ -z "${pe_ip}" || -z "${jwt}" ]]; then
+    jq -nc \
+      --arg status "discover_incomplete" \
+      --arg pe_ip "${pe_ip}" \
+      --arg revision "${revision}" \
+      --argjson current_ref "${current_ref_json}" \
+      --argjson reference_ref "${reference_ref_json:-null}" \
+      --argjson discover "${discover_json}" \
+      '{ok:false,status:$status,pe_ip:$pe_ip,revision:$revision,current_ref:$current_ref,reference_ref:$reference_ref,response:$discover}'
+    return 0
+  fi
+  jwt_revision="$(n2k_source_v4_jwt_content_revision "${jwt}")"
+  compute_revision="${jwt_revision:-${revision}}"
+  compute_path="$(n2k_source_v4_discover_compute_path "${discover_json}")"
+  if [[ -z "${compute_path}" ]]; then
+    compute_path="$(n2k_source_v4_compute_changed_regions_path "${compute_revision}" "${recovery_point_ext_id}" "${vm_recovery_point_ext_id}" "${disk_recovery_point_ext_id}")"
+  fi
+
+  while true; do
+    body="$(n2k_source_v4_compute_changed_regions_body "${reference_ref_json}" "${start_offset}" "" "${block_size}")"
+    n2k_source_v4_compute_changed_regions_capture "${pe_ip}" "${jwt}" "${compute_path}" "${insecure}" "${body}" response http_code api_error || true
+
+    response_json="null"
+    if printf '%s' "${response}" | jq empty >/dev/null 2>&1; then
+      response_json="$(printf '%s' "${response}" | jq -c .)"
+    fi
+    if ! n2k_nutanix_http_success "${http_code}"; then
+      jq -nc \
+        --arg status "${http_code}" \
+        --arg error "${api_error}" \
+        --arg pe_ip "${pe_ip}" \
+        --arg revision "${revision}" \
+        --arg compute_revision "${compute_revision}" \
+        --arg compute_path "${compute_path}" \
+        --argjson current_ref "${current_ref_json}" \
+        --argjson reference_ref "${reference_ref_json:-null}" \
+        --argjson response "${response_json}" \
+        '{
+          ok:false,
+          status:$status,
+          error:$error,
+          pe_ip:$pe_ip,
+          revision:$revision,
+          compute_revision:$compute_revision,
+          compute_path:$compute_path,
+          current_ref:$current_ref,
+          reference_ref:$reference_ref,
+          response:$response
+        }'
+      return 0
+    fi
+
+    file_size="$(printf '%s' "${response_json}" | jq -r '
+      ((.metadata.extraInfo // .metadata.extra_info // [])
+        | map(select((.name // "") == "fileSize"))
+        | .[0].value // null)
+    ')"
+    regions="$(jq -cs '
+      def normalize_region:
+        {
+          offset:(.offset // .start // .startOffset),
+          length:(.length // .len // .size),
+          type:((.regionType // .region_type // .type // "regular") | tostring | ascii_downcase)
+        };
+      .[0] + ((.[1].data // .[1].regions // .[1].changedRegions // .[1].regionList // []) | map(normalize_region))
+    ' <(printf '%s\n' "${regions}") <(printf '%s\n' "${response_json}"))"
+    next_offset="$(printf '%s' "${response_json}" | jq -r '
+      ((.metadata.extraInfo // .metadata.extra_info // [])
+        | map(select((.name // "") == "nextOffset"))
+        | .[0].value // empty)
+    ')"
+    page_count="$((page_count + 1))"
+
+    [[ -n "${next_offset}" ]] || break
+    [[ "${next_offset}" =~ ^[0-9]+$ ]] || break
+    [[ "${next_offset}" -gt 0 ]] || break
+    if [[ "${next_offset}" -le "${start_offset}" ]]; then
+      break
+    fi
+    if [[ "${page_count}" -ge "${max_pages}" ]]; then
+      jq -nc \
+        --arg status "pagination_limit" \
+        --arg pe_ip "${pe_ip}" \
+        --arg compute_path "${compute_path}" \
+        --argjson page_count "${page_count}" \
+        --argjson current_ref "${current_ref_json}" \
+        --argjson reference_ref "${reference_ref_json:-null}" \
+        '{ok:false,status:$status,pe_ip:$pe_ip,compute_path:$compute_path,page_count:$page_count,current_ref:$current_ref,reference_ref:$reference_ref,response:null}'
+      return 0
+    fi
+    start_offset="${next_offset}"
+  done
+
+  region_count="$(printf '%s' "${regions}" | jq -r 'length')"
+  bytes_total="$(printf '%s' "${regions}" | jq -r 'map(.length) | add // 0')"
+  jq -nc \
+    --argjson current_ref "${current_ref_json}" \
+    --argjson reference_ref "${reference_ref_json:-null}" \
+    --arg pe_ip "${pe_ip}" \
+    --arg revision "${revision}" \
+    --arg compute_revision "${compute_revision}" \
+    --arg compute_path "${compute_path}" \
+    --argjson file_size "${file_size}" \
+    --argjson page_count "${page_count}" \
+    --argjson region_count "${region_count}" \
+    --argjson bytes_total "${bytes_total}" \
+    --argjson regions "${regions}" \
+    '{
+      ok:true,
+      schema:"ablestack-n2k/changed-regions-v1",
+      source_api:"v4",
+      current_recovery_point_id:($current_ref.recoveryPointExtId // ""),
+      base_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+      reference_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+      pe_ip:$pe_ip,
+      revision:$revision,
+      compute_revision:$compute_revision,
+      compute_path:$compute_path,
+      file_size:$file_size,
+      page_count:$page_count,
+      region_count:$region_count,
+      bytes_total:$bytes_total,
+      disk_recovery_point_ext_id:($current_ref.diskRecoveryPointExtId // ""),
+      regions:$regions
+    }'
+}
+
+n2k_source_v4_collect_changed_regions_from_indexes() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local current_index_json="$5" reference_index_json="${6:-null}" manifest="$7"
+  local current_recovery_point_id="${8:-}" reference_recovery_point_id="${9:-}" revision="${10:-}" max_pages="${11:-256}" block_size="${12:-32768}"
+  local pairs_json pair_count idx pair disk_key capacity_bytes result
+  local disk_id regions regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
+  local total_regions=0 total_bytes=0 mapped_count=0
+
+  pairs_json="$(n2k_source_v4_changed_region_pairs_from_indexes "${current_index_json}" "${reference_index_json}")"
+  pair_count="$(printf '%s' "${pairs_json}" | jq -r 'length')"
+  if [[ "${pair_count}" -eq 0 ]]; then
+    jq -nc \
+      --arg current_recovery_point_id "${current_recovery_point_id}" \
+      --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+      '{
+        schema:"ablestack-n2k/changed-regions-v1",
+        source_api:"v4",
+        ok:false,
+        reason:"no v4 disk recovery point pairs",
+        current_recovery_point_id:$current_recovery_point_id,
+        base_recovery_point_id:$reference_recovery_point_id,
+        reference_recovery_point_id:$reference_recovery_point_id,
+        disks:{},
+        disk_mappings:{},
+        errors:[],
+        skipped:[]
+      }'
+    return 0
+  fi
+
+  idx=0
+  while [[ "${idx}" -lt "${pair_count}" ]]; do
+    pair="$(printf '%s' "${pairs_json}" | jq -c --argjson idx "${idx}" '.[$idx]')"
+    disk_key="$(printf '%s' "${pair}" | jq -r '.disk_key')"
+    capacity_bytes="$(printf '%s' "${pair}" | jq -r '.capacity_bytes // null')"
+    result="$(n2k_source_v4_compute_changed_regions_for_pair \
+      "${pc}" "${username}" "${password}" "${insecure}" \
+      "$(printf '%s' "${pair}" | jq -c '.current_ref')" \
+      "$(printf '%s' "${pair}" | jq -c '.reference_ref')" \
+      "${revision}" "${max_pages}" "${block_size}")"
+
+    if ! printf '%s' "${result}" | jq -e '.ok == true' >/dev/null; then
+      errors="$(jq -cs '.[0] + [.[1]]' <(printf '%s\n' "${errors}") <(printf '%s\n' "${result}"))"
+      idx="$((idx + 1))"
+      continue
+    fi
+
+    disk_id="$(n2k_source_manifest_disk_id_for_snapshot_file "${manifest}" "${disk_key}" "${capacity_bytes}" "${idx}")"
+    if [[ -z "${disk_id}" ]]; then
+      skipped="$(jq -cs '.[0] + [.[1]]' \
+        <(printf '%s\n' "${skipped}") \
+        <(jq -nc --arg disk_key "${disk_key}" --argjson capacity_bytes "${capacity_bytes}" '{disk_key:$disk_key,capacity_bytes:$capacity_bytes,reason:"v4 disk recovery point was not mapped to a manifest disk"}'))"
+      idx="$((idx + 1))"
+      continue
+    fi
+
+    regions="$(printf '%s' "${result}" | jq -c '.regions // []')"
+    regions_by_disk="$(jq -c --arg disk_id "${disk_id}" --argjson regions "${regions}" '. + {($disk_id):$regions}' <<<"${regions_by_disk}")"
+    mappings="$(jq -c \
+      --arg disk_id "${disk_id}" \
+      --arg disk_key "${disk_key}" \
+      --argjson pair "${pair}" \
+      --argjson result "${result}" \
+      '. + {($disk_id):{disk_key:$disk_key,current_ref:$pair.current_ref,reference_ref:$pair.reference_ref,file_size:$result.file_size,pe_ip:$result.pe_ip,compute_path:$result.compute_path}}' \
+      <<<"${mappings}")"
+    total_regions="$((total_regions + $(printf '%s' "${result}" | jq -r '.region_count // 0')))"
+    total_bytes="$((total_bytes + $(printf '%s' "${result}" | jq -r '.bytes_total // 0')))"
+    mapped_count="$((mapped_count + 1))"
+    idx="$((idx + 1))"
+  done
+
+  jq -nc \
+    --arg current_recovery_point_id "${current_recovery_point_id}" \
+    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+    --argjson mapped_count "${mapped_count}" \
+    --argjson total_regions "${total_regions}" \
+    --argjson total_bytes "${total_bytes}" \
+    --argjson disks "${regions_by_disk}" \
+    --argjson mappings "${mappings}" \
+    --argjson errors "${errors}" \
+    --argjson skipped "${skipped}" \
+    '{
+      schema:"ablestack-n2k/changed-regions-v1",
+      source_api:"v4",
+      ok:(($errors | length) == 0 and $mapped_count > 0),
+      current_recovery_point_id:$current_recovery_point_id,
+      base_recovery_point_id:$reference_recovery_point_id,
+      reference_recovery_point_id:$reference_recovery_point_id,
+      disk_count:$mapped_count,
+      region_count:$total_regions,
+      bytes_total:$total_bytes,
+      disks:$disks,
+      disk_mappings:$mappings,
+      errors:$errors,
+      skipped:$skipped
+    }'
+}
+
 n2k_source_legacy_changed_region_candidate_pairs_from_indexes() {
   local current_index_json="$1" reference_index_json="$2" max_pairs="${3:-40}"
 

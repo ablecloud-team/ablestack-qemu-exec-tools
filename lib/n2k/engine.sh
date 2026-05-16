@@ -1021,6 +1021,7 @@ n2k_cmd_snapshot() {
         '{dry_run:true,source:{pc:$pc,vm:$vm},v4:{create_recovery_point:true,collect_changed_regions:$collect_changed_regions}}')"
     else
       local vm_raw vm_ext_id revision rp_name create_response task_ext_id task_json rp_projection rp_ext_id rp_json vmrp_ext_id vmrp_json path_index changed_regions_json
+      local ref_index resolved_reference_kind reference_recovery_point_id
       vm_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
       vm_ext_id="$(n2k_source_vm_uuid_from_inventory_raw "${vm_raw}")"
       [[ -n "${vm_ext_id}" ]] || n2k_die "v4 recovery point creation could not resolve VM extId: ${vm}"
@@ -1047,10 +1048,30 @@ n2k_cmd_snapshot() {
         vmrp_json="$(jq -nc '{data:{}}')"
       fi
       path_index="$(n2k_source_v4_recovery_point_index_from_json "${rp_json}" "${vmrp_json}")"
-      changed_regions_json="$(jq -nc '{ok:false,skipped:true,reason:"v4 changed-region collection is not implemented in this step",disks:{}}')"
+      changed_regions_json="$(jq -nc '{ok:false,skipped:true,reason:"v4 changed-region collection was not requested",disks:{}}')"
 
       if [[ "${collect_changed_regions}" == "true" ]]; then
-        changed_regions_json="$(jq -nc '{ok:false,skipped:true,reason:"v4 changed-region collection requires the next data-plane/discover-cluster implementation step",disks:{}}')"
+        ref_index="null"
+        reference_recovery_point_id=""
+        if [[ "${which}" != "base" || -n "${reference_kind}" ]]; then
+          resolved_reference_kind="${reference_kind:-base}"
+          ref_index="$(jq -c --arg kind "${resolved_reference_kind}" '.runtime.recovery_points[$kind].metadata.v4.path_index // empty' "${N2K_MANIFEST}")"
+          reference_recovery_point_id="$(jq -r --arg kind "${resolved_reference_kind}" '.runtime.recovery_points[$kind].id // empty' "${N2K_MANIFEST}")"
+          if [[ -z "${ref_index}" || "${ref_index}" == "null" ]]; then
+            changed_regions_json="$(jq -nc --arg kind "${resolved_reference_kind}" '{ok:false,skipped:true,reason:"reference recovery point has no v4 path index",reference_kind:$kind,disks:{}}')"
+          else
+            changed_regions_json="$(n2k_source_v4_collect_changed_regions_from_indexes \
+              "${pc}" "${username}" "${password}" "${insecure}" \
+              "${path_index}" "${ref_index}" "${N2K_MANIFEST}" \
+              "${rp_ext_id}" "${reference_recovery_point_id}" "${revision}" 256)"
+            changed_regions_json="$(jq -c --arg kind "${resolved_reference_kind}" '. + {reference_kind:$kind}' <<<"${changed_regions_json}")"
+          fi
+        else
+          changed_regions_json="$(n2k_source_v4_collect_changed_regions_from_indexes \
+            "${pc}" "${username}" "${password}" "${insecure}" \
+            "${path_index}" "null" "${N2K_MANIFEST}" \
+            "${rp_ext_id}" "" "${revision}" 256)"
+        fi
       fi
       if [[ -z "${recovery_point_id}" ]]; then
         recovery_point_id="${rp_ext_id}"

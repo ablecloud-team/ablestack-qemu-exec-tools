@@ -475,6 +475,28 @@ Acceptance:
 Status: PC discover-cluster is live-validated. PE compute is blocked by the
 observed JWT scope/API revision mismatch and remains open.
 
+Additional validation on 2026-05-16:
+
+- A new `rhel` recovery point was created and cleaned up through v4.1.
+- PC `discover-cluster` succeeded for `v4.1`, `v4.0`, and `v4.0.b1`.
+- Every successful discover response returned PE `10.10.132.10`.
+- The returned JWT scope was consistently:
+  `/api/dataprotection/v4.0/content`
+- PE compute path results:
+  - `/api/dataprotection/v4.1/content/.../$actions/compute-changed-regions`
+    returned HTTP `401`, `Scope claim value does not match API base path`.
+  - `/api/dataprotection/v4.0/content/.../$actions/compute-changed-regions`
+    returned HTTP `404`.
+  - `/api/dataprotection/v4.0.b1/content/.../$actions/compute-changed-regions`
+    returned HTTP `401`, also due API base path/scope mismatch.
+- The code now decodes the discover JWT scope and prefers that content revision
+  for the PE compute call. This makes newer or correctly aligned environments
+  runnable without hard-coding the PC config API revision as the PE content API
+  revision.
+- Because this testbed still returns `v4.0` scope with no matching PE content
+  route, `data_plane=false` and v4 incremental blocking remain correct for
+  PC132.
+
 ### Phase E - v4 data-plane and E2E
 
 Deliverables:
@@ -505,6 +527,8 @@ Acceptance:
 4. Resolve the PC132 changed-region compute mismatch:
    - v4.1 redirection with v4.0 JWT scope returns HTTP `401`.
    - v4.0 redirection with matching scope returns HTTP `404`.
+   - v4.0.b1 content path also returns HTTP `401` because its base path does
+     not match the JWT scope.
    - This must be resolved before setting v4 `changed_regions` and `data_plane`
      to fully runnable for E2E.
 5. Decide whether v4.1 should become the default preferred revision when both
