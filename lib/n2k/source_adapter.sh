@@ -992,6 +992,30 @@ n2k_source_v4_wait_task() {
   done
 }
 
+n2k_source_v4_wait_task_terminal() {
+  local pc="$1" username="$2" password="$3" insecure="$4" task_ext_id="$5" timeout_seconds="${6:-180}"
+  local start now response status
+
+  start="$(date +%s)"
+  while true; do
+    response="$(n2k_source_v4_get_task "${pc}" "${username}" "${password}" "${insecure}" "${task_ext_id}")"
+    status="$(printf '%s' "${response}" | jq -r '.data.status // ""')"
+    case "${status}" in
+      SUCCEEDED|FAILED|CANCELED|CANCELLED)
+        printf '%s' "${response}"
+        return 0
+        ;;
+    esac
+    now="$(date +%s)"
+    if (( now - start >= timeout_seconds )); then
+      echo "Timed out waiting for v4 task terminal state: ${task_ext_id}" >&2
+      printf '%s' "${response}"
+      return 4
+    fi
+    sleep 3
+  done
+}
+
 n2k_source_v4_list_recovery_points() {
   local pc="$1" username="$2" password="$3" insecure="$4" revision="${5:-}" limit="${6:-100}"
   local response="" http_code="" api_error=""

@@ -1078,7 +1078,7 @@ n2k_cmd_snapshot() {
           "${rp_ext_id}" "${vmrp_ext_id}" "${temp_vm_name}" "${restore_cluster_id}" "${restore_strict_mode}" "${revision}")"
         restore_task_ext_id="$(printf '%s' "${restore_response}" | jq -r '.data.extId // empty')"
         [[ -n "${restore_task_ext_id}" ]] || n2k_die "v4 recovery point restore response did not include a task extId"
-        restore_task_json="$(n2k_source_v4_wait_task "${pc}" "${username}" "${password}" "${insecure}" "${restore_task_ext_id}" "${wait_seconds}")"
+        restore_task_json="$(n2k_source_v4_wait_task_terminal "${pc}" "${username}" "${password}" "${insecure}" "${restore_task_ext_id}" "${wait_seconds}")"
         temp_vm_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${temp_vm_name}" "${username}" "${password}" "${insecure}" 2>/dev/null || true)"
         temp_vm_ext_id=""
         if [[ -n "${temp_vm_raw}" ]]; then

@@ -604,6 +604,33 @@ runtime.recovery_points.<kind>.metadata.v4.restore_to_temp_vm
   the restored temporary VM disk and must also prove cleanup of that temporary
   VM.
 
+Live restore validation on 2026-05-16:
+
+- A live `rhel` Recovery Point restore was attempted with a generated temporary
+  VM name. PC132 returned a top-level restore task and a VM restore subtask, but
+  both ended in `FAILED`:
+  - top-level error: `DP-10000`, `DATAPROTECTION_INTERNAL_ERROR`
+  - VM subtask error: `VMM-10000` and `DP-10000`
+- Even with the failed task status, PC132 created an `OFF` temporary VM with one
+  100 GiB disk.
+- The temporary VM's v4 direct byte-source candidates still failed:
+  - v4.1 config disk data path -> HTTP `404`
+  - v4.1 content disk data path -> HTTP `404`
+- The temporary VM appeared in the v3 VM list, and its v3 live disk data endpoint
+  returned HTTP `200` with `application/octet-stream`.
+- The first 512 bytes read through the v3 live disk data endpoint matched the
+  source `rhel` disk byte-for-byte in the validation run.
+- Creating a v3 internal VM snapshot for the temporary VM failed with HTTP
+  `404`, so the restore-to-temp-VM path has not yet produced a full NFS-backed
+  byte source.
+- Cleanup details:
+  - v4 VM deletion requires an `ETag` from VM GET and `If-Match` on DELETE.
+  - Temporary VM delete task completed with `SUCCEEDED`.
+  - Recovery Point delete task completed with `SUCCEEDED`.
+- Code was adjusted to wait for a terminal restore task state and record the
+  temporary VM identity even when the restore task status is `FAILED`. This
+  prevents failed restore attempts from hiding orphaned temporary VM details.
+
 ### Phase E - v4 data-plane and E2E
 
 Deliverables:
