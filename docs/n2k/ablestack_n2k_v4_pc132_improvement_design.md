@@ -525,6 +525,35 @@ Endpoint variant validation on 2026-05-16:
   from changed-region compute/data-plane readiness. A reachable recovery point
   list endpoint no longer implies `changed_regions=true`.
 
+PE v4 namespace validation on 2026-05-16:
+
+- The PE returned by PC `discover-cluster` for changed-region compute is
+  `10.10.132.10`.
+- That PE accepts Prism Element legacy and v3 APIs:
+  - `/PrismGateway/services/rest/v1/cluster` -> HTTP `200`
+  - `/PrismGateway/services/rest/v2.0/cluster` -> HTTP `200`
+  - `/api/nutanix/v3/clusters/list` -> HTTP `200`
+  - `/api/nutanix/v3/vms/list` -> HTTP `200`
+- The same PE does not expose the tested v4 namespaces:
+  - `/api/vmm/v4.1/ahv/config/vms` -> HTTP `404`
+  - `/api/vmm/v4.0/ahv/config/vms` -> HTTP `404`
+  - `/api/dataprotection/v4.1/config/recovery-points` -> HTTP `404`
+  - `/api/dataprotection/v4.0/config/recovery-points` -> HTTP `404`
+  - `/api/dataprotection/v4.1/content` -> HTTP `404`
+  - `/api/dataprotection/v4.0/content` -> HTTP `404`
+  - `/api/clustermgmt/v4.0/config/clusters` -> HTTP `404`
+  - `/api/prism/v4.0/config/tasks` -> HTTP `404`
+- Exact PE compute route probes with bogus IDs also returned HTTP `404` for
+  `v4.1`, `v4.0`, and `v4.0.b1`.
+- By contrast, PC `10.10.132.100` exposes v4 VMM, Data Protection config,
+  Cluster Management, and Prism task APIs with HTTP `200`.
+- Conclusion: the changed-region compute failure is very likely caused by the
+  discovered PE not exposing/accepting v4 API namespaces, not by request
+  escaping or client-side routing in `n2k`. The previous v4.1 JWT `401` should
+  be treated as an auth/scope filter result before a usable PE v4 content route
+  is available, because direct PE route probing shows the API route itself is
+  not exposed.
+
 Byte-source validation on 2026-05-16:
 
 - Officially visible v4 Data Protection APIs expose Recovery Point config
