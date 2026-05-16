@@ -109,7 +109,8 @@ n2k_source_probe_v4() {
       byte_source_candidates:{
         direct_disk_data:false,
         recovery_point_export:false,
-        restore_to_temp_vm:true
+        restore_to_temp_vm:true,
+        restore_to_temp_vm_v3_live_data:false
       },
       data_plane:false,
       revisions:{
@@ -126,7 +127,8 @@ n2k_source_probe_v4() {
           verified:false,
           direct_disk_data:{verified:false,reason:"no v4 VMM disk data endpoint is verified"},
           recovery_point_export:{verified:false,reason:"no v4 recovery point disk export endpoint is verified"},
-          restore_to_temp_vm:{candidate:true,verified:false,reason:"recovery point restore is a documented candidate but requires explicit live restore and cleanup validation"}
+          restore_to_temp_vm:{candidate:true,verified:false,reason:"recovery point restore is a documented candidate but requires explicit live restore and cleanup validation"},
+          restore_to_temp_vm_v3_live_data:{candidate:true,verified:false,offset_max_bytes:16777216,length_max_bytes:16777216,reason:"v3 live disk data can read small windows from the restored VM, but the observed 16MiB offset/length limits make it unsuitable as a full-disk byte source"}
         }
       }
     }'

@@ -631,6 +631,32 @@ Live restore validation on 2026-05-16:
   temporary VM identity even when the restore task status is `FAILED`. This
   prevents failed restore attempts from hiding orphaned temporary VM details.
 
+v3 live disk data limit validation on 2026-05-16:
+
+- PC132 `rhel` v3 live disk data endpoint was probed with the primary 12.5 GiB
+  disk.
+- Successful reads:
+  - `offset=0,length=512`
+  - `offset=512,length=512`
+  - `offset=1048576,length=512`
+  - `offset=16777216,length=512`
+  - `offset=0,length=1048576`
+  - `offset=0,length=16777216`
+- Rejected reads returned HTTP `422`:
+  - `offset=16777728,length=512`
+  - `offset=67108864,length=512`
+  - `offset=1073741824,length=512`
+  - last 512 bytes of the 12.5 GiB disk
+  - `offset=0,length=16777728`
+- Conclusion: the v3 live disk data API is useful as a small-window validation
+  read path, but not as a full-disk byte source for v4 restore-to-temp-VM. The
+  existing `N2K_NUTANIX_DATA_OFFSET_MAX` and `N2K_NUTANIX_DATA_LENGTH_MAX`
+  defaults of `16777216` remain correct.
+- `n2k_source_probe_v4` now reports
+  `byte_source_candidates.restore_to_temp_vm_v3_live_data=false` with the
+  observed limits, so a restored temporary VM is not accidentally promoted to a
+  runnable v4 data plane.
+
 ### Phase E - v4 data-plane and E2E
 
 Deliverables:
