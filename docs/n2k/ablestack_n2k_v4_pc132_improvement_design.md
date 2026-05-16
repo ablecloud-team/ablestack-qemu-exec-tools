@@ -497,6 +497,34 @@ Additional validation on 2026-05-16:
   route, `data_plane=false` and v4 incremental blocking remain correct for
   PC132.
 
+Endpoint variant validation on 2026-05-16:
+
+- PC `config` list endpoints remain reachable:
+  - `/api/dataprotection/v4.0/config/recovery-points?$limit=1` -> HTTP `200`
+  - `/api/dataprotection/v4.1/config/recovery-points?$limit=1` -> HTTP `200`
+- PE `10.10.132.10` does not expose generic v4 Data Protection list roots:
+  - `/api/dataprotection/v4.0/content` -> HTTP `404`
+  - `/api/dataprotection/v4.1/content` -> HTTP `404`
+  - `/api/dataprotection/v4.0/config/recovery-points?$limit=1` -> HTTP `404`
+  - `/api/dataprotection/v4.1/config/recovery-points?$limit=1` -> HTTP `404`
+- Exact PE compute endpoint variants were tested with a live `rhel` recovery
+  point and then cleaned up:
+  - v4.0 `$actions` and `%24actions` paths -> HTTP `404`
+  - v4.1 `$actions` path -> HTTP `401`, scope/base-path mismatch
+  - paths without `/api` -> HTTP `404`
+  - paths without `$actions` -> HTTP `404`
+  - `Authorization: Bearer <JWT>` on v4.1 -> HTTP `403`
+  - lowercase `cookie` header behaves the same as `Cookie`
+  - PC content POST on the v4.0 compute path -> HTTP `501`
+- Current conclusion: this is not a shell URL escaping or header casing bug in
+  `n2k`. PC132 returns a JWT scoped to `v4.0` content while the PE only shows a
+  routable compute action at the `v4.1` base path, where the JWT is rejected.
+  Treat this as an environment/product API alignment issue unless Nutanix
+  provides a different supported PE content endpoint or cluster setting.
+- `n2k_source_probe_v4` now reports v4 recovery point config APIs separately
+  from changed-region compute/data-plane readiness. A reachable recovery point
+  list endpoint no longer implies `changed_regions=true`.
+
 ### Phase E - v4 data-plane and E2E
 
 Deliverables:

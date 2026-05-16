@@ -101,7 +101,10 @@ n2k_source_probe_v4() {
       vmm:$vmm,
       dataprotection:$dataprotection,
       clustermgmt:$clustermgmt,
-      changed_regions:$dataprotection,
+      dp_recovery_points:$dataprotection,
+      dp_discover_cluster:false,
+      dp_compute_changed_regions:false,
+      changed_regions:false,
       data_plane:false,
       revisions:{
         vmm:$vmm_revision,
@@ -111,7 +114,8 @@ n2k_source_probe_v4() {
       probe:{
         vmm:{http_code:$vmm_http_code},
         dataprotection:{http_code:$dataprotection_http_code},
-        clustermgmt:{http_code:$clustermgmt_http_code}
+        clustermgmt:{http_code:$clustermgmt_http_code},
+        dataprotection_content:{verified:false,reason:"recovery point content APIs require a live recovery point and PE data-plane validation"}
       }
     }'
 }
