@@ -586,6 +586,23 @@ source_endpoint: 10.10.132.10
   snapshot/changed-region API calls, plus the NFS source-map host default, to
   the selected PE instead of blindly using the PC address.
 
+Explicit v3 operator override on 2026-05-16:
+
+- Operators can force the v3 incremental route even when PC advertises a fully
+  usable v4 route.
+- Supported selectors:
+  - `preflight|plan --force-v3`
+  - `preflight|plan --source-api v3`
+  - `run --force-v3`
+  - `run --source-api v3` when the option is explicitly provided
+  - `--mode v3-incremental` remains the direct mode selector
+- A forced v3 selection records `source_api_policy: v3`, `mode_forced: true`,
+  and `forced_mode: v3-incremental` in preflight/plan output and the manifest
+  preflight block.
+- If `--force-v3` or explicit `--source-api v3` is combined with a conflicting
+  mode such as `--mode v4-incremental`, the command fails fast instead of
+  silently overriding the operator input.
+
 Byte-source validation on 2026-05-16:
 
 - Officially visible v4 Data Protection APIs expose Recovery Point config

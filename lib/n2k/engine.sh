@@ -141,6 +141,7 @@ n2k_cmd_init() {
   local username="" password="" insecure="1"
   local inventory_json_arg="" inventory_source="none"
   local target_format="qcow2" target_storage="file" target_map_json="{}" rbd_access_mode="librbd"
+  local force_v3=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -148,6 +149,7 @@ n2k_cmd_init() {
       --pc) pc="${2:-}"; shift 2 ;;
       --dst) dst="${2:-}"; shift 2 ;;
       --mode) mode="${2:-}"; shift 2 ;;
+      --force-v3|--force-v3-incremental) force_v3=true; shift 1 ;;
       --cred-file) cred_file="${2:-}"; shift 2 ;;
       --username) username="${2:-}"; shift 2 ;;
       --password) password="${2:-}"; shift 2 ;;
@@ -167,6 +169,11 @@ n2k_cmd_init() {
   [[ -n "${pc}" ]] || n2k_die "init requires --pc"
   [[ -n "${dst}" ]] || dst="/var/lib/libvirt/images/$(n2k_safe_name "${vm}")"
   n2k_valid_mode "${mode}" || n2k_die "Invalid --mode: ${mode}"
+  if [[ "${force_v3}" == "true" ]]; then
+    [[ "${mode}" == "auto" || "${mode}" == "v3-incremental" ]] || \
+      n2k_die "--force-v3 conflicts with --mode ${mode}"
+    mode="v3-incremental"
+  fi
   if [[ "${target_storage}" == "qcow2" ]]; then
     target_storage="file"
     target_format="qcow2"
@@ -277,6 +284,7 @@ n2k_build_preflight_result_from_args() {
   local cred_file="" username="" password="" insecure="1" probe_legacy=false
   local v4_vmm="auto" v4_dp="auto" v4_data_plane="auto" legacy="auto" legacy_verified="auto" cold="auto" manual="auto"
   local target_storage="auto" target_format="qcow2" rbd_access_mode="librbd"
+  local source_api_policy="auto" force_v3=false
   local parsed_bool=""
 
   while [[ $# -gt 0 ]]; do
@@ -287,6 +295,16 @@ n2k_build_preflight_result_from_args() {
       --target-storage) target_storage="${2:-}"; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --rbd-access-mode) rbd_access_mode="${2:-}"; shift 2 ;;
+      --source-api)
+        source_api_policy="${2:-}"
+        case "${source_api_policy}" in
+          auto) ;;
+          v3) force_v3=true ;;
+          *) n2k_die "preflight/plan --source-api currently supports auto|v3" ;;
+        esac
+        shift 2
+        ;;
+      --force-v3|--force-v3-incremental) force_v3=true; source_api_policy="v3"; shift 1 ;;
       --cred-file)
         cred_file="${2:-}"
         [[ -f "${cred_file}" ]] || n2k_die "Credential file not found: ${cred_file}"
@@ -349,6 +367,11 @@ n2k_build_preflight_result_from_args() {
     [[ -n "${vm}" ]] || n2k_die "plan requires --vm"
   fi
   n2k_valid_mode "${mode}" || n2k_die "Invalid --mode: ${mode}"
+  if [[ "${force_v3}" == "true" ]]; then
+    [[ "${mode}" == "auto" || "${mode}" == "v3-incremental" ]] || \
+      n2k_die "--force-v3/--source-api v3 conflicts with --mode ${mode}"
+    source_api_policy="v3"
+  fi
   case "${insecure}" in
     0|1) ;;
     *) n2k_die "Invalid --insecure: ${insecure}" ;;
@@ -384,7 +407,7 @@ n2k_build_preflight_result_from_args() {
   n2k_preflight_result_json "${pc}" "${vm}" "${mode}" "${allow_experimental}" \
     "${capability_json}" "${deps_json}" \
     "${v4_vmm}" "${v4_dp}" "${v4_data_plane}" "${legacy}" "${legacy_verified}" "${cold}" "${manual}" \
-    "${target_storage}" "${target_format}"
+    "${target_storage}" "${target_format}" "${source_api_policy}"
 }
 
 n2k_maybe_record_phase_done() {
@@ -548,6 +571,7 @@ n2k_cmd_run() {
   local rbd_access_mode_arg_set=0
   local split="${N2K_RUN_DEFAULT_SPLIT:-full}" source_api="v3"
   local nfs_host="" nfs_mount_root="" source_map_from_v3_nfs=true source_endpoint=""
+  local source_api_arg_set=0 force_v3=false
   local deadline_sec="${N2K_RUN_DEFAULT_DEADLINE_SEC:-120}"
   local max_incr_phase2="${N2K_RUN_DEFAULT_MAX_INCR_PHASE2:-20}"
   local max_final_bytes="${N2K_RUN_DEFAULT_MAX_FINAL_BYTES:--1}"
@@ -573,7 +597,8 @@ n2k_cmd_run() {
       --target-map-json) target_map_json="${2:-}"; shift 2 ;;
       --rbd-access-mode) rbd_access_mode="${2:-}"; rbd_access_mode_arg_set=1; shift 2 ;;
       --split) split="${2:-}"; shift 2 ;;
-      --source-api) source_api="${2:-}"; shift 2 ;;
+      --source-api) source_api="${2:-}"; source_api_arg_set=1; shift 2 ;;
+      --force-v3|--force-v3-incremental) force_v3=true; shift 1 ;;
       --source-map-from-v3-nfs) source_map_from_v3_nfs=true; shift 1 ;;
       --no-source-map-from-v3-nfs) source_map_from_v3_nfs=false; shift 1 ;;
       --nfs-host) nfs_host="${2:-}"; shift 2 ;;
@@ -606,6 +631,9 @@ n2k_cmd_run() {
     v3) ;;
     *) n2k_die "run orchestration currently supports --source-api v3 only" ;;
   esac
+  if [[ "${source_api_arg_set}" -eq 1 && "${source_api}" == "v3" ]]; then
+    force_v3=true
+  fi
   case "${inventory_source}" in
     none|fixture|api) ;;
     *) n2k_die "Invalid --inventory-source: ${inventory_source}" ;;
@@ -626,6 +654,11 @@ n2k_cmd_run() {
   [[ "${shutdown_timeout_sec}" =~ ^[0-9]+$ ]] || n2k_die "Invalid --shutdown-timeout-sec: ${shutdown_timeout_sec}"
   [[ "${shutdown_poll_sec}" =~ ^[0-9]+$ && "${shutdown_poll_sec}" -gt 0 ]] || n2k_die "Invalid --shutdown-poll-sec: ${shutdown_poll_sec}"
   n2k_valid_mode "${mode}" || n2k_die "Invalid --mode: ${mode}"
+  if [[ "${force_v3}" == "true" ]]; then
+    [[ "${mode}" == "auto" || "${mode}" == "v3-incremental" ]] || \
+      n2k_die "--force-v3/--source-api v3 conflicts with --mode ${mode}"
+    mode="v3-incremental"
+  fi
   if [[ "${target_storage}" == "qcow2" ]]; then
     target_storage="file"
     target_format="qcow2"
@@ -692,6 +725,7 @@ n2k_cmd_run() {
   if [[ "${split}" != "phase2" && "${skip_plan}" -eq 0 ]] && ! n2k_run_manifest_phase_done "${N2K_MANIFEST}" "plan"; then
     local -a plan_args=(--vm "${vm}" --pc "${pc}" --mode "${mode}" --target-format "${target_format}" --target-storage "${target_storage}" --rbd-access-mode "${rbd_access_mode}")
     plan_args+=("${credential_args[@]}")
+    [[ "${force_v3}" == "true" ]] && plan_args+=(--force-v3)
     [[ "${allow_experimental}" == "true" ]] && plan_args+=(--allow-experimental)
     [[ "${probe_legacy}" == "true" ]] && plan_args+=(--probe-legacy-cbt)
     n2k_cmd_plan "${plan_args[@]}"

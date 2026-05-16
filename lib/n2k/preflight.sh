@@ -64,6 +64,7 @@ n2k_preflight_result_json() {
   local v4_vmm_override="$7" v4_dp_override="$8" v4_data_plane_override="$9"
   local legacy_override="${10}" legacy_verified_override="${11}" cold_override="${12}" manual_override="${13}"
   local requested_storage="${14:-auto}" requested_format="${15:-qcow2}"
+  local source_api_policy="${16:-auto}"
 
   jq -nc \
     --arg pc "${pc}" \
@@ -81,6 +82,7 @@ n2k_preflight_result_json() {
     --arg manual_override "${manual_override}" \
     --arg requested_storage "${requested_storage}" \
     --arg requested_format "${requested_format}" \
+    --arg source_api_policy "${source_api_policy}" \
     '
     def truthy:
       if type == "boolean" then .
@@ -187,6 +189,7 @@ n2k_preflight_result_json() {
     | ($v4_vmm and $v4_dp and $v4_changed_regions and $v4_data_plane) as $v4_incremental_available
     | ($v3_vm_snapshots and $v3_changed_regions and $v3_vm_available) as $v3_incremental_available
     | ($legacy_candidate and $legacy_verified and $allow_experimental) as $legacy_available
+    | ($source_api_policy == "v3") as $force_v3_source_api
     | (if $v3_incremental_available then "v3-incremental"
        elif $cold_available then "cold-export"
        elif $manual_available then "manual-disk"
@@ -197,7 +200,9 @@ n2k_preflight_result_json() {
        elif $cold_available then "cold-export"
        elif $manual_available then "manual-disk"
        else "unavailable" end) as $auto_mode
-    | (if $requested_mode == "auto" then $auto_mode else $requested_mode end) as $selected_mode
+    | (if $force_v3_source_api then "v3-incremental"
+       elif $requested_mode == "auto" then $auto_mode
+       else $requested_mode end) as $selected_mode
     | (if $selected_mode == "v4-incremental" then $v4_incremental_available
        elif $selected_mode == "v3-incremental" then $v3_incremental_available
        elif $selected_mode == "legacy-cbt" then $legacy_available
@@ -209,6 +214,9 @@ n2k_preflight_result_json() {
         pc: $pc,
         vm: (if $vm == "" then null else $vm end),
         requested_mode: $requested_mode,
+        source_api_policy: $source_api_policy,
+        mode_forced: $force_v3_source_api,
+        forced_mode: (if $force_v3_source_api then "v3-incremental" else null end),
         allow_experimental: $allow_experimental,
         recommended_mode: $auto_mode,
         selected_mode: $selected_mode,
@@ -314,6 +322,8 @@ n2k_preflight_result_json() {
           + (if $v4_vmm and $v4_dp and ($v4_changed_regions | not) and ($v3_incremental_available | not) then ["v4 Data Protection recovery point APIs are available, but changed-region compute is not verified; keep using a validated non-v4 source path for E2E"] else [] end)
           + (if $v4_vmm and $v4_dp and ($v4_byte_source | not) then ["v4 recovery-point disk byte source is not verified; direct v4 disk data/export is unavailable in the current validation"] else [] end)
           + (if $v4_vmm and $v4_dp and $v4_changed_regions and ($v4_data_plane | not) then ["v4 changed-region control plane is available, but v4 recovery-point data plane is not verified; use the validated v3 source path for E2E until data-plane support is completed"] else [] end)
+          + (if $force_v3_source_api and $v4_incremental_available then ["source API was forced to v3 by operator request; v4 incremental path was available but skipped"] else [] end)
+          + (if $force_v3_source_api and ($v3_incremental_available | not) then ["source API was forced to v3 by operator request, but the v3 incremental path is unavailable"] else [] end)
           + (if $legacy_candidate and ($legacy_verified | not) then ["legacy-cbt is only a candidate because endpoint verification is missing"] else [] end)
           + (if $legacy_candidate and $legacy_verified and ($allow_experimental | not) then ["legacy-cbt is blocked because experimental mode is not enabled"] else [] end)
           + (if $selected_mode == "legacy-cbt" and ($can_run | not) and $fallback_mode != "unavailable" then ["fallback mode is " + $fallback_mode] else [] end)
@@ -330,6 +340,8 @@ n2k_preflight_text_summary() {
   jq -r '
     "Prism Central: " + (.pc // "") + "\n" +
     "Requested mode: " + (.requested_mode // "") + "\n" +
+    "Source API policy: " + (.source_api_policy // "auto") + "\n" +
+    "Mode forced: " + ((.mode_forced // false) | tostring) + "\n" +
     "Recommended mode: " + (.recommended_mode // "") + "\n" +
     "Selected mode: " + (.selected_mode // "") + "\n" +
     "Can run selected mode: " + ((.can_run // false) | tostring) + "\n" +
@@ -365,6 +377,9 @@ n2k_plan_result_json() {
         vm: $pf.vm,
         pc: $pf.pc,
         requested_mode: $pf.requested_mode,
+        source_api_policy: ($pf.source_api_policy // "auto"),
+        mode_forced: ($pf.mode_forced // false),
+        forced_mode: ($pf.forced_mode // null),
         recommended_mode: $pf.recommended_mode,
         selected_mode: $pf.selected_mode,
         can_run: $pf.can_run,

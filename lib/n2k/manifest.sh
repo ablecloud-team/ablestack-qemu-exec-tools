@@ -392,6 +392,9 @@ n2k_manifest_record_preflight_result() {
     .runtime.selected_mode = ($pf.selected_mode // .runtime.selected_mode)
     | .runtime.preflight = {
         requested_mode: ($pf.requested_mode // ""),
+        source_api_policy: ($pf.source_api_policy // "auto"),
+        mode_forced: ($pf.mode_forced // false),
+        forced_mode: ($pf.forced_mode // null),
         recommended_mode: ($pf.recommended_mode // ""),
         selected_mode: ($pf.selected_mode // ""),
         can_run: ($pf.can_run // false),

@@ -85,6 +85,8 @@ Options:
   --cred-file <file>      Credential file
   --insecure <0|1>        Skip TLS verification when set to 1
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
+  --source-api <api>      auto|v3; v3 forces v3-incremental selection
+  --force-v3              Force v3-incremental even when v4 is available
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -120,6 +122,8 @@ Options:
   --pc <host>             Prism Central host
   --cred-file <file>      Credential file
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
+  --source-api <api>      auto|v3; v3 forces v3-incremental selection
+  --force-v3              Force v3-incremental even when v4 is available
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -162,7 +166,8 @@ Options:
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --split <mode>          full|phase1|phase2
-  --source-api <api>      v3 (current run orchestration)
+  --source-api <api>      v3; explicit v3 forces v3-incremental planning
+  --force-v3              Force v3-incremental even when v4 is available
   --nfs-host <host>       Nutanix container NFS host for v3 snapshot files
   --nfs-mount-root <dir>  Local NFS mount root
   --deadline-sec <sec>    Phase2 incremental round deadline before final sync
@@ -200,6 +205,7 @@ Options:
   --insecure <0|1>        Skip TLS verification when set to 1
   --dst <path>            Destination root
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
+  --force-v3              Initialize the manifest as v3-incremental
   --inventory-json <json> Normalized or raw VM inventory JSON
   --inventory-file <file> Normalized or raw VM inventory JSON file
   --inventory-source <s>  none|fixture|api
