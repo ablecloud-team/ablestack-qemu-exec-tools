@@ -56,7 +56,7 @@ n2k_not_implemented() {
 
 n2k_valid_mode() {
   case "${1:-}" in
-    auto|v4-incremental|legacy-cbt|cold-export|manual-disk) return 0 ;;
+    auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -547,7 +547,7 @@ n2k_cmd_run() {
   local target_format="qcow2" target_storage="file" target_map_json="" rbd_access_mode="librbd"
   local rbd_access_mode_arg_set=0
   local split="${N2K_RUN_DEFAULT_SPLIT:-full}" source_api="v3"
-  local nfs_host="" nfs_mount_root="" source_map_from_v3_nfs=true
+  local nfs_host="" nfs_mount_root="" source_map_from_v3_nfs=true source_endpoint=""
   local deadline_sec="${N2K_RUN_DEFAULT_DEADLINE_SEC:-120}"
   local max_incr_phase2="${N2K_RUN_DEFAULT_MAX_INCR_PHASE2:-20}"
   local max_final_bytes="${N2K_RUN_DEFAULT_MAX_FINAL_BYTES:--1}"
@@ -670,8 +670,19 @@ n2k_cmd_run() {
   pc="${pc:-$(n2k_run_manifest_value "${N2K_MANIFEST}" '.source.pc // empty')}"
   [[ -n "${vm}" ]] || n2k_die "run could not resolve VM name from args or manifest"
   [[ -n "${pc}" ]] || n2k_die "run could not resolve Prism endpoint from args or manifest"
+  source_endpoint="${pc}"
+  if [[ "${source_api}" == "v3" && -n "${username}" && -n "${password}" ]]; then
+    local v3_source_probe v3_source_endpoint
+    v3_source_probe="$(n2k_source_probe_v3_source_endpoint "${pc}" "${username}" "${password}" "${insecure}" "${vm}")"
+    v3_source_endpoint="$(jq -r 'if (.vm_snapshots // false) and (.changed_regions // false) then (.source_endpoint // "") else "" end' <<<"${v3_source_probe}")"
+    if [[ -n "${v3_source_endpoint}" ]]; then
+      source_endpoint="${v3_source_endpoint}"
+      n2k_event INFO "run" "" "v3_source_endpoint_selected" \
+        "$(jq -nc --arg pc "${pc}" --arg source_endpoint "${source_endpoint}" --argjson probe "${v3_source_probe}" '{pc:$pc,source_endpoint:$source_endpoint,probe:$probe}')"
+    fi
+  fi
   if [[ -z "${nfs_host}" ]]; then
-    nfs_host="${pc}"
+    nfs_host="${source_endpoint}"
   fi
 
   if [[ -n "${nfs_mount_root}" ]]; then
@@ -686,7 +697,7 @@ n2k_cmd_run() {
     n2k_cmd_plan "${plan_args[@]}"
   fi
 
-  local -a snapshot_common=(--source-api "${source_api}" --create-vm-snapshot --pc "${pc}" --vm "${vm}" --wait-seconds "${wait_seconds}" --retention-seconds "${retention_seconds}" --snapshot-type "${snapshot_type}")
+  local -a snapshot_common=(--source-api "${source_api}" --create-vm-snapshot --pc "${source_endpoint}" --vm "${vm}" --wait-seconds "${wait_seconds}" --retention-seconds "${retention_seconds}" --snapshot-type "${snapshot_type}")
   snapshot_common+=("${credential_args[@]}")
   local -a sync_common=(--source-map-from-v3-nfs --nfs-host "${nfs_host}")
   [[ -n "${nfs_mount_root}" ]] && sync_common+=(--nfs-mount-root "${nfs_mount_root}")

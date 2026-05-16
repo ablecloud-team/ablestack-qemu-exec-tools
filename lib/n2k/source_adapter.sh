@@ -2167,17 +2167,112 @@ n2k_source_legacy_changed_regions_to_canonical() {
     '
 }
 
+n2k_source_v3_source_endpoint_candidates() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local candidates v3_clusters="" v4_clusters="" http_code="" api_error="" endpoint
+
+  candidates="$(jq -nc --arg endpoint "${pc}" '[$endpoint]')"
+
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/clusters/list" \
+    "${username}" "${password}" "${insecure}" '{"kind":"cluster","offset":0,"length":100}' \
+    v3_clusters http_code api_error || true
+  if n2k_nutanix_http_success "${http_code}"; then
+    while IFS= read -r endpoint; do
+      [[ -n "${endpoint}" && "${endpoint}" != "null" ]] || continue
+      candidates="$(jq -c --arg endpoint "${endpoint}" '. + [$endpoint]' <<<"${candidates}")"
+    done < <(printf '%s' "${v3_clusters}" | jq -r '
+      .entities[]?
+      | select(((.status.resources.config.service_list // .spec.resources.config.service_list // []) | index("AOS")) != null)
+      | .status.resources.network.external_ip // .spec.resources.network.external_ip // empty
+    ' 2>/dev/null)
+  fi
+
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/clustermgmt/v4.0/config/clusters?\$limit=100" \
+    "${username}" "${password}" "${insecure}" "" v4_clusters http_code api_error || true
+  if n2k_nutanix_http_success "${http_code}"; then
+    while IFS= read -r endpoint; do
+      [[ -n "${endpoint}" && "${endpoint}" != "null" ]] || continue
+      candidates="$(jq -c --arg endpoint "${endpoint}" '. + [$endpoint]' <<<"${candidates}")"
+    done < <(printf '%s' "${v4_clusters}" | jq -r '
+      .data[]?
+      | select(((.config.clusterFunction // .clusterFunction // []) | index("AOS")) != null)
+      | .network.externalAddress.ipv4.value // empty
+    ' 2>/dev/null)
+  fi
+
+  jq -c 'reduce .[] as $endpoint ([]; if (($endpoint == null) or ($endpoint == "") or (index($endpoint) != null)) then . else . + [$endpoint] end)' <<<"${candidates}"
+}
+
+n2k_source_probe_v3_source_endpoint() {
+  local pc="$1" username="$2" password="$3" insecure="$4" vm="${5:-}"
+  local candidates endpoint v3_json changed_json inventory_json item results="[]" selected=""
+
+  candidates="$(n2k_source_v3_source_endpoint_candidates "${pc}" "${username}" "${password}" "${insecure}")"
+  while IFS= read -r endpoint; do
+    [[ -n "${endpoint}" && "${endpoint}" != "null" ]] || continue
+    v3_json="$(n2k_source_probe_v3_vm_snapshots "${endpoint}" "${username}" "${password}" "${insecure}")"
+    changed_json="$(n2k_source_probe_legacy_changed_regions "${endpoint}" "${username}" "${password}" "${insecure}")"
+    if [[ -n "${vm}" ]]; then
+      inventory_json="$(n2k_source_probe_inventory "${endpoint}" "${vm}" "${username}" "${password}" "${insecure}")"
+    else
+      inventory_json="$(jq -nc '{available:true,reason:"vm lookup skipped"}')"
+    fi
+    item="$(jq -nc \
+      --arg endpoint "${endpoint}" \
+      --argjson v3 "${v3_json}" \
+      --argjson changed "${changed_json}" \
+      --argjson inventory "${inventory_json}" \
+      '{
+        endpoint:$endpoint,
+        vm_snapshots:(($v3.vm_snapshots // $v3.available // false) | if type == "boolean" then . else false end),
+        changed_regions:(($changed.changed_regions // $changed.candidate // false) | if type == "boolean" then . else false end),
+        changed_regions_verified:(($changed.verified // false) | if type == "boolean" then . else false end),
+        changed_regions_endpoint:($changed.endpoint // ""),
+        changed_regions_probe:($changed.probe // {}),
+        vm_available:(($inventory.available // false) | if type == "boolean" then . else false end),
+        probe:{vm_snapshots:$v3,changed_regions:$changed,inventory:$inventory}
+      }')"
+    results="$(jq -cs '.[0] + [.[1]]' <(printf '%s\n' "${results}") <(printf '%s\n' "${item}"))"
+    if [[ -z "${selected}" ]] && [[ "$(jq -r '.vm_snapshots and .changed_regions and .vm_available' <<<"${item}")" == "true" ]]; then
+      selected="${item}"
+    fi
+  done < <(jq -r '.[]' <<<"${candidates}")
+
+  if [[ -z "${selected}" ]]; then
+    selected="$(jq -c '(. as $all | (map(select(.vm_snapshots and .changed_regions)) | .[0]) // $all[0] // {})' <<<"${results}")"
+  fi
+
+  jq -nc \
+    --argjson selected "${selected}" \
+    --argjson candidates_json "${candidates}" \
+    --argjson probes "${results}" \
+    '{
+      vm_snapshots:(($selected.vm_snapshots // false) | if type == "boolean" then . else false end),
+      available:(($selected.vm_snapshots // false) | if type == "boolean" then . else false end),
+      changed_regions:(($selected.changed_regions // false) | if type == "boolean" then . else false end),
+      changed_regions_candidate:(($selected.changed_regions // false) | if type == "boolean" then . else false end),
+      changed_regions_verified:(($selected.changed_regions_verified // false) | if type == "boolean" then . else false end),
+      changed_regions_endpoint:($selected.changed_regions_endpoint // ""),
+      changed_regions_probe:($selected.changed_regions_probe // {}),
+      vm_available:(($selected.vm_available // false) | if type == "boolean" then . else false end),
+      source_endpoint:($selected.endpoint // ""),
+      source_endpoint_candidates:$candidates_json,
+      source_endpoint_probes:$probes
+    }'
+}
+
 n2k_source_probe_capabilities() {
   local pc="$1" vm="$2" username="$3" password="$4" insecure="$5" probe_legacy="$6"
-  local v4_json v3_json inventory_json legacy_json pd_json
+  local v4_json v3_json v3_source_json inventory_json legacy_json pd_json
 
   v4_json="$(n2k_source_probe_v4 "${pc}" "${username}" "${password}" "${insecure}")"
-  v3_json="$(n2k_source_probe_v3_vm_snapshots "${pc}" "${username}" "${password}" "${insecure}")"
+  v3_json="$(n2k_source_probe_v3_source_endpoint "${pc}" "${username}" "${password}" "${insecure}" "${vm}")"
   inventory_json="$(n2k_source_probe_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
   pd_json="$(n2k_source_probe_legacy_pd_snapshots "${pc}" "${username}" "${password}" "${insecure}")"
 
   if [[ "${probe_legacy}" == "true" ]]; then
-    legacy_json="$(n2k_source_probe_legacy_changed_regions "${pc}" "${username}" "${password}" "${insecure}")"
+    v3_source_json="$(jq -c '{changed_regions, candidate:changed_regions_candidate, verified:changed_regions_verified, endpoint:changed_regions_endpoint, probe:changed_regions_probe}' <<<"${v3_json}")"
+    legacy_json="${v3_source_json}"
   else
     legacy_json="$(jq -nc '{changed_regions:false,candidate:false,verified:false,endpoint:"",probe:{status:null,reason:"legacy probe was not requested",error:""}}')"
   fi

@@ -165,7 +165,7 @@ n2k_manifest_init() {
       runtime: {
         selected_mode: $mode,
         sync: {
-          mode: (if ($mode == "v4-incremental" or $mode == "legacy-cbt") then "incremental" elif $mode == "cold-export" then "cold" else "manual" end),
+          mode: (if ($mode == "v4-incremental" or $mode == "v3-incremental" or $mode == "legacy-cbt") then "incremental" elif $mode == "cold-export" then "cold" else "manual" end),
           round: 0,
           base_recovery_point_id: "",
           last_recovery_point_id: "",
@@ -401,6 +401,7 @@ n2k_manifest_record_preflight_result() {
       }
     | .source.api.family = (
         if ($pf.selected_mode // "") == "v4-incremental" then "v4"
+        elif ($pf.selected_mode // "") == "v3-incremental" then "v3"
         elif ($pf.selected_mode // "") == "legacy-cbt" then "legacy"
         elif ($pf.selected_mode // "") == "cold-export" then "cold-export"
         elif ($pf.selected_mode // "") == "manual-disk" then "manual-disk"
@@ -409,6 +410,7 @@ n2k_manifest_record_preflight_result() {
       )
     | .source.api.namespaces = {
         v4: ($pf.api.v4 // {}),
+        v3: ($pf.api.v3 // {}),
         legacy: ($pf.api.legacy // {})
       }
     | .source.fallback = {

@@ -84,7 +84,7 @@ Options:
   --password <pass>       Prism Central password
   --cred-file <file>      Credential file
   --insecure <0|1>        Skip TLS verification when set to 1
-  --mode <mode>           auto|v4-incremental|legacy-cbt|cold-export|manual-disk
+  --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -119,7 +119,7 @@ Options:
   --vm <name|uuid>        Source Nutanix VM
   --pc <host>             Prism Central host
   --cred-file <file>      Credential file
-  --mode <mode>           auto|v4-incremental|legacy-cbt|cold-export|manual-disk
+  --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -155,7 +155,7 @@ Options:
   --vm <name|uuid>        Source Nutanix VM
   --pc <host>             Prism Central host
   --cred-file <file>      Credential file
-  --mode <mode>           auto|v4-incremental|legacy-cbt|cold-export|manual-disk
+  --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --dst <path>            Destination root
   --target-format <fmt>   qcow2|raw
   --target-storage <type> file|block|rbd
@@ -199,7 +199,7 @@ Options:
   --password <pass>       Prism Central password
   --insecure <0|1>        Skip TLS verification when set to 1
   --dst <path>            Destination root
-  --mode <mode>           auto|v4-incremental|legacy-cbt|cold-export|manual-disk
+  --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --inventory-json <json> Normalized or raw VM inventory JSON
   --inventory-file <file> Normalized or raw VM inventory JSON file
   --inventory-source <s>  none|fixture|api

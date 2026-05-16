@@ -554,6 +554,38 @@ PE v4 namespace validation on 2026-05-16:
   is available, because direct PE route probing shows the API route itself is
   not exposed.
 
+v3 fallback routing update on 2026-05-16:
+
+- When PC exposes v4 APIs but the PE does not expose v4 content/compute routes,
+  `n2k` must not remain on `manual-disk` only. It should prefer the already
+  validated v3 incremental path when the hosting PE supports it.
+- PC132 itself returns HTTP `404` for the internal v3 VM snapshot and
+  `/api/nutanix/v3/data/changed_regions` endpoints, but the discovered PE
+  `10.10.132.10` returns:
+  - `/api/nutanix/v3/vm_snapshots/list` -> HTTP `200`
+  - `/api/nutanix/v3/data/changed_regions` with an empty body -> HTTP `422`,
+    which confirms the endpoint exists and requires a valid snapshot path
+    payload
+  - `/api/nutanix/v3/vms/list` -> HTTP `200`
+- `n2k_source_probe_capabilities` now probes v3 source endpoint candidates:
+  - the provided PC endpoint
+  - AOS cluster external IPs discovered from v3 cluster list
+  - AOS cluster external addresses discovered from v4 Cluster Management
+- A v3 source endpoint is selected only when it supports VM snapshots,
+  changed-region endpoint probing, and the source VM is visible on that
+  endpoint.
+- `preflight` and `plan` now expose a first-class `v3-incremental` mode. On the
+  current PC132 state, automatic planning selects:
+
+```text
+selected_mode: v3-incremental
+source_endpoint: 10.10.132.10
+```
+
+- `run --source-api v3` now reuses the same endpoint selection and sends v3
+  snapshot/changed-region API calls, plus the NFS source-map host default, to
+  the selected PE instead of blindly using the PC address.
+
 Byte-source validation on 2026-05-16:
 
 - Officially visible v4 Data Protection APIs expose Recovery Point config

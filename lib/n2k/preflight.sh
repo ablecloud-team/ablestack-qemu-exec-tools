@@ -113,6 +113,18 @@ n2k_preflight_result_json() {
       ($cap.api.v4.byte_source // $cap.v4.byte_source // $cap.api.v4.data_plane // $cap.v4.data_plane // false) | truthy;
     def cap_v3_vm_snapshots:
       ($cap.api.v3.vm_snapshots // $cap.v3.vm_snapshots // $cap.api.v3.available // $cap.v3.available // false) | truthy;
+    def cap_v3_changed_regions:
+      ($cap.api.v3.changed_regions // $cap.api.v3.changed_regions_candidate // $cap.v3.changed_regions // $cap.v3.changed_regions_candidate // false) | truthy;
+    def cap_v3_changed_regions_verified:
+      ($cap.api.v3.changed_regions_verified // $cap.v3.changed_regions_verified // false) | truthy;
+    def cap_v3_changed_regions_endpoint:
+      ($cap.api.v3.changed_regions_endpoint // $cap.v3.changed_regions_endpoint // $cap.api.legacy.endpoint // $cap.legacy.endpoint // "");
+    def cap_v3_changed_regions_probe_status:
+      ($cap.api.v3.changed_regions_probe.status // $cap.v3.changed_regions_probe.status // $cap.api.legacy.probe.status // $cap.legacy.probe.status // null);
+    def cap_v3_source_endpoint:
+      ($cap.api.v3.source_endpoint // $cap.v3.source_endpoint // "");
+    def cap_v3_vm_available:
+      ($cap.api.v3.vm_available // $cap.v3.vm_available // true) | truthy;
     def cap_legacy_changed_regions:
       ($cap.api.legacy.changed_regions // $cap.legacy.changed_regions // $cap.changed_regions.legacy // false) | truthy;
     def cap_legacy_endpoint:
@@ -147,6 +159,12 @@ n2k_preflight_result_json() {
     | (cap_v4_byte_source) as $v4_byte_source
     | (override_bool($v4_data_plane_override; cap_v4_data_plane)) as $v4_data_plane
     | (cap_v3_vm_snapshots) as $v3_vm_snapshots
+    | (cap_v3_changed_regions) as $v3_changed_regions
+    | (cap_v3_changed_regions_verified) as $v3_changed_regions_verified
+    | (cap_v3_changed_regions_endpoint) as $v3_changed_regions_endpoint
+    | (cap_v3_changed_regions_probe_status) as $v3_changed_regions_probe_status
+    | (cap_v3_source_endpoint) as $v3_source_endpoint
+    | (cap_v3_vm_available) as $v3_vm_available
     | (override_bool($legacy_override; cap_legacy_changed_regions)) as $legacy_candidate
     | (override_bool($legacy_verified_override; cap_legacy_verified)) as $legacy_verified
     | (cap_legacy_endpoint) as $legacy_endpoint
@@ -167,17 +185,21 @@ n2k_preflight_result_json() {
        elif $selected_storage == "block" then $block_available
        else false end) as $storage_available
     | ($v4_vmm and $v4_dp and $v4_changed_regions and $v4_data_plane) as $v4_incremental_available
+    | ($v3_vm_snapshots and $v3_changed_regions and $v3_vm_available) as $v3_incremental_available
     | ($legacy_candidate and $legacy_verified and $allow_experimental) as $legacy_available
-    | (if $cold_available then "cold-export"
+    | (if $v3_incremental_available then "v3-incremental"
+       elif $cold_available then "cold-export"
        elif $manual_available then "manual-disk"
        else "unavailable" end) as $fallback_mode
     | (if $v4_incremental_available then "v4-incremental"
+       elif $v3_incremental_available then "v3-incremental"
        elif $legacy_available then "legacy-cbt"
        elif $cold_available then "cold-export"
        elif $manual_available then "manual-disk"
        else "unavailable" end) as $auto_mode
     | (if $requested_mode == "auto" then $auto_mode else $requested_mode end) as $selected_mode
     | (if $selected_mode == "v4-incremental" then $v4_incremental_available
+       elif $selected_mode == "v3-incremental" then $v3_incremental_available
        elif $selected_mode == "legacy-cbt" then $legacy_available
        elif $selected_mode == "cold-export" then $cold_available
        elif $selected_mode == "manual-disk" then $manual_available
@@ -197,6 +219,23 @@ n2k_preflight_result_json() {
           "v4-incremental": {
             available: $v4_incremental_available,
             reason: (if $v4_incremental_available then "v4 vmm and dataprotection changed regions are available" else "v4 vmm or dataprotection changed regions are unavailable" end)
+          },
+          "v3-incremental": {
+            available: $v3_incremental_available,
+            vm_snapshots: $v3_vm_snapshots,
+            changed_regions: $v3_changed_regions,
+            changed_regions_verified: $v3_changed_regions_verified,
+            endpoint: $v3_changed_regions_endpoint,
+            source_endpoint: $v3_source_endpoint,
+            probe_status: $v3_changed_regions_probe_status,
+            vm_available: $v3_vm_available,
+            source_api: "v3",
+            path_source: "v3-vm-snapshot",
+            reason: (if $v3_incremental_available then "v3 VM snapshots and v3 changed-region endpoint are available"
+                     elif ($v3_vm_snapshots and $v3_changed_regions and ($v3_vm_available | not)) then "v3 source endpoint is available but the VM was not found on that endpoint"
+                     elif ($v3_vm_snapshots and ($v3_changed_regions | not)) then "v3 VM snapshots are available but the v3 changed-region endpoint is unavailable"
+                     elif (($v3_vm_snapshots | not) and $v3_changed_regions) then "v3 changed-region endpoint is available but v3 VM snapshots are unavailable"
+                     else "v3 incremental path is unavailable" end)
           },
           "legacy-cbt": {
             candidate: $legacy_candidate,
@@ -238,7 +277,16 @@ n2k_preflight_result_json() {
             probe: ($cap.api.v4.probe // $cap.v4.probe // {})
           },
           v3: {
-            vm_snapshots: $v3_vm_snapshots
+            vm_snapshots: $v3_vm_snapshots,
+            changed_regions: $v3_changed_regions,
+            changed_regions_verified: $v3_changed_regions_verified,
+            changed_regions_endpoint: $v3_changed_regions_endpoint,
+            changed_regions_probe_status: $v3_changed_regions_probe_status,
+            source_endpoint: $v3_source_endpoint,
+            vm_available: $v3_vm_available,
+            source_endpoint_candidates: ($cap.api.v3.source_endpoint_candidates // $cap.v3.source_endpoint_candidates // []),
+            source_endpoint_probes: ($cap.api.v3.source_endpoint_probes // $cap.v3.source_endpoint_probes // []),
+            incremental_available: $v3_incremental_available
           },
           legacy: {
             changed_regions: $legacy_candidate,
@@ -262,7 +310,8 @@ n2k_preflight_result_json() {
         },
         warnings: (
           []
-          + (if $v4_vmm and $v4_dp and ($v4_changed_regions | not) then ["v4 Data Protection recovery point APIs are available, but changed-region compute is not verified; keep using the validated v3 source path for E2E"] else [] end)
+          + (if $v4_vmm and $v4_dp and ($v4_changed_regions | not) and $v3_incremental_available then ["v4 Data Protection recovery point APIs are available, but PE v4 changed-region compute is not verified; falling back to the validated v3 incremental path"] else [] end)
+          + (if $v4_vmm and $v4_dp and ($v4_changed_regions | not) and ($v3_incremental_available | not) then ["v4 Data Protection recovery point APIs are available, but changed-region compute is not verified; keep using a validated non-v4 source path for E2E"] else [] end)
           + (if $v4_vmm and $v4_dp and ($v4_byte_source | not) then ["v4 recovery-point disk byte source is not verified; direct v4 disk data/export is unavailable in the current validation"] else [] end)
           + (if $v4_vmm and $v4_dp and $v4_changed_regions and ($v4_data_plane | not) then ["v4 changed-region control plane is available, but v4 recovery-point data plane is not verified; use the validated v3 source path for E2E until data-plane support is completed"] else [] end)
           + (if $legacy_candidate and ($legacy_verified | not) then ["legacy-cbt is only a candidate because endpoint verification is missing"] else [] end)
@@ -292,6 +341,9 @@ n2k_preflight_text_summary() {
     "v4 byte source: " + ((.api.v4.byte_source // false) | tostring) + "\n" +
     "v4 data plane: " + ((.api.v4.data_plane // false) | tostring) + "\n" +
     "v3 vm snapshots: " + ((.api.v3.vm_snapshots // false) | tostring) + "\n" +
+    "v3 changed regions: " + ((.api.v3.changed_regions // false) | tostring) + "\n" +
+    "v3 source endpoint: " + (.api.v3.source_endpoint // "") + "\n" +
+    "v3 incremental: " + ((.api.v3.incremental_available // false) | tostring) + "\n" +
     "legacy changed regions: " + ((.api.legacy.changed_regions // false) | tostring) + "\n" +
     "legacy verified: " + ((.api.legacy.verified // false) | tostring) + "\n" +
     "fallback mode: " + (.fallback_mode // "") + "\n" +
@@ -321,6 +373,8 @@ n2k_plan_result_json() {
         steps: (
           if ($pf.selected_mode == "v4-incremental" and $pf.can_run) then
             ["init","preflight","inventory","prepare-target-storage","recovery-point-base","sync-base","recovery-point-incr","sync-incr","shutdown-source","recovery-point-final","sync-final","define-target","cleanup"]
+          elif ($pf.selected_mode == "v3-incremental" and $pf.can_run) then
+            ["init","preflight","inventory","prepare-target-storage","v3-snapshot-base","sync-base","v3-snapshot-incr","sync-incr","shutdown-source","v3-snapshot-final","sync-final","define-target","cleanup"]
           elif ($pf.selected_mode == "legacy-cbt" and $pf.can_run) then
             ["init","preflight","inventory","prepare-target-storage","legacy-base","legacy-incr","shutdown-source","legacy-final","define-target","cleanup"]
           elif ($pf.selected_mode == "cold-export" and $pf.can_run) then
@@ -333,6 +387,9 @@ n2k_plan_result_json() {
         ),
         blockers: (
           if $pf.can_run then []
+          elif $pf.selected_mode == "v3-incremental" and (($pf.modes["v3-incremental"].vm_snapshots // false) | not) then ["v3 VM snapshot path is not available"]
+          elif $pf.selected_mode == "v3-incremental" and (($pf.modes["v3-incremental"].changed_regions // false) | not) then ["v3 changed-region endpoint is not available"]
+          elif $pf.selected_mode == "v3-incremental" and (($pf.modes["v3-incremental"].vm_available // true) | not) then ["source VM is not visible on the selected v3 source endpoint"]
           elif $pf.selected_mode == "legacy-cbt" and (($pf.modes["legacy-cbt"].candidate // false) | not) then ["legacy changed-region path is not available"]
           elif $pf.selected_mode == "legacy-cbt" and (($pf.modes["legacy-cbt"].verified // false) | not) then ["legacy changed-region endpoint is not verified"]
           elif $pf.selected_mode == "legacy-cbt" and (($pf.allow_experimental // false) | not) then ["legacy-cbt requires --allow-experimental"]
