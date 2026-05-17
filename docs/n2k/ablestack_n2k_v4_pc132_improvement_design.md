@@ -735,6 +735,136 @@ v3 live disk data limit validation on 2026-05-16:
   observed limits, so a restored temporary VM is not accidentally promoted to a
   runnable v4 data plane.
 
+Revalidation after corrected target on 2026-05-18:
+
+- The current v4 target is Prism Central `https://10.10.132.100:9440`; the
+  earlier 10.10.131.x check was against the wrong environment for this work.
+- PC `10.10.132.100` is reachable and exposes the expected v4 PC-side
+  namespaces:
+  - VMM `v4.1` -> HTTP `200`, `5` VMs
+  - VMM `v4.0` -> HTTP `200`, `5` VMs
+  - VMM `v4.2` -> HTTP `404`
+  - Data Protection config recovery points `v4.1` -> HTTP `200`
+  - Data Protection config recovery points `v4.0` -> HTTP `200`
+  - Data Protection `v4.2` -> HTTP `404`
+  - Cluster Management clusters `v4.1` -> HTTP `200`, `2` clusters
+  - Cluster Management clusters `v4.0` -> HTTP `200`, `2` clusters
+  - Prism tasks `v4.1` -> HTTP `200`
+  - Prism tasks `v4.0` -> HTTP `200`
+- PC version observed through v1/v2 compatibility APIs is `pc.7.3.1.9`.
+- PC v3 compatibility APIs also remain available:
+  - `/api/nutanix/v3/clusters/list` -> HTTP `200`, `2` entities
+  - `/api/nutanix/v3/vms/list` -> HTTP `200`, `5` entities
+  - `/api/nutanix/v3/vm_snapshots/list` -> HTTP `404` on PC, so v3 snapshot
+    operations must still be routed to the hosting PE when using fallback.
+- The AOS PE cluster discovered from PC is:
+  - name: `test-cluster`
+  - extId/UUID: `000651c1-7bba-d796-4637-020100d40001`
+  - external IP: `10.10.132.10`
+  - external data services IP from v3 cluster list: `10.10.132.9`
+  - AOS version: `7.3.1.5`
+  - node count: `3`
+- Current v4 VM inventory from PC:
+
+| VM | Power | Disks | NICs | Cluster |
+| --- | --- | --- | --- | --- |
+| `rhel` | `OFF` | `3` | `1` | `test-cluster` |
+| `win10` | `OFF` | `2` | `1` | `test-cluster` |
+| `centos7-bios-ide` | `OFF` | `1` | `1` | `test-cluster` |
+| `PC-NameOption-1` | `ON` | `7` | `2` | `test-cluster` |
+| `windows11` | `ON` | `1` | `1` | `test-cluster` |
+
+- Direct PE probe against `https://10.10.132.10:9440` shows that the PE is
+  upgraded to AOS `7.3.1.5` and legacy/v3 source APIs are still usable:
+  - v1/v2 cluster APIs -> HTTP `200`
+  - `/api/nutanix/v3/vms/list` -> HTTP `200`, `5` VMs
+  - `/api/nutanix/v3/vm_snapshots/list` -> HTTP `200`, `0` snapshots
+  - `/api/nutanix/v3/data/changed_regions` with an empty body -> HTTP `422`,
+    confirming the endpoint exists and expects a valid snapshot path payload.
+- The same direct PE probe still returns HTTP `404` for the tested v4
+  namespaces:
+  - VMM `v4.1` and `v4.0`
+  - Data Protection config `v4.1` and `v4.0`
+  - Data Protection content roots `v4.1`, `v4.0`, and `v4.0.b1`
+  - Cluster Management `v4.1` and `v4.0`
+  - Prism tasks `v4.1` and `v4.0`
+
+Design impact from the 2026-05-18 revalidation:
+
+- PC-side v4 inventory, Recovery Point config, Cluster Management, and Prism
+  task APIs are available and should be treated as the preferred control-plane
+  candidate when `source_api_policy=auto`.
+- Namespace revision selection should be updated to prefer `v4.1` for Cluster
+  Management and Prism tasks as well as VMM/Data Protection, while keeping
+  `v4.0` fallback and treating `v4.2` as unavailable on this testbed.
+- PE direct v4 namespace probes are still not enough to mark changed-region
+  compute or byte-source data-plane capabilities as runnable. The implementation
+  must keep the current capability split:
+  - `dp_recovery_points=true` from PC config API
+  - `dp_discover_cluster` only after a live Recovery Point discover smoke
+  - `dp_compute_changed_regions` only after a live PE redirected compute smoke
+  - `byte_source=false` until a supported byte stream or validated restore
+    data-plane is proven
+- Automatic run selection must keep the verified v3 PE fallback path when PC is
+  v4-capable but the PE v4 content/data-plane path is not proven. For this
+  environment that means routing runnable E2E migrations to PE `10.10.132.10`
+  through v3 snapshot/changed-region APIs until the v4 content path passes.
+- The next validation step before enabling `run --source-api v4` is a controlled
+  live smoke:
+  1. create a short-retention v4 Recovery Point on a small test VM,
+  2. wait through the selected Prism task API,
+  3. resolve Recovery Point, VM Recovery Point, and disk Recovery Point IDs,
+  4. call PC `discover-cluster`,
+  5. execute the returned PE compute-changed-regions URL with the returned JWT,
+  6. delete the Recovery Point even on failure.
+
+Controlled live changed-region smoke on 2026-05-18:
+
+- Target VM: `centos7-bios-ide`
+  - VM extId: `92c03e06-e400-40f1-b000-e9be3b0c92b1`
+  - power state: `OFF`
+  - disk count: `1`
+- Selected PC-side revisions:
+  - VMM: `v4.1`
+  - Data Protection config: `v4.1`
+  - Cluster Management: `v4.0`
+- A short-retention v4 Recovery Point was created through PC
+  `10.10.132.100` and the Prism task completed with `SUCCEEDED`.
+- Resolved identifiers:
+  - Recovery Point extId: `cca07175-9f57-4301-9c59-134cd60ef1a6`
+  - VM Recovery Point extId: `0008c8c5-18c0-4409-afcf-0a392f4b7e7b`
+  - Disk Recovery Point extId: `d0061823-ab02-4e05-9b61-7673c2797a34`
+- PC `discover-cluster` succeeded and returned:
+  - PE IP: `10.10.132.10`
+  - JWT scope/content revision: `v4.0`
+  - compute path:
+    `/api/dataprotection/v4.0/content/recovery-points/{rp}/vm-recovery-points/{vmrp}/disk-recovery-points/{diskrp}/$actions/compute-changed-regions`
+- PE `compute-changed-regions` succeeded with HTTP `200` when called through
+  the exact path returned/derived from the discover JWT scope.
+  - request window: `offset=0`, `length=1048576`, `blockSizeByte=32768`
+  - returned region count: `2`
+  - returned `nextOffset`: `1048576`
+  - returned `fileSize`: `107374182400`
+- Cleanup succeeded:
+  - Recovery Point delete task status: `SUCCEEDED`
+  - follow-up Recovery Point list found no remaining `n2k-v4-smoke-*`
+    Recovery Points.
+
+Design impact from the live smoke:
+
+- The direct PE v4 namespace root probes returning HTTP `404` do not mean the
+  redirected PE content action is unavailable. The exact JWT-authorized
+  `compute-changed-regions` action can still succeed.
+- `n2k` should rely on the PC `discover-cluster` response and JWT scope to
+  choose the PE content revision/path, instead of probing generic PE v4 roots or
+  forcing the PC config revision onto PE content calls.
+- The v4 changed-region metadata/control-plane capability is now proven for a
+  single-disk VM and a no-reference/base-style changed-region window on PC132.
+- Remaining v4 run blockers are now narrower:
+  - confirm incremental comparison between two Recovery Points,
+  - confirm pagination across all regions/disks,
+  - confirm a reliable byte-source data plane for copying the changed bytes.
+
 ### Phase E - v4 data-plane and E2E
 
 Deliverables:
@@ -762,16 +892,14 @@ Acceptance:
 3. Confirm the official or supported byte-stream data plane for v4 recovery
    point disks. Changed-region APIs identify what changed, but `n2k` still needs
    a reliable way to read the corresponding bytes.
-4. Resolve the PC132 changed-region compute mismatch:
-   - v4.1 redirection with v4.0 JWT scope returns HTTP `401`.
-   - v4.0 redirection with matching scope returns HTTP `404`.
-   - v4.0.b1 content path also returns HTTP `401` because its base path does
-     not match the JWT scope.
-   - This must be resolved before setting v4 `changed_regions` and `data_plane`
-     to fully runnable for E2E.
-5. Decide whether v4.1 should become the default preferred revision when both
-   v4.1 and v4.0 are available. Based on this environment, v4.1 is available and
-   v4.2 is not.
+4. Extend the successful PC132 changed-region smoke:
+   - create two Recovery Points and compute changed regions with a real
+     reference Recovery Point.
+   - verify pagination until `nextOffset=0` across all disks.
+   - run the same check on `rhel` and `win10`, which have multiple disks in the
+     current testbed.
+5. Implement v4.1-first revision selection for Cluster Management and Prism
+   tasks, matching the already preferred v4.1 VMM/Data Protection behavior.
 
 ## References
 

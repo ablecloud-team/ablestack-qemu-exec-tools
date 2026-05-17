@@ -201,9 +201,54 @@ n2k_target_prepare_libvirt_storage() {
   done
 }
 
+n2k_target_interface_xml() {
+  local manifest="$1"
+  local mac mode bridge network model
+  mac="$(jq -r '.source.vm.nics[0].mac // empty' "${manifest}")"
+  [[ -n "${mac}" ]] || return 0
+
+  mode="${N2K_LIBVIRT_NETWORK_MODE:-$(jq -r '.target.libvirt.network.mode // "bridge"' "${manifest}")}"
+  bridge="${N2K_LIBVIRT_BRIDGE:-$(jq -r '.target.libvirt.network.bridge // "bridge0"' "${manifest}")}"
+  network="${N2K_LIBVIRT_NETWORK:-$(jq -r '.target.libvirt.network.name // "default"' "${manifest}")}"
+  model="${N2K_LIBVIRT_NIC_MODEL:-virtio}"
+
+  case "${mode}" in
+    bridge)
+      [[ -n "${bridge}" && "${bridge}" != "null" ]] || {
+        echo "Libvirt bridge name is required when network mode is bridge." >&2
+        return 2
+      }
+      cat <<EOF
+    <interface type='bridge'>
+      <mac address='$(n2k_xml_escape "${mac}")'/>
+      <source bridge='$(n2k_xml_escape "${bridge}")'/>
+      <model type='$(n2k_xml_escape "${model}")'/>
+    </interface>
+EOF
+      ;;
+    network)
+      [[ -n "${network}" && "${network}" != "null" ]] || {
+        echo "Libvirt network name is required when network mode is network." >&2
+        return 2
+      }
+      cat <<EOF
+    <interface type='network'>
+      <mac address='$(n2k_xml_escape "${mac}")'/>
+      <source network='$(n2k_xml_escape "${network}")'/>
+      <model type='$(n2k_xml_escape "${model}")'/>
+    </interface>
+EOF
+      ;;
+    *)
+      echo "Unsupported libvirt network mode: ${mode}" >&2
+      return 2
+      ;;
+  esac
+}
+
 n2k_target_generate_libvirt_xml() {
   local manifest="$1"
-  local vm vcpu memory_mb fw secure_boot count idx xml disks_xml iface_xml mac
+  local vm vcpu memory_mb fw secure_boot count idx xml disks_xml iface_xml
   local ovmf_code ovmf_vars ovmf_nvram loader_attrs
   vm="$(jq -r '.target.libvirt.name // .source.vm.name' "${manifest}")"
   vcpu="$(jq -r '(.source.vm.cpu // 0 | tonumber? // 0) as $v | if $v > 0 then $v else 2 end' "${manifest}")"
@@ -240,16 +285,7 @@ n2k_target_generate_libvirt_xml() {
 $(n2k_target_disk_xml "${manifest}" "${idx}")"
   done
 
-  mac="$(jq -r '.source.vm.nics[0].mac // empty' "${manifest}")"
-  iface_xml=""
-  if [[ -n "${mac}" ]]; then
-    iface_xml="
-    <interface type='network'>
-      <mac address='$(n2k_xml_escape "${mac}")'/>
-      <source network='default'/>
-      <model type='virtio'/>
-    </interface>"
-  fi
+  iface_xml="$(n2k_target_interface_xml "${manifest}")"
 
   xml="${N2K_WORKDIR}/artifacts/${vm}.xml"
   mkdir -p "$(dirname "${xml}")"

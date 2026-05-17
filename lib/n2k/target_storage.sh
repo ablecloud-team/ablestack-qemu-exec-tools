@@ -61,6 +61,19 @@ n2k_storage_require_command() {
   }
 }
 
+n2k_storage_detect_image_format() {
+  local path="$1" fmt
+  if [[ -b "${path}" ]]; then
+    printf 'raw'
+    return 0
+  fi
+
+  n2k_storage_require_command qemu-img "image format detection"
+  fmt="$(qemu-img info --output=json "${path}" 2>/dev/null | jq -r '.format // empty' 2>/dev/null || true)"
+  [[ -n "${fmt}" ]] || fmt="raw"
+  printf '%s' "${fmt}"
+}
+
 n2k_storage_copy_base() {
   local source_path="$1" target_path="$2" target_storage="$3" target_format="$4"
 
@@ -124,7 +137,7 @@ n2k_storage_validate_patch_target() {
             echo "Target qcow2 file not found: ${target_path}" >&2
             return 2
           }
-          n2k_storage_require_command qemu-nbd "qcow2 incremental patch"
+          n2k_storage_require_command qemu-io "qcow2 incremental patch"
           ;;
         *)
           echo "Unsupported file patch format: ${target_format}" >&2
@@ -323,21 +336,102 @@ n2k_storage_connect_qcow2_nbd() {
   return 2
 }
 
+n2k_storage_connect_readonly_nbd() {
+  local source_path="$1" image_format="${2:-}"
+  local i dev err msg size tries last_error
+
+  n2k_storage_require_command qemu-nbd "read-only image source mapping"
+  [[ -n "${image_format}" ]] || image_format="$(n2k_storage_detect_image_format "${source_path}")"
+
+  if command -v modprobe >/dev/null 2>&1; then
+    modprobe nbd max_part=8 >/dev/null 2>&1 || true
+  fi
+
+  for i in $(seq 0 127); do
+    dev="/dev/nbd${i}"
+    n2k_storage_nbd_is_free "${dev}" || continue
+
+    err="$(mktemp -t n2k-src-qemu-nbd-err.XXXXXX)"
+    if qemu-nbd --read-only --connect="${dev}" --format="${image_format}" --cache=none "${source_path}" >/dev/null 2>"${err}"; then
+      rm -f "${err}" || true
+      if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle >/dev/null 2>&1 || true
+      fi
+      tries=0
+      while [[ "${tries}" -lt 30 ]]; do
+        size="$(blockdev --getsize64 "${dev}" 2>/dev/null || echo 0)"
+        if [[ "${size}" =~ ^[0-9]+$ && "${size}" -gt 0 ]]; then
+          printf '%s' "${dev}"
+          return 0
+        fi
+        tries=$((tries + 1))
+        if command -v udevadm >/dev/null 2>&1; then
+          udevadm settle >/dev/null 2>&1 || true
+        fi
+        sleep 0.2
+      done
+      n2k_storage_unmap_qcow2_nbd "${dev}" >/dev/null 2>&1 || true
+      last_error="qemu-nbd attached ${dev}, but the block device size stayed zero"
+      continue
+    fi
+
+    msg="$(tail -n 20 "${err}" 2>/dev/null || true)"
+    rm -f "${err}" || true
+    n2k_storage_unmap_qcow2_nbd "${dev}" >/dev/null 2>&1 || true
+    last_error="dev=${dev}: ${msg}"
+  done
+
+  echo "Unable to attach read-only image source through qemu-nbd: ${source_path}" >&2
+  [[ -n "${last_error:-}" ]] && echo "${last_error}" >&2
+  return 2
+}
+
+n2k_storage_copy_region_to_file() {
+  local source_path="$1" output_file="$2" offset="$3" length="$4"
+  local bs=1 skip="${offset}" count="${length}" unit
+
+  for unit in 1048576 65536 4096 1024 512; do
+    if (( offset % unit == 0 && length % unit == 0 )); then
+      bs="${unit}"
+      skip=$((offset / unit))
+      count=$((length / unit))
+      break
+    fi
+  done
+
+  dd if="${source_path}" of="${output_file}" bs="${bs}" skip="${skip}" count="${count}" conv=notrunc iflag=fullblock status=none
+}
+
 n2k_storage_patch_qcow2() {
   local source_path="$1" target_path="$2" regions="$3"
-  local nbd_device offset length region_type
+  local offset length region_type chunk_file
 
-  n2k_storage_require_command qemu-nbd "qcow2 incremental patch"
-  nbd_device="$(n2k_storage_connect_qcow2_nbd "${target_path}")"
-  trap 'n2k_storage_unmap_qcow2_nbd "'"${nbd_device}"'" >/dev/null 2>&1 || true' RETURN
+  n2k_storage_require_command qemu-io "qcow2 incremental patch"
 
   while IFS=$'\t' read -r offset length region_type; do
     [[ -n "${offset}" && -n "${length}" ]] || continue
-    n2k_storage_apply_patch_region_to_device "${source_path}" "${nbd_device}" "${offset}" "${length}" "${region_type:-regular}"
+    case "${region_type:-regular}" in
+      zero|zeros|zeroed|hole)
+        qemu-io -f qcow2 -c "write -q -z ${offset} ${length}" "${target_path}" >/dev/null
+        ;;
+      regular|"")
+        chunk_file="$(mktemp -t n2k-qcow2-patch-region.XXXXXX)"
+        if ! n2k_storage_copy_region_to_file "${source_path}" "${chunk_file}" "${offset}" "${length}"; then
+          rm -f "${chunk_file}"
+          return 2
+        fi
+        if ! qemu-io -f qcow2 -c "write -q -s ${chunk_file} ${offset} ${length}" "${target_path}" >/dev/null; then
+          rm -f "${chunk_file}"
+          return 2
+        fi
+        rm -f "${chunk_file}"
+        ;;
+      *)
+        echo "Unsupported changed-region type: ${region_type}" >&2
+        return 2
+        ;;
+    esac
   done < <(jq -r '.[] | [(.offset | tostring), (.length | tostring), (.type // "regular")] | @tsv' <<<"${regions}")
-
-  n2k_storage_unmap_qcow2_nbd "${nbd_device}"
-  trap - RETURN
 }
 
 n2k_storage_map_rbd() {

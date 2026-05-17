@@ -7,44 +7,7 @@ _ablestack_n2k()
 
     local commands="preflight plan run auto init snapshot sync verify cutover cleanup status"
     local global_opts="--workdir --run-id --manifest --log --json --dry-run --resume --force -h --help"
-
-    case "${prev}" in
-        --workdir|--manifest|--log|--cred-file|--inventory-file|--source-map-file|--changed-regions-file)
-            _filedir
-            return
-            ;;
-        --mode)
-            COMPREPLY=( $(compgen -W "auto v4-incremental legacy-cbt cold-export manual-disk" -- "${cur}") )
-            return
-            ;;
-        --target-format)
-            COMPREPLY=( $(compgen -W "qcow2 raw" -- "${cur}") )
-            return
-            ;;
-        --target-storage)
-            COMPREPLY=( $(compgen -W "file block rbd" -- "${cur}") )
-            return
-            ;;
-        --rbd-access-mode)
-            COMPREPLY=( $(compgen -W "librbd krbd" -- "${cur}") )
-            return
-            ;;
-        --inventory-source)
-            COMPREPLY=( $(compgen -W "none fixture api" -- "${cur}") )
-            return
-            ;;
-        --insecure|--v4-vmm|--v4-dataprotection|--legacy-changed-regions|--legacy-endpoint-verified|--cold-export-available|--manual-disk-available)
-            COMPREPLY=( $(compgen -W "0 1" -- "${cur}") )
-            return
-            ;;
-        --shutdown)
-            COMPREPLY=( $(compgen -W "manual guest poweroff" -- "${cur}") )
-            return
-            ;;
-        --run-id|--vm|--pc|--username|--password|--dst|--capability-json|--inventory-json|--target-map-json|--source-map-json|--changed-regions-json|--recovery-point-id|--jobs|--chunk|--coalesce-gap|--samples|--name)
-            return
-            ;;
-    esac
+    local modes="auto v4-incremental v3-incremental legacy-cbt cold-export manual-disk"
 
     local cmd=""
     local i
@@ -57,6 +20,82 @@ _ablestack_n2k()
         esac
     done
 
+    case "${prev}" in
+        --workdir|--manifest|--log|--cred-file|--inventory-file|--source-map-file|--changed-regions-file)
+            _filedir
+            return
+            ;;
+        --nfs-mount-root)
+            _filedir -d
+            return
+            ;;
+        --mode)
+            case "${cmd}" in
+                verify) COMPREPLY=( $(compgen -W "quick full" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "${modes}" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --source-api)
+            case "${cmd}" in
+                preflight|plan) COMPREPLY=( $(compgen -W "auto v3" -- "${cur}") ) ;;
+                run|auto) COMPREPLY=( $(compgen -W "v3" -- "${cur}") ) ;;
+                snapshot) COMPREPLY=( $(compgen -W "manual v4 v3 legacy" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "auto v3 manual v4 legacy" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --target-format)
+            COMPREPLY=( $(compgen -W "qcow2 raw" -- "${cur}") )
+            return
+            ;;
+        --target-storage)
+            case "${cmd}" in
+                preflight|plan) COMPREPLY=( $(compgen -W "auto file block rbd qcow2" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "file block rbd qcow2" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --rbd-access-mode)
+            COMPREPLY=( $(compgen -W "librbd krbd" -- "${cur}") )
+            return
+            ;;
+        --inventory-source)
+            COMPREPLY=( $(compgen -W "none fixture api" -- "${cur}") )
+            return
+            ;;
+        --split)
+            COMPREPLY=( $(compgen -W "full phase1 phase2" -- "${cur}") )
+            return
+            ;;
+        --shutdown)
+            case "${cmd}" in
+                run|auto) COMPREPLY=( $(compgen -W "manual none guest poweroff" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "manual guest poweroff" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --snapshot-type)
+            COMPREPLY=( $(compgen -W "CRASH_CONSISTENT APPLICATION_CONSISTENT" -- "${cur}") )
+            return
+            ;;
+        --reference-kind)
+            COMPREPLY=( $(compgen -W "base incr final" -- "${cur}") )
+            return
+            ;;
+        --network-mode|--libvirt-network-mode)
+            COMPREPLY=( $(compgen -W "bridge network" -- "${cur}") )
+            return
+            ;;
+        --insecure|--v4-vmm|--v4-dataprotection|--v4-data-plane|--legacy-changed-regions|--legacy-endpoint-verified|--cold-export-available|--manual-disk-available|--restore-strict-mode)
+            COMPREPLY=( $(compgen -W "0 1" -- "${cur}") )
+            return
+            ;;
+        --run-id|--vm|--pc|--username|--password|--dst|--capability-json|--inventory-json|--target-map-json|--source-map-json|--changed-regions-json|--recovery-point-id|--jobs|--chunk|--coalesce-gap|--samples|--name|--pd-name|--temp-vm-name|--restore-cluster-id|--wait-seconds|--retention-seconds|--deadline-sec|--max-incr-phase2|--max-final-bytes|--shutdown-timeout-sec|--shutdown-poll-sec|--cutover-args|--nfs-host|--bridge|--libvirt-bridge|--network|--libvirt-network)
+            return
+            ;;
+    esac
+
     if [[ -z "${cmd}" ]]; then
         COMPREPLY=( $(compgen -W "${global_opts} ${commands}" -- "${cur}") )
         return
@@ -64,25 +103,25 @@ _ablestack_n2k()
 
     case "${cmd}" in
         preflight|plan)
-            COMPREPLY=( $(compgen -W "--pc --vm --username --password --cred-file --insecure --mode --capability-json --v4-vmm --v4-dataprotection --legacy-changed-regions --legacy-endpoint-verified --cold-export-available --manual-disk-available --allow-experimental --json --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--pc --vm --username --password --cred-file --insecure --mode --source-api --force-v3 --force-v3-incremental --target-storage --target-format --rbd-access-mode --capability-json --v4-vmm --v4-dataprotection --v4-data-plane --legacy-changed-regions --legacy-endpoint-verified --cold-export-available --manual-disk-available --probe-legacy-cbt --allow-experimental --help" -- "${cur}") )
             ;;
         run|auto)
-            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --mode --dst --target-format --target-storage --target-map-json --rbd-access-mode --allow-experimental --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--vm --pc --username --password --cred-file --insecure --mode --dst --target-format --target-storage --target-map-json --rbd-access-mode --inventory-source --split --source-api --force-v3 --force-v3-incremental --source-map-from-v3-nfs --no-source-map-from-v3-nfs --nfs-host --nfs-mount-root --deadline-sec --max-incr-phase2 --max-final-bytes --wait-seconds --retention-seconds --snapshot-type --shutdown --shutdown-timeout-sec --shutdown-poll-sec --cutover-args --network-mode --libvirt-network-mode --bridge --libvirt-bridge --network --libvirt-network --cleanup-source-points --keep-source-points --define-only --apply --start --skip-plan --probe-legacy-cbt --allow-experimental --help" -- "${cur}") )
             ;;
         init)
-            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --username --password --insecure --dst --mode --inventory-json --inventory-file --inventory-source --target-format --target-storage --target-map-json --rbd-access-mode --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --username --password --insecure --dst --mode --force-v3 --force-v3-incremental --inventory-json --inventory-file --inventory-source --target-format --target-storage --target-map-json --rbd-access-mode --help" -- "${cur}") )
             ;;
         snapshot)
-            COMPREPLY=( $(compgen -W "base incr final --name --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "base incr final --name --recovery-point-id --source-api --pc --vm --cred-file --username --password --insecure --create-recovery-point --create-vm-snapshot --snapshot-type --pd-name --create-pd --protect-vm --create-oob-snapshot --verify-changed-regions --collect-changed-regions --reference-kind --restore-to-temp-vm --temp-vm-name --restore-cluster-id --restore-strict-mode --wait-seconds --retention-seconds --app-consistent --help" -- "${cur}") )
             ;;
         sync)
-            COMPREPLY=( $(compgen -W "base incr final --jobs --chunk --coalesce-gap --source-map-json --source-map-file --changed-regions-json --changed-regions-file --recovery-point-id --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "base incr final --jobs --chunk --coalesce-gap --source-map-json --source-map-file --pc --cred-file --username --password --insecure --source-map-from-v3-nfs --nfs-host --nfs-mount-root --changed-regions-json --changed-regions-file --recovery-point-id --help" -- "${cur}") )
             ;;
         verify)
             COMPREPLY=( $(compgen -W "--mode --samples --help" -- "${cur}") )
             ;;
         cutover)
-            COMPREPLY=( $(compgen -W "--shutdown --define-only --apply --start --rbd-access-mode --help" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--shutdown --define-only --apply --start --rbd-access-mode --network-mode --libvirt-network-mode --bridge --libvirt-bridge --network --libvirt-network --help" -- "${cur}") )
             ;;
         cleanup)
             COMPREPLY=( $(compgen -W "--keep-source-points --keep-workdir --remove-source-points --remove-workdir --apply --help" -- "${cur}") )

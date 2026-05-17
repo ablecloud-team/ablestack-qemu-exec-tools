@@ -289,23 +289,27 @@ n2k_nutanix_fetch_vm_inventory() {
   local list_json vm_json http_code detail_json vm_uuid attempts api_error revision
   local -a attempt_notes=()
 
-  for revision in $(n2k_nutanix_v4_candidate_revisions vmm); do
-    n2k_nutanix_api_request_capture GET "${pc}" "/api/vmm/${revision}/ahv/config/vms?\$limit=100" "${username}" "${password}" "${insecure}" "" list_json http_code api_error || true
-    if n2k_nutanix_http_auth_failure "${http_code}"; then
-      echo "Nutanix ${revision} VM list authentication failed: HTTP ${http_code}" >&2
-      return 3
-    fi
-    if n2k_nutanix_http_success "${http_code}"; then
-      vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
-      if [[ -n "${vm_json}" ]]; then
-        printf '%s' "${vm_json}"
-        return 0
+  if [[ "${N2K_NUTANIX_INVENTORY_SKIP_V4:-0}" != "1" ]]; then
+    for revision in $(n2k_nutanix_v4_candidate_revisions vmm); do
+      n2k_nutanix_api_request_capture GET "${pc}" "/api/vmm/${revision}/ahv/config/vms?\$limit=100" "${username}" "${password}" "${insecure}" "" list_json http_code api_error || true
+      if n2k_nutanix_http_auth_failure "${http_code}"; then
+        echo "Nutanix ${revision} VM list authentication failed: HTTP ${http_code}" >&2
+        return 3
       fi
-      attempt_notes+=("${revision}:http=${http_code}:vm_not_found")
-    else
-      attempt_notes+=("${revision}:http=${http_code}${api_error:+:${api_error}}")
-    fi
-  done
+      if n2k_nutanix_http_success "${http_code}"; then
+        vm_json="$(n2k_nutanix_select_vm_from_list "${list_json}" "${vm}")"
+        if [[ -n "${vm_json}" ]]; then
+          printf '%s' "${vm_json}"
+          return 0
+        fi
+        attempt_notes+=("${revision}:http=${http_code}:vm_not_found")
+      else
+        attempt_notes+=("${revision}:http=${http_code}${api_error:+:${api_error}}")
+      fi
+    done
+  else
+    attempt_notes+=("v4:skipped_by_policy")
+  fi
 
   n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/vms/list" "${username}" "${password}" "${insecure}" '{"kind":"vm","length":100}' list_json http_code api_error || true
   if n2k_nutanix_http_auth_failure "${http_code}"; then

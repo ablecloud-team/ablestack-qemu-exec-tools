@@ -512,6 +512,67 @@ n2k_run_shutdown_payload_ok() {
   [[ "$(printf '%s' "${payload}" | jq -r '.ok // false' 2>/dev/null || printf false)" == "true" ]]
 }
 
+n2k_run_cleanup_source_recovery_points() {
+  local manifest="$1" pc="$2" username="$3" password="$4" insecure="$5"
+  local points point_count cleanup_rc=0
+  local kind recovery_point_id name response payload rc
+
+  points="$(jq -r '
+    [
+      (.runtime.recovery_point_history // []),
+      ((.runtime.recovery_points // {}) | to_entries | map(.value + {kind:.key}))
+    ]
+    | add
+    | map(select(
+        ((.id // "") | length) > 0
+        and (.source_api // "") == "v3"
+        and (((.cleanup.ok // false) | not))
+      ))
+    | unique_by(.id)
+    | sort_by(if .kind == "final" then 0 elif .kind == "incr" then 1 elif .kind == "base" then 2 else 9 end)
+    | .[]
+    | [.kind, .id, (.name // "")] | @tsv
+  ' "${manifest}")"
+  point_count="$(printf '%s\n' "${points}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+
+  if [[ "${point_count}" -eq 0 ]]; then
+    n2k_event INFO "run" "" "source_points_cleanup_skipped" '{"reason":"no pending v3 source recovery points"}'
+    return 0
+  fi
+
+  [[ -n "${username}" && -n "${password}" ]] || {
+    n2k_event ERROR "run" "" "source_points_cleanup_failed" \
+      "$(jq -nc --argjson count "${point_count}" '{reason:"credentials are required to cleanup source recovery points",count:$count}')"
+    return 2
+  }
+
+  n2k_event INFO "run" "" "source_points_cleanup_start" \
+    "$(jq -nc --argjson count "${point_count}" --arg source_endpoint "${pc}" '{count:$count,source_endpoint:$source_endpoint}')"
+
+  while IFS=$'\t' read -r kind recovery_point_id name; do
+    [[ -n "${recovery_point_id}" ]] || continue
+    rc=0
+    response="$(n2k_source_v3_delete_vm_snapshot "${pc}" "${username}" "${password}" "${insecure}" "${recovery_point_id}")" || rc=$?
+    payload="$(n2k_source_compact_json_value "${response:-{}}")"
+    if [[ "${rc}" -ne 0 ]]; then
+      n2k_manifest_record_recovery_point_cleanup "${manifest}" "${kind}" "${recovery_point_id}" "delete-v3-vm-snapshot" false "${payload}" || true
+      n2k_event ERROR "run" "" "source_point_cleanup_failed" \
+        "$(jq -nc --arg kind "${kind}" --arg id "${recovery_point_id}" --arg name "${name}" --argjson response "${payload}" '{kind:$kind,id:$id,name:$name,response:$response}')"
+      cleanup_rc="${rc}"
+      continue
+    fi
+    n2k_manifest_record_recovery_point_cleanup "${manifest}" "${kind}" "${recovery_point_id}" "delete-v3-vm-snapshot" true "${payload}"
+    n2k_event INFO "run" "" "source_point_cleaned" \
+      "$(jq -nc --arg kind "${kind}" --arg id "${recovery_point_id}" --arg name "${name}" --argjson response "${payload}" '{kind:$kind,id:$id,name:$name,response:$response}')"
+  done <<< "${points}"
+
+  if [[ "${cleanup_rc}" -ne 0 ]]; then
+    return "${cleanup_rc}"
+  fi
+  n2k_event INFO "run" "" "source_points_cleanup_done" \
+    "$(jq -nc --argjson count "${point_count}" '{count:$count}')"
+}
+
 n2k_cmd_preflight() {
   local result
   result="$(n2k_build_preflight_result_from_args 0 "$@")"
@@ -580,6 +641,8 @@ n2k_cmd_run() {
   local shutdown_timeout_sec="${N2K_RUN_DEFAULT_SHUTDOWN_TIMEOUT_SEC:-300}"
   local shutdown_poll_sec="${N2K_RUN_DEFAULT_SHUTDOWN_POLL_SEC:-5}"
   local skip_plan=0 allow_experimental=false probe_legacy=false
+  local libvirt_network_mode="" libvirt_bridge="" libvirt_network=""
+  local cleanup_source_points=true
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -613,6 +676,11 @@ n2k_cmd_run() {
       --shutdown-timeout-sec) shutdown_timeout_sec="${2:-}"; shift 2 ;;
       --shutdown-poll-sec) shutdown_poll_sec="${2:-}"; shift 2 ;;
       --cutover-args) cutover_args_str="${2:-}"; shift 2 ;;
+      --network-mode|--libvirt-network-mode) libvirt_network_mode="${2:-}"; shift 2 ;;
+      --bridge|--libvirt-bridge) libvirt_bridge="${2:-}"; shift 2 ;;
+      --network|--libvirt-network) libvirt_network="${2:-}"; shift 2 ;;
+      --cleanup-source-points) cleanup_source_points=true; shift 1 ;;
+      --keep-source-points) cleanup_source_points=false; shift 1 ;;
       --define-only) cutover_policy="define-only"; shift 1 ;;
       --apply) cutover_policy="apply"; shift 1 ;;
       --start) cutover_policy="start"; shift 1 ;;
@@ -646,6 +714,12 @@ n2k_cmd_run() {
     none|manual|guest|poweroff) ;;
     *) n2k_die "Invalid --shutdown: ${shutdown}" ;;
   esac
+  if [[ -n "${libvirt_network_mode}" ]]; then
+    case "${libvirt_network_mode}" in
+      bridge|network) ;;
+      *) n2k_die "Invalid --network-mode: ${libvirt_network_mode}" ;;
+    esac
+  fi
   [[ "${deadline_sec}" =~ ^[0-9]+$ ]] || n2k_die "Invalid --deadline-sec: ${deadline_sec}"
   [[ "${max_incr_phase2}" =~ ^[0-9]+$ ]] || n2k_die "Invalid --max-incr-phase2: ${max_incr_phase2}"
   [[ "${max_final_bytes}" =~ ^-?[0-9]+$ ]] || n2k_die "Invalid --max-final-bytes: ${max_final_bytes}"
@@ -817,15 +891,20 @@ n2k_cmd_run() {
         local shutdown_result shutdown_payload shutdown_rc shutdown_transition shutdown_before shutdown_after
         shutdown_rc=0
         n2k_event INFO "run" "" "shutdown_source_start" \
-          "$(jq -nc --arg policy "${shutdown}" --argjson timeout_sec "${shutdown_timeout_sec}" '{policy:$policy,timeout_sec:$timeout_sec}')"
-        shutdown_result="$(n2k_source_vm_shutdown "${pc}" "${vm}" "${username}" "${password}" "${insecure}" "${shutdown}" "${shutdown_timeout_sec}" "${shutdown_poll_sec}")" || shutdown_rc=$?
+          "$(jq -nc --arg policy "${shutdown}" --arg pc "${pc}" --arg source_endpoint "${source_endpoint}" --argjson timeout_sec "${shutdown_timeout_sec}" '{policy:$policy,pc:$pc,source_endpoint:$source_endpoint,timeout_sec:$timeout_sec}')"
+        if [[ "${source_api}" == "v3" ]]; then
+          shutdown_result="$(N2K_NUTANIX_INVENTORY_SKIP_V4=1 n2k_source_vm_shutdown "${source_endpoint}" "${vm}" "${username}" "${password}" "${insecure}" "${shutdown}" "${shutdown_timeout_sec}" "${shutdown_poll_sec}")" || shutdown_rc=$?
+        else
+          shutdown_result="$(n2k_source_vm_shutdown "${source_endpoint}" "${vm}" "${username}" "${password}" "${insecure}" "${shutdown}" "${shutdown_timeout_sec}" "${shutdown_poll_sec}")" || shutdown_rc=$?
+        fi
         shutdown_payload="$(n2k_source_compact_json_value "${shutdown_result:-{}}")"
         if [[ "${shutdown_rc}" -eq 0 ]]; then
-          shutdown_payload="$(n2k_run_reconstruct_empty_shutdown_payload "${shutdown_payload}" "${pc}" "${vm}" "${username}" "${password}" "${insecure}" "${shutdown}")"
+          shutdown_payload="$(n2k_run_reconstruct_empty_shutdown_payload "${shutdown_payload}" "${source_endpoint}" "${vm}" "${username}" "${password}" "${insecure}" "${shutdown}")"
           if ! n2k_run_shutdown_payload_ok "${shutdown_payload}"; then
             shutdown_rc=4
           fi
         fi
+        shutdown_payload="$(printf '%s' "${shutdown_payload}" | jq -c --arg pc "${pc}" --arg source_endpoint "${source_endpoint}" '. + {pc:$pc,source_endpoint:$source_endpoint,source_endpoint_selected:($pc != $source_endpoint)}')"
         shutdown_transition="$(printf '%s' "${shutdown_payload}" | jq -r '.transition // ""' 2>/dev/null || true)"
         shutdown_before="$(printf '%s' "${shutdown_payload}" | jq -r '.before_state // ""' 2>/dev/null || true)"
         shutdown_after="$(printf '%s' "${shutdown_payload}" | jq -r '.after_state // ""' 2>/dev/null || true)"
@@ -858,11 +937,19 @@ n2k_cmd_run() {
   if [[ "${rbd_access_mode_arg_set}" -eq 1 ]]; then
     cutover_args+=(--rbd-access-mode "${rbd_access_mode}")
   fi
+  [[ -n "${libvirt_network_mode}" ]] && cutover_args+=(--network-mode "${libvirt_network_mode}")
+  [[ -n "${libvirt_bridge}" ]] && cutover_args+=(--bridge "${libvirt_bridge}")
+  [[ -n "${libvirt_network}" ]] && cutover_args+=(--network "${libvirt_network}")
   cutover_args+=(--shutdown "${shutdown}")
 
   if ! n2k_run_manifest_phase_done "${N2K_MANIFEST}" "cutover"; then
     n2k_event INFO "run" "" "step" '{"step":"cutover"}'
     n2k_cmd_cutover "${cutover_args[@]}"
+  fi
+  if [[ "${cleanup_source_points}" == "true" && "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
+    n2k_run_cleanup_source_recovery_points "${N2K_MANIFEST}" "${source_endpoint}" "${username}" "${password}" "${insecure}"
+  else
+    n2k_event INFO "run" "" "source_points_cleanup_skipped" '{"reason":"operator requested source recovery point retention"}'
   fi
 
   if [[ "${split}" == "phase2" ]]; then
@@ -1414,6 +1501,7 @@ n2k_cmd_verify() { n2k_not_implemented "verify"; }
 n2k_cmd_cutover() {
   local define_only=0 apply_define=0 start_vm=0
   local rbd_access_mode=""
+  local libvirt_network_mode="" libvirt_bridge="" libvirt_network=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1421,6 +1509,9 @@ n2k_cmd_cutover() {
       --apply) apply_define=1; shift 1 ;;
       --start) start_vm=1; shift 1 ;;
       --rbd-access-mode) rbd_access_mode="${2:-}"; shift 2 ;;
+      --network-mode|--libvirt-network-mode) libvirt_network_mode="${2:-}"; shift 2 ;;
+      --bridge|--libvirt-bridge) libvirt_bridge="${2:-}"; shift 2 ;;
+      --network|--libvirt-network) libvirt_network="${2:-}"; shift 2 ;;
       --shutdown)
         shift 2
         ;;
@@ -1442,6 +1533,15 @@ n2k_cmd_cutover() {
     n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
     export N2K_RBD_ACCESS_MODE="${rbd_access_mode}"
   fi
+  if [[ -n "${libvirt_network_mode}" ]]; then
+    case "${libvirt_network_mode}" in
+      bridge|network) ;;
+      *) n2k_die "Invalid --network-mode: ${libvirt_network_mode}" ;;
+    esac
+    export N2K_LIBVIRT_NETWORK_MODE="${libvirt_network_mode}"
+  fi
+  [[ -n "${libvirt_bridge}" ]] && export N2K_LIBVIRT_BRIDGE="${libvirt_bridge}"
+  [[ -n "${libvirt_network}" ]] && export N2K_LIBVIRT_NETWORK="${libvirt_network}"
 
   local xml_path vm
   if [[ "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]]; then

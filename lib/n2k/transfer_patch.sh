@@ -217,12 +217,55 @@ n2k_patch_source_materialize_nutanix_v3_data() {
   printf '%s' "${out_file}"
 }
 
+n2k_patch_source_materialize_image_regions() {
+  local source_path="$1" regions="$2" disk_id="$3" phase="$4"
+  local cache_dir safe_disk out_file max_end image_format source_device
+  local offset length region_type rc=0
+
+  n2k_storage_require_command qemu-nbd "image patch source materialization"
+  cache_dir="${N2K_WORKDIR:-$(pwd)}/source-cache"
+  safe_disk="$(n2k_patch_source_safe_name "${disk_id}")"
+  out_file="${cache_dir}/${phase}-${safe_disk}.raw"
+  max_end="$(jq -r 'map(.offset + .length) | max // 0' <<<"${regions}")"
+
+  mkdir -p "${cache_dir}"
+  rm -f "${out_file}"
+  truncate -s "${max_end}" "${out_file}"
+
+  image_format="$(n2k_storage_detect_image_format "${source_path}")"
+  source_device="$(n2k_storage_connect_readonly_nbd "${source_path}" "${image_format}")"
+
+  while IFS=$'\t' read -r offset length region_type; do
+    [[ -n "${offset}" && -n "${length}" ]] || continue
+    case "${region_type:-regular}" in
+      regular|"")
+        if ! n2k_storage_apply_patch_region_to_device "${source_device}" "${out_file}" "${offset}" "${length}" "${region_type:-regular}"; then
+          rc=2
+          break
+        fi
+        ;;
+      zero|zeros|zeroed|hole)
+        ;;
+      *)
+        echo "Unsupported changed-region type: ${region_type}" >&2
+        rc=2
+        break
+        ;;
+    esac
+  done < <(jq -r '.[] | [(.offset | tostring), (.length | tostring), (.type // "regular")] | @tsv' <<<"${regions}")
+
+  n2k_storage_unmap_qcow2_nbd "${source_device}"
+  [[ "${rc}" -eq 0 ]] || return "${rc}"
+  printf '%s' "${out_file}"
+}
+
 n2k_patch_source_prepare() {
   local source_path="$1" regions="$2" disk_id="$3" phase="$4"
   if n2k_patch_source_is_nutanix_v3_data_uri "${source_path}"; then
     n2k_patch_source_materialize_nutanix_v3_data "${source_path}" "${regions}" "${disk_id}" "${phase}"
   elif n2k_source_is_nutanix_nfs_uri "${source_path}"; then
-    n2k_source_prepare_file_path "${source_path}"
+    source_path="$(n2k_source_prepare_file_path "${source_path}")"
+    n2k_patch_source_materialize_image_regions "${source_path}" "${regions}" "${disk_id}" "${phase}"
   else
     [[ -e "${source_path}" ]] || {
       echo "Patch source path not found: ${source_path}" >&2

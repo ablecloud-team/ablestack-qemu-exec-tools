@@ -561,9 +561,64 @@ n2k_manifest_record_recovery_point() {
           recorded_at: $ts,
           metadata: $metadata
         }
+      | .runtime.recovery_point_history = (
+          ((.runtime.recovery_point_history // []) + [{
+            kind: $rp_key,
+            id: $recovery_point_id,
+            name: $name,
+            source_api: $source_api,
+            recorded_at: $ts,
+            metadata: $metadata
+          }])
+          | unique_by(.id)
+        )
       | .disks = (.disks | map(
           .recovery_points[$rp_key].id = $recovery_point_id
         ))
+    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_manifest_record_recovery_point_cleanup() {
+  local manifest="$1" kind="$2" recovery_point_id="$3" action="$4" ok="$5" response_json="${6:-}"
+  local ok_json=false response_compact ts tmp
+  case "${ok}" in
+    true|1|yes) ok_json=true ;;
+  esac
+  if [[ -z "${response_json}" ]]; then
+    response_json="{}"
+  fi
+  if ! response_compact="$(printf '%s' "${response_json}" | jq -c . 2>/dev/null)"; then
+    response_compact="{}"
+  fi
+  ts="$(n2k_now_iso)"
+  tmp="$(mktemp)"
+
+  jq \
+    --arg kind "${kind}" \
+    --arg recovery_point_id "${recovery_point_id}" \
+    --arg action "${action}" \
+    --arg ts "${ts}" \
+    --argjson ok "${ok_json}" \
+    --argjson response "${response_compact}" \
+    '
+      def cleanup_record:
+        {action:$action, ok:$ok, response:$response, ts:$ts};
+      def mark_point:
+        if ((.id // "") == $recovery_point_id) then
+          .cleanup = cleanup_record
+        else
+          .
+        end;
+
+      if ((.runtime.recovery_points[$kind].id // "") == $recovery_point_id) then
+        .runtime.recovery_points[$kind] = (.runtime.recovery_points[$kind] | mark_point)
+      else
+        .
+      end
+      | .runtime.recovery_point_history = (
+          (.runtime.recovery_point_history // [])
+          | map(mark_point)
+        )
     ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 

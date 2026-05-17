@@ -107,8 +107,10 @@ Options:
   --allow-experimental    Allow experimental legacy paths
 
 Notes:
-  - This command will check API family, namespace, and target host capabilities.
-  - Direct Nutanix API probing is planned for the inventory/API phases.
+  - With credentials, this command probes PC v4 capability, PE v3 fallback
+    capability, target storage dependencies, and records the selected path.
+  - Current runnable data path is v3 snapshot/NFS. PC v4 is used for discovery
+    only until a verified v4 byte source is available.
 EOF
 }
 
@@ -120,7 +122,10 @@ Usage:
 Options:
   --vm <name|uuid>        Source Nutanix VM
   --pc <host>             Prism Central host
+  --username <user>       Prism Central username
+  --password <pass>       Prism Central password
   --cred-file <file>      Credential file
+  --insecure <0|1>        Skip TLS verification when set to 1
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --source-api <api>      auto|v3; v3 forces v3-incremental selection
   --force-v3              Force v3-incremental even when v4 is available
@@ -144,8 +149,9 @@ Options:
   --allow-experimental    Allow experimental legacy paths
 
 Notes:
-  - This command will produce a VM-specific migration plan.
-  - Direct Nutanix API inventory lookup is planned in development phase 4.
+  - This command produces a VM-specific migration plan.
+  - With credentials, PC v4 capability and PE v3 fallback capability are probed.
+  - v4-incremental is not selected unless a v4 byte source/data-plane is verified.
 EOF
 }
 
@@ -158,21 +164,33 @@ Usage:
 Options:
   --vm <name|uuid>        Source Nutanix VM
   --pc <host>             Prism Central host
+  --username <user>       Prism Central username
+  --password <pass>       Prism Central password
   --cred-file <file>      Credential file
+  --insecure <0|1>        Skip TLS verification when set to 1
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --dst <path>            Destination root
   --target-format <fmt>   qcow2|raw
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
+  --inventory-source <s>  none|fixture|api; default api
   --split <mode>          full|phase1|phase2
-  --source-api <api>      v3; explicit v3 forces v3-incremental planning
+  --source-api <api>      v3; run data path currently uses v3 snapshot/NFS
   --force-v3              Force v3-incremental even when v4 is available
+  --source-map-from-v3-nfs
+                          Build source map from v3 snapshot metadata and NFS
+                           (default)
+  --no-source-map-from-v3-nfs
+                          Reject v3 NFS source-map use
   --nfs-host <host>       Nutanix container NFS host for v3 snapshot files
   --nfs-mount-root <dir>  Local NFS mount root
   --deadline-sec <sec>    Phase2 incremental round deadline before final sync
   --max-incr-phase2 <n>   Maximum Phase2 incremental rounds
   --max-final-bytes <n>   Optional changed-byte threshold for Phase2 final gate
+  --wait-seconds <N>      Source snapshot wait timeout
+  --retention-seconds <N> Source snapshot retention time
+  --snapshot-type <type>  CRASH_CONSISTENT|APPLICATION_CONSISTENT
   --shutdown <policy>     manual|none|guest|poweroff
   --shutdown-timeout-sec <sec>
                           Wait time for guest/poweroff shutdown completion
@@ -180,14 +198,26 @@ Options:
   --shutdown-poll-sec <sec>
                            Power-state polling interval after shutdown request
   --cutover-args <args>   Arguments forwarded to cutover, defaults to --define-only
+  --network-mode <mode>   Target NIC mode: bridge|network; default bridge
+  --bridge <name>         Bridge name for bridge mode; default bridge0
+  --network <name>        Libvirt NAT network name for network mode; default default
+  --cleanup-source-points Delete Nutanix source snapshots after successful cutover
+                           (default)
+  --keep-source-points    Keep Nutanix source snapshots after successful cutover
+  --define-only           Generate target XML without virsh define/start
+  --apply                 Run virsh define for the generated target XML
+  --start                 Run virsh define and start the target VM
   --skip-plan             Skip preflight/plan recording before Phase1
+  --probe-legacy-cbt      Probe legacy changed-region endpoint during plan
   --allow-experimental    Allow experimental legacy paths
 
 Notes:
   - With global --resume, this command prints the manifest-based resume plan.
+  - In auto mode, run records PC v4 capability and uses the validated PE v3
+    fallback path when v4 byte-source/data-plane is unavailable.
   - Phase1 performs base sync and the first incremental sync, then exits.
   - Phase2 requires the Phase1 marker, loops incremental sync until the
-    deadline gate is met, then performs final sync and cutover artifact creation.
+    deadline gate is met, then performs final sync and cutover.
 EOF
 }
 
@@ -217,6 +247,7 @@ Options:
 Notes:
   - This command creates the initial n2k manifest.
   - Direct API inventory lookup runs only with --inventory-source api.
+  - --force-v3 stores v3-incremental as the manifest mode.
 EOF
 }
 
@@ -331,11 +362,14 @@ Usage:
   ablestack_n2k cutover [options]
 
 Options:
-  --shutdown <policy>     manual|guest|poweroff
-  --define-only           Define target VM without starting it
+  --shutdown <policy>     Accepted from run; source shutdown is handled before cutover
+  --define-only           Generate target XML without virsh define/start
   --apply                 Run virsh define for the generated XML
   --start                 Start target VM after definition
   --rbd-access-mode <m>   Override manifest RBD access mode: librbd|krbd
+  --network-mode <mode>   Target NIC mode: bridge|network; default bridge
+  --bridge <name>         Bridge name for bridge mode; default bridge0
+  --network <name>        Libvirt NAT network name for network mode; default default
 
 Notes:
   - Without --apply, this command only generates the libvirt XML artifact.

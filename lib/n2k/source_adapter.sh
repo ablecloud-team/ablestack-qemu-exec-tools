@@ -853,10 +853,15 @@ n2k_source_v3_delete_vm_snapshot() {
   n2k_nutanix_api_request_capture DELETE "${pc}" "/api/nutanix/v3/vm_snapshots/${snapshot_uuid}" \
     "${username}" "${password}" "${insecure}" "" response http_code api_error || true
   if ! n2k_nutanix_http_success "${http_code}"; then
+    if [[ "${http_code}" == "404" ]]; then
+      jq -nc --arg status "${http_code}" --arg uuid "${snapshot_uuid}" \
+        '{ok:true,already_absent:true,status:$status,uuid:$uuid}'
+      return 0
+    fi
     echo "v3 VM snapshot delete failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
     return 4
   fi
-  printf '%s' "${response}"
+  n2k_source_compact_json_value "${response:-{\"ok\":true}}"
 }
 
 n2k_source_v3_vm_snapshot_paths_from_json() {
@@ -1631,22 +1636,22 @@ n2k_source_v4_compute_changed_regions_for_pair() {
 
   region_count="$(printf '%s' "${regions}" | jq -r 'length')"
   bytes_total="$(printf '%s' "${regions}" | jq -r 'map(.length) | add // 0')"
-  jq -nc \
-    --argjson current_ref "${current_ref_json}" \
-    --argjson reference_ref "${reference_ref_json:-null}" \
-    --arg pe_ip "${pe_ip}" \
-    --arg revision "${revision}" \
+	  jq -nc \
+	    --argjson current_ref "${current_ref_json}" \
+	    --argjson reference_ref "${reference_ref_json:-null}" \
+	    --arg pe_ip "${pe_ip}" \
+	    --arg revision "${revision}" \
     --arg compute_revision "${compute_revision}" \
     --arg compute_path "${compute_path}" \
-    --argjson file_size "${file_size}" \
-    --argjson page_count "${page_count}" \
-    --argjson region_count "${region_count}" \
-    --argjson bytes_total "${bytes_total}" \
-    --argjson regions "${regions}" \
-    '{
-      ok:true,
-      schema:"ablestack-n2k/changed-regions-v1",
-      source_api:"v4",
+	    --argjson file_size "${file_size}" \
+	    --argjson page_count "${page_count}" \
+	    --argjson region_count "${region_count}" \
+	    --argjson bytes_total "${bytes_total}" \
+	    --slurpfile regions <(printf '%s\n' "${regions}") \
+	    '{
+	      ok:true,
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v4",
       current_recovery_point_id:($current_ref.recoveryPointExtId // ""),
       base_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
       reference_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
@@ -1655,12 +1660,12 @@ n2k_source_v4_compute_changed_regions_for_pair() {
       compute_revision:$compute_revision,
       compute_path:$compute_path,
       file_size:$file_size,
-      page_count:$page_count,
-      region_count:$region_count,
-      bytes_total:$bytes_total,
-      disk_recovery_point_ext_id:($current_ref.diskRecoveryPointExtId // ""),
-      regions:$regions
-    }'
+	      page_count:$page_count,
+	      region_count:$region_count,
+	      bytes_total:$bytes_total,
+	      disk_recovery_point_ext_id:($current_ref.diskRecoveryPointExtId // ""),
+	      regions:($regions[0] // [])
+	    }'
 }
 
 n2k_source_v4_collect_changed_regions_from_indexes() {
@@ -1719,46 +1724,52 @@ n2k_source_v4_collect_changed_regions_from_indexes() {
       continue
     fi
 
-    regions="$(printf '%s' "${result}" | jq -c '.regions // []')"
-    regions_by_disk="$(jq -c --arg disk_id "${disk_id}" --argjson regions "${regions}" '. + {($disk_id):$regions}' <<<"${regions_by_disk}")"
-    mappings="$(jq -c \
-      --arg disk_id "${disk_id}" \
-      --arg disk_key "${disk_key}" \
-      --argjson pair "${pair}" \
-      --argjson result "${result}" \
-      '. + {($disk_id):{disk_key:$disk_key,current_ref:$pair.current_ref,reference_ref:$pair.reference_ref,file_size:$result.file_size,pe_ip:$result.pe_ip,compute_path:$result.compute_path}}' \
-      <<<"${mappings}")"
+	    regions="$(printf '%s' "${result}" | jq -c '.regions // []')"
+	    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
+	      <(printf '%s\n' "${regions_by_disk}") <(printf '%s\n' "${regions}"))"
+	    file_size="$(printf '%s' "${result}" | jq -r '.file_size // null')"
+	    pe_ip="$(printf '%s' "${result}" | jq -r '.pe_ip // ""')"
+	    compute_path="$(printf '%s' "${result}" | jq -r '.compute_path // ""')"
+	    mappings="$(jq -c \
+	      --arg disk_id "${disk_id}" \
+	      --arg disk_key "${disk_key}" \
+	      --argjson pair "${pair}" \
+	      --argjson file_size "${file_size}" \
+	      --arg pe_ip "${pe_ip}" \
+	      --arg compute_path "${compute_path}" \
+	      '. + {($disk_id):{disk_key:$disk_key,current_ref:$pair.current_ref,reference_ref:$pair.reference_ref,file_size:$file_size,pe_ip:$pe_ip,compute_path:$compute_path}}' \
+	      <<<"${mappings}")"
     total_regions="$((total_regions + $(printf '%s' "${result}" | jq -r '.region_count // 0')))"
     total_bytes="$((total_bytes + $(printf '%s' "${result}" | jq -r '.bytes_total // 0')))"
     mapped_count="$((mapped_count + 1))"
     idx="$((idx + 1))"
   done
 
-  jq -nc \
-    --arg current_recovery_point_id "${current_recovery_point_id}" \
-    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
-    --argjson mapped_count "${mapped_count}" \
-    --argjson total_regions "${total_regions}" \
-    --argjson total_bytes "${total_bytes}" \
-    --argjson disks "${regions_by_disk}" \
-    --argjson mappings "${mappings}" \
-    --argjson errors "${errors}" \
-    --argjson skipped "${skipped}" \
-    '{
-      schema:"ablestack-n2k/changed-regions-v1",
-      source_api:"v4",
-      ok:(($errors | length) == 0 and $mapped_count > 0),
-      current_recovery_point_id:$current_recovery_point_id,
-      base_recovery_point_id:$reference_recovery_point_id,
-      reference_recovery_point_id:$reference_recovery_point_id,
-      disk_count:$mapped_count,
-      region_count:$total_regions,
-      bytes_total:$total_bytes,
-      disks:$disks,
-      disk_mappings:$mappings,
-      errors:$errors,
-      skipped:$skipped
-    }'
+	  jq -nc \
+	    --arg current_recovery_point_id "${current_recovery_point_id}" \
+	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+	    --argjson mapped_count "${mapped_count}" \
+	    --argjson total_regions "${total_regions}" \
+	    --argjson total_bytes "${total_bytes}" \
+	    --slurpfile disks <(printf '%s\n' "${regions_by_disk}") \
+	    --slurpfile mappings <(printf '%s\n' "${mappings}") \
+	    --slurpfile errors <(printf '%s\n' "${errors}") \
+	    --slurpfile skipped <(printf '%s\n' "${skipped}") \
+	    '{
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v4",
+	      ok:((($errors[0] // []) | length) == 0 and $mapped_count > 0),
+	      current_recovery_point_id:$current_recovery_point_id,
+	      base_recovery_point_id:$reference_recovery_point_id,
+	      reference_recovery_point_id:$reference_recovery_point_id,
+	      disk_count:$mapped_count,
+	      region_count:$total_regions,
+	      bytes_total:$total_bytes,
+	      disks:($disks[0] // {}),
+	      disk_mappings:($mappings[0] // {}),
+	      errors:($errors[0] // []),
+	      skipped:($skipped[0] // [])
+	    }'
 }
 
 n2k_source_legacy_changed_region_candidate_pairs_from_indexes() {
@@ -1880,33 +1891,33 @@ n2k_source_legacy_collect_changed_regions_for_pair() {
 
   region_count="$(printf '%s' "${regions}" | jq -r 'length')"
   bytes_total="$(printf '%s' "${regions}" | jq -r 'map(.length) | add // 0')"
-  jq -nc \
-    --arg disk_key "${disk_key}" \
-    --arg current_recovery_point_id "${current_recovery_point_id}" \
-    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+	  jq -nc \
+	    --arg disk_key "${disk_key}" \
+	    --arg current_recovery_point_id "${current_recovery_point_id}" \
+	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
     --arg snapshot_file_path "${snapshot_file_path}" \
     --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
-    --argjson file_size "${file_size}" \
-    --argjson page_count "${page_count}" \
-    --argjson region_count "${region_count}" \
-    --argjson bytes_total "${bytes_total}" \
-    --argjson regions "${regions}" \
-    '{
-      ok:true,
-      schema:"ablestack-n2k/changed-regions-v1",
-      source_api:"v3",
+	    --argjson file_size "${file_size}" \
+	    --argjson page_count "${page_count}" \
+	    --argjson region_count "${region_count}" \
+	    --argjson bytes_total "${bytes_total}" \
+	    --slurpfile regions <(printf '%s\n' "${regions}") \
+	    '{
+	      ok:true,
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v3",
       disk_key:$disk_key,
       current_recovery_point_id:$current_recovery_point_id,
       base_recovery_point_id:$reference_recovery_point_id,
       reference_recovery_point_id:$reference_recovery_point_id,
       snapshot_file_path:$snapshot_file_path,
       reference_snapshot_file_path:(if $reference_snapshot_file_path == "" then null else $reference_snapshot_file_path end),
-      file_size:$file_size,
-      page_count:$page_count,
-      region_count:$region_count,
-      bytes_total:$bytes_total,
-      disks:{($disk_key):$regions}
-    }'
+	      file_size:$file_size,
+	      page_count:$page_count,
+	      region_count:$region_count,
+	      bytes_total:$bytes_total,
+	      disks:{($disk_key):($regions[0] // [])}
+	    }'
 }
 
 n2k_source_manifest_disk_id_for_snapshot_file() {
@@ -2000,12 +2011,13 @@ n2k_source_v3_collect_changed_regions_from_indexes() {
       continue
     fi
 
-    regions="$(printf '%s' "${result}" | jq -c --arg vdisk_uuid "${vdisk_uuid}" '.disks[$vdisk_uuid] // []')"
-    regions_by_disk="$(jq -c --arg disk_id "${disk_id}" --argjson regions "${regions}" '. + {($disk_id):$regions}' <<<"${regions_by_disk}")"
-    mappings="$(jq -c \
-      --arg disk_id "${disk_id}" \
-      --arg vdisk_uuid "${vdisk_uuid}" \
-      --arg snapshot_file_path "${snapshot_file_path}" \
+	    regions="$(printf '%s' "${result}" | jq -c --arg vdisk_uuid "${vdisk_uuid}" '.disks[$vdisk_uuid] // []')"
+	    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
+	      <(printf '%s\n' "${regions_by_disk}") <(printf '%s\n' "${regions}"))"
+	    mappings="$(jq -c \
+	      --arg disk_id "${disk_id}" \
+	      --arg vdisk_uuid "${vdisk_uuid}" \
+	      --arg snapshot_file_path "${snapshot_file_path}" \
       --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
       --argjson file_size "${file_size}" \
       '. + {($disk_id):{vdisk_uuid:$vdisk_uuid,file_size:$file_size,snapshot_file_path:$snapshot_file_path,reference_snapshot_file_path:$reference_snapshot_file_path}}' \
@@ -2016,31 +2028,31 @@ n2k_source_v3_collect_changed_regions_from_indexes() {
     idx="$((idx + 1))"
   done
 
-  jq -nc \
-    --arg current_recovery_point_id "${current_recovery_point_id}" \
-    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
-    --argjson mapped_count "${mapped_count}" \
-    --argjson total_regions "${total_regions}" \
-    --argjson total_bytes "${total_bytes}" \
-    --argjson disks "${regions_by_disk}" \
-    --argjson mappings "${mappings}" \
-    --argjson errors "${errors}" \
-    --argjson skipped "${skipped}" \
-    '{
-      schema:"ablestack-n2k/changed-regions-v1",
-      source_api:"v3",
-      ok:(($errors | length) == 0 and $mapped_count > 0),
-      current_recovery_point_id:$current_recovery_point_id,
-      base_recovery_point_id:$reference_recovery_point_id,
-      reference_recovery_point_id:$reference_recovery_point_id,
-      disk_count:$mapped_count,
-      region_count:$total_regions,
-      bytes_total:$total_bytes,
-      disks:$disks,
-      disk_mappings:$mappings,
-      errors:$errors,
-      skipped:$skipped
-    }'
+	  jq -nc \
+	    --arg current_recovery_point_id "${current_recovery_point_id}" \
+	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+	    --argjson mapped_count "${mapped_count}" \
+	    --argjson total_regions "${total_regions}" \
+	    --argjson total_bytes "${total_bytes}" \
+	    --slurpfile disks <(printf '%s\n' "${regions_by_disk}") \
+	    --slurpfile mappings <(printf '%s\n' "${mappings}") \
+	    --slurpfile errors <(printf '%s\n' "${errors}") \
+	    --slurpfile skipped <(printf '%s\n' "${skipped}") \
+	    '{
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v3",
+	      ok:((($errors[0] // []) | length) == 0 and $mapped_count > 0),
+	      current_recovery_point_id:$current_recovery_point_id,
+	      base_recovery_point_id:$reference_recovery_point_id,
+	      reference_recovery_point_id:$reference_recovery_point_id,
+	      disk_count:$mapped_count,
+	      region_count:$total_regions,
+	      bytes_total:$total_bytes,
+	      disks:($disks[0] // {}),
+	      disk_mappings:($mappings[0] // {}),
+	      errors:($errors[0] // []),
+	      skipped:($skipped[0] // [])
+	    }'
 }
 
 n2k_source_legacy_verify_changed_region_paths() {
