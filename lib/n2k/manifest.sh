@@ -23,10 +23,12 @@ n2k_manifest_init() {
   local manifest="$1" run_id="$2" workdir="$3" vm="$4" pc="$5" mode="$6" dst="$7" target_format="$8" target_storage="$9" target_map_json="${10}"
   local inventory_json="${11:-}"
   local rbd_access_mode="${12:-librbd}"
+  local target_provider="${13:-libvirt}"
+  local cloud_json="${14:-}"
   local created_at
   created_at="$(n2k_now_iso)"
 
-  local map_compact inv_compact
+  local map_compact inv_compact cloud_compact
   if [[ -z "${target_map_json}" ]]; then
     target_map_json="{}"
   fi
@@ -39,6 +41,13 @@ n2k_manifest_init() {
   fi
   if ! inv_compact="$(printf '%s' "${inventory_json}" | jq -c . 2>/dev/null)"; then
     echo "Invalid inventory JSON." >&2
+    return 2
+  fi
+  if [[ -z "${cloud_json}" ]]; then
+    cloud_json="{}"
+  fi
+  if ! cloud_compact="$(printf '%s' "${cloud_json}" | jq -c . 2>/dev/null)"; then
+    echo "Invalid cloud target JSON." >&2
     return 2
   fi
 
@@ -56,8 +65,10 @@ n2k_manifest_init() {
     --arg target_format "${target_format}" \
     --arg target_storage "${target_storage}" \
     --arg rbd_access_mode "${rbd_access_mode}" \
+    --arg target_provider "${target_provider}" \
     --argjson target_map "${map_compact}" \
     --argjson inv "${inv_compact}" \
+    --argjson cloud "${cloud_compact}" \
     '
       def safe_name($s):
         ($s | tostring)
@@ -138,6 +149,7 @@ n2k_manifest_init() {
       },
       target: {
         type: "kvm",
+        provider: $target_provider,
         format: $target_format,
         dst_root: $dst,
         storage: {
@@ -149,7 +161,8 @@ n2k_manifest_init() {
         },
         libvirt: {
           name: $vm
-        }
+        },
+        cloud: $cloud
       },
       disks: $disks,
       phases: {
@@ -425,6 +438,9 @@ n2k_manifest_record_preflight_result() {
           end
         )
       }
+    | .target.provider = ($pf.target.provider // .target.provider // "libvirt")
+    | .runtime.cloud = (.runtime.cloud // {})
+    | .runtime.cloud.preflight = ($pf.target.cloud // {})
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 

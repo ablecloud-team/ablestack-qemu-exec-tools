@@ -90,6 +90,26 @@ Options:
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
+  --target-provider <p>   libvirt|ablestack-cloud; default libvirt
+  --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
+  --cloud-api-key <key>   ABLESTACK Cloud API key
+  --cloud-secret-key <k>  ABLESTACK Cloud secret key
+  --cloud-cred-file <f>   ABLESTACK Cloud credential file
+  --cloud-zone-id <id>    Cloud zone ID for VM deployment
+  --cloud-service-offering-id <id>
+                          Cloud service offering ID
+  --cloud-network-id <id> Cloud network ID; repeatable
+  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-storage-id <id> Cloud primary storage ID for importVolume
+  --cloud-disk-offering-id <id>
+                          Cloud disk offering ID for imported volumes
+  --cloud-host-id <id>    Optional Cloud host ID
+  --cloud-account <name>  Optional Cloud account
+  --cloud-domain-id <id>  Optional Cloud domain ID
+  --cloud-project-id <id> Optional Cloud project ID
+  --cloud-name <name>     Optional Cloud VM host name
+  --cloud-display-name <name>
+                          Optional Cloud VM display name
   --capability-json <js>  Capability JSON string or file path
   --v4-vmm <0|1>          Override v4 vmm capability
   --v4-dataprotection <0|1>
@@ -132,6 +152,26 @@ Options:
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
+  --target-provider <p>   libvirt|ablestack-cloud; default libvirt
+  --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
+  --cloud-api-key <key>   ABLESTACK Cloud API key
+  --cloud-secret-key <k>  ABLESTACK Cloud secret key
+  --cloud-cred-file <f>   ABLESTACK Cloud credential file
+  --cloud-zone-id <id>    Cloud zone ID for VM deployment
+  --cloud-service-offering-id <id>
+                          Cloud service offering ID
+  --cloud-network-id <id> Cloud network ID; repeatable
+  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-storage-id <id> Cloud primary storage ID for importVolume
+  --cloud-disk-offering-id <id>
+                          Cloud disk offering ID for imported volumes
+  --cloud-host-id <id>    Optional Cloud host ID
+  --cloud-account <name>  Optional Cloud account
+  --cloud-domain-id <id>  Optional Cloud domain ID
+  --cloud-project-id <id> Optional Cloud project ID
+  --cloud-name <name>     Optional Cloud VM host name
+  --cloud-display-name <name>
+                          Optional Cloud VM display name
   --capability-json <js>  Capability JSON string or file path
   --probe-legacy-cbt      Probe legacy changed-region endpoint when credentials are provided
   --v4-vmm <0|1>          Override v4 vmm capability
@@ -174,6 +214,26 @@ Options:
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
+  --target-provider <p>   libvirt|ablestack-cloud; default libvirt
+  --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
+  --cloud-api-key <key>   ABLESTACK Cloud API key
+  --cloud-secret-key <k>  ABLESTACK Cloud secret key
+  --cloud-cred-file <f>   ABLESTACK Cloud credential file
+  --cloud-zone-id <id>    Cloud zone ID for VM deployment
+  --cloud-service-offering-id <id>
+                          Cloud service offering ID
+  --cloud-network-id <id> Cloud network ID; repeatable
+  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-storage-id <id> Cloud primary storage ID for importVolume
+  --cloud-disk-offering-id <id>
+                          Cloud disk offering ID for imported volumes
+  --cloud-host-id <id>    Optional Cloud host ID
+  --cloud-account <name>  Optional Cloud account
+  --cloud-domain-id <id>  Optional Cloud domain ID
+  --cloud-project-id <id> Optional Cloud project ID
+  --cloud-name <name>     Optional Cloud VM host name
+  --cloud-display-name <name>
+                          Optional Cloud VM display name
   --inventory-source <s>  none|fixture|api; default api
   --split <mode>          full|phase1|phase2
   --source-api <api>      v3; run data path currently uses v3 snapshot/NFS
@@ -243,6 +303,23 @@ Options:
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
+  --target-provider <p>   libvirt|ablestack-cloud; default libvirt
+  --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
+  --cloud-zone-id <id>    Cloud zone ID for VM deployment
+  --cloud-service-offering-id <id>
+                          Cloud service offering ID
+  --cloud-network-id <id> Cloud network ID; repeatable
+  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-storage-id <id> Cloud primary storage ID for importVolume
+  --cloud-disk-offering-id <id>
+                          Cloud disk offering ID for imported volumes
+  --cloud-host-id <id>    Optional Cloud host ID
+  --cloud-account <name>  Optional Cloud account
+  --cloud-domain-id <id>  Optional Cloud domain ID
+  --cloud-project-id <id> Optional Cloud project ID
+  --cloud-name <name>     Optional Cloud VM host name
+  --cloud-display-name <name>
+                          Optional Cloud VM display name
 
 Notes:
   - This command creates the initial n2k manifest.
@@ -370,9 +447,31 @@ Options:
   --network-mode <mode>   Target NIC mode: bridge|network; default bridge
   --bridge <name>         Bridge name for bridge mode; default bridge0
   --network <name>        Libvirt NAT network name for network mode; default default
+  --target-provider <p>   libvirt|ablestack-cloud; defaults to manifest provider
+  --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
+  --cloud-api-key <key>   ABLESTACK Cloud API key
+  --cloud-secret-key <k>  ABLESTACK Cloud secret key
+  --cloud-cred-file <f>   ABLESTACK Cloud credential file
+  --cloud-zone-id <id>    Cloud zone ID for VM deployment
+  --cloud-service-offering-id <id>
+                          Cloud service offering ID
+  --cloud-network-id <id> Cloud network ID; repeatable
+  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-storage-id <id> Cloud primary storage ID for importVolume
+  --cloud-disk-offering-id <id>
+                          Cloud disk offering ID for imported volumes
+  --cloud-host-id <id>    Optional Cloud host ID
+  --cloud-account <name>  Optional Cloud account
+  --cloud-domain-id <id>  Optional Cloud domain ID
+  --cloud-project-id <id> Optional Cloud project ID
+  --cloud-name <name>     Optional Cloud VM host name
+  --cloud-display-name <name>
+                          Optional Cloud VM display name
 
 Notes:
-  - Without --apply, this command only generates the libvirt XML artifact.
+  - With libvirt, without --apply this command only generates the XML artifact.
+  - With ablestack-cloud, --define-only validates imported volumes are visible;
+    --apply imports volumes and deploys the VM stopped; --start starts it.
 EOF
 }
 

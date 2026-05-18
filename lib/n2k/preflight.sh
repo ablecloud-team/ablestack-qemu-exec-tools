@@ -41,7 +41,7 @@ n2k_load_json_arg() {
 n2k_detect_host_dependencies() {
   local deps="{}"
   local name path available
-  for name in jq curl qemu-img qemu-nbd virsh rbd rbd-nbd lvs lvcreate modprobe; do
+  for name in jq curl openssl qemu-img qemu-nbd virsh rbd rbd-nbd lvs lvcreate modprobe; do
     path="$(command -v "${name}" 2>/dev/null || true)"
     if [[ -n "${path}" ]]; then
       available=true
@@ -65,6 +65,7 @@ n2k_preflight_result_json() {
   local legacy_override="${10}" legacy_verified_override="${11}" cold_override="${12}" manual_override="${13}"
   local requested_storage="${14:-auto}" requested_format="${15:-qcow2}"
   local source_api_policy="${16:-auto}"
+  local target_provider="${17:-libvirt}"
 
   jq -nc \
     --arg pc "${pc}" \
@@ -83,6 +84,7 @@ n2k_preflight_result_json() {
     --arg requested_storage "${requested_storage}" \
     --arg requested_format "${requested_format}" \
     --arg source_api_policy "${source_api_policy}" \
+    --arg target_provider "${target_provider}" \
     '
     def truthy:
       if type == "boolean" then .
@@ -304,6 +306,7 @@ n2k_preflight_result_json() {
           }
         },
         target: {
+          provider: $target_provider,
           requested_storage: $requested_storage,
           requested_format: $requested_format,
           selected_storage: $selected_storage,
@@ -314,6 +317,7 @@ n2k_preflight_result_json() {
             file: {available: $file_available, priority: 2, format: $requested_format, reason: storage_reason("file"; $file_available)},
             block: {available: $block_available, priority: 3, reason: storage_reason("block"; $block_available)}
           },
+          cloud: ($cap.target.cloud // {}),
           dependencies: $deps
         },
         warnings: (
@@ -328,6 +332,7 @@ n2k_preflight_result_json() {
           + (if $legacy_candidate and $legacy_verified and ($allow_experimental | not) then ["legacy-cbt is blocked because experimental mode is not enabled"] else [] end)
           + (if $selected_mode == "legacy-cbt" and ($can_run | not) and $fallback_mode != "unavailable" then ["fallback mode is " + $fallback_mode] else [] end)
           + (if ($deps["jq"].available // false | not) then ["jq is required for n2k runtime"] else [] end)
+          + (if (($cap.target.provider // $target_provider) == "ablestack-cloud" and ($deps["openssl"].available // false | not)) then ["openssl is required for ABLESTACK Cloud API signing"] else [] end)
           + (if ($deps["qemu-img"].available // false | not) then ["qemu-img is required for disk conversion or image creation"] else [] end)
           + (if ($deps["virsh"].available // false | not) then ["virsh is required for target VM definition"] else [] end)
           + (if ($storage_available | not) then ["selected target storage is not available: " + $selected_storage] else [] end)
@@ -359,6 +364,7 @@ n2k_preflight_text_summary() {
     "legacy changed regions: " + ((.api.legacy.changed_regions // false) | tostring) + "\n" +
     "legacy verified: " + ((.api.legacy.verified // false) | tostring) + "\n" +
     "fallback mode: " + (.fallback_mode // "") + "\n" +
+    "target provider: " + (.target.provider // "libvirt") + "\n" +
     "target storage: " + (.target.selected_storage // "") + "\n" +
     "target storage available: " + ((.target.storage_available // false) | tostring) + "\n" +
     "cold-export: " + ((.modes["cold-export"].available // false) | tostring) + "\n" +
@@ -423,6 +429,7 @@ n2k_plan_text_summary() {
     "Selected mode: " + (.selected_mode // "") + "\n" +
     "Can run: " + ((.can_run // false) | tostring) + "\n" +
     "Fallback mode: " + (.fallback_mode // "") + "\n" +
+    "Target provider: " + (.target.provider // "libvirt") + "\n" +
     "Target storage: " + (.target.selected_storage // "") + "\n" +
     "Steps:\n" +
     (if ((.steps // []) | length) > 0 then ((.steps // []) | map("- " + .) | join("\n")) else "- none" end) +

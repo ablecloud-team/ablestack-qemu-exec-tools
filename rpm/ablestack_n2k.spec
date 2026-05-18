@@ -28,6 +28,7 @@ Requires:       bash
 Requires:       bash-completion
 Requires:       jq
 Requires:       curl
+Requires:       openssl
 Requires:       qemu-img
 Requires:       libvirt-client
 
