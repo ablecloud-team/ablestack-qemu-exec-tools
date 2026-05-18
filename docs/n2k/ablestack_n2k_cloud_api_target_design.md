@@ -357,18 +357,44 @@ This avoids assuming that libvirt `bridge0` maps directly to a Cloud network.
 
 ## Firmware and VM details
 
-Source inventory already captures firmware and secure boot where available. Cloud mode should map those fields to `deployVirtualMachineForVolume` parameters or details only where the target API supports them.
+Source inventory already captures CPU count, memory size, firmware, secure
+boot, and disk controller information where available. Cloud mode must not ask
+the operator to re-enter those guest-shape values. It should derive them from
+the source VM inventory and pass them to `deployVirtualMachineForVolume`.
 
-Initial mapping:
+Implemented automatic mapping:
 
-| Source | Cloud parameter |
+| Source inventory field | Cloud API parameter |
 | --- | --- |
-| BIOS | default boot type |
-| UEFI | `boottype=UEFI` |
-| Secure Boot | `bootmode=SECURE` if supported |
-| TPM | defer until verified |
+| `.source.vm.cpu` | `details[0].cpuNumber` |
+| `.source.vm.memory_mb` | `details[0].memory` |
+| `.source.vm.firmware == "efi"` | `boottype=UEFI` |
+| `.source.vm.firmware == "bios"` | `boottype=BIOS` |
+| `.source.vm.secure_boot == true` with EFI | `bootmode=SECURE` |
+| `.source.vm.secure_boot == true` with missing firmware | `boottype=UEFI`, `bootmode=SECURE` |
+| EFI without secure boot | `bootmode=LEGACY` |
+| BIOS | `bootmode=LEGACY` |
+| root disk `.controller.type` | `details[0].rootDiskController` |
+| first data disk `.controller.type` | `details[0].dataDiskController` |
 
-If the Cloud API rejects a firmware parameter, n2k should fail during preflight or plan rather than during final cutover.
+Disk controller values are normalized to the Cloud KVM accepted set:
+`ide`, `sata`, `scsi`, or `virtio`. Unknown controller strings are not sent,
+so the Cloud service offering/template default remains in effect rather than
+inventing an unsafe value.
+
+The first migration disk is treated as the root disk. Data disks share the
+first observed data-disk controller because the deploy API exposes a VM-level
+`dataDiskController` detail rather than a per-volume controller field for this
+flow.
+
+TPM, IO threads, IO driver policy, NIC queue tuning, exact source MAC/IP
+preservation, and per-data-disk controller overrides remain deferred until the
+source inventory and the target Cloud API behavior are validated for those
+specific properties.
+
+If the Cloud API rejects one of the derived properties, n2k should record the
+Cloud job/API error in the manifest and stop before considering the migration
+successful.
 
 ## Failure and rollback policy
 

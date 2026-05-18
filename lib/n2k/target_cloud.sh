@@ -197,6 +197,41 @@ n2k_cloud_target_optional_owner_params() {
   '
 }
 
+n2k_cloud_target_source_deploy_params_json() {
+  local manifest="$1"
+  jq -c '
+    def controller($raw):
+      ($raw // "" | tostring | ascii_downcase) as $s
+      | if ($s | test("virtio")) then "virtio"
+        elif ($s | test("sata")) then "sata"
+        elif ($s | test("ide")) then "ide"
+        elif ($s | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
+        else "" end;
+
+    (.source.vm // {}) as $vm
+    | (($vm.cpu // 0) | tonumber? // 0) as $cpu
+    | (($vm.memory_mb // 0) | tonumber? // 0) as $memory_mb
+    | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
+    | (($vm.secure_boot // false) == true) as $secure_boot
+    | (controller(.disks[0].controller.type // "")) as $root_controller
+    | (controller((.disks[1:] // [] | map(.controller.type // "") | map(select((. | tostring | length) > 0)) | first) // "")) as $data_controller
+    | {}
+      + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
+      + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
+      + (if ($root_controller | length) > 0 then {"details[0].rootDiskController": $root_controller} else {} end)
+      + (if ($data_controller | length) > 0 then {"details[0].dataDiskController": $data_controller} else {} end)
+      + (
+          if (($firmware | test("efi|uefi")) or $secure_boot) then
+            {boottype:"UEFI", bootmode:(if $secure_boot then "SECURE" else "LEGACY" end)}
+          elif ($firmware | test("bios|legacy")) then
+            {boottype:"BIOS", bootmode:"LEGACY"}
+          else
+            {}
+          end
+        )
+  ' "${manifest}"
+}
+
 n2k_cloud_target_validate_import_visible() {
   local endpoint="$1" api_key="$2" secret_key="$3" storage_id="$4" import_path="$5"
   local response
@@ -236,13 +271,15 @@ n2k_cloud_target_import_volume() {
 }
 
 n2k_cloud_target_deploy_vm_for_volume() {
-  local endpoint="$1" api_key="$2" secret_key="$3" cfg="$4" root_volume_id="$5" start_vm="$6"
+  local endpoint="$1" api_key="$2" secret_key="$3" cfg="$4" root_volume_id="$5" start_vm="$6" source_params="${7:-}"
   local owner_params params response job_id job vm_id
+  [[ -n "${source_params}" ]] || source_params="{}"
   owner_params="$(n2k_cloud_target_optional_owner_params "${cfg}")"
   params="$(jq -nc \
     --arg volumeid "${root_volume_id}" \
     --argjson cfg "${cfg}" \
     --argjson owner "${owner_params}" \
+    --argjson source_params "${source_params}" \
     --arg startvm "${start_vm}" \
     '
       {
@@ -256,6 +293,7 @@ n2k_cloud_target_deploy_vm_for_volume() {
         hypervisor: "KVM"
       }
       + $owner
+      + $source_params
       + (if (($cfg.host_id // "") | length) > 0 then {hostid:$cfg.host_id} else {} end)
     ')"
   response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "deployVirtualMachineForVolume" "${params}")"
@@ -322,7 +360,7 @@ n2k_cloud_target_cutover() {
   local endpoint_arg="${5:-}" api_key_arg="${6:-}" secret_key_arg="${7:-}" cred_file="${8:-}"
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
   local disk_offering_id owner_params root_import root_volume_id deploy vm_id data_volumes_json jobs_json
-  local import_result attach_result start_result result_json disk_name
+  local import_result attach_result start_result result_json disk_name source_deploy_params
 
   runtime="$(n2k_cloud_target_resolve_runtime_json "${manifest}" "${endpoint_arg}" "${api_key_arg}" "${secret_key_arg}" "${cred_file}")"
   endpoint="$(jq -r '.endpoint // ""' <<<"${runtime}")"
@@ -335,6 +373,7 @@ n2k_cloud_target_cutover() {
   storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
   disk_offering_id="$(jq -r '.disk_offering_id // ""' <<<"${cfg}")"
   owner_params="$(n2k_cloud_target_optional_owner_params "${cfg}")"
+  source_deploy_params="$(n2k_cloud_target_source_deploy_params_json "${manifest}")"
   disk_count="$(jq -r '.disks | length' "${manifest}")"
   [[ "${disk_count}" -gt 0 ]] || {
     echo "Cloud target cutover requires at least one migrated disk." >&2
@@ -358,15 +397,16 @@ n2k_cloud_target_cutover() {
     result_json="$(jq -nc \
       --arg provider "ablestack-cloud" \
       --arg endpoint "${endpoint}" \
+      --argjson deployment_properties "${source_deploy_params}" \
       --argjson define_only "$(if [[ "${define_only}" -eq 1 ]]; then printf true; else printf false; fi)" \
-      '{provider:$provider,endpoint:$endpoint,validated:true,applied:false,started:false,define_only:$define_only}')"
+      '{provider:$provider,endpoint:$endpoint,validated:true,applied:false,started:false,define_only:$define_only,deployment_properties:$deployment_properties}')"
     n2k_cloud_target_record_result "${manifest}" "${result_json}"
     printf '%s' "${result_json}"
     return 0
   fi
 
   if [[ "${N2K_DRY_RUN:-0}" -eq 1 ]]; then
-    result_json="$(jq -nc --arg provider "ablestack-cloud" '{provider:$provider,validated:true,applied:false,started:false,dry_run:true}')"
+    result_json="$(jq -nc --arg provider "ablestack-cloud" --argjson deployment_properties "${source_deploy_params}" '{provider:$provider,validated:true,applied:false,started:false,dry_run:true,deployment_properties:$deployment_properties}')"
     n2k_cloud_target_record_result "${manifest}" "${result_json}"
     printf '%s' "${result_json}"
     return 0
@@ -377,7 +417,7 @@ n2k_cloud_target_cutover() {
   disk_name="$(n2k_cloud_target_disk_name "${manifest}" 0)"
   root_import="$(n2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}")"
   root_volume_id="$(jq -r '.id' <<<"${root_import}")"
-  deploy="$(n2k_cloud_target_deploy_vm_for_volume "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${root_volume_id}" "false")"
+  deploy="$(n2k_cloud_target_deploy_vm_for_volume "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${root_volume_id}" "false" "${source_deploy_params}")"
   vm_id="$(jq -r '.id' <<<"${deploy}")"
 
   data_volumes_json="[]"
@@ -413,8 +453,9 @@ n2k_cloud_target_cutover() {
     --arg root_volume_id "${root_volume_id}" \
     --argjson data_volumes "${data_volumes_json}" \
     --argjson jobs "${jobs_json}" \
+    --argjson deployment_properties "${source_deploy_params}" \
     --argjson started "$(if [[ "${start_vm}" -eq 1 ]]; then printf true; else printf false; fi)" \
-    '{provider:$provider,endpoint:$endpoint,validated:true,applied:true,started:$started,vm_id:$vm_id,root_volume_id:$root_volume_id,data_volumes:$data_volumes,jobs:$jobs}')"
+    '{provider:$provider,endpoint:$endpoint,validated:true,applied:true,started:$started,vm_id:$vm_id,root_volume_id:$root_volume_id,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties}')"
   n2k_cloud_target_record_result "${manifest}" "${result_json}"
   printf '%s' "${result_json}"
 }
