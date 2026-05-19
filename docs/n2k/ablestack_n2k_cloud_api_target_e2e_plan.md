@@ -370,7 +370,7 @@ ablestack_n2k --json \
 | ID | VM | Source mode | Split | Target backend | Disk offering | Expected result | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | C00 | n/a | n/a | n/a | n/a | n/a | Cloud API/resource readiness passes | PASS |
-| C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | BLOCKED |
+| C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | RECOVERED |
 | C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | TODO |
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | TODO |
 | C04 | `rhel` | auto fallback | Full | RBD | Omitted | n2k does not block on missing disk offering; Cloud result recorded | TODO |
@@ -451,7 +451,7 @@ Pass criteria:
 
 Result:
 
-- Status: `BLOCKED`
+- Status: `RECOVERED`
 - Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-postfix-20260519`
 - Latest retest workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-cpuspeed-20260519`
 - Latest failed Cloud VM ID: `4cdaf3d0-1e28-48ad-9d84-348fbd7e3313`
@@ -526,6 +526,16 @@ Result:
     This was not an RBD lock or watcher issue. The root-volume correction must
     call `updateVolume` with both `type=ROOT` and the original import `path` so
     Cloud does not clear the path before sending `StartCommand` to the agent.
+  - Code was updated, built, pushed, and deployed to 10.10.22.1/2/3 so the
+    root-volume correction now preserves the import path. The existing broken
+    Cloud VM was repaired by calling `updateVolume` with
+    `type=ROOT,path=n2k-cloud-c01-rhel-rootfix2-disk0`, after which
+    `startVirtualMachine` succeeded.
+  - Final recovery evidence: Cloud VM
+    `bb4b9784-2453-4c07-b50f-916446e199e9` is `Running` on host
+    `ablecube22-2` as `i-2-383-VM`; libvirt reports the domain `running`; qemu
+    is using `/dev/rbd/rbd/n2k-cloud-c01-rhel-rootfix2-disk0/1/2`; all three
+    RBD images have a single watcher and exclusive lock from `100.100.22.2`.
 
 ### C02 - Win10 full RBD Cloud target with auto fallback
 
