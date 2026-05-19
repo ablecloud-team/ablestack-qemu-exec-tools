@@ -74,7 +74,7 @@ n2k_cloud_params_query() {
   printf '%s' "${params_json}" | jq -r '
     to_entries
     | sort_by(.key)
-    | map((.key | @uri) + "=" + ((.value | tostring) | @uri))
+    | map(.key + "=" + ((.value | tostring) | @uri))
     | join("&")
   '
 }
@@ -128,7 +128,7 @@ n2k_cloud_api_get() {
   query="$(n2k_cloud_signed_query "${body_params}" "${secret_key}")"
   url="${endpoint}?${query}"
 
-  curl --silent --show-error --fail \
+  curl --globoff --silent --show-error --fail \
     --connect-timeout "${connect_timeout}" \
     --max-time "${max_time}" \
     "${url}"

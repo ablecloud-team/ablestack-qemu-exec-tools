@@ -359,8 +359,8 @@ ablestack_n2k --json \
 
 | ID | VM | Source mode | Split | Target backend | Disk offering | Expected result | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| C00 | n/a | n/a | n/a | n/a | n/a | Cloud API/resource readiness passes | TODO |
-| C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | TODO |
+| C00 | n/a | n/a | n/a | n/a | n/a | Cloud API/resource readiness passes | PASS |
+| C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | BLOCKED |
 | C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | TODO |
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | TODO |
 | C04 | `rhel` | auto fallback | Full | RBD | Omitted | n2k does not block on missing disk offering; Cloud result recorded | TODO |
@@ -392,8 +392,26 @@ Evidence to record:
 
 Result:
 
-- Status: `TODO`
-- Notes:
+- Status: `PASS`
+- Evidence path: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C00-readiness-20260519`
+- Source commit: `a2744fd`
+- RPM: `ablestack_n2k-0.8.0-1.el9.el9.noarch`
+- Selected Cloud resources:
+  - Zone: `Zone-22` / `d5551005-3372-43e5-8a2b-5742057bbabd`
+  - Service offering: `NoLimit-HA-WB` / `49b2a775-4dba-4b4b-8f92-554b111898bf`
+  - Network: `L2-Network` / `fa2d6e6c-0003-4ab0-92a2-e3e41c9ccbac`
+  - Primary storage: `Primary Storage Glue RBD` / `91cae554-3fce-3f93-89d1-cefaf9bf8122`
+  - Disk offering: `Custom1` / `1da3a4e3-3a1a-4afd-bd28-19df910b334a`
+- Required Cloud APIs are exposed: `listVolumesForImport`, `importVolume`,
+  `deployVirtualMachineForVolume`, `attachVolume`, `startVirtualMachine`, and
+  `queryAsyncJobResult`.
+- Installed help and bash completion expose the Cloud target options.
+- Note: an early check on 2026-05-19 saw the PC endpoint refuse TCP 9440, but
+  a later C01 retry precheck confirmed both `https://10.10.132.100:9440` and
+  `https://10.10.132.10:9440` were responding. Direct PE v3 preflight against
+  `https://10.10.132.10:9440` passed for `rhel`, showing 3 disks and
+  source-derived properties `cpu=1`, `memory_mb=4096`, `firmware=efi`,
+  `secure_boot=true`, and SCSI disk controllers.
 
 ### C01 - RHEL Phase1/Phase2 RBD Cloud target
 
@@ -423,10 +441,27 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
-- Workdir:
-- Cloud VM ID:
+- Status: `BLOCKED`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-rerun-20260519`
+- Cloud VM ID: n/a
 - Notes:
+  - Retry precheck confirmed PC and PE API reachability, no conflicting Cloud
+    VM, no stale C01 RBD image, and source `rhel` in `ON` state with 3 disks.
+  - Phase1 passed. Base and incremental v3 VM snapshots were created, RBD
+    target images `n2k-cloud-c01-rhel-disk0/1/2` were populated, and changed
+    regions were applied.
+  - Phase2 incremental loop, guest shutdown, final snapshot, and final sync
+    passed. Source `rhel` reached `OFF`.
+  - Cloud `importVolume` succeeded for all 3 disks. Imported volumes were left
+    in `Ready` state after the deploy failure.
+  - Cloud `deployVirtualMachineForVolume` failed because map-style parameters
+    such as `details[0].cpuNumber` were URL-encoding bracket characters in the
+    signed query, causing CloudStack signature verification to return 401.
+  - Follow-up fix: keep Cloud API parameter keys literal while URI-encoding
+    values, and run curl with globbing disabled. The signature smoke then
+    advanced from 401 to the expected fake-volume validation error 431, proving
+    signature verification passed. C01 must be retried after the fixed RPM is
+    deployed and the imported volumes/RBD images/source snapshots are cleaned.
 
 ### C02 - Win10 full RBD Cloud target with auto fallback
 
