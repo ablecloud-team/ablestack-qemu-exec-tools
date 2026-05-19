@@ -259,6 +259,83 @@ n2k_interactive_build_target_map_json() {
     ' <<< "${inventory_json}"
 }
 
+n2k_interactive_prepare_manifest_path() {
+  if [[ -z "${N2K_MANIFEST:-}" && -n "${N2K_WORKDIR:-}" && -f "${N2K_WORKDIR}/manifest.json" ]]; then
+    N2K_MANIFEST="${N2K_WORKDIR}/manifest.json"
+    export N2K_MANIFEST
+  fi
+}
+
+n2k_interactive_manifest_value() {
+  local path="$1" query="$2"
+  [[ -f "${path}" ]] || return 1
+  jq -r "${query} // empty" "${path}" 2>/dev/null
+}
+
+n2k_interactive_manifest_network_ids() {
+  local path="$1"
+  [[ -f "${path}" ]] || return 1
+  jq -r '(.target.cloud.network_ids // []) | join(",")' "${path}" 2>/dev/null
+}
+
+n2k_interactive_profile_from_manifest() {
+  local path="$1" provider storage format
+  provider="$(n2k_interactive_manifest_value "${path}" '.target.provider')"
+  storage="$(n2k_interactive_manifest_value "${path}" '.target.storage.type')"
+  format="$(n2k_interactive_manifest_value "${path}" '.target.format')"
+  case "${provider}:${storage}:${format}" in
+    ablestack-cloud:rbd:*) printf 'cloud-rbd' ;;
+    ablestack-cloud:file:*) printf 'cloud-filesystem' ;;
+    libvirt:rbd:*) printf 'libvirt-rbd' ;;
+    libvirt:file:qcow2) printf 'libvirt-qcow2' ;;
+    *) return 1 ;;
+  esac
+}
+
+n2k_interactive_default_split_from_manifest() {
+  local path="$1" phase1_done phase2_done
+  [[ -f "${path}" ]] || return 1
+  phase1_done="$(jq -r '.runtime.split.phase1.done // false' "${path}" 2>/dev/null || printf false)"
+  phase2_done="$(jq -r '.runtime.split.phase2.done // false' "${path}" 2>/dev/null || printf false)"
+  if [[ "${phase1_done}" == "true" && "${phase2_done}" != "true" ]]; then
+    printf 'phase2'
+  else
+    printf 'phase1'
+  fi
+}
+
+n2k_interactive_apply_manifest_defaults() {
+  local path="$1"
+  [[ -f "${path}" ]] || return 0
+
+  vm="${vm:-$(n2k_interactive_manifest_value "${path}" '.source.vm.name')}"
+  pc="${pc:-$(n2k_interactive_manifest_value "${path}" '.source.pc')}"
+  target_provider="${target_provider:-$(n2k_interactive_manifest_value "${path}" '.target.provider')}"
+  target_storage="${target_storage:-$(n2k_interactive_manifest_value "${path}" '.target.storage.type')}"
+  target_format="${target_format:-$(n2k_interactive_manifest_value "${path}" '.target.format')}"
+  dst="${dst:-$(n2k_interactive_manifest_value "${path}" '.target.dst_root')}"
+  rbd_access_mode="${rbd_access_mode:-$(n2k_interactive_manifest_value "${path}" '.target.storage.rbd_access_mode')}"
+  cloud_endpoint="${cloud_endpoint:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.endpoint')}"
+  cloud_zone_id="${cloud_zone_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.zone_id')}"
+  cloud_service_offering_id="${cloud_service_offering_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.service_offering_id')}"
+  cloud_network_ids="${cloud_network_ids:-$(n2k_interactive_manifest_network_ids "${path}")}"
+  cloud_storage_id="${cloud_storage_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.storage_id')}"
+  cloud_disk_offering_id="${cloud_disk_offering_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.disk_offering_id')}"
+  cloud_host_id="${cloud_host_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.host_id')}"
+  cloud_account="${cloud_account:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.account')}"
+  cloud_domain_id="${cloud_domain_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.domain_id')}"
+  cloud_project_id="${cloud_project_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.project_id')}"
+  cloud_name="${cloud_name:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.name')}"
+  cloud_display_name="${cloud_display_name:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.display_name')}"
+  cloud_cpu_speed="${cloud_cpu_speed:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.cpu_speed')}"
+  if [[ -z "${target_profile}" ]]; then
+    target_profile="$(n2k_interactive_profile_from_manifest "${path}" 2>/dev/null || true)"
+  fi
+  if [[ -z "${split}" ]]; then
+    split="$(n2k_interactive_default_split_from_manifest "${path}" 2>/dev/null || true)"
+  fi
+}
+
 n2k_interactive_print_command() {
   local redact_next=0 arg rendered=""
   local -a printable=(ablestack_n2k)
@@ -325,7 +402,7 @@ n2k_cmd_wizard() {
   local vm="" pc="" username="" password="" cred_file="" insecure="1"
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json=""
   local rbd_pool="${N2K_WIZARD_RBD_POOL:-rbd}" file_root="${N2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
-  local rbd_access_mode="librbd"
+  local rbd_access_mode=""
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id="" cloud_disk_offering_id=""
   local cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
@@ -390,6 +467,11 @@ n2k_cmd_wizard() {
       *) n2k_die "Unknown option for wizard: $1" ;;
     esac
   done
+
+  n2k_interactive_prepare_manifest_path
+  if [[ -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]]; then
+    n2k_interactive_apply_manifest_defaults "${N2K_MANIFEST}"
+  fi
 
   [[ "${source_api}" == "v3" ]] || n2k_die "wizard currently supports --source-api v3 only"
   case "${insecure}" in 0|1) ;; *) n2k_die "Invalid --insecure: ${insecure}" ;; esac
@@ -463,6 +545,7 @@ n2k_cmd_wizard() {
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_target_storage "${target_storage}" || n2k_die "Invalid --target-storage: ${target_storage}"
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
+  rbd_access_mode="${rbd_access_mode:-librbd}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   if [[ -n "${target_map_json}" ]]; then
     target_map_json="$(printf '%s' "${target_map_json}" | jq -c . 2>/dev/null)" || \

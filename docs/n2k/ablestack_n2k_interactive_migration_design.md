@@ -146,6 +146,21 @@ migration with a short final cutover. Operators can select `phase2` later with
 the same workdir or manifest, or select `full` for a single-command validation
 run.
 
+When a manifest exists through global `--workdir` or `--manifest`, the wizard
+loads source VM, Prism endpoint, target provider, target storage, and Cloud
+resource IDs from that manifest before prompting. If the manifest has
+`runtime.split.phase1.done=true` and `runtime.split.phase2.done!=true`, the
+wizard defaults to `phase2`. This supports the required operator workflow:
+
+```text
+ablestack_n2k --workdir /var/lib/ablestack-n2k/rhel/<run-id> wizard --split phase1 ...
+# process exits after phase1
+ablestack_n2k --workdir /var/lib/ablestack-n2k/rhel/<run-id> wizard --split phase2 ...
+```
+
+The second command is a new process. It resumes from the manifest rather than
+from any in-memory state.
+
 ## Resource discovery
 
 The wizard uses existing API helpers and adds only light list/selection logic:

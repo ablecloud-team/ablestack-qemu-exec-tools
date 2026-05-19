@@ -353,6 +353,8 @@ Notes:
   - wizard/migrate/interactive calls the same implementation.
   - Current runnable data path is v3 snapshot/NFS, so wizard generates
     --source-api v3 and --force-v3 by default.
+  - With global --workdir or --manifest, wizard loads the existing manifest so
+    phase2 can be started later in a new process after phase1 exits.
   - Secrets are passed only at runtime. --print-command redacts secret values.
 EOF
 }
