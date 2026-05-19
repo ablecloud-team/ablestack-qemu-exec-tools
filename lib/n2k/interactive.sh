@@ -18,7 +18,7 @@
 set -euo pipefail
 
 n2k_interactive_has_tty() {
-  [[ -t 0 && -t 1 ]]
+  [[ -t 0 && ( -t 2 || -t 1 ) ]]
 }
 
 n2k_interactive_prompt_text() {
