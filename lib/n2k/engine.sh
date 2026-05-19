@@ -155,7 +155,8 @@ n2k_cmd_init() {
   local inventory_json_arg="" inventory_source="none"
   local target_format="qcow2" target_storage="file" target_map_json="{}" rbd_access_mode="librbd"
   local target_provider="libvirt"
-  local cloud_endpoint="" cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids=""
+  local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
+  local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids=""
   local cloud_storage_id="" cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id=""
   local cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local force_v3=false
@@ -180,6 +181,9 @@ n2k_cmd_init() {
       --rbd-access-mode) rbd_access_mode="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; shift 2 ;;
       --cloud-endpoint) cloud_endpoint="${2:-}"; shift 2 ;;
+      --cloud-api-key) cloud_api_key="${2:-}"; shift 2 ;;
+      --cloud-secret-key) cloud_secret_key="${2:-}"; shift 2 ;;
+      --cloud-cred-file) cloud_cred_file="${2:-}"; shift 2 ;;
       --cloud-zone-id) cloud_zone_id="${2:-}"; shift 2 ;;
       --cloud-service-offering-id) cloud_service_offering_id="${2:-}"; shift 2 ;;
       --cloud-network-id)
@@ -202,7 +206,6 @@ n2k_cmd_init() {
 
   [[ -n "${vm}" ]] || n2k_die "init requires --vm"
   [[ -n "${pc}" ]] || n2k_die "init requires --pc"
-  [[ -n "${dst}" ]] || dst="/var/lib/libvirt/images/$(n2k_safe_name "${vm}")"
   n2k_valid_mode "${mode}" || n2k_die "Invalid --mode: ${mode}"
   if [[ "${force_v3}" == "true" ]]; then
     [[ "${mode}" == "auto" || "${mode}" == "v3-incremental" ]] || \
@@ -232,6 +235,43 @@ n2k_cmd_init() {
     password="${password:-${NUTANIX_PASSWORD:-${N2K_PC_PASSWORD:-}}}"
   fi
 
+  local cloud_config_json storage_pool_json storage_path storage_pool_config
+  if [[ "${target_provider}" == "ablestack-cloud" && "${target_storage}" == "file" ]]; then
+    [[ -n "${cloud_storage_id}" ]] || n2k_die "Cloud file/qcow2 target requires --cloud-storage-id"
+    local cloud_runtime cloud_runtime_endpoint cloud_runtime_api_key cloud_runtime_secret_key
+    cloud_runtime="$(n2k_cloud_target_resolve_runtime_json "" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}")"
+    cloud_runtime_endpoint="$(jq -r '.endpoint // ""' <<<"${cloud_runtime}")"
+    cloud_runtime_api_key="$(jq -r '.api_key // ""' <<<"${cloud_runtime}")"
+    cloud_runtime_secret_key="$(jq -r '.secret_key // ""' <<<"${cloud_runtime}")"
+    n2k_cloud_require_credentials "${cloud_runtime_endpoint}" "${cloud_runtime_api_key}" "${cloud_runtime_secret_key}" || return $?
+    storage_pool_json="$(n2k_cloud_target_storage_pool_json "${cloud_runtime_endpoint}" "${cloud_runtime_api_key}" "${cloud_runtime_secret_key}" "${cloud_storage_id}")" || return $?
+    [[ -n "${storage_pool_json}" ]] || n2k_die "Cloud storage pool was not found: ${cloud_storage_id}"
+    storage_path="$(n2k_cloud_target_file_storage_path_from_pool "${storage_pool_json}")" || return $?
+    if [[ -n "${dst}" && "${dst%/}" != "${storage_path}" ]]; then
+      n2k_die "Cloud file/qcow2 target root must match selected Cloud storage path: ${storage_path} (got ${dst%/})"
+    fi
+    dst="${storage_path}"
+    if [[ -n "${target_map_json}" && "${target_map_json}" != "{}" ]]; then
+      local bad_map_paths
+      bad_map_paths="$(jq -r --arg pool_path "${storage_path}" '
+        to_entries[]
+        | (.value | tostring) as $path
+        | select(
+            ($path | startswith($pool_path + "/") | not)
+            or (($path | sub("/[^/]*$"; "")) != $pool_path)
+          )
+        | $path
+      ' <<<"${target_map_json}")"
+      [[ -z "${bad_map_paths}" ]] || {
+        echo "Cloud file/qcow2 target map must use root-level files under selected Cloud storage path: ${storage_path}" >&2
+        printf '%s\n' "${bad_map_paths}" >&2
+        return 2
+      }
+    fi
+  else
+    [[ -n "${dst}" ]] || dst="/var/lib/libvirt/images/$(n2k_safe_name "${vm}")"
+  fi
+
   n2k_set_default_paths "${vm}"
   mkdir -p "${N2K_WORKDIR}"
 
@@ -246,8 +286,11 @@ n2k_cmd_init() {
     inventory_json="$(n2k_nutanix_inventory_from_raw "${inventory_raw}" "${vm}")"
   fi
 
-  local cloud_config_json
   cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
+  if [[ -n "${storage_pool_json:-}" ]]; then
+    storage_pool_config="$(n2k_cloud_target_storage_pool_config_json "${storage_pool_json}")"
+    cloud_config_json="$(jq -c --argjson pool "${storage_pool_config}" '. + {storage_pool:$pool}' <<<"${cloud_config_json}")"
+  fi
   n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}"
   n2k_event INFO "init" "" "manifest_created" "{\"manifest\":\"${N2K_MANIFEST}\"}"
   if [[ -n "${inventory_json}" ]]; then
@@ -878,6 +921,9 @@ n2k_cmd_run() {
     [[ -n "${dst}" ]] && init_args+=(--dst "${dst}")
     [[ -n "${target_map_json}" ]] && init_args+=(--target-map-json "${target_map_json}")
     [[ -n "${cloud_endpoint}" ]] && init_args+=(--cloud-endpoint "${cloud_endpoint}")
+    [[ -n "${cloud_api_key}" ]] && init_args+=(--cloud-api-key "${cloud_api_key}")
+    [[ -n "${cloud_secret_key}" ]] && init_args+=(--cloud-secret-key "${cloud_secret_key}")
+    [[ -n "${cloud_cred_file}" ]] && init_args+=(--cloud-cred-file "${cloud_cred_file}")
     [[ -n "${cloud_zone_id}" ]] && init_args+=(--cloud-zone-id "${cloud_zone_id}")
     [[ -n "${cloud_service_offering_id}" ]] && init_args+=(--cloud-service-offering-id "${cloud_service_offering_id}")
     [[ -n "${cloud_network_ids}" ]] && init_args+=(--cloud-network-ids "${cloud_network_ids}")
@@ -902,6 +948,9 @@ n2k_cmd_run() {
     n2k_cloud_target_apply_manifest_config "${N2K_MANIFEST}" "$(if [[ "${target_provider_arg_set}" -eq 1 ]]; then printf '%s' "${target_provider}"; else printf ''; fi)" "${cloud_config_json}"
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"
+  if [[ "${target_provider}" == "ablestack-cloud" && "$(jq -r '.target.storage.type // ""' "${N2K_MANIFEST}")" == "file" ]]; then
+    n2k_cloud_target_resolve_file_storage_for_manifest "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" >/dev/null
+  fi
 
   vm="${vm:-$(n2k_run_manifest_value "${N2K_MANIFEST}" '.source.vm.name // empty')}"
   pc="${pc:-$(n2k_run_manifest_value "${N2K_MANIFEST}" '.source.pc // empty')}"
@@ -1747,7 +1796,19 @@ n2k_cmd_cutover() {
 
   local xml_path vm cloud_result
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
-    cloud_result="$(n2k_cloud_target_cutover "${N2K_MANIFEST}" "${define_only}" "${apply_define}" "${start_vm}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}")"
+    local cloud_error_file cloud_rc cloud_error_text cloud_error_json
+    cloud_error_file="$(mktemp)"
+    if cloud_result="$(n2k_cloud_target_cutover "${N2K_MANIFEST}" "${define_only}" "${apply_define}" "${start_vm}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" 2>"${cloud_error_file}")"; then
+      rm -f "${cloud_error_file}"
+    else
+      cloud_rc=$?
+      cloud_error_text="$(cat "${cloud_error_file}")"
+      [[ -n "${cloud_error_text}" ]] && printf '%s\n' "${cloud_error_text}" >&2
+      cloud_error_json="$(jq -nc --arg error "${cloud_error_text}" '{error:$error}')"
+      n2k_event ERROR "cutover" "" "cloud_target_cutover_failed" "${cloud_error_json}"
+      rm -f "${cloud_error_file}"
+      return "${cloud_rc}"
+    fi
     n2k_event INFO "cutover" "" "cloud_target_cutover" "${cloud_result}"
     if [[ "${define_only}" -eq 1 || "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]]; then
       n2k_manifest_phase_done "${N2K_MANIFEST}" "cutover"

@@ -144,7 +144,7 @@ The defaults are chosen to match the current tested production path:
 | Cloud target VM name | `n2k-<source-vm>-<timestamp>` |
 | Migration work directory | `/var/lib/ablestack-n2k/<source-vm>/<run-id>` |
 | RBD pool | `rbd` |
-| File root | `/var/lib/libvirt/images` |
+| File root | libvirt targets use `/var/lib/libvirt/images`; Cloud file targets use the selected Cloud storage pool path |
 | Libvirt network | `bridge` with `bridge0` |
 
 `phase1` is the default because the preferred production path is incremental
@@ -197,16 +197,22 @@ wizard fails instead of guessing.
 
 ## Target map generation
 
-For Cloud FileSystem/qcow2, the wizard prefers root-level qcow2 paths under the
-selected file root:
+For Cloud FileSystem/qcow2, the wizard must first resolve the selected Cloud
+storage pool through `listStoragePools`. The resolved storage pool `path` is the
+file root. The wizard then uses root-level qcow2 paths under that Cloud storage
+path:
 
 ```text
-/var/lib/libvirt/images/<target-name>-disk0.qcow2
-/var/lib/libvirt/images/<target-name>-disk1.qcow2
+/mnt/glue-gfs/<target-name>-disk0.qcow2
+/mnt/glue-gfs/<target-name>-disk1.qcow2
 ```
 
-This avoids Cloud import visibility problems caused by arbitrary subdirectories
-on local FileSystem storage.
+The literal path is environment-dependent; `/mnt/glue-gfs` is an example from
+the 10.10.1.x SharedMountPoint test environment. The wizard must not fall back
+to `/var/lib/libvirt/images` for Cloud file targets unless that is the path
+returned by Cloud for the selected storage pool. This avoids Cloud import
+visibility problems caused by writing qcow2 files outside the selected Cloud
+primary storage or inside arbitrary subdirectories.
 
 For Cloud RBD and libvirt RBD, the wizard uses:
 

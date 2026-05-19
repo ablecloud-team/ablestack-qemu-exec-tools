@@ -389,6 +389,10 @@ Options:
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --target-provider <p>   libvirt|ablestack-cloud; default libvirt
   --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
+  --cloud-api-key <key>   ABLESTACK Cloud API key, runtime only
+  --cloud-secret-key <key>
+                          ABLESTACK Cloud secret key, runtime only
+  --cloud-cred-file <f>   ABLESTACK Cloud credential file
   --cloud-zone-id <id>    Cloud zone ID for VM deployment
   --cloud-service-offering-id <id>
                           Cloud service offering ID
@@ -411,6 +415,7 @@ Notes:
   - This command creates the initial n2k manifest.
   - Direct API inventory lookup runs only with --inventory-source api.
   - --force-v3 stores v3-incremental as the manifest mode.
+  - Cloud file/qcow2 targets resolve --dst from --cloud-storage-id via Cloud API.
 EOF
 }
 

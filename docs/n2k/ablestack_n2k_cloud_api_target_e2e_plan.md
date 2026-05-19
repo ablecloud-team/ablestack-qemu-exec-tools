@@ -117,20 +117,30 @@ The import target storage is selected by `--cloud-storage-id` and is passed to
 
 Required first target backend for this plan: RBD.
 
-Filesystem primary storage is host-local. A filesystem migration must create
-the qcow2 files on the same host that Cloud will use for `hostid`, and
-`--cloud-storage-id` must be the matching host-scoped primary storage.
+Filesystem and SharedMountPoint primary storage migrations must create the
+qcow2 files directly under the selected Cloud storage pool path returned by
+`listStoragePools`. n2k must not assume `/var/lib/libvirt/images`; that path is
+valid only when it is the selected Cloud storage pool path. Host-local
+Filesystem storage also requires the VM placement host to match the selected
+storage, while cluster-scoped SharedMountPoint storage uses the shared mount
+path and does not need a host id for file placement.
+
+The 10.10.1.x SharedMountPoint test found a bug where n2k wrote qcow2 files
+under `/var/lib/libvirt/images` even though the selected Cloud storage pool path
+was `/mnt/glue-gfs`. That behavior is invalid and is superseded by
+`docs/n2k/ablestack_n2k_cloud_storage_path_design.md`.
 
 Filesystem import behavior was rechecked on 2026-05-19:
 
-- `listVolumesForImport` accepts a file placed directly under
-  `/var/lib/libvirt/images` when `path` is either the basename or the absolute
-  `/var/lib/libvirt/images/<file>.qcow2`.
-- `listVolumesForImport` rejects files in a subdirectory under
-  `/var/lib/libvirt/images` with HTTP 530.
-- Therefore C04-C06 must write target qcow2 files directly under
-  `/var/lib/libvirt/images` and must use `--target-map-json` to avoid generic
-  names such as `rhel-disk0.qcow2`.
+- `listVolumesForImport` accepts a file placed directly under the selected
+  Cloud storage pool path when `path` is either the basename or the absolute
+  `<storage-pool-path>/<file>.qcow2`.
+- `listVolumesForImport` rejects files in a subdirectory under the selected
+  Cloud storage pool path with HTTP 530.
+- Therefore FileSystem/SharedMountPoint tests must write target qcow2 files
+  directly under the selected Cloud storage pool path and must use
+  `--target-map-json` or the wizard-generated map to avoid generic names such
+  as `rhel-disk0.qcow2`.
 - For host-local FileSystem imports, omit `--cloud-disk-offering-id` unless the
   offering is known to be local-storage compatible. The RBD-tagged `Custom1`
   offering is rejected by Cloud for local storage imports.

@@ -242,8 +242,10 @@ n2k_cloud_target_source_deploy_params_json() {
 n2k_cloud_target_validate_import_visible() {
   local endpoint="$1" api_key="$2" secret_key="$3" storage_id="$4" import_path="$5"
   local response
-  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listVolumesForImport" \
-    "$(jq -nc --arg storageid "${storage_id}" --arg path "${import_path}" '{storageid:$storageid,path:$path}')")"
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listVolumesForImport" \
+    "$(jq -nc --arg storageid "${storage_id}" --arg path "${import_path}" '{storageid:$storageid,path:$path}')")"; then
+    return 1
+  fi
   printf '%s' "${response}" | jq -e '
     to_entries[0].value as $body
     | (
@@ -251,6 +253,123 @@ n2k_cloud_target_validate_import_visible() {
         or (($body.volume // $body.volumes // $body.volumeforimport // []) | length > 0)
       )
   ' >/dev/null
+}
+
+n2k_cloud_target_storage_pool_json() {
+  local endpoint="$1" api_key="$2" secret_key="$3" storage_id="$4"
+  local response
+  [[ -n "${storage_id}" ]] || {
+    echo "Cloud storage id is required to resolve storage path." >&2
+    return 2
+  }
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listStoragePools" \
+    "$(jq -nc --arg id "${storage_id}" '{id:$id,listall:true}')")"; then
+    return 1
+  fi
+  printf '%s' "${response}" | jq -c --arg id "${storage_id}" '
+    (.liststoragepoolsresponse.storagepool // [])
+    | map(select((.id // "") == $id))
+    | .[0] // empty
+  '
+}
+
+n2k_cloud_target_storage_pool_config_json() {
+  local pool_json="$1"
+  printf '%s' "${pool_json}" | jq -c '
+    {
+      id: (.id // ""),
+      name: (.name // ""),
+      type: ((.type // .storagetype // "") | tostring),
+      scope: ((.scope // "") | tostring),
+      path: (.path // ""),
+      cluster_id: (.clusterid // ""),
+      cluster_name: (.clustername // ""),
+      zone_id: (.zoneid // "")
+    }
+    | with_entries(select((.value | tostring | length) > 0))
+  '
+}
+
+n2k_cloud_target_file_storage_path_from_pool() {
+  local pool_json="$1"
+  local pool_type path
+  pool_type="$(jq -r '(.type // .storagetype // "") | tostring' <<<"${pool_json}")"
+  path="$(jq -r '.path // ""' <<<"${pool_json}")"
+  case "${pool_type}" in
+    Filesystem|NetworkFilesystem|SharedMountPoint) ;;
+    *)
+      echo "Cloud file/qcow2 target requires a file-backed storage pool, got type=${pool_type:-unknown}." >&2
+      return 2
+      ;;
+  esac
+  [[ -n "${path}" ]] || {
+    echo "Cloud storage pool path is empty for type=${pool_type}." >&2
+    return 2
+  }
+  printf '%s' "${path%/}"
+}
+
+n2k_cloud_target_resolve_file_storage_path() {
+  local endpoint="$1" api_key="$2" secret_key="$3" storage_id="$4"
+  local pool_json
+  pool_json="$(n2k_cloud_target_storage_pool_json "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}")" || return $?
+  [[ -n "${pool_json}" ]] || {
+    echo "Cloud storage pool was not found: ${storage_id}" >&2
+    return 2
+  }
+  n2k_cloud_target_file_storage_path_from_pool "${pool_json}"
+}
+
+n2k_cloud_target_record_storage_pool() {
+  local manifest="$1" pool_json="$2"
+  local pool_compact tmp
+  pool_compact="$(n2k_cloud_target_storage_pool_config_json "${pool_json}")"
+  tmp="$(mktemp)"
+  jq --argjson pool "${pool_compact}" '
+    .target.cloud.storage_pool = $pool
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_cloud_target_validate_file_paths_for_pool() {
+  local manifest="$1" pool_path="$2"
+  local bad_paths
+  pool_path="${pool_path%/}"
+  bad_paths="$(jq -r --arg pool_path "${pool_path}" '
+    .disks[]
+    | (.transfer.target_path // "") as $path
+    | select(
+        ($path | startswith($pool_path + "/") | not)
+        or (($path | sub("^.*/"; "")) | length == 0)
+        or (($path | sub("/[^/]*$"; "")) != $pool_path)
+      )
+    | $path
+  ' "${manifest}")"
+  [[ -z "${bad_paths}" ]] || {
+    echo "Cloud file/qcow2 target paths must be root-level files under the selected Cloud storage path: ${pool_path}" >&2
+    printf '%s\n' "${bad_paths}" >&2
+    return 2
+  }
+}
+
+n2k_cloud_target_resolve_file_storage_for_manifest() {
+  local manifest="$1" endpoint_arg="${2:-}" api_key_arg="${3:-}" secret_key_arg="${4:-}" cred_file="${5:-}"
+  local runtime cfg endpoint api_key secret_key storage_id pool_json pool_path
+  runtime="$(n2k_cloud_target_resolve_runtime_json "${manifest}" "${endpoint_arg}" "${api_key_arg}" "${secret_key_arg}" "${cred_file}")"
+  endpoint="$(jq -r '.endpoint // ""' <<<"${runtime}")"
+  api_key="$(jq -r '.api_key // ""' <<<"${runtime}")"
+  secret_key="$(jq -r '.secret_key // ""' <<<"${runtime}")"
+  cfg="$(n2k_cloud_target_required_config_json "${manifest}")"
+  storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
+  n2k_cloud_require_credentials "${endpoint}" "${api_key}" "${secret_key}" || return $?
+  pool_json="$(n2k_cloud_target_storage_pool_json "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}")" || return $?
+  [[ -n "${pool_json}" ]] || {
+    echo "Cloud storage pool was not found: ${storage_id}" >&2
+    return 2
+  }
+  pool_path="$(n2k_cloud_target_file_storage_path_from_pool "${pool_json}")" || return $?
+  n2k_cloud_target_record_storage_pool "${manifest}" "${pool_json}"
+  n2k_cloud_target_validate_file_paths_for_pool "${manifest}" "${pool_path}" || return $?
+  printf '%s' "${pool_path}"
 }
 
 n2k_cloud_target_import_volume() {
@@ -265,9 +384,18 @@ n2k_cloud_target_import_volume() {
     --argjson owner "${owner_params}" \
     '{path:$path,storageid:$storageid,name:$name} + $owner
      + (if ($diskofferingid | length) > 0 then {diskofferingid:$diskofferingid} else {} end)')"
-  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "importVolume" "${params}")"
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "importVolume" "${params}")"; then
+    return 1
+  fi
   job_id="$(printf '%s' "${response}" | n2k_cloud_response_job_id)"
-  job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"
+  [[ -n "${job_id}" ]] || {
+    echo "Cloud importVolume did not return an async job id." >&2
+    printf '%s\n' "${response}" >&2
+    return 1
+  }
+  if ! job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"; then
+    return 1
+  fi
   volume_id="$(printf '%s' "${job}" | jq -r '.jobresult.volume.id // .jobresult.id // empty')"
   [[ -n "${volume_id}" ]] || {
     echo "Cloud importVolume job completed but volume id was not returned." >&2
@@ -303,9 +431,22 @@ n2k_cloud_target_deploy_vm_for_volume() {
       + $source_params
       + (if (($cfg.host_id // "") | length) > 0 then {hostid:$cfg.host_id} else {} end)
     ')"
-  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "deployVirtualMachineForVolume" "${params}")"
+  [[ -n "${root_volume_id}" ]] || {
+    echo "Cloud deployVirtualMachineForVolume requires a root volume id." >&2
+    return 2
+  }
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "deployVirtualMachineForVolume" "${params}")"; then
+    return 1
+  fi
   job_id="$(printf '%s' "${response}" | n2k_cloud_response_job_id)"
-  job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"
+  [[ -n "${job_id}" ]] || {
+    echo "Cloud deployVirtualMachineForVolume did not return an async job id." >&2
+    printf '%s\n' "${response}" >&2
+    return 1
+  }
+  if ! job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"; then
+    return 1
+  fi
   vm_id="$(printf '%s' "${job}" | jq -r '.jobresult.virtualmachine.id // .jobresult.uservm.id // .jobresult.id // empty')"
   [[ -n "${vm_id}" ]] || {
     echo "Cloud deployVirtualMachineForVolume job completed but VM id was not returned." >&2
@@ -318,8 +459,14 @@ n2k_cloud_target_deploy_vm_for_volume() {
 n2k_cloud_target_volume_json() {
   local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4"
   local response
-  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listVolumes" \
-    "$(jq -nc --arg id "${volume_id}" '{id:$id}')")"
+  [[ -n "${volume_id}" ]] || {
+    echo "Cloud listVolumes requires a volume id." >&2
+    return 2
+  }
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listVolumes" \
+    "$(jq -nc --arg id "${volume_id}" '{id:$id}')")"; then
+    return 1
+  fi
   printf '%s' "${response}" | jq -c '(.listvolumesresponse.volume // [])[0] // {}'
 }
 
@@ -331,11 +478,15 @@ n2k_cloud_target_update_volume_type() {
     --arg type "${volume_type}" \
     --arg path "${volume_path}" \
     '{id:$id,type:$type} + (if ($path | length) > 0 then {path:$path} else {} end)')"
-  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "updateVolume" \
-    "${params}")"
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "updateVolume" \
+    "${params}")"; then
+    return 1
+  fi
   job_id="$(printf '%s' "${response}" | n2k_cloud_response_job_id)"
   if [[ -n "${job_id}" ]]; then
-    job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"
+    if ! job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"; then
+      return 1
+    fi
     jq -nc --arg job_id "${job_id}" --argjson job "${job}" '{job_id:$job_id,job:$job}'
   else
     jq -nc --argjson response "${response}" '{response:$response}'
@@ -345,7 +496,7 @@ n2k_cloud_target_update_volume_type() {
 n2k_cloud_target_ensure_root_volume() {
   local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4" vm_id="$5" volume_path_hint="${6:-}"
   local volume volume_type volume_vm_id volume_path update_result converted=false
-  volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")"
+  volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")" || return $?
   volume_type="$(jq -r '.type // empty' <<<"${volume}")"
   volume_vm_id="$(jq -r '.virtualmachineid // empty' <<<"${volume}")"
   volume_path="$(jq -r '.path // empty' <<<"${volume}")"
@@ -356,9 +507,9 @@ n2k_cloud_target_ensure_root_volume() {
     return 1
   }
   if [[ "${volume_type}" != "ROOT" ]]; then
-    update_result="$(n2k_cloud_target_update_volume_type "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}" "ROOT" "${volume_path}")"
+    update_result="$(n2k_cloud_target_update_volume_type "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}" "ROOT" "${volume_path}")" || return $?
     converted=true
-    volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")"
+    volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")" || return $?
     volume_type="$(jq -r '.type // empty' <<<"${volume}")"
     volume_path="$(jq -r '.path // empty' <<<"${volume}")"
   else
@@ -384,20 +535,46 @@ n2k_cloud_target_ensure_root_volume() {
 n2k_cloud_target_attach_volume() {
   local endpoint="$1" api_key="$2" secret_key="$3" vm_id="$4" volume_id="$5" device_id="$6"
   local response job_id job
-  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "attachVolume" \
-    "$(jq -nc --arg id "${volume_id}" --arg virtualmachineid "${vm_id}" --arg deviceid "${device_id}" '{id:$id,virtualmachineid:$virtualmachineid,deviceid:$deviceid}')")"
+  [[ -n "${vm_id}" && -n "${volume_id}" ]] || {
+    echo "Cloud attachVolume requires VM id and volume id." >&2
+    return 2
+  }
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "attachVolume" \
+    "$(jq -nc --arg id "${volume_id}" --arg virtualmachineid "${vm_id}" --arg deviceid "${device_id}" '{id:$id,virtualmachineid:$virtualmachineid,deviceid:$deviceid}')")"; then
+    return 1
+  fi
   job_id="$(printf '%s' "${response}" | n2k_cloud_response_job_id)"
-  job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"
+  [[ -n "${job_id}" ]] || {
+    echo "Cloud attachVolume did not return an async job id." >&2
+    printf '%s\n' "${response}" >&2
+    return 1
+  }
+  if ! job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"; then
+    return 1
+  fi
   jq -nc --arg job_id "${job_id}" --argjson job "${job}" '{job_id:$job_id,job:$job}'
 }
 
 n2k_cloud_target_start_vm() {
   local endpoint="$1" api_key="$2" secret_key="$3" vm_id="$4"
   local response job_id job
-  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "startVirtualMachine" \
-    "$(jq -nc --arg id "${vm_id}" '{id:$id}')")"
+  [[ -n "${vm_id}" ]] || {
+    echo "Cloud startVirtualMachine requires VM id." >&2
+    return 2
+  }
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "startVirtualMachine" \
+    "$(jq -nc --arg id "${vm_id}" '{id:$id}')")"; then
+    return 1
+  fi
   job_id="$(printf '%s' "${response}" | n2k_cloud_response_job_id)"
-  job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"
+  [[ -n "${job_id}" ]] || {
+    echo "Cloud startVirtualMachine did not return an async job id." >&2
+    printf '%s\n' "${response}" >&2
+    return 1
+  }
+  if ! job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"; then
+    return 1
+  fi
   jq -nc --arg job_id "${job_id}" --argjson job "${job}" '{job_id:$job_id,job:$job}'
 }
 
@@ -434,6 +611,7 @@ n2k_cloud_target_cutover() {
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
   local disk_offering_id owner_params root_import root_volume_id deploy vm_id data_volumes_json jobs_json
   local import_result attach_result start_result result_json disk_name source_deploy_params root_volume_result root_volume_json root_volume_update_job root_volume_converted
+  local pool_json pool_path import_volume_id
 
   runtime="$(n2k_cloud_target_resolve_runtime_json "${manifest}" "${endpoint_arg}" "${api_key_arg}" "${secret_key_arg}" "${cred_file}")"
   endpoint="$(jq -r '.endpoint // ""' <<<"${runtime}")"
@@ -453,6 +631,17 @@ n2k_cloud_target_cutover() {
     return 2
   }
 
+  if [[ "${storage}" == "file" ]]; then
+    pool_json="$(n2k_cloud_target_storage_pool_json "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}")" || return $?
+    [[ -n "${pool_json}" ]] || {
+      echo "Cloud storage pool was not found: ${storage_id}" >&2
+      return 2
+    }
+    pool_path="$(n2k_cloud_target_file_storage_path_from_pool "${pool_json}")" || return $?
+    n2k_cloud_target_record_storage_pool "${manifest}" "${pool_json}"
+    n2k_cloud_target_validate_file_paths_for_pool "${manifest}" "${pool_path}" || return $?
+  fi
+
   for ((idx=0; idx<disk_count; idx++)); do
     target_path="$(jq -r ".disks[${idx}].transfer.target_path // \"\"" "${manifest}")"
     [[ -n "${target_path}" ]] || {
@@ -462,6 +651,9 @@ n2k_cloud_target_cutover() {
     import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")" || return $?
     n2k_cloud_target_validate_import_visible "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${import_path}" || {
       echo "Cloud import source is not visible: ${import_path}" >&2
+      if [[ "${storage}" == "file" && -n "${pool_path:-}" ]]; then
+        echo "Selected Cloud storage path: ${pool_path}" >&2
+      fi
       return 2
     }
   done
@@ -488,11 +680,19 @@ n2k_cloud_target_cutover() {
   target_path="$(jq -r '.disks[0].transfer.target_path' "${manifest}")"
   import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")"
   disk_name="$(n2k_cloud_target_disk_name "${manifest}" 0)"
-  root_import="$(n2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}")"
+  root_import="$(n2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}")" || return $?
   root_volume_id="$(jq -r '.id' <<<"${root_import}")"
-  deploy="$(n2k_cloud_target_deploy_vm_for_volume "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${root_volume_id}" "false" "${source_deploy_params}")"
+  [[ -n "${root_volume_id}" ]] || {
+    echo "Cloud root import did not return a volume id." >&2
+    return 1
+  }
+  deploy="$(n2k_cloud_target_deploy_vm_for_volume "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${root_volume_id}" "false" "${source_deploy_params}")" || return $?
   vm_id="$(jq -r '.id' <<<"${deploy}")"
-  root_volume_result="$(n2k_cloud_target_ensure_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}" "${import_path}")"
+  [[ -n "${vm_id}" ]] || {
+    echo "Cloud deployVirtualMachineForVolume did not return a VM id." >&2
+    return 1
+  }
+  root_volume_result="$(n2k_cloud_target_ensure_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}" "${import_path}")" || return $?
   root_volume_json="$(jq -c '.volume' <<<"${root_volume_result}")"
   root_volume_update_job="$(jq -r '.update.job_id // empty' <<<"${root_volume_result}")"
   root_volume_converted="$(jq -r '.converted // false' <<<"${root_volume_result}")"
@@ -509,8 +709,13 @@ n2k_cloud_target_cutover() {
     target_path="$(jq -r ".disks[${idx}].transfer.target_path" "${manifest}")"
     import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")"
     disk_name="$(n2k_cloud_target_disk_name "${manifest}" "${idx}")"
-    import_result="$(n2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}")"
-    attach_result="$(n2k_cloud_target_attach_volume "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}" "$(jq -r '.id' <<<"${import_result}")" "${idx}")"
+    import_result="$(n2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}")" || return $?
+    import_volume_id="$(jq -r '.id // empty' <<<"${import_result}")"
+    [[ -n "${import_volume_id}" ]] || {
+      echo "Cloud data disk import did not return a volume id for disk ${idx}." >&2
+      return 1
+    }
+    attach_result="$(n2k_cloud_target_attach_volume "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}" "${import_volume_id}" "${idx}")" || return $?
     data_volumes_json="$(jq -c \
       --argjson volumes "${data_volumes_json}" \
       --argjson imported "${import_result}" \
@@ -525,7 +730,7 @@ n2k_cloud_target_cutover() {
   done
 
   if [[ "${start_vm}" -eq 1 ]]; then
-    start_result="$(n2k_cloud_target_start_vm "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")"
+    start_result="$(n2k_cloud_target_start_vm "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")" || return $?
     jobs_json="$(jq -c --argjson jobs "${jobs_json}" --arg start_job "$(jq -r '.job_id' <<<"${start_result}")" '$jobs + [{kind:"start-vm",job_id:$start_job}]' <<<"{}")"
   fi
 

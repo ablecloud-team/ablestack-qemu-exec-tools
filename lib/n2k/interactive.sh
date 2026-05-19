@@ -496,6 +496,7 @@ n2k_cmd_wizard() {
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id="" cloud_disk_offering_id=""
   local cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
+  local cloud_storage_json="" cloud_storage_path="" cloud_storage_scope=""
   local split="" source_api="v3" force_v3=true
   local nfs_host="" nfs_mount_root=""
   local shutdown="guest" cutover_policy="start"
@@ -708,9 +709,16 @@ n2k_cmd_wizard() {
       cloud_choices="$(n2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" storage-pools)"
       cloud_storage_id="$(n2k_interactive_select_tsv "Cloud storage pool" "${cloud_choices}" "" "${yes}" 1)"
     }
-    if [[ "${target_storage}" == "file" && -z "${cloud_host_id}" ]]; then
-      cloud_choices="$(n2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" hosts)"
-      cloud_host_id="$(n2k_interactive_select_tsv "Cloud host for local FileSystem storage" "${cloud_choices}" "" "${yes}" 1)"
+    if [[ "${target_storage}" == "file" ]]; then
+      cloud_storage_json="$(n2k_cloud_target_storage_pool_json "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_storage_id}")" || return $?
+      [[ -n "${cloud_storage_json}" ]] || n2k_die "Cloud storage pool was not found: ${cloud_storage_id}"
+      cloud_storage_path="$(n2k_cloud_target_file_storage_path_from_pool "${cloud_storage_json}")" || return $?
+      cloud_storage_scope="$(jq -r '(.scope // "") | tostring' <<<"${cloud_storage_json}")"
+      file_root="${cloud_storage_path}"
+      if [[ "${cloud_storage_scope}" == "HOST" && -z "${cloud_host_id}" ]]; then
+        cloud_choices="$(n2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" hosts)"
+        cloud_host_id="$(n2k_interactive_select_tsv "Cloud host for local FileSystem storage" "${cloud_choices}" "" "${yes}" 1)"
+      fi
     fi
   fi
 
@@ -725,6 +733,8 @@ n2k_cmd_wizard() {
         fi
         ;;
     esac
+  elif [[ "${target_provider}" == "ablestack-cloud" && "${target_storage}" == "file" && "${dst%/}" != "${file_root%/}" ]]; then
+    n2k_die "Cloud file/qcow2 target root must match selected Cloud storage path: ${file_root%/} (got ${dst%/})"
   fi
 
   if [[ -z "${target_map_json}" && ( "${target_storage}" == "rbd" || "${target_provider}" == "ablestack-cloud" ) ]]; then

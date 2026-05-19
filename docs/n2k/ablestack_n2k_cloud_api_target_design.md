@@ -108,6 +108,21 @@ Validation result:
 - The temporary RBD image was removed after the test.
 - A 64 MiB image failed import because the Cloud disk policy requires at least 1 GiB.
 
+Cloud FileSystem and SharedMountPoint path behavior:
+
+- Cloud file-backed import does not use n2k's libvirt default path.
+- For `Filesystem`, `NetworkFilesystem`, and `SharedMountPoint` storage pools,
+  n2k must query `listStoragePools` for the selected `storageid` and use the
+  returned storage pool `path` as the qcow2 target root.
+- Target qcow2 files must be root-level files directly under that storage pool
+  path. Subdirectories are not valid for this import path because the KVM agent
+  resolves the basename against the selected pool local path.
+- The 10.10.1.x test caught the invalid old behavior: files were created under
+  `/var/lib/libvirt/images` while the selected Cloud pool path was
+  `/mnt/glue-gfs`.
+- Detailed rules are recorded in
+  `docs/n2k/ablestack_n2k_cloud_storage_path_design.md`.
+
 ## Design goals
 
 - Keep the existing libvirt target path working unchanged.
@@ -116,6 +131,8 @@ Validation result:
 - Replace only the target VM creation/start path when Cloud API mode is selected.
 - Support root disk and multiple data disks.
 - Prefer RBD primary storage first, then add file primary storage support after path behavior is verified.
+- For file-backed Cloud storage, derive the qcow2 target root from the selected
+  Cloud storage pool path instead of using host-local defaults.
 - Keep all secret material out of manifests, docs, shell history where possible, and logs.
 - Make retry and cleanup behavior explicit because Cloud API operations are asynchronous.
 
