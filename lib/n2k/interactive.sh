@@ -259,10 +259,38 @@ n2k_interactive_build_target_map_json() {
     ' <<< "${inventory_json}"
 }
 
-n2k_interactive_prepare_manifest_path() {
-  if [[ -z "${N2K_MANIFEST:-}" && -n "${N2K_WORKDIR:-}" && -f "${N2K_WORKDIR}/manifest.json" ]]; then
-    N2K_MANIFEST="${N2K_WORKDIR}/manifest.json"
+n2k_interactive_default_workdir() {
+  local vm="$1"
+  if [[ -z "${N2K_RUN_ID:-}" ]]; then
+    N2K_RUN_ID="$(n2k_generate_run_id)"
+    export N2K_RUN_ID
+  fi
+  printf '/var/lib/ablestack-n2k/%s/%s' "$(n2k_safe_name "${vm}")" "${N2K_RUN_ID}"
+}
+
+n2k_interactive_set_workdir() {
+  local workdir="$1"
+  [[ -n "${workdir}" ]] || n2k_die "workdir is required"
+  N2K_WORKDIR="${workdir}"
+  export N2K_WORKDIR
+  if [[ -z "${N2K_MANIFEST:-}" ]]; then
+    N2K_MANIFEST="${N2K_WORKDIR%/}/manifest.json"
     export N2K_MANIFEST
+  fi
+  if [[ -z "${N2K_EVENTS_LOG:-}" ]]; then
+    N2K_EVENTS_LOG="${N2K_WORKDIR%/}/events.log"
+    export N2K_EVENTS_LOG
+  fi
+}
+
+n2k_interactive_prepare_manifest_path() {
+  if [[ -z "${N2K_MANIFEST:-}" && -n "${N2K_WORKDIR:-}" ]]; then
+    N2K_MANIFEST="${N2K_WORKDIR%/}/manifest.json"
+    export N2K_MANIFEST
+  fi
+  if [[ -z "${N2K_EVENTS_LOG:-}" && -n "${N2K_WORKDIR:-}" ]]; then
+    N2K_EVENTS_LOG="${N2K_WORKDIR%/}/events.log"
+    export N2K_EVENTS_LOG
   fi
 }
 
@@ -270,6 +298,12 @@ n2k_interactive_manifest_value() {
   local path="$1" query="$2"
   [[ -f "${path}" ]] || return 1
   jq -r "${query} // empty" "${path}" 2>/dev/null
+}
+
+n2k_interactive_manifest_json_value() {
+  local path="$1" query="$2"
+  [[ -f "${path}" ]] || return 1
+  jq -c "${query} // empty" "${path}" 2>/dev/null
 }
 
 n2k_interactive_manifest_network_ids() {
@@ -314,6 +348,7 @@ n2k_interactive_apply_manifest_defaults() {
   target_storage="${target_storage:-$(n2k_interactive_manifest_value "${path}" '.target.storage.type')}"
   target_format="${target_format:-$(n2k_interactive_manifest_value "${path}" '.target.format')}"
   dst="${dst:-$(n2k_interactive_manifest_value "${path}" '.target.dst_root')}"
+  target_map_json="${target_map_json:-$(n2k_interactive_manifest_json_value "${path}" '.target.storage.map')}"
   rbd_access_mode="${rbd_access_mode:-$(n2k_interactive_manifest_value "${path}" '.target.storage.rbd_access_mode')}"
   cloud_endpoint="${cloud_endpoint:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.endpoint')}"
   cloud_zone_id="${cloud_zone_id:-$(n2k_interactive_manifest_value "${path}" '.target.cloud.zone_id')}"
@@ -334,6 +369,50 @@ n2k_interactive_apply_manifest_defaults() {
   if [[ -z "${split}" ]]; then
     split="$(n2k_interactive_default_split_from_manifest "${path}" 2>/dev/null || true)"
   fi
+}
+
+n2k_interactive_select_or_prepare_resume_workdir() {
+  if [[ "${split:-}" != "phase2" ]]; then
+    return 0
+  fi
+
+  n2k_interactive_prepare_manifest_path
+  if [[ -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]]; then
+    n2k_interactive_apply_manifest_defaults "${N2K_MANIFEST}"
+    return 0
+  fi
+
+  if [[ -z "${N2K_WORKDIR:-}" ]]; then
+    [[ "${yes}" -eq 0 ]] || n2k_die "--workdir or --manifest is required for wizard --split phase2 when using --yes"
+    n2k_interactive_has_tty || n2k_die "Existing workdir is required for wizard --split phase2 without a TTY"
+    n2k_interactive_set_workdir "$(n2k_interactive_prompt_text "Existing migration work directory" "" 1)"
+  else
+    n2k_interactive_prepare_manifest_path
+  fi
+
+  [[ -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]] || \
+    n2k_die "wizard --split phase2 requires an existing manifest in the selected workdir"
+  n2k_interactive_apply_manifest_defaults "${N2K_MANIFEST}"
+}
+
+n2k_interactive_prepare_new_workdir() {
+  local vm="$1" split="$2" default_workdir workdir
+  if [[ "${split}" == "phase2" ]]; then
+    return 0
+  fi
+  if [[ -n "${N2K_WORKDIR:-}" ]]; then
+    n2k_interactive_prepare_manifest_path
+    return 0
+  fi
+  default_workdir="$(n2k_interactive_default_workdir "${vm}")"
+  if [[ "${yes}" -eq 1 ]]; then
+    workdir="${default_workdir}"
+    printf 'Auto-selected migration work directory: %s\n' "${workdir}" >&2
+  else
+    n2k_interactive_has_tty || n2k_die "Migration work directory requires a TTY or --workdir"
+    workdir="$(n2k_interactive_prompt_text "Migration work directory" "${default_workdir}" 1)"
+  fi
+  n2k_interactive_set_workdir "${workdir}"
 }
 
 n2k_interactive_print_command() {
@@ -471,6 +550,12 @@ n2k_cmd_wizard() {
   n2k_interactive_prepare_manifest_path
   if [[ -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]]; then
     n2k_interactive_apply_manifest_defaults "${N2K_MANIFEST}"
+  elif [[ -z "${split}" && "${yes}" -eq 0 ]]; then
+    n2k_interactive_has_tty || n2k_die "--split is required without a TTY"
+    split="$(n2k_interactive_select_tsv "migration split" "$(n2k_interactive_split_choices)" "" 0 1)"
+    n2k_interactive_select_or_prepare_resume_workdir
+  elif [[ "${split:-}" == "phase2" ]]; then
+    n2k_interactive_select_or_prepare_resume_workdir
   fi
 
   [[ "${source_api}" == "v3" ]] || n2k_die "wizard currently supports --source-api v3 only"
@@ -568,6 +653,8 @@ n2k_cmd_wizard() {
   fi
   cloud_name="${cloud_name:-${target_name}}"
   cloud_display_name="${cloud_display_name:-${cloud_name}}"
+
+  n2k_interactive_prepare_new_workdir "${vm}" "${split}"
 
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     if [[ -n "${cloud_cred_file}" ]]; then

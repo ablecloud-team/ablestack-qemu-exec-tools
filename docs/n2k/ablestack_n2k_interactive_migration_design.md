@@ -137,6 +137,7 @@ The defaults are chosen to match the current tested production path:
 | Source shutdown | `guest` |
 | Cloud CPU speed | `1000` |
 | Cloud target VM name | `n2k-<source-vm>-<timestamp>` |
+| Migration work directory | `/var/lib/ablestack-n2k/<source-vm>/<run-id>` |
 | RBD pool | `rbd` |
 | File root | `/var/lib/libvirt/images` |
 | Libvirt network | `bridge` with `bridge0` |
@@ -145,6 +146,13 @@ The defaults are chosen to match the current tested production path:
 migration with a short final cutover. Operators can select `phase2` later with
 the same workdir or manifest, or select `full` for a single-command validation
 run.
+
+For a new `phase1` or `full` run, the wizard does not require operators to
+pre-create or pre-type a global `--workdir`. It generates a default work
+directory after the source VM is known, prompts for confirmation in interactive
+mode, and accepts the default automatically with `--yes`. For `phase2`, the
+wizard must resume existing state, so it prompts for an existing work directory
+when neither global `--workdir` nor global `--manifest` was provided.
 
 When a manifest exists through global `--workdir` or `--manifest`, the wizard
 loads source VM, Prism endpoint, target provider, target storage, and Cloud
