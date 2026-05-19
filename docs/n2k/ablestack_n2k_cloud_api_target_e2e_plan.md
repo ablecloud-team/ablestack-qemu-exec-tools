@@ -409,9 +409,9 @@ ablestack_n2k --json \
 | C04 | `rhel` | forced v3 | Phase1/Phase2 | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.1 local qcow2 with 3 disks | PASS |
 | C05 | `win10` | auto fallback | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.2 local qcow2 with 2 disks | PASS |
 | C06 | `centos7-bios-ide` | forced v3 | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.3 local qcow2 with BIOS/IDE | PASS |
-| N01 | synthetic | n/a | cutover validation | RBD | Any | Missing service offering blocks before import/deploy | TODO |
-| N02 | synthetic | n/a | cutover validation | RBD | Any | Missing network blocks before import/deploy | TODO |
-| N03 | synthetic | n/a | cutover validation | block/LVM | Any | Cloud target rejects block/LVM as out of scope | TODO |
+| N01 | synthetic | n/a | cutover validation | RBD | Any | Missing service offering blocks before import/deploy | PASS |
+| N02 | synthetic | n/a | cutover validation | RBD | Any | Missing network blocks before import/deploy | PASS |
+| N03 | synthetic | n/a | cutover validation | block/LVM | Any | Cloud target rejects block/LVM as out of scope | PASS |
 
 C04-C06 reuse the same source VMs as C01-C03 but change the target backend from
 RBD to host-local FileSystem/qcow2. Before starting C04, remove the previous
@@ -1108,8 +1108,24 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
+- Status: `PASS`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/negative-remaining-20260519-1535/N01-missing-service-offering`
 - Notes:
+  - Initial execution before the fix printed the expected required-config error
+    but still attempted Cloud `importVolume`/`deployVirtualMachineForVolume`.
+    This failed the "block before import/deploy" criterion and exposed a retry
+    safety bug in Cloud cutover validation.
+  - Code fix `ac97469` makes `n2k_cloud_target_cutover` explicitly return
+    after Cloud config validation failures even when the function is executed
+    inside command substitution. The fixed RPM was rebuilt and deployed to
+    `10.10.22.1`, `10.10.22.2`, and `10.10.22.3`.
+  - Retest on 2026-05-19 passed. The command exited with rc 2 and only printed
+    `Cloud target requires zone_id, service_offering_id, network_ids,
+    storage_id, and a positive numeric cpu_speed.`
+  - The retest log contained no `importVolume`, `deployVirtualMachineForVolume`,
+    Cloud async job, or curl HTTP failure output. Cloud follow-up query found
+    no `n2k-negative-*` VM or volume, and 22.1 had no `n2k-negative*` local
+    files.
 
 ### N02 - Missing network validation
 
@@ -1126,8 +1142,18 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
+- Status: `PASS`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/negative-remaining-20260519-1535/N02-missing-network`
 - Notes:
+  - Initial execution before the fix printed the expected required-config error
+    but still attempted Cloud import/deploy work, so it did not satisfy the
+    "block before import/deploy" criterion.
+  - After code fix `ac97469` was rebuilt and deployed, the retest on
+    2026-05-19 exited with rc 2 and only printed the required-config error.
+  - The retest log contained no `importVolume`, `deployVirtualMachineForVolume`,
+    Cloud async job, or curl HTTP failure output. Cloud follow-up query found
+    no `n2k-negative-*` VM or volume, and 22.1 had no `n2k-negative*` local
+    files.
 
 ### N03 - Cloud target block/LVM out-of-scope validation
 
@@ -1142,8 +1168,21 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
+- Status: `PASS`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/negative-remaining-20260519-1535/N03-block-lvm-out-of-scope`
 - Notes:
+  - Initial execution before the fix printed the expected
+    `ABLESTACK Cloud target import does not support block/LVM target paths.`
+    error but still attempted later Cloud import/deploy steps. This failed the
+    "no Cloud API modification" criterion.
+  - Code fix `ac97469` also makes `n2k_cloud_target_cutover` explicitly return
+    when `n2k_cloud_target_import_path` rejects a block/LVM target path.
+  - After rebuild and deployment, the retest on 2026-05-19 exited with rc 2 and
+    only printed the block/LVM unsupported error.
+  - The retest log contained no `importVolume`, `deployVirtualMachineForVolume`,
+    Cloud async job, or curl HTTP failure output. Cloud follow-up query found
+    no `n2k-negative-*` VM or volume, and 22.1 had no `n2k-negative*` local
+    files.
 
 ## Cleanup checklist
 
