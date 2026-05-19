@@ -372,7 +372,7 @@ ablestack_n2k --json \
 | C00 | n/a | n/a | n/a | n/a | n/a | Cloud API/resource readiness passes | PASS |
 | C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | PASS |
 | C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | PASS |
-| C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | TODO |
+| C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | PASS |
 | C04 | `rhel` | auto fallback | Full | RBD | Omitted | n2k does not block on missing disk offering; Cloud result recorded | TODO |
 | C05 | n/a | n/a | n/a | Filesystem | Provided or omitted | `listVolumesForImport` path behavior is characterized only | TODO |
 | N01 | synthetic | n/a | cutover validation | RBD | Any | Missing service offering blocks before import/deploy | TODO |
@@ -677,10 +677,48 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
-- Workdir:
-- Cloud VM ID:
+- Status: `PASS`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C03-centos7-bios-ide-full-v3-20260519-1358`
+- Cloud VM ID: `062e6d69-0bd0-4f39-9e41-81ec09fcaab1`
 - Notes:
+  - Clean precheck on 2026-05-19 confirmed source `centos7-bios-ide` was
+    `ON`, no conflicting Cloud VM existed, no C03 RBD images existed, no C03
+    Cloud volumes existed, and no matching n2k source snapshots remained.
+  - The full run was executed with `--force-v3`. Preflight recorded
+    `source_api_policy=v3`, `mode_forced=true`, and selected the runnable
+    `v3-incremental` path through PE `10.10.132.10`.
+  - Manifest contains 1 migration disk: a 100 GiB IDE disk with bus 0 / unit 1.
+    Source-derived Cloud details were recorded as `details[0].cpuNumber=1`,
+    `details[0].cpuSpeed=1000`, `details[0].memory=4096`,
+    `details[0].rootDiskController=ide`, `boottype=BIOS`, and
+    `bootmode=LEGACY`.
+  - Full migration completed with guest shutdown. Source `centos7-bios-ide`
+    reached `OFF` after ACPI shutdown. Incremental sync applied 5 regions /
+    24576 bytes. Final sync applied 56 regions / 789504 bytes.
+  - Cloud cutover succeeded. VM `062e6d69-0bd0-4f39-9e41-81ec09fcaab1`
+    (`i-2-386-VM`) is `Running` on `ablecube22-2` with service offering
+    `NoLimit-HA-WB`, `cpunumber=1`, `cpuspeed=1000`, and `memory=4096`.
+    Selected network is `L2-Network`
+    (`fa2d6e6c-0003-4ab0-92a2-e3e41c9ccbac`).
+  - Cloud volume verification passed: root volume
+    `852e27f5-0da1-451e-8842-d96ea345e266` is type `ROOT`, device 0, size
+    100 GiB, and path
+    `n2k-cloud-c03-centos7-bios-ide-v3-20260519-1358-disk0`.
+  - Host 22.2 verification passed: libvirt domain `i-2-386-VM` is `running`,
+    uses machine `pc-i440fx-9.2`, has no UEFI loader/nvram entries, and maps
+    the root disk as IDE `hda` from
+    `/dev/rbd/rbd/n2k-cloud-c03-centos7-bios-ide-v3-20260519-1358-disk0`.
+    The Cloud agent also reported the VM as `PowerOn`.
+  - Successful cutoff cleaned all three Nutanix source snapshots created by the
+    run. Follow-up PE snapshot query returned no matching n2k snapshots.
+  - Observation: PC inventory reported source `centos7-bios-ide` disk_count 2,
+    while the selected manifest exposed 1 migration disk. The v3 snapshot path
+    list contained only the 100 GiB Storage-Container vDisk, and no extra
+    manifest disk was migrated.
+  - Non-blocking host observation: 22.2 Cloud agent logged failed
+    `rbd image-cache invalidate` commands because that rbd CLI subcommand form
+    is unsupported in the host build, but the VM remained running and disk
+    attach verification passed.
 
 ### C04 - RBD Cloud target without disk offering
 
