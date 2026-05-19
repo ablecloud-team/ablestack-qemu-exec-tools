@@ -371,7 +371,7 @@ ablestack_n2k --json \
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | C00 | n/a | n/a | n/a | n/a | n/a | Cloud API/resource readiness passes | PASS |
 | C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | PASS |
-| C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | TODO |
+| C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | PASS |
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | TODO |
 | C04 | `rhel` | auto fallback | Full | RBD | Omitted | n2k does not block on missing disk offering; Cloud result recorded | TODO |
 | C05 | n/a | n/a | n/a | Filesystem | Provided or omitted | `listVolumesForImport` path behavior is characterized only | TODO |
@@ -609,10 +609,50 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
-- Workdir:
-- Cloud VM ID:
+- Status: `PASS`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C02-win10-full-auto-20260519-1348`
+- Cloud VM ID: `19a0a3ad-ed1b-4148-8ef1-2e52fce84a36`
 - Notes:
+  - Clean precheck on 2026-05-19 confirmed source `win10` was `ON`, no C02
+    RBD images existed, no C02 Cloud volumes existed, and there was no
+    conflicting Cloud VM named `win10`. An unrelated existing Cloud VM
+    `tj-win10` was left untouched.
+  - The full run was executed without `--force-v3`. Preflight detected PC v4
+    VMM/Data Protection APIs but selected the runnable `v3-incremental` path
+    through PE `10.10.132.10` because v4 changed-region/byte-source data plane
+    is not verified. This validates the PC v4 / PE v3 auto fallback route.
+  - Manifest contains 2 migration disks: a 100 GiB SCSI root disk and a 10 GiB
+    SCSI data disk. Source-derived Cloud details were recorded as
+    `details[0].cpuNumber=4`, `details[0].cpuSpeed=1000`,
+    `details[0].memory=4096`, `rootDiskController=scsi`,
+    `dataDiskController=scsi`, `boottype=UEFI`, and `bootmode=SECURE`.
+  - Full migration completed with guest shutdown. Source `win10` reached `OFF`
+    after ACPI shutdown. Final sync applied 253 regions / 2420736 bytes on
+    disk0 and 0 regions / 0 bytes on disk1.
+  - Cloud cutover succeeded. VM `19a0a3ad-ed1b-4148-8ef1-2e52fce84a36`
+    (`i-2-385-VM`) is `Running` on `ablecube22-2` with service offering
+    `NoLimit-HA-WB`, `cpunumber=4`, `cpuspeed=1000`, and `memory=4096`.
+    Selected network is `L2-Network`
+    (`fa2d6e6c-0003-4ab0-92a2-e3e41c9ccbac`).
+  - Cloud volume verification passed: root volume
+    `05d73a35-7067-40a6-bc3e-c585d8a77da8` is type `ROOT`, device 0, size
+    100 GiB, and path `n2k-cloud-c02-win10-auto-20260519-disk0`. Data volume
+    `4961bd27-eef0-4713-b34f-c65dea550d82` is type `DATADISK`, device 1, size
+    10 GiB, and path `n2k-cloud-c02-win10-auto-20260519-disk1`.
+  - Host 22.2 verification passed: libvirt domain `i-2-385-VM` is `running`
+    and uses `/dev/rbd/rbd/n2k-cloud-c02-win10-auto-20260519-disk0` and
+    `/dev/rbd/rbd/n2k-cloud-c02-win10-auto-20260519-disk1`.
+  - Successful cutoff cleaned all three Nutanix source snapshots created by the
+    run. Follow-up PE snapshot query returned no matching n2k snapshots.
+  - Observation: PC inventory reported source `win10` disk_count 3 while the
+    selected manifest exposed 2 migration disks. The extra 540672-byte
+    SelfServiceContainer snapshot file was not mapped to a manifest disk and
+    was skipped. C02 pass criteria remain based on the 2 manifest migration
+    disks.
+  - Non-blocking host observation: 22.2 Cloud agent logged failed
+    `rbd image-cache invalidate` commands because that rbd CLI subcommand form
+    is unsupported in the host build, but the VM remained running and disk
+    attach verification passed.
 
 ### C03 - CentOS BIOS/IDE full RBD Cloud target
 
