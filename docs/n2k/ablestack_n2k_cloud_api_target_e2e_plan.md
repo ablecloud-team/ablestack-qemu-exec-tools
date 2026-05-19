@@ -117,9 +117,23 @@ The import target storage is selected by `--cloud-storage-id` and is passed to
 
 Required first target backend for this plan: RBD.
 
-Filesystem primary storage can be validated after RBD passes. LVM/block is out
-of scope for the current Cloud target test pass and should be treated as a next
-version topic.
+Filesystem primary storage is host-local. A filesystem migration must create
+the qcow2 files on the same host that Cloud will use for `hostid`, and
+`--cloud-storage-id` must be the matching host-scoped primary storage.
+
+Filesystem import behavior was rechecked on 2026-05-19:
+
+- `listVolumesForImport` accepts a file placed directly under
+  `/var/lib/libvirt/images` when `path` is either the basename or the absolute
+  `/var/lib/libvirt/images/<file>.qcow2`.
+- `listVolumesForImport` rejects files in a subdirectory under
+  `/var/lib/libvirt/images` with HTTP 530.
+- Therefore C04-C06 must write target qcow2 files directly under
+  `/var/lib/libvirt/images` and must use `--target-map-json` to avoid generic
+  names such as `rhel-disk0.qcow2`.
+
+LVM/block is out of scope for the current Cloud target test pass and should be
+treated as a next version topic.
 
 ### Disk offerings
 
@@ -209,6 +223,13 @@ During cutoff:
   - `--cloud-storage-id 91cae554-3fce-3f93-89d1-cefaf9bf8122`
 - Include `--cloud-disk-offering-id 1da3a4e3-3a1a-4afd-bd28-19df910b334a` for
   the main RBD pass, then omit it in the compatibility case.
+- For FileSystem local storage:
+  - Run n2k on the same ABLESTACK host selected by `--cloud-host-id`.
+  - Use the matching host-scoped `--cloud-storage-id`.
+  - Use `--target-storage file` and `--target-format qcow2`.
+  - Use `--dst /var/lib/libvirt/images`.
+  - Use `--target-map-json` so every target file is created directly under
+    `/var/lib/libvirt/images` with a case-specific basename.
 
 After each case:
 
@@ -258,6 +279,7 @@ export CLOUD_SERVICE_OFFERING_ID='<select-before-test>'
 
 export N2K_BASE_WORKDIR='/var/lib/ablestack/n2k-e2e/cloud-target'
 export N2K_RBD_POOL='rbd'
+export N2K_FILE_DST_ROOT='/var/lib/libvirt/images'
 ```
 
 ## Command templates
@@ -373,15 +395,47 @@ ablestack_n2k --json \
 | C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | PASS |
 | C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | PASS |
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | PASS |
-| C04 | `rhel` | auto fallback | Full | RBD | Omitted | n2k does not block on missing disk offering; Cloud result recorded | TODO |
-| C05 | n/a | n/a | n/a | Filesystem | Provided or omitted | `listVolumesForImport` path behavior is characterized only | TODO |
+| C04 | `rhel` | forced v3 | Phase1/Phase2 | FileSystem/qcow2 | Provided | Cloud VM starts from 22.1 local qcow2 with 3 disks | TODO |
+| C05 | `win10` | auto fallback | Full | FileSystem/qcow2 | Provided | Cloud VM starts from 22.2 local qcow2 with 2 disks | TODO |
+| C06 | `centos7-bios-ide` | forced v3 | Full | FileSystem/qcow2 | Provided | Cloud VM starts from 22.3 local qcow2 with BIOS/IDE | TODO |
 | N01 | synthetic | n/a | cutover validation | RBD | Any | Missing service offering blocks before import/deploy | TODO |
 | N02 | synthetic | n/a | cutover validation | RBD | Any | Missing network blocks before import/deploy | TODO |
 | N03 | synthetic | n/a | cutover validation | block/LVM | Any | Cloud target rejects block/LVM as out of scope | TODO |
 
-Do not run C05 as a full migration until the filesystem import path is proven
-against the matching host-local primary storage. LVM/block Cloud target testing
-is explicitly out of scope for this version.
+C04-C06 reuse the same source VMs as C01-C03 but change the target backend from
+RBD to host-local FileSystem/qcow2. Before starting C04, remove the previous
+C01-C03 Cloud target VMs or otherwise ensure the source VM and migrated target
+VM are not running on the same network at the same time. LVM/block Cloud target
+testing is explicitly out of scope for this version.
+
+## FileSystem readiness snapshot
+
+Checked on 2026-05-19:
+
+- Cloud APIs required for local storage tests are exposed:
+  `listHosts`, `listStoragePools`, `listVolumesForImport`, `importVolume`, and
+  `deployVirtualMachineForVolume`.
+- Host-scoped FileSystem primary storage pools are `Up` for all three
+  ABLESTACK hosts.
+- Local storage root `/var/lib/libvirt/images` is present on all three hosts.
+  Available capacity at check time was approximately 247 GiB on 22.1, 301 GiB
+  on 22.2, and 234 GiB on 22.3.
+- Harmless 1 MiB qcow2 probes placed directly under `/var/lib/libvirt/images`
+  were visible through `listVolumesForImport` on 22.1, 22.2, and 22.3 when
+  queried by basename or absolute path.
+- A qcow2 probe placed in a subdirectory under `/var/lib/libvirt/images` was
+  rejected by `listVolumesForImport` with HTTP 530, so C04-C06 target files
+  must be root-level files, not files under a case directory.
+- No C04-C06 Cloud volumes or root-level C04-C06 local qcow2 files were present
+  at check time.
+- n2k preflight passed for all three FileSystem host/storage pairs:
+  C04 on 22.1, C05 on 22.2, and C06 on 22.3. Each preflight selected
+  `target.selected_storage=file`, `target.requested_format=qcow2`, and
+  `selected_mode=v3-incremental`.
+- The previous C01-C03 Cloud target VMs were still running at check time:
+  `rhel` / `i-2-384-VM`, `win10` / `i-2-385-VM`, and
+  `centos7-bios-ide` / `i-2-386-VM`. Clean these before starting C04-C06, then
+  power the corresponding Nutanix source VM back on.
 
 ## Case detail
 
@@ -720,56 +774,182 @@ Result:
     is unsupported in the host build, but the VM remained running and disk
     attach verification passed.
 
-### C04 - RBD Cloud target without disk offering
+### C04 - RHEL Phase1/Phase2 FileSystem Cloud target
 
 Objective:
 
-- Confirm n2k treats disk offering as optional.
-- Distinguish n2k validation behavior from Cloud policy behavior.
+- Validate the split migration flow with Cloud API cutoff on host-local
+  FileSystem/qcow2 storage.
+- Validate multi-disk import and attach for 3 disks.
+- Validate source snapshot cleanup after successful cutoff.
+
+Target placement:
+
+| Item | Value |
+| --- | --- |
+| Execution host | `10.10.22.1` / `ablecube22-1` |
+| Cloud host ID | `34ada5ae-05cd-42f2-92a7-71f462da6a2e` |
+| Cloud storage ID | `4e929594-99f4-4846-add9-bdf49cf71587` |
+| Cloud storage name | `ablecube22-1-local-4e929594` |
+| Cloud storage path | `/var/lib/libvirt/images` |
+
+Target map:
+
+```json
+{
+  "ae29c318-5dca-44b3-93c6-f3f3714177ec": "/var/lib/libvirt/images/n2k-cloud-c04-rhel-fs-disk0.qcow2",
+  "afe42ac0-bb0a-4022-b9cf-3a5409eb21fb": "/var/lib/libvirt/images/n2k-cloud-c04-rhel-fs-disk1.qcow2",
+  "ee5d7f96-7d87-46e4-996c-efcc4d7d8dde": "/var/lib/libvirt/images/n2k-cloud-c04-rhel-fs-disk2.qcow2"
+}
+```
 
 Execution:
 
-1. Set `VM='rhel'`.
-2. Set `RBD_PREFIX='n2k-cloud-c04-rhel-no-diskoffering'`.
-3. Run full cutoff command with the `--cloud-disk-offering-id` option removed.
+1. Remove or stop the previous C01 Cloud target VM before powering on source
+   `rhel`.
+2. Set `VM='rhel'`.
+3. Set `WORKDIR='/var/lib/ablestack/n2k-e2e/cloud-target/C04-rhel-fs-phase12-<timestamp>'`.
+4. Run Phase1 on `10.10.22.1` with `--force-v3`, `--target-storage file`,
+   `--target-format qcow2`, `--dst /var/lib/libvirt/images`,
+   `--cloud-storage-id 4e929594-99f4-4846-add9-bdf49cf71587`,
+   `--cloud-host-id 34ada5ae-05cd-42f2-92a7-71f462da6a2e`, and the target map
+   above.
+5. Run Phase2 with `--shutdown guest --apply --start --force-v3` and the same
+   Cloud/FileSystem options.
 
 Pass criteria:
 
-- n2k does not fail local validation only because disk offering is omitted.
-- If Cloud accepts the import, continue to boot validation.
-- If Cloud rejects the import, record the Cloud error and classify the case as
-  Cloud policy `BLOCKED`, not n2k validation failure.
+- Manifest has 3 migration disks.
+- All target qcow2 files are directly under `/var/lib/libvirt/images` on
+  `10.10.22.1`.
+- `runtime.cloud.deployment_properties` includes CPU, memory, boot, and SCSI
+  controller properties derived from the source manifest.
+- Cloud VM is running on `ablecube22-1`.
+- Cloud VM has 3 volumes and each volume path matches the target map basename.
+- Source `rhel` is `OFF` after successful cutoff.
+- Nutanix `n2k-*` source snapshots for this run are removed.
 
 Result:
 
 - Status: `TODO`
 - Workdir:
 - Cloud VM ID:
-- Cloud error, if any:
 - Notes:
 
-### C05 - Filesystem primary storage path characterization
+### C05 - Win10 full FileSystem Cloud target with auto fallback
 
 Objective:
 
-- Characterize ABLESTACK Cloud `listVolumesForImport` path behavior for
-  Filesystem primary storage.
-- Do not run a full migration until path behavior is proven.
+- Validate the auto source route with Cloud API cutoff on host-local
+  FileSystem/qcow2 storage.
+- Validate Windows multi-disk import and attach for 2 disks.
 
-Execution outline:
+Target placement:
 
-1. Select the host-local primary storage matching the target host.
-2. Create or reuse a harmless test qcow2/raw image under the storage path.
-3. Call `listVolumesForImport` through n2k Cloud helper or a protected API
-   probe.
-4. Record whether Cloud expects basename, relative path, or absolute path.
-5. Delete the harmless test image.
+| Item | Value |
+| --- | --- |
+| Execution host | `10.10.22.2` / `ablecube22-2` |
+| Cloud host ID | `56a141bf-4119-4bae-8599-ce8583a5b1e6` |
+| Cloud storage ID | `aa5cf314-1246-42b5-9783-4f1a3c1e1d19` |
+| Cloud storage name | `ablecube22-2-local-aa5cf314` |
+| Cloud storage path | `/var/lib/libvirt/images` |
+
+Target map:
+
+```json
+{
+  "de061be4-fe34-412e-931b-b5163b03d81c": "/var/lib/libvirt/images/n2k-cloud-c05-win10-fs-disk0.qcow2",
+  "ee1cbd9e-6692-4ec5-9131-d54bce8a4bf9": "/var/lib/libvirt/images/n2k-cloud-c05-win10-fs-disk1.qcow2"
+}
+```
+
+Execution:
+
+1. Remove or stop the previous C02 Cloud target VM before powering on source
+   `win10`.
+2. Set `VM='win10'`.
+3. Set `WORKDIR='/var/lib/ablestack/n2k-e2e/cloud-target/C05-win10-fs-full-<timestamp>'`.
+4. Run full cutoff on `10.10.22.2` without `--force-v3`, using
+   `--target-storage file`, `--target-format qcow2`,
+   `--dst /var/lib/libvirt/images`,
+   `--cloud-storage-id aa5cf314-1246-42b5-9783-4f1a3c1e1d19`,
+   `--cloud-host-id 56a141bf-4119-4bae-8599-ce8583a5b1e6`, and the target map
+   above.
+
+Pass criteria:
+
+- Plan/preflight records selected v3 fallback or another explicitly validated
+  runnable source path.
+- Manifest has 2 migration disks.
+- Both target qcow2 files are directly under `/var/lib/libvirt/images` on
+  `10.10.22.2`.
+- Cloud VM is running on `ablecube22-2`.
+- Cloud VM has 2 volumes and each volume path matches the target map basename.
+- Source `win10` is `OFF` after successful cutoff.
+- Source snapshots are cleaned up.
 
 Result:
 
 - Status: `TODO`
-- Storage ID:
-- Accepted path format:
+- Workdir:
+- Cloud VM ID:
+- Notes:
+
+### C06 - CentOS BIOS/IDE full FileSystem Cloud target
+
+Objective:
+
+- Validate one-disk BIOS/IDE compatibility through Cloud API deploy on
+  host-local FileSystem/qcow2 storage.
+
+Target placement:
+
+| Item | Value |
+| --- | --- |
+| Execution host | `10.10.22.3` / `ablecube22-3` |
+| Cloud host ID | `0132ec7b-055b-44e2-b8a8-62bcc58c81e4` |
+| Cloud storage ID | `a872e82e-3f49-410e-a743-25ea04484fd1` |
+| Cloud storage name | `ablecube22-3-local-a872e82e` |
+| Cloud storage path | `/var/lib/libvirt/images` |
+
+Target map:
+
+```json
+{
+  "ea40360c-6263-4bdb-9630-0925bfcc660e": "/var/lib/libvirt/images/n2k-cloud-c06-centos7-bios-ide-fs-disk0.qcow2"
+}
+```
+
+Execution:
+
+1. Remove or stop the previous C03 Cloud target VM before powering on source
+   `centos7-bios-ide`.
+2. Set `VM='centos7-bios-ide'`.
+3. Set `WORKDIR='/var/lib/ablestack/n2k-e2e/cloud-target/C06-centos7-bios-ide-fs-full-<timestamp>'`.
+4. Run full cutoff on `10.10.22.3` with `--force-v3`,
+   `--target-storage file`, `--target-format qcow2`,
+   `--dst /var/lib/libvirt/images`,
+   `--cloud-storage-id a872e82e-3f49-410e-a743-25ea04484fd1`,
+   `--cloud-host-id 0132ec7b-055b-44e2-b8a8-62bcc58c81e4`, and the target map
+   above.
+
+Pass criteria:
+
+- Manifest has 1 migration disk.
+- Target qcow2 file is directly under `/var/lib/libvirt/images` on
+  `10.10.22.3`.
+- `runtime.cloud.deployment_properties` preserves BIOS/IDE-compatible boot and
+  root disk controller settings where present.
+- Cloud VM is running on `ablecube22-3`.
+- Cloud VM has 1 ROOT volume and its path matches the target map basename.
+- Guest reaches bootable state through libvirt/Cloud VM state evidence.
+- Source snapshots are cleaned up.
+
+Result:
+
+- Status: `TODO`
+- Workdir:
+- Cloud VM ID:
 - Notes:
 
 ### N01 - Missing service offering validation
