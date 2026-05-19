@@ -131,6 +131,9 @@ Filesystem import behavior was rechecked on 2026-05-19:
 - Therefore C04-C06 must write target qcow2 files directly under
   `/var/lib/libvirt/images` and must use `--target-map-json` to avoid generic
   names such as `rhel-disk0.qcow2`.
+- For host-local FileSystem imports, omit `--cloud-disk-offering-id` unless the
+  offering is known to be local-storage compatible. The RBD-tagged `Custom1`
+  offering is rejected by Cloud for local storage imports.
 
 LVM/block is out of scope for the current Cloud target test pass and should be
 treated as a next version topic.
@@ -142,7 +145,7 @@ The disk offering is selected by `--cloud-disk-offering-id` and is passed to
 
 | Name | ID | Notes |
 | --- | --- | --- |
-| `Custom1` | `1da3a4e3-3a1a-4afd-bd28-19df910b334a` | Customized, tag `rbd` |
+| `Custom1` | `1da3a4e3-3a1a-4afd-bd28-19df910b334a` | Customized, tag `rbd`; use for RBD tests only |
 | `FTCTL Internal Root Disk` | `bf9b2567-abe0-420b-bdba-44c8779232f0` | Internal candidate, not preferred for n2k |
 | `FTCTL Internal Data Disk` | `20de1c04-f650-4900-af23-34567bfe2fa9` | Internal candidate, not preferred for n2k |
 
@@ -150,6 +153,12 @@ Disk offering is intentionally optional in n2k. One negative/compatibility case
 must omit `--cloud-disk-offering-id` and verify that n2k does not block before
 the Cloud API call. If Cloud rejects the import due policy, record that as a
 Cloud policy result rather than an n2k argument validation failure.
+
+For C04-C06 FileSystem/local storage cases, the disk offering must be omitted.
+On 2026-05-19, passing `Custom1` to the 22.1 local storage pool failed with
+Cloud error text indicating that the disk offering should use local storage.
+When omitted, Cloud selected `Default Custom Offering for Volume Import - Local
+Storage` for the imported local qcow2 root volume.
 
 ### Optional host placement
 
@@ -230,6 +239,8 @@ During cutoff:
   - Use `--dst /var/lib/libvirt/images`.
   - Use `--target-map-json` so every target file is created directly under
     `/var/lib/libvirt/images` with a case-specific basename.
+  - Omit `--cloud-disk-offering-id` unless a local-storage-compatible offering
+    has been explicitly selected.
 
 After each case:
 
@@ -395,9 +406,9 @@ ablestack_n2k --json \
 | C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | PASS |
 | C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | PASS |
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | PASS |
-| C04 | `rhel` | forced v3 | Phase1/Phase2 | FileSystem/qcow2 | Provided | Cloud VM starts from 22.1 local qcow2 with 3 disks | TODO |
-| C05 | `win10` | auto fallback | Full | FileSystem/qcow2 | Provided | Cloud VM starts from 22.2 local qcow2 with 2 disks | TODO |
-| C06 | `centos7-bios-ide` | forced v3 | Full | FileSystem/qcow2 | Provided | Cloud VM starts from 22.3 local qcow2 with BIOS/IDE | TODO |
+| C04 | `rhel` | forced v3 | Phase1/Phase2 | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.1 local qcow2 with 3 disks | PASS |
+| C05 | `win10` | auto fallback | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.2 local qcow2 with 2 disks | TODO |
+| C06 | `centos7-bios-ide` | forced v3 | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.3 local qcow2 with BIOS/IDE | TODO |
 | N01 | synthetic | n/a | cutover validation | RBD | Any | Missing service offering blocks before import/deploy | TODO |
 | N02 | synthetic | n/a | cutover validation | RBD | Any | Missing network blocks before import/deploy | TODO |
 | N03 | synthetic | n/a | cutover validation | block/LVM | Any | Cloud target rejects block/LVM as out of scope | TODO |
@@ -831,10 +842,60 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
-- Workdir:
-- Cloud VM ID:
+- Status: `PASS`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C04-rhel-fs-phase12-20260519-1428`
+- Cloud VM ID: `a231e17e-c365-49d2-8e64-9918f0a8f68b`
 - Notes:
+  - The previous RBD C01 Cloud target VM named `rhel` was destroyed and expunged
+    before C04 so the migrated Cloud VM would not collide by name or run on the
+    same network as the source. C04 used Cloud name/display name
+    `n2k-c04-rhel-fs`.
+  - Source `rhel` was powered on before Phase1 and exposed 3 migration disks.
+  - Phase1 with `--force-v3`, FileSystem/qcow2 target storage, host
+    `ablecube22-1`, and the C04 target map completed. Base snapshot
+    `73967551-ae08-4241-a2c5-a6150a563b4d` and incremental snapshot
+    `0a005319-2e93-48aa-a08a-435bd0ce6c7b` were created. Phase1 incremental
+    changed regions were 36 regions / 466944 bytes on disk0 and 0 on disk1/disk2.
+  - Phase1 produced root-level local files
+    `n2k-cloud-c04-rhel-fs-disk0.qcow2`,
+    `n2k-cloud-c04-rhel-fs-disk1.qcow2`, and
+    `n2k-cloud-c04-rhel-fs-disk2.qcow2` directly under
+    `/var/lib/libvirt/images` on 22.1.
+  - The first Phase2 attempt intentionally used the earlier RBD-style `Custom1`
+    disk offering and failed at Cloud `importVolume` because that offering is
+    not local-storage compatible. This was treated as a procedural parameter
+    error, not a data sync failure. The runtime manifest was corrected to omit
+    the disk offering before retry.
+  - Observation for follow-up: the failed Phase2 attempt had already recorded
+    `phases.cutover.done=true` even though Cloud apply did not complete. The
+    test manifest checkpoint was reset to retry only the cutover path. This
+    checkpoint behavior should be hardened before relying on automatic retry
+    after cutover API failures.
+  - Phase2 final sync had completed before the first Cloud import failure.
+    Incremental snapshot `be1f7cde-63e6-4804-9846-19fc61b565a1` applied
+    9 regions / 94208 bytes. Guest shutdown via ACPI completed and source
+    `rhel` reached `OFF`. Final snapshot
+    `f62d98f4-fc88-4036-9e9b-019b0b4520e1` applied 43 regions / 545280 bytes
+    across all three disks.
+  - Retrying the cutover without `--cloud-disk-offering-id` passed. Cloud
+    imported the root qcow2 as volume
+    `2d7778cc-b7ad-497a-820a-47406805c48b`, converted it to `ROOT`, deployed
+    VM `a231e17e-c365-49d2-8e64-9918f0a8f68b`, attached data volumes
+    `ad93fb6c-9307-4176-8647-9d9f5617fc77` and
+    `c7b2279b-a233-4b1e-99b7-dffd51b92b0b`, and started the VM.
+  - Cloud verification passed: VM `n2k-c04-rhel-fs` / `i-2-387-VM` is
+    `Running` on `ablecube22-1`. VM details include `cpuNumber=1`,
+    `cpuSpeed=1000`, `memory=4096`, `rootDiskController=scsi`,
+    `dataDiskController=scsi`, and `UEFI=SECURE`.
+  - Cloud volume verification passed: one `ROOT` volume and two `DATADISK`
+    volumes are `Ready` on `ablecube22-1-local-4e929594`, with paths matching
+    the C04 target map basenames and device IDs 0, 1, and 2.
+  - Host 22.1 verification passed: libvirt domain `i-2-387-VM` is `running`,
+    maps `sda`, `sdb`, and `sdc` to the three C04 qcow2 files under
+    `/var/lib/libvirt/images`, and uses `bridge0` for its NIC.
+  - Successful cleanup removed the four Nutanix source snapshots created by
+    the run. Follow-up PE snapshot query returned no matching n2k snapshots.
+    Source `rhel` remained `OFF` after cutoff.
 
 ### C05 - Win10 full FileSystem Cloud target with auto fallback
 
