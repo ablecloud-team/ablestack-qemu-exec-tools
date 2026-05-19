@@ -440,7 +440,7 @@ n2k_cloud_target_cutover() {
   api_key="$(jq -r '.api_key // ""' <<<"${runtime}")"
   secret_key="$(jq -r '.secret_key // ""' <<<"${runtime}")"
   cfg="$(n2k_cloud_target_required_config_json "${manifest}")"
-  n2k_cloud_target_validate_config "${manifest}" "${runtime}"
+  n2k_cloud_target_validate_config "${manifest}" "${runtime}" || return $?
 
   storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
   storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
@@ -459,7 +459,7 @@ n2k_cloud_target_cutover() {
       echo "Disk ${idx} has no target path." >&2
       return 2
     }
-    import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")"
+    import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")" || return $?
     n2k_cloud_target_validate_import_visible "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${import_path}" || {
       echo "Cloud import source is not visible: ${import_path}" >&2
       return 2
