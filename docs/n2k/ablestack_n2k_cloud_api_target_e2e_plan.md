@@ -370,7 +370,7 @@ ablestack_n2k --json \
 | ID | VM | Source mode | Split | Target backend | Disk offering | Expected result | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | C00 | n/a | n/a | n/a | n/a | n/a | Cloud API/resource readiness passes | PASS |
-| C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | RECOVERED |
+| C01 | `rhel` | forced v3 | Phase1/Phase2 | RBD | Provided | Cloud VM starts, 3 disks imported/attached | PASS |
 | C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | TODO |
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | TODO |
 | C04 | `rhel` | auto fallback | Full | RBD | Omitted | n2k does not block on missing disk offering; Cloud result recorded | TODO |
@@ -451,11 +451,56 @@ Pass criteria:
 
 Result:
 
-- Status: `RECOVERED`
+- Status: `PASS`
 - Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-postfix-20260519`
-- Latest retest workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-cpuspeed-20260519`
+- Latest failed retest workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-cpuspeed-20260519`
+- Latest clean retest workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-clean-20260519-1325`
 - Latest failed Cloud VM ID: `4cdaf3d0-1e28-48ad-9d84-348fbd7e3313`
+- Latest clean Cloud VM ID: `a88eeff4-d45d-4e18-9720-0283933b0b39`
 - Notes:
+  - Clean revalidation on 2026-05-19 passed after the root-volume path
+    preservation fix was built and deployed to 10.10.22.1/2/3. Previous
+    recovered Cloud VM, data volumes, stale C01 RBD images, and source
+    snapshots were cleaned before the run. Source `rhel` was powered back on
+    before Phase1.
+  - Clean Phase1 completed with base snapshot
+    `7fe5b0ec-96a4-4899-9b6f-93f1ce09f2ee` and incremental snapshot
+    `fc281510-2590-473a-9931-3a5b82fd68b3`. Disk sync covered one 100 GiB
+    root disk and two 10 GiB data disks. Phase1 incremental changed regions
+    were 24 regions / 262144 bytes on disk0 and 0 on disk1/disk2.
+  - Clean Phase2 with `--shutdown guest --apply --start --force-v3` completed.
+    Phase2 incremental snapshot `4afaac21-656e-4ae1-8b94-daf41ab227a2`
+    applied 7 regions / 86016 bytes. Guest shutdown via ACPI completed and
+    source `rhel` reached `OFF`. Final snapshot
+    `76e75a39-7948-4aed-98c9-51fdb6a9123d` applied 42 regions / 541184 bytes
+    across all three disks.
+  - Cloud deploy succeeded. VM `a88eeff4-d45d-4e18-9720-0283933b0b39`
+    (`i-2-384-VM`) is `Running` on `ablecube22-3`. Service offering is
+    `NoLimit-HA-WB`; effective shape is `cpuNumber=1`, `cpuSpeed=1000`, and
+    `memory=4096`.
+  - Cloud volume verification passed: root volume
+    `c3720eec-b1d7-4752-8f15-3942ae0de034` is type `ROOT`, device 0, size
+    100 GiB, and path `n2k-cloud-c01-rhel-clean-20260519-disk0`. Data volumes
+    `2f4b5ea6-66b0-4a07-a450-cc8e681fb3c5` and
+    `da5be1d8-95b1-4a68-93b6-f59aa8598299` are type `DATADISK`, devices 1 and
+    2, size 10 GiB each, with paths
+    `n2k-cloud-c01-rhel-clean-20260519-disk1` and
+    `n2k-cloud-c01-rhel-clean-20260519-disk2`.
+  - Host 22.3 verification passed: libvirt domain `i-2-384-VM` is `running`
+    and uses `/dev/rbd/rbd/n2k-cloud-c01-rhel-clean-20260519-disk0`,
+    `/dev/rbd/rbd/n2k-cloud-c01-rhel-clean-20260519-disk1`, and
+    `/dev/rbd/rbd/n2k-cloud-c01-rhel-clean-20260519-disk2`.
+  - Successful cutoff cleaned all four Nutanix source snapshots created by the
+    run. Follow-up PE snapshot query returned no matching n2k snapshots.
+  - Observation: PC v3 inventory reported source `rhel` disk_count 4 while the
+    PE-selected manifest exposed 3 migration disks. The extra tiny
+    SelfServiceContainer snapshot file was not mapped to a manifest disk and
+    was skipped. C01 pass criteria remain based on the 3 manifest migration
+    disks.
+  - Non-blocking host observation: 22.3 Cloud agent logged a failed
+    `rbd image-cache invalidate` command because that rbd CLI subcommand form
+    is unsupported in the host build, but the VM remained running and disk
+    attach verification passed.
   - Retry precheck confirmed PC and PE API reachability, no conflicting Cloud
     VM, no stale C01 RBD image, and source `rhel` in `ON` state with 3 disks.
   - Phase1 passed. Base and incremental v3 VM snapshots were created, RBD
