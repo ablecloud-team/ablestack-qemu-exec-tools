@@ -183,6 +183,7 @@ Add target provider options to `preflight`, `plan`, `init`, `run`, and `cutover`
 --cloud-cred-file <file>           Protected credential file
 --cloud-zone-id <uuid>             Target zone
 --cloud-service-offering-id <uuid> Target compute offering
+--cloud-cpu-speed <mhz>            Dynamic offering CPU speed detail, default 1000
 --cloud-network-id <uuid>          Repeatable network ID option
 --cloud-storage-id <uuid>          Target primary storage pool
 --cloud-disk-offering-id <uuid>    Disk offering used by importVolume
@@ -314,7 +315,9 @@ Cloud API cutover replaces libvirt XML generation.
 11. Mark cutover phase done.
 ```
 
-Root disk deployment uses `deployVirtualMachineForVolume`, not the normal `deployVirtualMachine`. The imported root volume is initially a `DATADISK` from `importVolume`, and the Cloud implementation converts it into the root device during VM creation.
+Root disk deployment uses `deployVirtualMachineForVolume`, not the normal `deployVirtualMachine`. The imported root volume is initially a `DATADISK` from `importVolume`, and the Cloud implementation converts it into the root device during VM creation. n2k verifies this after deploy with `listVolumes(id=<root_volume_id>)`; the flow must fail before data-disk attach/start if the imported root volume is not converted to `ROOT` and attached to the new VM.
+
+The ABLESTACK Cloud API currently exposed by `ablestack-diplo` does not publish a `templateid` parameter for `deployVirtualMachineForVolume`. The management-server implementation creates and uses the KVM import dummy template named `kvm-default-vm-import-dummy-template` internally, then assigns that template ID to the imported root volume before VM creation. Therefore n2k does not pass `templateid`; if a future Cloud build exposes the parameter, n2k can add a `--cloud-template-id` option without changing the rest of the import flow.
 
 ## Disk mapping
 
@@ -367,6 +370,7 @@ Implemented automatic mapping:
 | Source inventory field | Cloud API parameter |
 | --- | --- |
 | `.source.vm.cpu` | `details[0].cpuNumber` |
+| `.target.cloud.cpu_speed`, default `1000` | `details[0].cpuSpeed` |
 | `.source.vm.memory_mb` | `details[0].memory` |
 | `.source.vm.firmware == "efi"` | `boottype=UEFI` |
 | `.source.vm.firmware == "bios"` | `boottype=BIOS` |

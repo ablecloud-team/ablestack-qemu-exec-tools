@@ -155,7 +155,7 @@ n2k_cmd_init() {
   local target_provider="libvirt"
   local cloud_endpoint="" cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids=""
   local cloud_storage_id="" cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id=""
-  local cloud_project_id="" cloud_name="" cloud_display_name=""
+  local cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local force_v3=false
 
   while [[ $# -gt 0 ]]; do
@@ -193,6 +193,7 @@ n2k_cmd_init() {
       --cloud-project-id) cloud_project_id="${2:-}"; shift 2 ;;
       --cloud-name) cloud_name="${2:-}"; shift 2 ;;
       --cloud-display-name) cloud_display_name="${2:-}"; shift 2 ;;
+      --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; shift 2 ;;
       *) n2k_die "Unknown option for init: $1" ;;
     esac
   done
@@ -244,7 +245,7 @@ n2k_cmd_init() {
   fi
 
   local cloud_config_json
-  cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}")"
+  cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
   n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}"
   n2k_event INFO "init" "" "manifest_created" "{\"manifest\":\"${N2K_MANIFEST}\"}"
   if [[ -n "${inventory_json}" ]]; then
@@ -323,7 +324,7 @@ n2k_build_preflight_result_from_args() {
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
   local cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id=""
-  local cloud_name="" cloud_display_name=""
+  local cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local source_api_policy="auto" force_v3=false
   local parsed_bool=""
 
@@ -355,6 +356,7 @@ n2k_build_preflight_result_from_args() {
       --cloud-project-id) cloud_project_id="${2:-}"; shift 2 ;;
       --cloud-name) cloud_name="${2:-}"; shift 2 ;;
       --cloud-display-name) cloud_display_name="${2:-}"; shift 2 ;;
+      --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; shift 2 ;;
       --source-api)
         source_api_policy="${2:-}"
         case "${source_api_policy}" in
@@ -450,7 +452,7 @@ n2k_build_preflight_result_from_args() {
 
   local capability_json deps_json probed_json cloud_config_json cloud_probe_json cloud_runtime_json cloud_endpoint_runtime cloud_api_runtime cloud_secret_runtime
   capability_json="$(n2k_load_json_arg "${capability_json_arg}")"
-  cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}")"
+  cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
   if [[ "${probe_legacy}" == "true" || "${capability_json}" == "{}" && ( -n "${cred_file}" || -n "${username}" || -n "${password}" ) ]]; then
     if [[ -n "${cred_file}" ]]; then
       n2k_nutanix_load_cred_file "${cred_file}"
@@ -711,7 +713,7 @@ n2k_cmd_run() {
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
   local cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id=""
-  local cloud_name="" cloud_display_name="" cloud_config_arg_set=0
+  local cloud_name="" cloud_display_name="" cloud_cpu_speed="" cloud_config_arg_set=0
   local split="${N2K_RUN_DEFAULT_SPLIT:-full}" source_api="v3"
   local nfs_host="" nfs_mount_root="" source_map_from_v3_nfs=true source_endpoint=""
   local source_api_arg_set=0 force_v3=false
@@ -762,6 +764,7 @@ n2k_cmd_run() {
       --cloud-project-id) cloud_project_id="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
       --cloud-name) cloud_name="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
       --cloud-display-name) cloud_display_name="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
+      --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
       --split) split="${2:-}"; shift 2 ;;
       --source-api) source_api="${2:-}"; source_api_arg_set=1; shift 2 ;;
       --force-v3|--force-v3-incremental) force_v3=true; shift 1 ;;
@@ -884,6 +887,7 @@ n2k_cmd_run() {
     [[ -n "${cloud_project_id}" ]] && init_args+=(--cloud-project-id "${cloud_project_id}")
     [[ -n "${cloud_name}" ]] && init_args+=(--cloud-name "${cloud_name}")
     [[ -n "${cloud_display_name}" ]] && init_args+=(--cloud-display-name "${cloud_display_name}")
+    [[ -n "${cloud_cpu_speed}" ]] && init_args+=(--cloud-cpu-speed "${cloud_cpu_speed}")
     init_args+=("${credential_args[@]}")
     n2k_cmd_init "${init_args[@]}"
   else
@@ -892,7 +896,7 @@ n2k_cmd_run() {
 
   if [[ "${target_provider_arg_set}" -eq 1 || "${cloud_config_arg_set}" -eq 1 ]]; then
     local cloud_config_json
-    cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}")"
+    cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
     n2k_cloud_target_apply_manifest_config "${N2K_MANIFEST}" "$(if [[ "${target_provider_arg_set}" -eq 1 ]]; then printf '%s' "${target_provider}"; else printf ''; fi)" "${cloud_config_json}"
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"
@@ -939,6 +943,7 @@ n2k_cmd_run() {
     [[ -n "${cloud_project_id}" ]] && plan_args+=(--cloud-project-id "${cloud_project_id}")
     [[ -n "${cloud_name}" ]] && plan_args+=(--cloud-name "${cloud_name}")
     [[ -n "${cloud_display_name}" ]] && plan_args+=(--cloud-display-name "${cloud_display_name}")
+    [[ -n "${cloud_cpu_speed}" ]] && plan_args+=(--cloud-cpu-speed "${cloud_cpu_speed}")
     [[ "${force_v3}" == "true" ]] && plan_args+=(--force-v3)
     [[ "${allow_experimental}" == "true" ]] && plan_args+=(--allow-experimental)
     [[ "${probe_legacy}" == "true" ]] && plan_args+=(--probe-legacy-cbt)
@@ -1096,6 +1101,7 @@ n2k_cmd_run() {
   [[ -n "${cloud_project_id}" ]] && cutover_args+=(--cloud-project-id "${cloud_project_id}")
   [[ -n "${cloud_name}" ]] && cutover_args+=(--cloud-name "${cloud_name}")
   [[ -n "${cloud_display_name}" ]] && cutover_args+=(--cloud-display-name "${cloud_display_name}")
+  [[ -n "${cloud_cpu_speed}" ]] && cutover_args+=(--cloud-cpu-speed "${cloud_cpu_speed}")
   cutover_args+=(--shutdown "${shutdown}")
 
   if ! n2k_run_manifest_phase_done "${N2K_MANIFEST}" "cutover"; then
@@ -1662,7 +1668,7 @@ n2k_cmd_cutover() {
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
   local cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id=""
-  local cloud_name="" cloud_display_name="" cloud_config_arg_set=0
+  local cloud_name="" cloud_display_name="" cloud_cpu_speed="" cloud_config_arg_set=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1694,6 +1700,7 @@ n2k_cmd_cutover() {
       --cloud-project-id) cloud_project_id="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
       --cloud-name) cloud_name="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
       --cloud-display-name) cloud_display_name="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
+      --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; cloud_config_arg_set=1; shift 2 ;;
       --shutdown)
         shift 2
         ;;
@@ -1731,7 +1738,7 @@ n2k_cmd_cutover() {
 
   if [[ "${target_provider_arg_set}" -eq 1 || "${cloud_config_arg_set}" -eq 1 ]]; then
     local cloud_config_json
-    cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}")"
+    cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
     n2k_cloud_target_apply_manifest_config "${N2K_MANIFEST}" "$(if [[ "${target_provider_arg_set}" -eq 1 ]]; then printf '%s' "${target_provider}"; else printf ''; fi)" "${cloud_config_json}"
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"

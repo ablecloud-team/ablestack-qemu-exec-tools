@@ -98,6 +98,8 @@ Options:
   --cloud-zone-id <id>    Cloud zone ID for VM deployment
   --cloud-service-offering-id <id>
                           Cloud service offering ID
+  --cloud-cpu-speed <mhz>
+                          Cloud CPU speed detail; default 1000
   --cloud-network-id <id> Cloud network ID; repeatable
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
@@ -160,6 +162,8 @@ Options:
   --cloud-zone-id <id>    Cloud zone ID for VM deployment
   --cloud-service-offering-id <id>
                           Cloud service offering ID
+  --cloud-cpu-speed <mhz>
+                          Cloud CPU speed detail; default 1000
   --cloud-network-id <id> Cloud network ID; repeatable
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
@@ -222,6 +226,8 @@ Options:
   --cloud-zone-id <id>    Cloud zone ID for VM deployment
   --cloud-service-offering-id <id>
                           Cloud service offering ID
+  --cloud-cpu-speed <mhz>
+                          Cloud CPU speed detail; default 1000
   --cloud-network-id <id> Cloud network ID; repeatable
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
@@ -308,6 +314,8 @@ Options:
   --cloud-zone-id <id>    Cloud zone ID for VM deployment
   --cloud-service-offering-id <id>
                           Cloud service offering ID
+  --cloud-cpu-speed <mhz>
+                          Cloud CPU speed detail; default 1000
   --cloud-network-id <id> Cloud network ID; repeatable
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
@@ -455,6 +463,8 @@ Options:
   --cloud-zone-id <id>    Cloud zone ID for VM deployment
   --cloud-service-offering-id <id>
                           Cloud service offering ID
+  --cloud-cpu-speed <mhz>
+                          Cloud CPU speed detail; default 1000
   --cloud-network-id <id> Cloud network ID; repeatable
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume

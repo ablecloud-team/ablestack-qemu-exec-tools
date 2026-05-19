@@ -192,6 +192,15 @@ During cutoff:
 - Do not manually enter source VM CPU, memory, firmware, or disk controller
   details. n2k must derive them from the source inventory and pass them to the
   Cloud deploy API.
+- Use the Cloud CPU speed detail default of `1000` unless a case explicitly
+  sets `--cloud-cpu-speed`.
+- Expect root `importVolume` to create a detached `DATADISK` first, then expect
+  `deployVirtualMachineForVolume` to convert that volume to `ROOT`. n2k must
+  verify the root type before data-disk attach or VM start.
+- Do not pass a template ID for the current ABLESTACK Cloud build. The
+  `ablestack-diplo` API does not expose `templateid` on
+  `deployVirtualMachineForVolume`; its management server uses the KVM import
+  dummy template internally.
 - Use RBD first:
   - `--target-storage rbd`
   - `--target-format raw`
@@ -204,9 +213,9 @@ After each case:
 
 1. Record `manifest.json`, `events.log`, command output, and Cloud VM ID.
 2. Confirm `runtime.cloud` records imported volume IDs and async job IDs.
-3. Confirm `runtime.cloud.deployment_properties` records derived CPU, memory,
-   boot type/mode, and disk controller parameters when those values exist in
-   the source manifest.
+3. Confirm `runtime.cloud.deployment_properties` records derived CPU, default
+   CPU speed, memory, boot type/mode, and disk controller parameters when those
+   values exist in the source manifest.
 4. Confirm the Cloud VM reaches a running state when `--start` is used.
 5. Confirm Cloud root disk and data disks match the manifest disk count.
 6. Confirm the Cloud VM uses the selected network ID.
@@ -442,7 +451,7 @@ Pass criteria:
 Result:
 
 - Status: `BLOCKED`
-- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-rerun-20260519`
+- Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-postfix-20260519`
 - Cloud VM ID: n/a
 - Notes:
   - Retry precheck confirmed PC and PE API reachability, no conflicting Cloud
@@ -460,8 +469,27 @@ Result:
   - Follow-up fix: keep Cloud API parameter keys literal while URI-encoding
     values, and run curl with globbing disabled. The signature smoke then
     advanced from 401 to the expected fake-volume validation error 431, proving
-    signature verification passed. C01 must be retried after the fixed RPM is
-    deployed and the imported volumes/RBD images/source snapshots are cleaned.
+    signature verification passed.
+  - Fixed RPM was deployed and C01 was retried. Phase1 passed again, and Phase2
+    passed through incremental sync, guest shutdown, final sync, and Cloud
+    `importVolume` for all 3 disks.
+  - Cloud `deployVirtualMachineForVolume` now reaches Cloud validation but
+    returns error 431: `Invalid CPU speed value, specify a value between 1 and
+    2147483647`.
+  - The selected service offering `NoLimit-HA-WB`
+    (`49b2a775-4dba-4b4b-8f92-554b111898bf`) is customized and returns null
+    `cpunumber`, `cpuspeed`, and `memory` from `listServiceOfferings`.
+    Therefore Cloud requires a CPU speed detail in addition to the source CPU
+    count and memory details.
+  - Current C01 state after this failure: source `rhel` is `OFF`, Cloud VM was
+    not created, imported Cloud volumes and target RBD images remain for
+    evidence/cleanup.
+  - Follow-up implementation direction: n2k now defaults Cloud `cpuSpeed` to
+    `1000`, exposes `--cloud-cpu-speed`, and verifies after
+    `deployVirtualMachineForVolume` that the imported root volume was converted
+    from detached `DATADISK` to attached `ROOT`. The current Cloud API does not
+    expose a `templateid` parameter; ABLESTACK Cloud internally uses the KVM
+    import dummy template for this flow.
 
 ### C02 - Win10 full RBD Cloud target with auto fallback
 
