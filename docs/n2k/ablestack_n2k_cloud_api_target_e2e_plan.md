@@ -408,7 +408,7 @@ ablestack_n2k --json \
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | PASS |
 | C04 | `rhel` | forced v3 | Phase1/Phase2 | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.1 local qcow2 with 3 disks | PASS |
 | C05 | `win10` | auto fallback | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.2 local qcow2 with 2 disks | PASS |
-| C06 | `centos7-bios-ide` | forced v3 | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.3 local qcow2 with BIOS/IDE | TODO |
+| C06 | `centos7-bios-ide` | forced v3 | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.3 local qcow2 with BIOS/IDE | PASS |
 | N01 | synthetic | n/a | cutover validation | RBD | Any | Missing service offering blocks before import/deploy | TODO |
 | N02 | synthetic | n/a | cutover validation | RBD | Any | Missing network blocks before import/deploy | TODO |
 | N03 | synthetic | n/a | cutover validation | block/LVM | Any | Cloud target rejects block/LVM as out of scope | TODO |
@@ -1049,10 +1049,49 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
-- Workdir:
-- Cloud VM ID:
+- Status: `PASS`
+- Workdir: `10.10.22.3:/var/lib/ablestack/n2k-e2e/cloud-target/C06-centos7-bios-ide-fs-full-20260519-1506`
+- Cloud VM ID: `7b84acd0-107c-49c5-b4bb-c4c1bf50b37f`
 - Notes:
+  - The previous RBD C03 Cloud target VM named `centos7-bios-ide`
+    (`062e6d69-0bd0-4f39-9e41-81ec09fcaab1` / `i-2-386-VM`) was destroyed
+    and expunged before C06. No C06 Cloud target VM or root-level C06 qcow2
+    file existed on 22.3 before the run.
+  - Source `centos7-bios-ide` was powered back on before the test. Raw Nutanix
+    v3 VM inventory reported two disk-list entries, but the PE-selected n2k
+    manifest exposed the single 100 GiB IDE migration disk expected for this
+    case.
+  - Full run started from PC `https://10.10.132.100:9440` with `--force-v3`.
+    Planning selected the validated `v3-incremental` path and PE source
+    endpoint `10.10.132.10`.
+  - Base snapshot `a57bac88-c11a-4641-a4c0-d3ea7c5ee204`, incremental snapshot
+    `dc8a857f-1bab-4a47-9774-6a0450115330`, and final snapshot
+    `c2d882bf-e925-40e7-894e-afd884443054` were created. Incremental sync
+    applied 53 regions / 885248 bytes, and final sync applied 36 regions /
+    409600 bytes.
+  - Guest shutdown via ACPI completed during cutoff and source
+    `centos7-bios-ide` reached `OFF`.
+  - Target file `n2k-cloud-c06-centos7-bios-ide-fs-disk0.qcow2` was created
+    directly under `/var/lib/libvirt/images` on `ablecube22-3`.
+  - Cloud cutover succeeded without `--cloud-disk-offering-id`. Cloud selected
+    `Default Custom Offering for Volume Import - Local Storage`, imported the
+    root qcow2 as volume `6b01a1ef-6693-4654-a583-bee56025c2ee`, converted it
+    to `ROOT`, deployed VM `7b84acd0-107c-49c5-b4bb-c4c1bf50b37f`, and started
+    the VM.
+  - Cloud verification passed: VM `n2k-c06-centos7-bios-ide-fs` /
+    `i-2-389-VM` is `Running` on `ablecube22-3`. VM details include
+    `cpuNumber=1`, `cpuSpeed=1000`, `memory=4096`,
+    `rootDiskController=ide`, `boottype=BIOS`, and `bootmode=LEGACY`.
+  - Cloud volume verification passed: one `ROOT` volume is `Ready` on
+    `ablecube22-3-local-a872e82e`, with path
+    `n2k-cloud-c06-centos7-bios-ide-fs-disk0.qcow2` and device ID 0.
+  - Host 22.3 verification passed: libvirt domain `i-2-389-VM` is `running`,
+    uses machine `pc-i440fx-9.2`, maps IDE disk `hda` to the C06 qcow2 file
+    under `/var/lib/libvirt/images`, and uses `bridge0` for its NIC. The QEMU
+    log also shows `ide-hd` for the boot disk.
+  - Successful cleanup removed all three Nutanix source snapshots created by
+    the run. Follow-up PE snapshot query returned no matching n2k snapshots.
+    Source `centos7-bios-ide` remained `OFF` after cutoff.
 
 ### N01 - Missing service offering validation
 
