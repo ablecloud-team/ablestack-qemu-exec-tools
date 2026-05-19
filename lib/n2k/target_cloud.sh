@@ -323,23 +323,49 @@ n2k_cloud_target_volume_json() {
   printf '%s' "${response}" | jq -c '(.listvolumesresponse.volume // [])[0] // {}'
 }
 
-n2k_cloud_target_require_root_volume() {
+n2k_cloud_target_update_volume_type() {
+  local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4" volume_type="$5"
+  local response job_id job
+  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "updateVolume" \
+    "$(jq -nc --arg id "${volume_id}" --arg type "${volume_type}" '{id:$id,type:$type}')")"
+  job_id="$(printf '%s' "${response}" | n2k_cloud_response_job_id)"
+  if [[ -n "${job_id}" ]]; then
+    job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"
+    jq -nc --arg job_id "${job_id}" --argjson job "${job}" '{job_id:$job_id,job:$job}'
+  else
+    jq -nc --argjson response "${response}" '{response:$response}'
+  fi
+}
+
+n2k_cloud_target_ensure_root_volume() {
   local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4" vm_id="$5"
-  local volume volume_type volume_vm_id
+  local volume volume_type volume_vm_id update_result converted=false
   volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")"
   volume_type="$(jq -r '.type // empty' <<<"${volume}")"
   volume_vm_id="$(jq -r '.virtualmachineid // empty' <<<"${volume}")"
-  [[ "${volume_type}" == "ROOT" ]] || {
-    echo "Cloud root volume was not converted to ROOT: ${volume_id} type=${volume_type:-unknown}" >&2
-    printf '%s\n' "${volume}" >&2
-    return 1
-  }
   [[ -z "${vm_id}" || "${volume_vm_id}" == "${vm_id}" ]] || {
     echo "Cloud root volume is not attached to the deployed VM: ${volume_id} vm=${volume_vm_id:-none} expected=${vm_id}" >&2
     printf '%s\n' "${volume}" >&2
     return 1
   }
-  printf '%s' "${volume}"
+  if [[ "${volume_type}" != "ROOT" ]]; then
+    update_result="$(n2k_cloud_target_update_volume_type "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}" "ROOT")"
+    converted=true
+    volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")"
+    volume_type="$(jq -r '.type // empty' <<<"${volume}")"
+  else
+    update_result="{}"
+  fi
+  [[ "${volume_type}" == "ROOT" ]] || {
+    echo "Cloud root volume was not converted to ROOT: ${volume_id} type=${volume_type:-unknown}" >&2
+    printf '%s\n' "${volume}" >&2
+    return 1
+  }
+  jq -nc \
+    --argjson volume "${volume}" \
+    --argjson converted "${converted}" \
+    --argjson update "${update_result}" \
+    '{volume:$volume,converted:$converted} + (if ($update | length) > 0 then {update:$update} else {} end)'
 }
 
 n2k_cloud_target_attach_volume() {
@@ -377,7 +403,7 @@ n2k_cloud_target_preflight_json() {
   local api command response available_json="{}" ok=true
   n2k_cloud_require_credentials "${endpoint}" "${api_key}" "${secret_key}"
   response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listApis")"
-  for api in listVolumesForImport importVolume deployVirtualMachineForVolume attachVolume startVirtualMachine queryAsyncJobResult; do
+  for api in listVolumesForImport importVolume deployVirtualMachineForVolume updateVolume attachVolume startVirtualMachine queryAsyncJobResult; do
     if printf '%s' "${response}" | jq -e --arg api "${api}" '(.listapisresponse.api // []) | map(.name) | index($api) != null' >/dev/null; then
       command=true
     else
@@ -394,7 +420,7 @@ n2k_cloud_target_cutover() {
   local endpoint_arg="${5:-}" api_key_arg="${6:-}" secret_key_arg="${7:-}" cred_file="${8:-}"
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
   local disk_offering_id owner_params root_import root_volume_id deploy vm_id data_volumes_json jobs_json
-  local import_result attach_result start_result result_json disk_name source_deploy_params root_volume_json
+  local import_result attach_result start_result result_json disk_name source_deploy_params root_volume_result root_volume_json root_volume_update_job root_volume_converted
 
   runtime="$(n2k_cloud_target_resolve_runtime_json "${manifest}" "${endpoint_arg}" "${api_key_arg}" "${secret_key_arg}" "${cred_file}")"
   endpoint="$(jq -r '.endpoint // ""' <<<"${runtime}")"
@@ -453,10 +479,19 @@ n2k_cloud_target_cutover() {
   root_volume_id="$(jq -r '.id' <<<"${root_import}")"
   deploy="$(n2k_cloud_target_deploy_vm_for_volume "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${root_volume_id}" "false" "${source_deploy_params}")"
   vm_id="$(jq -r '.id' <<<"${deploy}")"
-  root_volume_json="$(n2k_cloud_target_require_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}")"
+  root_volume_result="$(n2k_cloud_target_ensure_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}")"
+  root_volume_json="$(jq -c '.volume' <<<"${root_volume_result}")"
+  root_volume_update_job="$(jq -r '.update.job_id // empty' <<<"${root_volume_result}")"
+  root_volume_converted="$(jq -r '.converted // false' <<<"${root_volume_result}")"
 
   data_volumes_json="[]"
   jobs_json="$(jq -nc --arg root_import_job "$(jq -r '.job_id' <<<"${root_import}")" --arg deploy_job "$(jq -r '.job_id' <<<"${deploy}")" '[{kind:"import-root",job_id:$root_import_job},{kind:"deploy-vm",job_id:$deploy_job}]')"
+  if [[ -n "${root_volume_update_job}" ]]; then
+    jobs_json="$(jq -c \
+      --argjson jobs "${jobs_json}" \
+      --arg update_job "${root_volume_update_job}" \
+      '$jobs + [{kind:"update-root-volume",job_id:$update_job}]' <<<"{}")"
+  fi
   for ((idx=1; idx<disk_count; idx++)); do
     target_path="$(jq -r ".disks[${idx}].transfer.target_path" "${manifest}")"
     import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")"
@@ -487,11 +522,14 @@ n2k_cloud_target_cutover() {
     --arg vm_id "${vm_id}" \
     --arg root_volume_id "${root_volume_id}" \
     --argjson root_volume "${root_volume_json}" \
+    --argjson root_volume_converted "${root_volume_converted}" \
+    --arg root_volume_update_job_id "${root_volume_update_job}" \
     --argjson data_volumes "${data_volumes_json}" \
     --argjson jobs "${jobs_json}" \
     --argjson deployment_properties "${source_deploy_params}" \
     --argjson started "$(if [[ "${start_vm}" -eq 1 ]]; then printf true; else printf false; fi)" \
-    '{provider:$provider,endpoint:$endpoint,validated:true,applied:true,started:$started,vm_id:$vm_id,root_volume_id:$root_volume_id,root_volume:$root_volume,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties}')"
+    '{provider:$provider,endpoint:$endpoint,validated:true,applied:true,started:$started,vm_id:$vm_id,root_volume_id:$root_volume_id,root_volume:$root_volume,root_volume_converted:$root_volume_converted,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties}
+     + (if ($root_volume_update_job_id | length) > 0 then {root_volume_update_job_id:$root_volume_update_job_id} else {} end)')"
   n2k_cloud_target_record_result "${manifest}" "${result_json}"
   printf '%s' "${result_json}"
 }

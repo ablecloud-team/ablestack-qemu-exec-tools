@@ -194,9 +194,10 @@ During cutoff:
   Cloud deploy API.
 - Use the Cloud CPU speed detail default of `1000` unless a case explicitly
   sets `--cloud-cpu-speed`.
-- Expect root `importVolume` to create a detached `DATADISK` first, then expect
-  `deployVirtualMachineForVolume` to convert that volume to `ROOT`. n2k must
-  verify the root type before data-disk attach or VM start.
+- Expect root `importVolume` to create a detached `DATADISK` first. After
+  `deployVirtualMachineForVolume`, n2k must verify the attached root volume and
+  use `updateVolume type=ROOT` when the Cloud API leaves the imported boot disk
+  as `DATADISK`.
 - Do not pass a template ID for the current ABLESTACK Cloud build. The
   `ablestack-diplo` API does not expose `templateid` on
   `deployVirtualMachineForVolume`; its management server uses the KVM import
@@ -452,7 +453,8 @@ Result:
 
 - Status: `BLOCKED`
 - Workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-postfix-20260519`
-- Cloud VM ID: n/a
+- Latest retest workdir: `10.10.22.1:/var/lib/ablestack/n2k-e2e/cloud-target/C01-rhel-phase12-cpuspeed-20260519`
+- Latest failed Cloud VM ID: `4cdaf3d0-1e28-48ad-9d84-348fbd7e3313`
 - Notes:
   - Retry precheck confirmed PC and PE API reachability, no conflicting Cloud
     VM, no stale C01 RBD image, and source `rhel` in `ON` state with 3 disks.
@@ -490,6 +492,34 @@ Result:
     from detached `DATADISK` to attached `ROOT`. The current Cloud API does not
     expose a `templateid` parameter; ABLESTACK Cloud internally uses the KVM
     import dummy template for this flow.
+  - Retest after the CPU speed/root-volume validation build was deployed did
+    not pass. The command intentionally omitted `--cloud-cpu-speed` and the
+    manifest deployment properties included default
+    `details[0].cpuSpeed=1000`. Phase1, Phase2 incremental sync, guest
+    shutdown, final snapshot, final sync, and root `importVolume` completed.
+  - `deployVirtualMachineForVolume` created VM
+    `4cdaf3d0-1e28-48ad-9d84-348fbd7e3313` and attached imported volume
+    `7975dfec-e0b5-4b31-9895-92594ffea0e5`, but `listVolumes` still reported
+    that volume as `DATADISK` with `deviceid=0`. n2k failed fast with
+    `Cloud root volume was not converted to ROOT`.
+  - A subsequent `startVirtualMachine` call also failed from Cloud with
+    `Unable to deploy VM [4cdaf3d0-1e28-48ad-9d84-348fbd7e3313] because the
+    ROOT volume is missing.`
+  - Residual cleanup was completed after the failed retest: the Cloud VM was
+    destroyed, the imported Cloud root volume was deleted, RBD images
+    `n2k-cloud-c01-rhel-disk0/1/2` were removed, Nutanix VM snapshots
+    `8e3ceada-d00c-4d35-ba96-9b39eac95838`,
+    `9f30a649-e850-4f9e-853d-5aadab2bed53`,
+    `b623c38c-3873-4e63-9449-266a3b7d8647`, and
+    `d9050208-5417-423b-8688-c677a0f7c892` were deleted and verified as 404,
+    and source `rhel` was powered back on.
+  - Code inspection of `UserVmManagerImpl.createVirtualMachineVolume` shows the
+    imported volume is assigned `deviceId=0` and the dummy template ID, but its
+    `volume_type` is not changed to `ROOT`. `listApis` also shows that
+    `updateVolume` exposes a `type` parameter, and
+    `VolumeApiServiceImpl.updateVolume` applies it through
+    `volume.setVolumeType(...)`. The next n2k build will use that API as a
+    post-deploy root-volume correction before data-disk attach/start.
 
 ### C02 - Win10 full RBD Cloud target with auto fallback
 
