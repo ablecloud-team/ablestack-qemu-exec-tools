@@ -357,6 +357,8 @@ Notes:
     offers an auto-generated default. With --yes, that default is accepted.
   - For phase2, wizard asks for an existing work directory when --workdir or
     --manifest was not supplied.
+  - Interactive prompts show examples for free-form values, and selectable
+    resources are shown as numbered lists. Enter a number, ID, or exact name.
   - With global --workdir or --manifest, wizard loads the existing manifest so
     phase2 can be started later in a new process after phase1 exits.
   - Secrets are passed only at runtime. --print-command redacts secret values.

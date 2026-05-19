@@ -22,8 +22,11 @@ n2k_interactive_has_tty() {
 }
 
 n2k_interactive_prompt_text() {
-  local label="$1" default_value="${2:-}" required="${3:-0}" answer
+  local label="$1" default_value="${2:-}" required="${3:-0}" example="${4:-}" answer
   while true; do
+    if [[ -n "${example}" ]]; then
+      printf '  Example: %s\n' "${example}" >&2
+    fi
     if [[ -n "${default_value}" ]]; then
       printf '%s [%s]: ' "${label}" "${default_value}" >&2
     else
@@ -40,8 +43,11 @@ n2k_interactive_prompt_text() {
 }
 
 n2k_interactive_prompt_secret() {
-  local label="$1" answer
+  local label="$1" hint="${2:-Input is hidden.}" answer
   while true; do
+    if [[ -n "${hint}" ]]; then
+      printf '  %s\n' "${hint}" >&2
+    fi
     printf '%s: ' "${label}" >&2
     IFS= read -rs answer || answer=""
     printf '\n' >&2
@@ -106,7 +112,7 @@ n2k_interactive_select_tsv() {
   fi
 
   if [[ "${yes}" -eq 1 ]]; then
-    n2k_die "${label} has multiple candidates; provide an explicit option when using --yes"
+    n2k_die "${label} has multiple candidates; run without --yes to select from the list, or provide an explicit option"
   fi
   n2k_interactive_has_tty || n2k_die "${label} selection requires a TTY"
 
@@ -118,13 +124,18 @@ n2k_interactive_select_tsv() {
       printf '  %d. %s (%s)\n' "$((idx + 1))" "${names[idx]}" "${ids[idx]}" >&2
     fi
   done
+  printf '  Choose by number, ID, or exact name. Press Enter for %s.\n' "${default_index}" >&2
   while true; do
-    choice="$(n2k_interactive_prompt_text "Select ${label}" "${default_index}" 1)"
+    choice="$(n2k_interactive_prompt_text "Select ${label}" "${default_index}" 1 "1")"
     if [[ "${choice}" =~ ^[0-9]+$ && "${choice}" -ge 1 && "${choice}" -le "${count}" ]]; then
       printf '%s' "${ids[choice - 1]}"
       return 0
     fi
-    printf 'Invalid selection.\n' >&2
+    if selected="$(n2k_interactive_choice_by_id_or_label "${choices}" "${choice}" 2>/dev/null)"; then
+      printf '%s' "${selected}"
+      return 0
+    fi
+    printf 'Invalid selection. Enter a number from 1 to %s, an ID, or an exact name.\n' "${count}" >&2
   done
 }
 
@@ -385,7 +396,7 @@ n2k_interactive_select_or_prepare_resume_workdir() {
   if [[ -z "${N2K_WORKDIR:-}" ]]; then
     [[ "${yes}" -eq 0 ]] || n2k_die "--workdir or --manifest is required for wizard --split phase2 when using --yes"
     n2k_interactive_has_tty || n2k_die "Existing workdir is required for wizard --split phase2 without a TTY"
-    n2k_interactive_set_workdir "$(n2k_interactive_prompt_text "Existing migration work directory" "" 1)"
+    n2k_interactive_set_workdir "$(n2k_interactive_prompt_text "Existing migration work directory" "" 1 "/var/lib/ablestack-n2k/win10/20260519-120000-abcd1234")"
   else
     n2k_interactive_prepare_manifest_path
   fi
@@ -410,7 +421,7 @@ n2k_interactive_prepare_new_workdir() {
     printf 'Auto-selected migration work directory: %s\n' "${workdir}" >&2
   else
     n2k_interactive_has_tty || n2k_die "Migration work directory requires a TTY or --workdir"
-    workdir="$(n2k_interactive_prompt_text "Migration work directory" "${default_workdir}" 1)"
+    workdir="$(n2k_interactive_prompt_text "Migration work directory" "${default_workdir}" 1 "Press Enter to accept the generated path, or type another absolute path.")"
   fi
   n2k_interactive_set_workdir "${workdir}"
 }
@@ -574,17 +585,17 @@ n2k_cmd_wizard() {
   if [[ -z "${pc}" ]]; then
     [[ "${yes}" -eq 0 ]] || n2k_die "--pc is required when using --yes"
     n2k_interactive_has_tty || n2k_die "--pc is required without a TTY"
-    pc="$(n2k_interactive_prompt_text "Prism endpoint" "" 1)"
+    pc="$(n2k_interactive_prompt_text "Prism endpoint" "" 1 "https://10.10.132.100:9440")"
   fi
   if [[ -z "${username}" ]]; then
     [[ "${yes}" -eq 0 ]] || n2k_die "--username is required when using --yes"
     n2k_interactive_has_tty || n2k_die "--username is required without a TTY"
-    username="$(n2k_interactive_prompt_text "Prism username" "admin" 1)"
+    username="$(n2k_interactive_prompt_text "Prism username" "admin" 1 "admin")"
   fi
   if [[ -z "${password}" ]]; then
     [[ "${yes}" -eq 0 ]] || n2k_die "--password, environment password, or --cred-file is required when using --yes"
     n2k_interactive_has_tty || n2k_die "Prism password is required without a TTY"
-    password="$(n2k_interactive_prompt_secret "Prism password")"
+    password="$(n2k_interactive_prompt_secret "Prism password" "Paste the Prism admin password. Input is hidden.")"
   fi
 
   if [[ -z "${vm}" ]]; then
@@ -668,17 +679,17 @@ n2k_cmd_wizard() {
     if [[ -z "${cloud_endpoint}" ]]; then
       [[ "${yes}" -eq 0 ]] || n2k_die "--cloud-endpoint is required when using --yes"
       n2k_interactive_has_tty || n2k_die "--cloud-endpoint is required without a TTY"
-      cloud_endpoint="$(n2k_interactive_prompt_text "Cloud API endpoint" "" 1)"
+      cloud_endpoint="$(n2k_interactive_prompt_text "Cloud API endpoint" "" 1 "http://10.10.22.10:8080/client/api")"
     fi
     if [[ -z "${cloud_api_key}" ]]; then
       [[ "${yes}" -eq 0 ]] || n2k_die "--cloud-api-key, environment key, or --cloud-cred-file is required when using --yes"
       n2k_interactive_has_tty || n2k_die "Cloud API key is required without a TTY"
-      cloud_api_key="$(n2k_interactive_prompt_secret "Cloud API key")"
+      cloud_api_key="$(n2k_interactive_prompt_secret "Cloud API key" "Paste the ABLESTACK Cloud API key. Input is hidden.")"
     fi
     if [[ -z "${cloud_secret_key}" ]]; then
       [[ "${yes}" -eq 0 ]] || n2k_die "--cloud-secret-key, environment key, or --cloud-cred-file is required when using --yes"
       n2k_interactive_has_tty || n2k_die "Cloud secret key is required without a TTY"
-      cloud_secret_key="$(n2k_interactive_prompt_secret "Cloud secret key")"
+      cloud_secret_key="$(n2k_interactive_prompt_secret "Cloud secret key" "Paste the ABLESTACK Cloud secret key. Input is hidden.")"
     fi
 
     [[ -n "${cloud_zone_id}" ]] || {
@@ -776,6 +787,7 @@ n2k_cmd_wizard() {
 
   if [[ "${yes}" -eq 0 ]]; then
     n2k_interactive_has_tty || n2k_die "Final confirmation requires a TTY; pass --yes to execute with supplied values"
+    printf 'Review the summary above. Type yes to start the migration, or no to cancel.\n' >&2
     n2k_interactive_prompt_confirm "Execute this migration run" "no" || {
       printf 'Migration run cancelled.\n' >&2
       return 0

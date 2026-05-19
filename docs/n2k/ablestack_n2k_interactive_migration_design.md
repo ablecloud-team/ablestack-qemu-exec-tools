@@ -124,6 +124,11 @@ not support block/LVM import yet.
 10. Execute `n2k_cmd_run` with the generated arguments, or print the generated
     command with secret values redacted.
 
+Free-form prompts show an example value or a short input hint. Resource prompts
+show a numbered list when more than one candidate exists; operators can enter
+the list number, the resource ID, or the exact resource name. This avoids
+requiring operators to copy UUIDs from another screen during the common path.
+
 ## Default behavior
 
 The defaults are chosen to match the current tested production path:
