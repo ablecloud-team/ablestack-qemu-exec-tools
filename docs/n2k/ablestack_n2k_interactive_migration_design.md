@@ -141,7 +141,7 @@ The defaults are chosen to match the current tested production path:
 | Cutover action | `--apply --start` |
 | Source shutdown | `guest` |
 | Cloud CPU speed | `1000` |
-| Cloud target VM name | `n2k-<source-vm>-<timestamp>` |
+| Cloud target VM name | prompt with default `n2k-<source-vm>-<timestamp>` |
 | Migration work directory | `/var/lib/ablestack-n2k/<source-vm>/<run-id>` |
 | RBD pool | `rbd` |
 | File root | libvirt targets use `/var/lib/libvirt/images`; Cloud file targets use the selected Cloud storage pool path |
@@ -158,6 +158,12 @@ directory after the source VM is known, prompts for confirmation in interactive
 mode, and accepts the default automatically with `--yes`. For `phase2`, the
 wizard must resume existing state, so it prompts for an existing work directory
 when neither global `--workdir` nor global `--manifest` was provided.
+
+For a new Cloud target run, the wizard also prompts for the target VM name. The
+default remains `n2k-<source-vm>-<timestamp>`, but the operator can replace it
+before the target disk names and Cloud VM metadata are derived. When resuming
+from a manifest for `phase2`, the stored target VM name is reused without
+renaming the migration.
 
 When a manifest exists through global `--workdir` or `--manifest`, the wizard
 loads source VM, Prism endpoint, target provider, target storage, and Cloud

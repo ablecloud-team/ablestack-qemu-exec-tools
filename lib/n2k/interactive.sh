@@ -497,6 +497,7 @@ n2k_cmd_wizard() {
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id="" cloud_disk_offering_id=""
   local cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local cloud_storage_json="" cloud_storage_path="" cloud_storage_scope=""
+  local cloud_name_arg_set=0 existing_manifest=0
   local split="" source_api="v3" force_v3=true
   local nfs_host="" nfs_mount_root=""
   local shutdown="guest" cutover_policy="start"
@@ -538,7 +539,7 @@ n2k_cmd_wizard() {
       --cloud-account) cloud_account="${2:-}"; shift 2 ;;
       --cloud-domain-id) cloud_domain_id="${2:-}"; shift 2 ;;
       --cloud-project-id) cloud_project_id="${2:-}"; shift 2 ;;
-      --cloud-name) cloud_name="${2:-}"; shift 2 ;;
+      --cloud-name) cloud_name="${2:-}"; cloud_name_arg_set=1; shift 2 ;;
       --cloud-display-name) cloud_display_name="${2:-}"; shift 2 ;;
       --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; shift 2 ;;
       --split) split="${2:-}"; shift 2 ;;
@@ -561,6 +562,7 @@ n2k_cmd_wizard() {
 
   n2k_interactive_prepare_manifest_path
   if [[ -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]]; then
+    existing_manifest=1
     n2k_interactive_apply_manifest_defaults "${N2K_MANIFEST}"
   elif [[ -z "${split}" && "${yes}" -eq 0 ]]; then
     n2k_interactive_has_tty || n2k_die "--split is required without a TTY"
@@ -662,6 +664,11 @@ n2k_cmd_wizard() {
   target_name="${cloud_name:-${N2K_WIZARD_TARGET_NAME:-}}"
   if [[ -z "${target_name}" ]]; then
     target_name="n2k-$(n2k_safe_name "${vm}")-$(date +%Y%m%d%H%M%S)"
+  fi
+  if [[ "${target_provider}" == "ablestack-cloud" && "${yes}" -eq 0 && "${cloud_name_arg_set}" -eq 0 && "${existing_manifest}" -eq 0 ]]; then
+    if n2k_interactive_has_tty; then
+      target_name="$(n2k_interactive_prompt_text "Cloud target VM name" "${target_name}" 1 "${target_name}")"
+    fi
   fi
   cloud_name="${cloud_name:-${target_name}}"
   cloud_display_name="${cloud_display_name:-${cloud_name}}"
