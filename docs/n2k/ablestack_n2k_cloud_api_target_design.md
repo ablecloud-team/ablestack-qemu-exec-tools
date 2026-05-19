@@ -301,7 +301,7 @@ Cloud API cutover replaces libvirt XML generation.
    - record VM ID
 7. Ensure the imported root volume is a Cloud ROOT volume:
    - listVolumes(id=<root_volume_id>)
-   - if the attached volume is still DATADISK, call updateVolume(id, type=ROOT)
+   - if the attached volume is still DATADISK, call updateVolume(id, type=ROOT, path=<import_path>)
    - wait for async job and verify the final type is ROOT
 8. Import every data disk:
    - importVolume(...)
@@ -319,7 +319,7 @@ Cloud API cutover replaces libvirt XML generation.
 12. Mark cutover phase done.
 ```
 
-Root disk deployment uses `deployVirtualMachineForVolume`, not the normal `deployVirtualMachine`. The imported root volume is initially a `DATADISK` from `importVolume`. On the current ABLESTACK Cloud build, `deployVirtualMachineForVolume` attaches the imported volume and assigns `deviceId=0` plus the dummy template ID, but may leave `volume_type=DATADISK`. n2k therefore verifies the attached volume with `listVolumes(id=<root_volume_id>)` and, when needed, calls the exposed `updateVolume(id=<root_volume_id>, type=ROOT)` API before data-disk attach or VM start. If the final volume type is still not `ROOT`, the flow must fail before start.
+Root disk deployment uses `deployVirtualMachineForVolume`, not the normal `deployVirtualMachine`. The imported root volume is initially a `DATADISK` from `importVolume`. On the current ABLESTACK Cloud build, `deployVirtualMachineForVolume` attaches the imported volume and assigns `deviceId=0` plus the dummy template ID, but may leave `volume_type=DATADISK`. n2k therefore verifies the attached volume with `listVolumes(id=<root_volume_id>)` and, when needed, calls the exposed `updateVolume(id=<root_volume_id>, type=ROOT, path=<import_path>)` API before data-disk attach or VM start. Passing the original import path is required because the current Cloud `updateVolume` implementation can clear the volume path when it is omitted; without the path the KVM agent receives a ROOT volume with `path=null` and fails before libvirt domain creation. If the final volume type is still not `ROOT`, or the root path is empty after conversion, the flow must fail before start.
 
 The ABLESTACK Cloud API currently exposed by `ablestack-diplo` does not publish a `templateid` parameter for `deployVirtualMachineForVolume`. The management-server implementation creates and uses the KVM import dummy template named `kvm-default-vm-import-dummy-template` internally, then assigns that template ID to the imported root volume before VM creation. Therefore n2k does not pass `templateid`; if a future Cloud build exposes the parameter, n2k can add a `--cloud-template-id` option without changing the rest of the import flow.
 

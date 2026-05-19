@@ -324,10 +324,15 @@ n2k_cloud_target_volume_json() {
 }
 
 n2k_cloud_target_update_volume_type() {
-  local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4" volume_type="$5"
-  local response job_id job
+  local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4" volume_type="$5" volume_path="${6:-}"
+  local response job_id job params
+  params="$(jq -nc \
+    --arg id "${volume_id}" \
+    --arg type "${volume_type}" \
+    --arg path "${volume_path}" \
+    '{id:$id,type:$type} + (if ($path | length) > 0 then {path:$path} else {} end)')"
   response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "updateVolume" \
-    "$(jq -nc --arg id "${volume_id}" --arg type "${volume_type}" '{id:$id,type:$type}')")"
+    "${params}")"
   job_id="$(printf '%s' "${response}" | n2k_cloud_response_job_id)"
   if [[ -n "${job_id}" ]]; then
     job="$(n2k_cloud_wait_job "${endpoint}" "${api_key}" "${secret_key}" "${job_id}")"
@@ -338,26 +343,34 @@ n2k_cloud_target_update_volume_type() {
 }
 
 n2k_cloud_target_ensure_root_volume() {
-  local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4" vm_id="$5"
-  local volume volume_type volume_vm_id update_result converted=false
+  local endpoint="$1" api_key="$2" secret_key="$3" volume_id="$4" vm_id="$5" volume_path_hint="${6:-}"
+  local volume volume_type volume_vm_id volume_path update_result converted=false
   volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")"
   volume_type="$(jq -r '.type // empty' <<<"${volume}")"
   volume_vm_id="$(jq -r '.virtualmachineid // empty' <<<"${volume}")"
+  volume_path="$(jq -r '.path // empty' <<<"${volume}")"
+  [[ -n "${volume_path}" || -z "${volume_path_hint}" ]] || volume_path="${volume_path_hint}"
   [[ -z "${vm_id}" || "${volume_vm_id}" == "${vm_id}" ]] || {
     echo "Cloud root volume is not attached to the deployed VM: ${volume_id} vm=${volume_vm_id:-none} expected=${vm_id}" >&2
     printf '%s\n' "${volume}" >&2
     return 1
   }
   if [[ "${volume_type}" != "ROOT" ]]; then
-    update_result="$(n2k_cloud_target_update_volume_type "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}" "ROOT")"
+    update_result="$(n2k_cloud_target_update_volume_type "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}" "ROOT" "${volume_path}")"
     converted=true
     volume="$(n2k_cloud_target_volume_json "${endpoint}" "${api_key}" "${secret_key}" "${volume_id}")"
     volume_type="$(jq -r '.type // empty' <<<"${volume}")"
+    volume_path="$(jq -r '.path // empty' <<<"${volume}")"
   else
     update_result="{}"
   fi
   [[ "${volume_type}" == "ROOT" ]] || {
     echo "Cloud root volume was not converted to ROOT: ${volume_id} type=${volume_type:-unknown}" >&2
+    printf '%s\n' "${volume}" >&2
+    return 1
+  }
+  [[ -z "${volume_path_hint}" || -n "${volume_path}" ]] || {
+    echo "Cloud root volume path is empty after ROOT conversion: ${volume_id} expected_path=${volume_path_hint}" >&2
     printf '%s\n' "${volume}" >&2
     return 1
   }
@@ -479,7 +492,7 @@ n2k_cloud_target_cutover() {
   root_volume_id="$(jq -r '.id' <<<"${root_import}")"
   deploy="$(n2k_cloud_target_deploy_vm_for_volume "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${root_volume_id}" "false" "${source_deploy_params}")"
   vm_id="$(jq -r '.id' <<<"${deploy}")"
-  root_volume_result="$(n2k_cloud_target_ensure_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}")"
+  root_volume_result="$(n2k_cloud_target_ensure_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}" "${import_path}")"
   root_volume_json="$(jq -c '.volume' <<<"${root_volume_result}")"
   root_volume_update_job="$(jq -r '.update.job_id // empty' <<<"${root_volume_result}")"
   root_volume_converted="$(jq -r '.converted // false' <<<"${root_volume_result}")"

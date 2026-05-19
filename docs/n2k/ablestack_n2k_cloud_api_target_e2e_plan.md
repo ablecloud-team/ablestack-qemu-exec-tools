@@ -520,6 +520,12 @@ Result:
     `VolumeApiServiceImpl.updateVolume` applies it through
     `volume.setVolumeType(...)`. The next n2k build will use that API as a
     post-deploy root-volume correction before data-disk attach/start.
+  - During the first post-fix C01 retry, 22.3 Cloud agent logs showed the VM
+    still could not start because the ROOT volume path was `null`:
+    `Failed to find volume:null` followed by a `NullPointerException`.
+    This was not an RBD lock or watcher issue. The root-volume correction must
+    call `updateVolume` with both `type=ROOT` and the original import `path` so
+    Cloud does not clear the path before sending `StartCommand` to the agent.
 
 ### C02 - Win10 full RBD Cloud target with auto fallback
 
