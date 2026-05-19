@@ -63,6 +63,8 @@ Commands:
   preflight               Check Nutanix/API/target host capabilities
   plan                    Build a migration plan for a VM
   run (alias: auto)       Run the migration pipeline
+  wizard (aliases: migrate, interactive)
+                          Prompt for the minimum inputs and run migration
   init                    Initialize workdir and manifest
   snapshot                Create or select a source snapshot/recovery point
   sync                    Data sync: base|incr|final
@@ -284,6 +286,74 @@ Notes:
   - Phase1 performs base sync and the first incremental sync, then exits.
   - Phase2 requires the Phase1 marker, loops incremental sync until the
     deadline gate is met, then performs final sync and cutover.
+EOF
+}
+
+usage_wizard() {
+  cat <<'EOF'
+Usage:
+  ablestack_n2k wizard [options]
+  ablestack_n2k migrate [options]
+  ablestack_n2k interactive [options]
+
+Purpose:
+  Prompt for only the required source/target choices, derive the remaining
+  run options, show a summary, then execute the normal migration pipeline.
+
+Common options:
+  --pc <host>             Prism Central host or URL
+  --vm <name|uuid>        Source Nutanix VM; prompt with VM list when omitted
+  --username <user>       Prism username
+  --password <pass>       Prism password; prompted without echo when omitted
+  --cred-file <file>      Prism credential file
+  --insecure <0|1>        Skip TLS verification when set to 1
+  --target-profile <p>    cloud-rbd|cloud-filesystem|cloud-qcow2|libvirt-rbd|libvirt-qcow2
+  --split <split>         phase1|phase2|full; default phase1
+  --shutdown <policy>     guest|poweroff|manual|none; default guest
+  --define-only           Validate cutover definition only
+  --apply                 Create/define target VM but do not start
+  --start                 Create/define and start target VM; default
+  --yes, -y               Accept safe defaults and skip final confirmation
+  --print-command         Print the generated run command with secrets redacted
+
+Target convenience options:
+  --rbd-pool <pool>       RBD pool for generated target paths; default rbd
+  --file-root <path>      File target root; default /var/lib/libvirt/images
+  --dst <path>            Destination root passed to run
+  --target-map-json <js>  Explicit per-disk target map
+  --rbd-access-mode <m>   librbd|krbd for target VM RBD access
+  --network-mode <mode>   libvirt bridge|network; default bridge for libvirt
+  --bridge <name>         libvirt bridge name; default bridge0
+  --network <name>        libvirt NAT network name
+
+Cloud options:
+  --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
+  --cloud-api-key <key>   ABLESTACK Cloud API key
+  --cloud-secret-key <k>  ABLESTACK Cloud secret key
+  --cloud-cred-file <f>   ABLESTACK Cloud credential file
+  --cloud-zone-id <id>    Cloud zone ID; prompt/list when omitted
+  --cloud-service-offering-id <id>
+                          Cloud service offering ID; prompt/list when omitted
+  --cloud-network-id <id> Cloud network ID; repeatable
+  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-storage-id <id> Cloud primary storage ID; prompt/list when omitted
+  --cloud-disk-offering-id <id>
+                          Optional Cloud disk offering ID
+  --cloud-host-id <id>    Required for local FileSystem profile when multiple hosts exist
+  --cloud-account <name>  Optional Cloud account
+  --cloud-domain-id <id>  Optional Cloud domain ID
+  --cloud-project-id <id> Optional Cloud project ID
+  --cloud-name <name>     Optional Cloud VM host name
+  --cloud-display-name <name>
+                          Optional Cloud VM display name
+  --cloud-cpu-speed <mhz>
+                          Cloud CPU speed detail; default 1000
+
+Notes:
+  - wizard/migrate/interactive calls the same implementation.
+  - Current runnable data path is v3 snapshot/NFS, so wizard generates
+    --source-api v3 and --force-v3 by default.
+  - Secrets are passed only at runtime. --print-command redacts secret values.
 EOF
 }
 
@@ -524,6 +594,7 @@ usage_command() {
     preflight) usage_preflight ;;
     plan) usage_plan ;;
     run|auto) usage_run ;;
+    wizard|migrate|interactive) usage_wizard ;;
     init) usage_init ;;
     snapshot) usage_snapshot ;;
     sync) usage_sync ;;
@@ -613,6 +684,7 @@ case "${CMD}" in
   preflight) n2k_call_command n2k_cmd_preflight ;;
   plan) n2k_call_command n2k_cmd_plan ;;
   run|auto) n2k_call_command n2k_cmd_run ;;
+  wizard|migrate|interactive) n2k_call_command n2k_cmd_wizard ;;
   init) n2k_call_command n2k_cmd_init ;;
   snapshot) n2k_call_command n2k_cmd_snapshot ;;
   sync) n2k_call_command n2k_cmd_sync ;;

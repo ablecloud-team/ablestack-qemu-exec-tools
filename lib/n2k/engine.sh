@@ -42,6 +42,8 @@ source "${N2K_LIB_DIR}/transfer_cold.sh"
 source "${N2K_LIB_DIR}/transfer_patch.sh"
 # shellcheck source=/dev/null
 source "${N2K_LIB_DIR}/target_libvirt.sh"
+# shellcheck source=/dev/null
+source "${N2K_LIB_DIR}/interactive.sh"
 
 n2k_die() {
   echo "ERROR: $*" >&2
