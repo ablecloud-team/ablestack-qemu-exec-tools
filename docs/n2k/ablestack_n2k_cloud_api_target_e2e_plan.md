@@ -407,7 +407,7 @@ ablestack_n2k --json \
 | C02 | `win10` | auto fallback | Full | RBD | Provided | Cloud VM starts, 2 disks imported/attached | PASS |
 | C03 | `centos7-bios-ide` | forced v3 | Full | RBD | Provided | Cloud VM starts, BIOS/IDE guest boots | PASS |
 | C04 | `rhel` | forced v3 | Phase1/Phase2 | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.1 local qcow2 with 3 disks | PASS |
-| C05 | `win10` | auto fallback | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.2 local qcow2 with 2 disks | TODO |
+| C05 | `win10` | auto fallback | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.2 local qcow2 with 2 disks | PASS |
 | C06 | `centos7-bios-ide` | forced v3 | Full | FileSystem/qcow2 | Omitted | Cloud VM starts from 22.3 local qcow2 with BIOS/IDE | TODO |
 | N01 | synthetic | n/a | cutover validation | RBD | Any | Missing service offering blocks before import/deploy | TODO |
 | N02 | synthetic | n/a | cutover validation | RBD | Any | Missing network blocks before import/deploy | TODO |
@@ -951,10 +951,51 @@ Pass criteria:
 
 Result:
 
-- Status: `TODO`
-- Workdir:
-- Cloud VM ID:
+- Status: `PASS`
+- Workdir: `10.10.22.2:/var/lib/ablestack/n2k-e2e/cloud-target/C05-win10-fs-full-20260519-1451`
+- Cloud VM ID: `1acbfb58-b7a6-486f-934f-d40495b704e7`
 - Notes:
+  - The previous RBD C02 Cloud target VM named `win10`
+    (`19a0a3ad-ed1b-4148-8ef1-2e52fce84a36` / `i-2-385-VM`) was destroyed
+    and expunged before C05, and its leftover C02 data volume was removed.
+    No C05 Cloud target VM or root-level C05 qcow2 file existed before the run.
+  - Source `win10` was powered back on before the test. The PE-selected n2k
+    manifest exposed 2 migration disks even though the raw snapshot path list
+    also included one small SelfServiceContainer file. The extra file was not
+    mapped to a manifest disk and was skipped.
+  - Full run started from PC `https://10.10.132.100:9440` without `--force-v3`.
+    Planning selected the validated `v3-incremental` path automatically and
+    selected PE source endpoint `10.10.132.10`; this validates the PC v4 / PE
+    v3 fallback route for the C05 FileSystem case.
+  - Base snapshot `a33abb17-9a11-41a1-bf6e-f408872c68e6`, incremental snapshot
+    `b10bbbea-a341-42a8-bb0d-c7dac1bd3492`, and final snapshot
+    `84dc3649-ed1f-4568-927e-bf0f49fe21fb` were created. Incremental sync
+    applied 603 regions / 7474688 bytes, and final sync applied 1440 regions /
+    18617344 bytes. Each changed-region calculation skipped the unmapped tiny
+    SelfServiceContainer snapshot file.
+  - Guest shutdown via ACPI completed during cutoff and source `win10` reached
+    `OFF`.
+  - Target files were created directly under `/var/lib/libvirt/images` on
+    `ablecube22-2`: `n2k-cloud-c05-win10-fs-disk0.qcow2` and
+    `n2k-cloud-c05-win10-fs-disk1.qcow2`.
+  - Cloud cutover succeeded without `--cloud-disk-offering-id`. Cloud selected
+    `Default Custom Offering for Volume Import - Local Storage`, imported the
+    root qcow2 as volume `a7f6f959-58bc-4d78-8d02-5a630d452b61`, converted it
+    to `ROOT`, deployed VM `1acbfb58-b7a6-486f-934f-d40495b704e7`, attached
+    data volume `ae2d2361-a0eb-4ab3-9454-2899374333c0`, and started the VM.
+  - Cloud verification passed: VM `n2k-c05-win10-fs` / `i-2-388-VM` is
+    `Running` on `ablecube22-2`. VM details include `cpuNumber=4`,
+    `cpuSpeed=1000`, `memory=4096`, `rootDiskController=scsi`,
+    `dataDiskController=scsi`, and `UEFI=SECURE`.
+  - Cloud volume verification passed: one `ROOT` volume and one `DATADISK`
+    volume are `Ready` on `ablecube22-2-local-aa5cf314`, with paths matching
+    the C05 target map basenames and device IDs 0 and 1.
+  - Host 22.2 verification passed: libvirt domain `i-2-388-VM` is `running`,
+    maps `sda` and `sdb` to the two C05 qcow2 files under
+    `/var/lib/libvirt/images`, and uses `bridge0` for its NIC.
+  - Successful cleanup removed all three Nutanix source snapshots created by
+    the run. Follow-up PE snapshot query returned no matching n2k snapshots.
+    Source `win10` remained `OFF` after cutoff.
 
 ### C06 - CentOS BIOS/IDE full FileSystem Cloud target
 
