@@ -1779,6 +1779,62 @@ jobs:
             release_notes.md
           retention-days: 14
 
+      - name: Stage uniquely named GitHub Release assets
+        if: ${{ env.RELEASE_PUBLISH == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          OUT_DIR="release/upload-assets"
+          mkdir -p "${OUT_DIR}"
+
+          copy_plain() {
+            local src="$1"
+            local dst="${OUT_DIR}/$(basename "${src}")"
+            cp -f "${src}" "${dst}"
+          }
+
+          copy_rpm_with_suffix() {
+            local src="$1"
+            local suffix="$2"
+            local base name arch
+            base="$(basename "${src}")"
+            name="${base%.rpm}"
+            arch="${name##*.}"
+            if [[ "${arch}" == "${name}" ]]; then
+              cp -f "${src}" "${OUT_DIR}/${name}-${suffix}.rpm"
+            else
+              cp -f "${src}" "${OUT_DIR}/${name%.*}-${suffix}.${arch}.rpm"
+            fi
+          }
+
+          for iso in build/iso/rocky/*.iso build/iso/ubuntu/*.iso build/iso/windows/*.iso; do
+            copy_plain "${iso}"
+          done
+
+          for rpm in release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm; do
+            copy_plain "${rpm}"
+          done
+          for rpm in release/rpm/hangctl-rpm-rocky9.6/*.rpm; do
+            copy_plain "${rpm}"
+          done
+          for rpm in release/rpm/ftctl-rpm-rocky9.6/*.rpm; do
+            copy_plain "${rpm}"
+          done
+
+          for ver in 9.6 9.7; do
+            for rpm in "release/v2k/v2k-rpm-rocky${ver}"/ablestack_v2k-*.rpm; do
+              copy_rpm_with_suffix "${rpm}" "rocky${ver}"
+            done
+            for rpm in "release/n2k/n2k-rpm-rocky${ver}"/ablestack_n2k-*.rpm; do
+              copy_rpm_with_suffix "${rpm}" "rocky${ver}"
+            done
+          done
+
+          echo "[INFO] GitHub Release assets to upload:"
+          find "${OUT_DIR}" -maxdepth 1 -type f -printf '%f\n' | sort
+
       - name: Create GitHub Release
         if: ${{ env.RELEASE_PUBLISH == 'true' }}
         uses: softprops/action-gh-release@v2
@@ -1786,13 +1842,4 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           body_path: release_notes.md
           files: |
-            build/iso/rocky/*.iso
-            build/iso/ubuntu/*.iso
-            build/iso/windows/*.iso
-            release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm
-            release/rpm/hangctl-rpm-rocky9.6/*.rpm
-            release/rpm/ftctl-rpm-rocky9.6/*.rpm
-            release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
-            release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.rpm
-            release/n2k/n2k-rpm-rocky9.6/ablestack_n2k-*.rpm
-            release/n2k/n2k-rpm-rocky9.7/ablestack_n2k-*.rpm
+            release/upload-assets/*
