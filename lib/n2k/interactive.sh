@@ -84,7 +84,7 @@ n2k_interactive_choice_by_id_or_label() {
 
 n2k_interactive_select_tsv() {
   local label="$1" choices="$2" current="${3:-}" yes="${4:-0}" default_index="${5:-1}"
-  local count=0 idx=0 line id name meta choice selected
+  local count=0 idx=0 id name meta choice selected
   local -a ids=() names=() metas=()
 
   if [[ -n "${current}" ]]; then

@@ -31,6 +31,7 @@ Requires:       curl
 Requires:       openssl
 Requires:       qemu-img
 Requires:       libvirt-client
+Requires:       nfs-utils
 
 %description
 ablestack_n2k provides ABLESTACK Nutanix AHV-to-KVM migration scripts and libraries.

@@ -1,6 +1,7 @@
 name: N2K CI
 
 on:
+  workflow_dispatch:
   push:
     branches: ["main", "develop", "feature/ablestack_n2k"]
     paths:
@@ -10,7 +11,6 @@ on:
       - "tests/fixtures/n2k/**"
       - "completions/ablestack_n2k"
       - "rpm/ablestack_n2k.spec"
-      - "deb/ablestack_n2k.control"
       - "Makefile"
       - ".github/workflows/n2k-ci.yml"
   pull_request:
@@ -21,7 +21,6 @@ on:
       - "tests/fixtures/n2k/**"
       - "completions/ablestack_n2k"
       - "rpm/ablestack_n2k.spec"
-      - "deb/ablestack_n2k.control"
       - "Makefile"
       - ".github/workflows/n2k-ci.yml"
 
@@ -50,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           if LC_ALL=C grep -RIl $'\r' \
-            bin/ablestack_n2k.sh lib/n2k docs/n2k tests/fixtures/n2k completions/ablestack_n2k rpm/ablestack_n2k.spec deb/ablestack_n2k.control; then
+            bin/ablestack_n2k.sh lib/n2k docs/n2k tests/fixtures/n2k completions/ablestack_n2k rpm/ablestack_n2k.spec; then
             echo "CRLF line endings detected." >&2
             exit 1
           fi
@@ -59,7 +58,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -RInP '[\x{AC00}-\x{D7A3}]' bin/ablestack_n2k.sh lib/n2k tests/fixtures/n2k completions/ablestack_n2k rpm/ablestack_n2k.spec deb/ablestack_n2k.control; then
+          if grep -RInP '[\x{AC00}-\x{D7A3}]' bin/ablestack_n2k.sh lib/n2k tests/fixtures/n2k completions/ablestack_n2k rpm/ablestack_n2k.spec; then
             echo "Korean text detected in source paths." >&2
             exit 1
           fi
@@ -126,9 +125,9 @@ jobs:
             --target-format raw --target-storage rbd >/dev/null
           jq -e '.target.storage.type == "rbd" and .target.storage.priority == 1 and (.disks[0].transfer.target_path | startswith("rbd:pool/n2k-app-01-disk0"))' "${rbd_dir}/work/manifest.json" >/dev/null
 
-          bin/ablestack_n2k.sh --json plan --vm app-01 --pc pc.example --mode v4-incremental \
-            --v4-vmm 1 --v4-dataprotection 1 --v4-data-plane 1 --target-storage auto --target-format qcow2 \
-            | jq -e '.target.selected_storage == "file" and (.steps | index("prepare-target-storage") != null)' >/dev/null
+          bin/ablestack_n2k.sh --json plan --vm app-01 --pc pc.example --mode manual-disk \
+            --target-storage auto --target-format qcow2 \
+            | jq -e '.can_run == true and .target.selected_storage == "file" and (.steps | index("prepare-manual-disk") != null)' >/dev/null
 
           source lib/n2k/engine.sh
           n2k_source_nfs_uri_parts 'nutanix-nfs://10.10.131.10/Storage-Container/.snapshot/21/id/.acropolis/vmdisk/disk-1' \
@@ -204,23 +203,3 @@ jobs:
         with:
           name: n2k-rpm
           path: build/rpm-n2k/*.rpm
-
-  build-deb:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install DEB build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y make dpkg-dev
-
-      - name: Build N2K DEB
-        run: make n2k-deb
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: n2k-deb
-          path: build/deb-n2k/*.deb

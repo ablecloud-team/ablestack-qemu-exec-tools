@@ -73,6 +73,33 @@ Commands:
   cleanup                 Clean temporary migration resources
   status                  Show migration status
 EOF
+  usage_ahv_prerequisites
+}
+
+usage_ahv_prerequisites() {
+  cat <<'EOF'
+
+AHV/Nutanix source-side prerequisites:
+  - Confirm Prism Central or Prism Element URL, credentials, and VM privileges.
+  - Confirm the source VM inventory before migration: power state, disks, NICs,
+    firmware type, guest OS, and any VM/host affinity or passthrough settings.
+  - Confirm the source VM can be snapshotted and, for final cutover, can be
+    shut down through guest or poweroff policy.
+  - Confirm the n2k host can mount/read Nutanix snapshot NFS exports when using
+    the current v3 snapshot/NFS data path.
+
+Source-side ports to allow from the n2k host:
+  - TCP 9440 to Prism Central and/or Prism Element for REST API calls.
+  - TCP 2049 to Nutanix CVM/cluster NFS export for vDisk reads.
+  - TCP/UDP 111 when the environment requires NFSv3 portmapper negotiation.
+  - TCP/UDP 20048-20050 and 7508 when strict firewalls filter Nutanix NFS/data
+    service auxiliary ports.
+  - Allow return traffic for established sessions.
+
+Target-side ports depend on the selected target:
+  - ABLESTACK Cloud API endpoint port, for example TCP 8080 or 443.
+  - libvirt/SSH/management ports only when your operation model requires them.
+EOF
 }
 
 usage_preflight() {
@@ -88,7 +115,8 @@ Options:
   --insecure <0|1>        Skip TLS verification when set to 1
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --source-api <api>      auto|v3; v3 forces v3-incremental selection
-  --force-v3              Force v3-incremental even when v4 is available
+  --force-v3, --force-v3-incremental
+                          Force v3-incremental even when v4 is available
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -136,6 +164,7 @@ Notes:
   - Current runnable data path is v3 snapshot/NFS. PC v4 is used for discovery
     only until a verified v4 byte source is available.
 EOF
+  usage_ahv_prerequisites
 }
 
 usage_plan() {
@@ -152,7 +181,8 @@ Options:
   --insecure <0|1>        Skip TLS verification when set to 1
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --source-api <api>      auto|v3; v3 forces v3-incremental selection
-  --force-v3              Force v3-incremental even when v4 is available
+  --force-v3, --force-v3-incremental
+                          Force v3-incremental even when v4 is available
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -245,7 +275,8 @@ Options:
   --inventory-source <s>  none|fixture|api; default api
   --split <mode>          full|phase1|phase2
   --source-api <api>      v3; run data path currently uses v3 snapshot/NFS
-  --force-v3              Force v3-incremental even when v4 is available
+  --force-v3, --force-v3-incremental
+                          Force v3-incremental even when v4 is available
   --source-map-from-v3-nfs
                           Build source map from v3 snapshot metadata and NFS
                            (default)
@@ -287,6 +318,7 @@ Notes:
   - Phase2 requires the Phase1 marker, loops incremental sync until the
     deadline gate is met, then performs final sync and cutover.
 EOF
+  usage_ahv_prerequisites
 }
 
 usage_wizard() {
@@ -316,9 +348,17 @@ Common options:
   --yes, -y               Accept safe defaults and skip final confirmation
   --print-command         Print the generated run command with secrets redacted
 
+Source options:
+  --source-api <api>      v3; wizard currently generates v3 snapshot/NFS runs
+  --force-v3, --force-v3-incremental
+                          Force v3-incremental source path
+  --nfs-host <host>       Nutanix NFS host for v3 snapshot file paths
+  --nfs-mount-root <dir>  Local mount root for Nutanix NFS sources
+
 Target convenience options:
   --rbd-pool <pool>       RBD pool for generated target paths; default rbd
-  --file-root <path>      File target root; default /var/lib/libvirt/images
+  --file-root <path>      Libvirt file target root; default /var/lib/libvirt/images
+                          Cloud FileSystem resolves this from selected storage
   --dst <path>            Destination root passed to run
   --target-map-json <js>  Explicit per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -343,7 +383,8 @@ Cloud options:
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
   --cloud-project-id <id> Optional Cloud project ID
-  --cloud-name <name>     Optional Cloud VM host name
+  --cloud-name <name>     Cloud VM host name; prompts with generated default
+                          when omitted in new interactive Cloud runs
   --cloud-display-name <name>
                           Optional Cloud VM display name
   --cloud-cpu-speed <mhz>
@@ -363,6 +404,7 @@ Notes:
     phase2 can be started later in a new process after phase1 exits.
   - Secrets are passed only at runtime. --print-command redacts secret values.
 EOF
+  usage_ahv_prerequisites
 }
 
 usage_init() {
@@ -379,7 +421,8 @@ Options:
   --insecure <0|1>        Skip TLS verification when set to 1
   --dst <path>            Destination root
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
-  --force-v3              Initialize the manifest as v3-incremental
+  --force-v3, --force-v3-incremental
+                          Initialize the manifest as v3-incremental
   --inventory-json <json> Normalized or raw VM inventory JSON
   --inventory-file <file> Normalized or raw VM inventory JSON file
   --inventory-source <s>  none|fixture|api
