@@ -1,0 +1,11 @@
+Package: ablestack-n2k
+Version: ${VERSION}-${RELEASE}
+Section: utils
+Priority: optional
+Architecture: all
+Depends: bash, jq, curl, qemu-utils, libvirt-clients
+Maintainer: ABLECLOUD <dev@ablecloud.io>
+Description: ABLESTACK Nutanix AHV-to-KVM migration tool
+ ablestack_n2k provides Nutanix AHV to ABLESTACK KVM migration
+ command line tooling, manifest-based status tracking, and data
+ transfer helpers.

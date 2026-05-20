@@ -17,6 +17,9 @@
 NAME = ablestack-qemu-exec-tools
 V2K_NAME = ablestack_v2k
 V2K_SPEC = rpm/$(V2K_NAME).spec
+N2K_NAME = ablestack_n2k
+N2K_SPEC = rpm/$(N2K_NAME).spec
+N2K_COMPLETIONS_FILE = completions/$(N2K_NAME)
 
 HANGCTL_NAME = ablestack_vm_hangctl
 HANGCTL_SPEC = rpm/$(HANGCTL_NAME).spec
@@ -45,7 +48,7 @@ DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
 DEB_COMPLETIONS_DIR = $(DEB_BUILD_DIR)/usr/share/bash-completion/completions
 
-.PHONY: all install uninstall rpm v2k-rpm hangctl-rpm ftctl-rpm deb windows clean
+.PHONY: all install uninstall rpm v2k-rpm n2k-rpm n2k-deb hangctl-rpm ftctl-rpm deb windows clean
 
 all:
 	@echo "Available targets: install, uninstall, rpm, deb, windows, clean"
@@ -57,6 +60,7 @@ install:
 	install -m 0755 bin/vm_exec.sh $(BIN_DIR)/vm_exec
 	install -m 0755 bin/agent_policy_fix.sh $(BIN_DIR)/agent_policy_fix
 	@if [ -f bin/ablestack_vm_ftctl.sh ]; then install -m 0755 bin/ablestack_vm_ftctl.sh $(BIN_DIR)/ablestack_vm_ftctl; fi
+	@if [ -f bin/ablestack_n2k.sh ]; then install -m 0755 bin/ablestack_n2k.sh $(BIN_DIR)/ablestack_n2k; fi
 	@if [ -f bin/ablestack_vm_ftctl_selftest.sh ]; then install -m 0755 bin/ablestack_vm_ftctl_selftest.sh $(BIN_DIR)/ablestack_vm_ftctl_selftest; fi
 	@if [ -f bin/ablestack_vm_ftctl_firewalld.sh ]; then install -m 0755 bin/ablestack_vm_ftctl_firewalld.sh $(BIN_DIR)/ablestack_vm_ftctl_firewalld; fi
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(BIN_DIR)/install_ablestack_qemu_exec_tools; fi
@@ -70,6 +74,9 @@ install:
 	fi
 	@if [ -f completions/ablestack_vm_ftctl ]; then \
 		install -m 0644 completions/ablestack_vm_ftctl $(COMPLETIONS_TARGET)/ablestack_vm_ftctl; \
+	fi
+	@if [ -f completions/ablestack_n2k ]; then \
+		install -m 0644 completions/ablestack_n2k $(COMPLETIONS_TARGET)/ablestack_n2k; \
 	fi
 	@echo "Installed to $(INSTALL_PREFIX)"
 
@@ -282,6 +289,83 @@ v2k-rpm:
 
 	@echo "V2K RPM package created: build/rpm-v2k/"
 
+n2k-rpm:
+	@echo "Building N2K RPM (isolated)..."
+	@test -f "$(N2K_SPEC)" || (echo "[ERR] Missing spec: $(N2K_SPEC)" >&2; exit 2)
+	@test -f "$(N2K_COMPLETIONS_FILE)" || (echo "[ERR] Missing completion file: $(N2K_COMPLETIONS_FILE)" >&2; exit 2)
+
+	mkdir -p rpmbuild_n2k/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+	@TMP_TGZ="$$(mktemp /tmp/$(N2K_NAME)-$(VERSION).tar.gz.XXXXXX)"; \
+	tar czf "$$TMP_TGZ" \
+		--transform="s,^,$(N2K_NAME)-$(VERSION)/," \
+		--exclude=./rpmbuild \
+		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_n2k \
+		--exclude=./rpmbuild_hangctl \
+		--exclude=./rpmbuild_ftctl \
+		--exclude=./build \
+		--exclude=./release \
+		--exclude=./repo \
+		--exclude=./dist \
+		. ; \
+	mv -f "$$TMP_TGZ" "rpmbuild_n2k/SOURCES/$(N2K_NAME)-$(VERSION).tar.gz"
+
+	cp $(N2K_SPEC) rpmbuild_n2k/SPECS/
+
+	rpmbuild --noplugins -ba --define "_topdir $(shell pwd)/rpmbuild_n2k" \
+	         --define "version $(VERSION)" \
+	         --define "release $(RELEASE)" \
+	         --define "githash $(GIT_HASH)" \
+	         rpmbuild_n2k/SPECS/$(N2K_NAME).spec
+
+	mkdir -p build/rpm-n2k
+	cp rpmbuild_n2k/RPMS/noarch/*.rpm build/rpm-n2k/ 2>/dev/null || true
+	cp rpmbuild_n2k/RPMS/*/*.rpm build/rpm-n2k/ 2>/dev/null || true
+
+	@echo "Verifying ablestack_n2k RPM file list..."
+	@RPM_FILE="$$(ls -1 build/rpm-n2k/$(N2K_NAME)-*.rpm 2>/dev/null | head -n 1)"; \
+	if [ -z "$$RPM_FILE" ]; then \
+	  echo "[ERR] Built RPM not found under build/rpm-n2k" >&2; exit 2; \
+	fi; \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/local/bin/$(N2K_NAME)$$" || \
+	  (echo "[ERR] command missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/local/lib/ablestack-qemu-exec-tools/n2k/engine.sh$$" || \
+	  (echo "[ERR] n2k engine library missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "bash-completion/completions/$(N2K_NAME)$$" || \
+	  (echo "[ERR] completion file missing in RPM: $$RPM_FILE" >&2; exit 2)
+
+	@echo "N2K RPM package created: build/rpm-n2k/"
+
+n2k-deb:
+	@echo "Building N2K DEB (isolated)..."
+	rm -rf $(N2K_NAME)_$(VERSION)-$(RELEASE)
+	mkdir -p $(N2K_NAME)_$(VERSION)-$(RELEASE)/DEBIAN
+	mkdir -p $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/bin
+	mkdir -p $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/lib/ablestack-qemu-exec-tools/n2k
+	mkdir -p $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/share/bash-completion/completions
+	mkdir -p $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/share/doc/$(N2K_NAME)
+
+	install -m 0755 bin/ablestack_n2k.sh $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/bin/ablestack_n2k
+	cp -a lib/n2k/* $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/lib/ablestack-qemu-exec-tools/n2k/
+	install -m 0644 completions/ablestack_n2k $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/share/bash-completion/completions/ablestack_n2k
+	cp -a docs/n2k/* $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/share/doc/$(N2K_NAME)/
+	sed -e "s/\$${VERSION}/$(VERSION)/" \
+		-e "s/\$${RELEASE}/$(RELEASE)/" \
+		deb/ablestack_n2k.control > $(N2K_NAME)_$(VERSION)-$(RELEASE)/DEBIAN/control
+	find $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/lib/ablestack-qemu-exec-tools/n2k -type f -name "*.sh" -exec chmod 0755 {} \;
+	dpkg-deb --build $(N2K_NAME)_$(VERSION)-$(RELEASE)
+	mkdir -p build/deb-n2k
+	mv $(N2K_NAME)_$(VERSION)-$(RELEASE).deb build/deb-n2k/$(N2K_NAME)_$(VERSION)-$(RELEASE).deb
+	@echo "Verifying ablestack_n2k DEB file list..."
+	@DEB_FILE="build/deb-n2k/$(N2K_NAME)_$(VERSION)-$(RELEASE).deb"; \
+	dpkg-deb -c "$$DEB_FILE" | grep -qE "\./usr/local/bin/$(N2K_NAME)$$" || \
+	  (echo "[ERR] command missing in DEB: $$DEB_FILE" >&2; exit 2); \
+	dpkg-deb -c "$$DEB_FILE" | grep -qE "\./usr/local/lib/ablestack-qemu-exec-tools/n2k/engine.sh$$" || \
+	  (echo "[ERR] n2k engine library missing in DEB: $$DEB_FILE" >&2; exit 2); \
+	dpkg-deb -c "$$DEB_FILE" | grep -qE "\./usr/share/bash-completion/completions/$(N2K_NAME)$$" || \
+	  (echo "[ERR] completion file missing in DEB: $$DEB_FILE" >&2; exit 2)
+	@echo "N2K DEB package created: build/deb-n2k/"
+
 deb:
 	@echo "Building DEB..."
 	rm -rf $(DEB_BUILD_DIR)
@@ -332,7 +416,9 @@ windows:
 clean:
 	rm -rf rpmbuild
 	rm -rf rpmbuild_v2k
+	rm -rf rpmbuild_n2k
 	rm -rf rpmbuild_hangctl
 	rm -rf $(DEB_BUILD_DIR)
+	rm -rf $(N2K_NAME)_$(VERSION)-$(RELEASE)
 	rm -f *.deb
 	rm -rf build/*

@@ -1,0 +1,60 @@
+{
+  "$objectType": "vmm.v4.ahv.config.Vm",
+  "extId": "c571852a-43ab-42e4-a58b-a5e38a459b06",
+  "name": "rhel",
+  "powerState": "ON",
+  "numSockets": 1,
+  "numCoresPerSocket": 1,
+  "memorySizeBytes": 4294967296,
+  "bootConfig": {
+    "$objectType": "vmm.v4.ahv.config.UefiBoot",
+    "isSecureBootEnabled": true
+  },
+  "vtpmConfig": {
+    "isVtpmEnabled": false
+  },
+  "nics": [
+    {
+      "$objectType": "vmm.v4.ahv.config.Nic",
+      "extId": "4120b53e-8a20-4705-a5a8-b2e4a8f85039",
+      "backingInfo": {
+        "$objectType": "vmm.v4.ahv.config.EmulatedNic",
+        "macAddress": "50:6b:8d:bb:91:08"
+      },
+      "networkInfo": {
+        "subnet": {
+          "extId": "f44f350c-2313-4861-89ed-d26b0b576690"
+        }
+      }
+    }
+  ],
+  "disks": [
+    {
+      "$objectType": "vmm.v4.ahv.config.Disk",
+      "extId": "ae29c318-5dca-44b3-93c6-f3f3714177ec",
+      "backingInfo": {
+        "$objectType": "vmm.v4.ahv.config.VmDisk",
+        "diskExtId": "ae29c318-5dca-44b3-93c6-f3f3714177ec",
+        "diskSizeBytes": 107374182400,
+        "storageContainer": {
+          "extId": "8fe1da89-3dd2-4419-8b7f-313959eae441"
+        }
+      },
+      "diskAddress": {
+        "$objectType": "vmm.v4.ahv.config.DiskAddress",
+        "busType": "SCSI",
+        "index": 0
+      }
+    }
+  ],
+  "cdRoms": [
+    {
+      "$objectType": "vmm.v4.ahv.config.CdRom",
+      "extId": "af169f93-2c52-4cdb-8758-726261231cae",
+      "backingInfo": {
+        "diskExtId": "af169f93-2c52-4cdb-8758-726261231cae",
+        "diskSizeBytes": 12534677504
+      }
+    }
+  ]
+}

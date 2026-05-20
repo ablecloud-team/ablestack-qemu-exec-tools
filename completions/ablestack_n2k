@@ -1,0 +1,149 @@
+# bash completion for ablestack_n2k
+
+_ablestack_n2k()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local commands="preflight plan run auto wizard migrate interactive init snapshot sync verify cutover cleanup status"
+    local global_opts="--workdir --run-id --manifest --log --json --dry-run --resume --force -h --help"
+    local modes="auto v4-incremental v3-incremental legacy-cbt cold-export manual-disk"
+
+    local cmd=""
+    local i
+    for ((i = 1; i < cword; i++)); do
+        case "${words[i]}" in
+            preflight|plan|run|auto|wizard|migrate|interactive|init|snapshot|sync|verify|cutover|cleanup|status)
+                cmd="${words[i]}"
+                break
+                ;;
+        esac
+    done
+
+    case "${prev}" in
+        --workdir|--manifest|--log|--cred-file|--cloud-cred-file|--inventory-file|--source-map-file|--changed-regions-file)
+            _filedir
+            return
+            ;;
+        --nfs-mount-root|--file-root)
+            _filedir -d
+            return
+            ;;
+        --mode)
+            case "${cmd}" in
+                verify) COMPREPLY=( $(compgen -W "quick full" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "${modes}" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --source-api)
+            case "${cmd}" in
+                preflight|plan) COMPREPLY=( $(compgen -W "auto v3" -- "${cur}") ) ;;
+                run|auto|wizard|migrate|interactive) COMPREPLY=( $(compgen -W "v3" -- "${cur}") ) ;;
+                snapshot) COMPREPLY=( $(compgen -W "manual v4 v3 legacy" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "auto v3 manual v4 legacy" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --target-format)
+            COMPREPLY=( $(compgen -W "qcow2 raw" -- "${cur}") )
+            return
+            ;;
+        --target-storage)
+            case "${cmd}" in
+                preflight|plan) COMPREPLY=( $(compgen -W "auto file block rbd" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "file block rbd" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --rbd-access-mode)
+            COMPREPLY=( $(compgen -W "librbd krbd" -- "${cur}") )
+            return
+            ;;
+        --target-provider)
+            COMPREPLY=( $(compgen -W "libvirt ablestack-cloud" -- "${cur}") )
+            return
+            ;;
+        --target-profile|--profile)
+            COMPREPLY=( $(compgen -W "cloud-rbd cloud-filesystem cloud-qcow2 libvirt-rbd libvirt-qcow2" -- "${cur}") )
+            return
+            ;;
+        --inventory-source)
+            COMPREPLY=( $(compgen -W "none fixture api" -- "${cur}") )
+            return
+            ;;
+        --split)
+            COMPREPLY=( $(compgen -W "full phase1 phase2" -- "${cur}") )
+            return
+            ;;
+        --shutdown)
+            case "${cmd}" in
+                run|auto|wizard|migrate|interactive|cutover) COMPREPLY=( $(compgen -W "manual none guest poweroff" -- "${cur}") ) ;;
+                *) COMPREPLY=( $(compgen -W "manual guest poweroff" -- "${cur}") ) ;;
+            esac
+            return
+            ;;
+        --snapshot-type)
+            COMPREPLY=( $(compgen -W "CRASH_CONSISTENT APPLICATION_CONSISTENT" -- "${cur}") )
+            return
+            ;;
+        --reference-kind)
+            COMPREPLY=( $(compgen -W "base incr final" -- "${cur}") )
+            return
+            ;;
+        --network-mode|--libvirt-network-mode)
+            COMPREPLY=( $(compgen -W "bridge network" -- "${cur}") )
+            return
+            ;;
+        --insecure|--v4-vmm|--v4-dataprotection|--v4-data-plane|--legacy-changed-regions|--legacy-endpoint-verified|--cold-export-available|--manual-disk-available|--restore-strict-mode)
+            COMPREPLY=( $(compgen -W "0 1" -- "${cur}") )
+            return
+            ;;
+        --run-id|--vm|--pc|--username|--password|--dst|--capability-json|--inventory-json|--target-map-json|--source-map-json|--changed-regions-json|--recovery-point-id|--jobs|--chunk|--coalesce-gap|--samples|--name|--pd-name|--temp-vm-name|--restore-cluster-id|--wait-seconds|--retention-seconds|--deadline-sec|--max-incr-phase2|--max-final-bytes|--shutdown-timeout-sec|--shutdown-poll-sec|--cutover-args|--nfs-host|--rbd-pool|--bridge|--libvirt-bridge|--network|--libvirt-network|--cloud-endpoint|--cloud-api-key|--cloud-secret-key|--cloud-zone-id|--cloud-service-offering-id|--cloud-cpu-speed|--cloud-network-id|--cloud-network-ids|--cloud-storage-id|--cloud-disk-offering-id|--cloud-host-id|--cloud-account|--cloud-domain-id|--cloud-project-id|--cloud-name|--cloud-display-name)
+            return
+            ;;
+    esac
+
+    if [[ -z "${cmd}" ]]; then
+        COMPREPLY=( $(compgen -W "${global_opts} ${commands}" -- "${cur}") )
+        return
+    fi
+
+    case "${cmd}" in
+        preflight)
+            COMPREPLY=( $(compgen -W "--pc --username --password --cred-file --insecure --mode --source-api --force-v3 --force-v3-incremental --target-storage --target-format --rbd-access-mode --target-provider --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file --cloud-zone-id --cloud-service-offering-id --cloud-cpu-speed --cloud-network-id --cloud-network-ids --cloud-storage-id --cloud-disk-offering-id --cloud-host-id --cloud-account --cloud-domain-id --cloud-project-id --cloud-name --cloud-display-name --capability-json --v4-vmm --v4-dataprotection --v4-data-plane --legacy-changed-regions --legacy-endpoint-verified --cold-export-available --manual-disk-available --probe-legacy-cbt --allow-experimental --help" -- "${cur}") )
+            ;;
+        plan)
+            COMPREPLY=( $(compgen -W "--vm --pc --username --password --cred-file --insecure --mode --source-api --force-v3 --force-v3-incremental --target-storage --target-format --rbd-access-mode --target-provider --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file --cloud-zone-id --cloud-service-offering-id --cloud-cpu-speed --cloud-network-id --cloud-network-ids --cloud-storage-id --cloud-disk-offering-id --cloud-host-id --cloud-account --cloud-domain-id --cloud-project-id --cloud-name --cloud-display-name --capability-json --v4-vmm --v4-dataprotection --v4-data-plane --legacy-changed-regions --legacy-endpoint-verified --cold-export-available --manual-disk-available --probe-legacy-cbt --allow-experimental --help" -- "${cur}") )
+            ;;
+        run|auto)
+            COMPREPLY=( $(compgen -W "--vm --pc --username --password --cred-file --insecure --mode --dst --target-format --target-storage --target-map-json --rbd-access-mode --target-provider --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file --cloud-zone-id --cloud-service-offering-id --cloud-cpu-speed --cloud-network-id --cloud-network-ids --cloud-storage-id --cloud-disk-offering-id --cloud-host-id --cloud-account --cloud-domain-id --cloud-project-id --cloud-name --cloud-display-name --inventory-source --split --source-api --force-v3 --force-v3-incremental --source-map-from-v3-nfs --no-source-map-from-v3-nfs --nfs-host --nfs-mount-root --deadline-sec --max-incr-phase2 --max-final-bytes --wait-seconds --retention-seconds --snapshot-type --shutdown --shutdown-timeout-sec --shutdown-poll-sec --cutover-args --network-mode --libvirt-network-mode --bridge --libvirt-bridge --network --libvirt-network --cleanup-source-points --keep-source-points --define-only --apply --start --skip-plan --probe-legacy-cbt --allow-experimental --help" -- "${cur}") )
+            ;;
+        wizard|migrate|interactive)
+            COMPREPLY=( $(compgen -W "--vm --pc --username --password --cred-file --insecure --target-profile --profile --target-provider --target-format --target-storage --target-map-json --dst --rbd-pool --file-root --rbd-access-mode --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file --cloud-zone-id --cloud-service-offering-id --cloud-cpu-speed --cloud-network-id --cloud-network-ids --cloud-storage-id --cloud-disk-offering-id --cloud-host-id --cloud-account --cloud-domain-id --cloud-project-id --cloud-name --cloud-display-name --split --source-api --force-v3 --force-v3-incremental --nfs-host --nfs-mount-root --shutdown --define-only --apply --start --network-mode --libvirt-network-mode --bridge --libvirt-bridge --network --libvirt-network --yes -y --print-command --help" -- "${cur}") )
+            ;;
+        init)
+            COMPREPLY=( $(compgen -W "--vm --pc --cred-file --username --password --insecure --dst --mode --force-v3 --force-v3-incremental --inventory-json --inventory-file --inventory-source --target-format --target-storage --target-map-json --rbd-access-mode --target-provider --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file --cloud-zone-id --cloud-service-offering-id --cloud-cpu-speed --cloud-network-id --cloud-network-ids --cloud-storage-id --cloud-disk-offering-id --cloud-host-id --cloud-account --cloud-domain-id --cloud-project-id --cloud-name --cloud-display-name --help" -- "${cur}") )
+            ;;
+        snapshot)
+            COMPREPLY=( $(compgen -W "base incr final --name --recovery-point-id --source-api --pc --vm --cred-file --username --password --insecure --create-recovery-point --create-vm-snapshot --snapshot-type --pd-name --create-pd --protect-vm --create-oob-snapshot --verify-changed-regions --collect-changed-regions --reference-kind --restore-to-temp-vm --temp-vm-name --restore-cluster-id --restore-strict-mode --wait-seconds --retention-seconds --app-consistent --help" -- "${cur}") )
+            ;;
+        sync)
+            COMPREPLY=( $(compgen -W "base incr final --jobs --chunk --coalesce-gap --source-map-json --source-map-file --pc --cred-file --username --password --insecure --source-map-from-v3-nfs --nfs-host --nfs-mount-root --changed-regions-json --changed-regions-file --recovery-point-id --help" -- "${cur}") )
+            ;;
+        verify)
+            COMPREPLY=( $(compgen -W "--mode --samples --help" -- "${cur}") )
+            ;;
+        cutover)
+            COMPREPLY=( $(compgen -W "--shutdown --define-only --apply --start --rbd-access-mode --network-mode --libvirt-network-mode --bridge --libvirt-bridge --network --libvirt-network --target-provider --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file --cloud-zone-id --cloud-service-offering-id --cloud-cpu-speed --cloud-network-id --cloud-network-ids --cloud-storage-id --cloud-disk-offering-id --cloud-host-id --cloud-account --cloud-domain-id --cloud-project-id --cloud-name --cloud-display-name --help" -- "${cur}") )
+            ;;
+        cleanup)
+            COMPREPLY=( $(compgen -W "--keep-source-points --keep-workdir --remove-source-points --remove-workdir --apply --help" -- "${cur}") )
+            ;;
+        status)
+            COMPREPLY=( $(compgen -W "--vm --watch --resume-plan --help" -- "${cur}") )
+            ;;
+    esac
+}
+
+complete -F _ablestack_n2k ablestack_n2k

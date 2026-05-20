@@ -1,6 +1,18 @@
 name: Build and Release ablestack-qemu-exec-tools
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional release tag used for generated artifact names. Empty uses an n2k validation tag."
+        required: false
+        default: ""
+        type: string
+      publish_release:
+        description: "Create or update GitHub Release assets. Keep false for release build validation."
+        required: false
+        default: false
+        type: boolean
   workflow_run:
     workflows: ["WinPE Release Build"]
     types:
@@ -503,6 +515,94 @@ jobs:
           path: release/v2k/**
 
   # ======================================================================
+  # 1-D) N2K RPM BUILD (Rocky 9.6 / 9.7)
+  # ======================================================================
+  build-n2k-rpm:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        host_os_minor: ["9.6", "9.7"]
+    container:
+      image: rockylinux/rockylinux:9
+      options: --user 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build deps (n2k, Rocky ${{ matrix.host_os_minor }})
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROCKY_MINOR="${{ matrix.host_os_minor }}"
+          REPO_PREFIX="rocky-n2k-${ROCKY_MINOR}"
+          if [[ "${ROCKY_MINOR}" == "9.6" ]]; then
+            REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
+          elif [[ "${ROCKY_MINOR}" == "9.7" ]]; then
+            REPO_ROOT="https://dl.rockylinux.org/pub/rocky/${ROCKY_MINOR}"
+          else
+            echo "[ERR] Unsupported Rocky minor for N2K build: ${ROCKY_MINOR}" >&2
+            exit 2
+          fi
+
+          cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
+          [${REPO_PREFIX}-baseos]
+          name=Rocky Linux ${ROCKY_MINOR} - BaseOS
+          baseurl=${REPO_ROOT}/BaseOS/\$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [${REPO_PREFIX}-appstream]
+          name=Rocky Linux ${ROCKY_MINOR} - AppStream
+          baseurl=${REPO_ROOT}/AppStream/\$basearch/os/
+          enabled=1
+          gpgcheck=0
+
+          [${REPO_PREFIX}-crb]
+          name=Rocky Linux ${ROCKY_MINOR} - CRB
+          baseurl=${REPO_ROOT}/CRB/\$basearch/os/
+          enabled=1
+          gpgcheck=0
+          EOF
+
+          dnf clean all
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" makecache
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install \
+            make rpm-build tar git dnf-plugins-core createrepo_c
+
+      - name: Build N2K RPM
+        run: make n2k-rpm
+
+      - name: Create N2K RPM repo (Rocky ${{ matrix.host_os_minor }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROCKY_MINOR="${{ matrix.host_os_minor }}"
+          REPO_PREFIX="rocky-n2k-${ROCKY_MINOR}"
+          WORKDIR="release/n2k/n2k-rpm-rocky${ROCKY_MINOR}"
+          mkdir -p "${WORKDIR}"
+
+          cp -v build/rpm-n2k/*.rpm "${WORKDIR}/"
+
+          echo "[INFO] Downloading N2K runtime dependencies for Rocky ${ROCKY_MINOR}..."
+          dnf --releasever="${ROCKY_MINOR}" \
+            --disablerepo="*" \
+            --enablerepo="${REPO_PREFIX}-*" \
+            --setopt=install_weak_deps=False \
+            download --resolve --alldeps \
+            --destdir="${WORKDIR}" \
+            bash bash-completion jq curl openssl qemu-img libvirt-client nfs-utils || true
+
+          createrepo_c "${WORKDIR}"
+          test -f "${WORKDIR}/repodata/repomd.xml"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: n2k-rpm-package-rocky${{ matrix.host_os_minor }}
+          path: release/n2k/**
+
+  # ======================================================================
   # 2) DEB BUILD (Ubuntu 22.04 / 24.04)
   # ======================================================================
   build-deb:
@@ -617,29 +717,60 @@ jobs:
   # 4) RELEASE + ISO CREATION (VirtIO ???? ????
   # ======================================================================
   release:
-    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm]
+    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm]
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout workflow_run source
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Resolve tag from workflow_run
+      - name: Checkout workflow_dispatch source
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release context
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${{ github.event.workflow_run.head_branch }}"
-          if [[ -z "$TAG" ]]; then
-            echo "[ERR] workflow_run.head_branch is empty (cannot determine tag)" >&2
-            exit 2
+          EVENT_NAME="${{ github.event_name }}"
+          PUBLISH="false"
+
+          if [[ "${EVENT_NAME}" == "workflow_run" ]]; then
+            TAG="${{ github.event.workflow_run.head_branch }}"
+            if [[ -z "$TAG" ]]; then
+              echo "[ERR] workflow_run.head_branch is empty (cannot determine tag)" >&2
+              exit 2
+            fi
+            if [[ "$TAG" != v* ]]; then
+              echo "[ERR] head_branch is not a v* tag: $TAG" >&2
+              exit 2
+            fi
+            PUBLISH="true"
+          else
+            TAG="${{ inputs.release_tag }}"
+            if [[ -z "$TAG" ]]; then
+              TAG="n2k-validation-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+            fi
+            PUBLISH="${{ inputs.publish_release }}"
+            if [[ "${PUBLISH}" == "true" && "$TAG" != v* ]]; then
+              echo "[ERR] publish_release=true requires a v* release tag: $TAG" >&2
+              exit 2
+            fi
           fi
-          if [[ "$TAG" != v* ]]; then
-            echo "[ERR] head_branch is not a v* tag: $TAG" >&2
-            exit 2
-          fi
+
+          REF="$(git rev-parse HEAD)"
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_REF=$REF" >> "$GITHUB_ENV"
+          echo "RELEASE_PUBLISH=$PUBLISH" >> "$GITHUB_ENV"
+          echo "[INFO] RELEASE_TAG=$TAG"
+          echo "[INFO] RELEASE_REF=$REF"
+          echo "[INFO] RELEASE_PUBLISH=$PUBLISH"
 
       - uses: actions/download-artifact@v4
         with:
@@ -729,6 +860,9 @@ jobs:
           if [[ -f completions/ablestack_vm_ftctl ]]; then
             cp -f completions/ablestack_vm_ftctl release/completions/
           fi
+          if [[ -f completions/ablestack_n2k ]]; then
+            cp -f completions/ablestack_n2k release/completions/
+          fi
 
           echo "[INFO] Collecting DEB repos..."
           for ver in 22.04 24.04; do
@@ -769,6 +903,26 @@ jobs:
             echo "[INFO] Found V2K repo for Rocky ${ver}: ${SRC_DIR}"
             mkdir -p "release/v2k/v2k-rpm-rocky${ver}"
             cp -a "${SRC_DIR}/." "release/v2k/v2k-rpm-rocky${ver}/"
+          done
+
+      - name: Collect N2K repos into ISO tree
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for ver in 9.6 9.7; do
+            SRC_DIR="$(find dist -type d \( \
+                        -path "*/n2k-rpm-package-rocky${ver}/release/n2k/n2k-rpm-rocky${ver}" -o \
+                        -path "*/n2k-rpm-package-rocky${ver}/n2k-rpm-rocky${ver}" \
+                      \) | head -n 1 || true)"
+            if [[ -z "${SRC_DIR}" || ! -d "${SRC_DIR}" ]]; then
+              echo "[ERR] No N2K RPM repo found for Rocky ${ver} in workflow artifacts." >&2
+              find dist -maxdepth 6 -path "*n2k-rpm*" -print >&2 || true
+              exit 2
+            fi
+            echo "[INFO] Found N2K RPM repo for Rocky ${ver}: ${SRC_DIR}"
+            mkdir -p "release/n2k/n2k-rpm-rocky${ver}"
+            cp -a "${SRC_DIR}/." "release/n2k/n2k-rpm-rocky${ver}/"
           done
 
       - name: Stage V2K assets from repo ./assets into ISO (govc, VDDK)
@@ -1075,6 +1229,7 @@ jobs:
             - Shell completions:
                 completions/ablestack_v2k
                 completions/ablestack_vm_ftctl
+                completions/ablestack_n2k
             - Windows installers:
                 install.bat / install.ps1
             - FTCTL (ABLESTACK Host add-on):
@@ -1085,6 +1240,9 @@ jobs:
                 assets/govc_Linux_x86_64.tar.gz
                 assets/VMware-vix-disklib-*.tar.gz
                 assets/v2k/wheels (pyvmomi offline wheels)
+            - N2K (ABLESTACK Host add-on):
+                n2k/n2k-rpm-rocky9.6 (offline RPM repo for ablestack_n2k)
+                n2k/n2k-rpm-rocky9.7 (offline RPM repo for ablestack_n2k)
 
 
           Windows (recommended)
@@ -1125,6 +1283,16 @@ jobs:
                   return 1
               fi
               repo_dir="${ISO_MNT}/v2k/v2k-rpm-rocky${VERSION_ID}"
+              [[ -d "${repo_dir}" ]] || return 1
+              printf '%s\n' "${repo_dir}"
+          }
+
+          resolve_n2k_rpm_repo_dir() {
+              local repo_dir=
+              if [[ -z "${VERSION_ID:-}" ]]; then
+                  return 1
+              fi
+              repo_dir="${ISO_MNT}/n2k/n2k-rpm-rocky${VERSION_ID}"
               [[ -d "${repo_dir}" ]] || return 1
               printf '%s\n' "${repo_dir}"
           }
@@ -1230,6 +1398,37 @@ jobs:
                   fi
 
                   # ======================================================================
+                  # N2K add-on (ABLESTACK Host only)
+                  #  - Nutanix AHV to ABLESTACK migration tool
+                  # ======================================================================
+                  if [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* && "${MAJOR_VERSION:-}" == "9" ]]; then
+                      if N2K_REPO_DIR="$(resolve_n2k_rpm_repo_dir)"; then
+                          echo "[INFO] ABLESTACK ${VERSION_ID:-unknown} detected. Installing N2K add-on..."
+                          N2K_REPO_FILE=/etc/yum.repos.d/ablestack-n2k.repo
+                          sudo tee "${N2K_REPO_FILE}" >/dev/null <<-EON
+          [ablestack-n2k]
+          name=ablestack-n2k
+          baseurl=file://${N2K_REPO_DIR}
+          enabled=1
+          gpgcheck=0
+          EON
+                          sudo dnf clean all
+                          if sudo dnf -y --disablerepo="*" --enablerepo="ablestack-n2k" install ablestack_n2k; then
+                              echo "[OK] ablestack_n2k installed."
+                          else
+                              echo "[WARN] Failed to install ablestack_n2k from ISO repo. Continuing."
+                          fi
+                          sudo rm -f "${N2K_REPO_FILE}"
+                          sudo dnf clean all
+                      else
+                          echo "[WARN] No bundled N2K repo matches host Rocky ${VERSION_ID:-unknown}."
+                          echo "[WARN] Expected: ${ISO_MNT}/n2k/n2k-rpm-rocky${VERSION_ID:-<minor>}"
+                      fi
+                  else
+                      echo "[INFO] N2K add-on skipped (not ABLESTACK host or not Rocky 9)."
+                  fi
+
+                  # ======================================================================
                   # V2K add-on (ABLESTACK Host only)
                   #  - based on bin/v2k_test_install.sh
                   #  - Air-Gap: pyvmomi installs from ISO offline wheels
@@ -1328,6 +1527,9 @@ jobs:
               if [[ -f "${ISO_MNT}/completions/ablestack_vm_ftctl" ]]; then
                   sudo install -m 0644 "${ISO_MNT}/completions/ablestack_vm_ftctl" /usr/share/bash-completion/completions/ablestack_vm_ftctl
               fi
+              if [[ -f "${ISO_MNT}/completions/ablestack_n2k" ]]; then
+                  sudo install -m 0644 "${ISO_MNT}/completions/ablestack_n2k" /usr/share/bash-completion/completions/ablestack_n2k
+              fi
           fi
 
           # --- Installation marker ---
@@ -1368,12 +1570,12 @@ jobs:
           case "${DISTRO}" in
             rocky|rhel|centos|almalinux|fedora)
               echo "[INFO] Detected RPM-based system (${DISTRO} ${VERSION_ID:-unknown})"
-              sudo dnf -y remove ablestack_v2k ablestack_vm_hangctl ablestack_vm_ftctl ablestack-qemu-exec-tools || true
+              sudo dnf -y remove ablestack_v2k ablestack_n2k ablestack_vm_hangctl ablestack_vm_ftctl ablestack-qemu-exec-tools || true
               sudo dnf clean all || true
               ;;
             ubuntu|debian)
               echo "[INFO] Detected DEB-based system (${DISTRO} ${VERSION_ID:-unknown})"
-              sudo apt-get -y remove ablestack-qemu-exec-tools || true
+              sudo apt-get -y remove ablestack-n2k ablestack-qemu-exec-tools || true
               sudo apt-get -y autoremove || true
               ;;
             *)
@@ -1387,6 +1589,7 @@ jobs:
           remove_path_if_exists /usr/share/ablestack/v2k
           remove_path_if_exists /usr/share/bash-completion/completions/ablestack_v2k
           remove_path_if_exists /usr/share/bash-completion/completions/ablestack_vm_ftctl
+          remove_path_if_exists /usr/share/bash-completion/completions/ablestack_n2k
 
           if [[ -L /opt/vmware-vix-disklib-distrib ]]; then
             sudo rm -f /opt/vmware-vix-disklib-distrib
@@ -1417,6 +1620,7 @@ jobs:
           set -e
 
           CURRENT_TAG="${RELEASE_TAG}"
+          CURRENT_REF="${RELEASE_REF:-${CURRENT_TAG}}"
           DESC="ABLESTACK QEMU Exec Tools is an automation toolkit for libvirt/KVM environments, providing guest command execution, VM lifecycle orchestration, and VMware-to-KVM (V2K) migration pipelines. This release includes ablestack_v2k with fully automated Windows cutover support using WinPE-based offline VirtIO driver injection."
 
           echo "# ablestack-qemu-exec-tools ${CURRENT_TAG}" > release_notes.md
@@ -1428,14 +1632,14 @@ jobs:
           # Each ISO contains only the payload relevant to that operating system.
 
           # Each ISO contains only the payload relevant to that operating system.
-          PREV_TAG="$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)"
+          PREV_TAG="$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || true)"
 
           if [ -z "$PREV_TAG" ]; then
             echo "## Changes" >> release_notes.md
-            git log --oneline "${CURRENT_TAG}" -- . | sed 's/^/- /' >> release_notes.md
+            git log --oneline "${CURRENT_REF}" -- . | sed 's/^/- /' >> release_notes.md
           else
             echo "## Changes since ${PREV_TAG}" >> release_notes.md
-            git log --oneline "${PREV_TAG}..${CURRENT_TAG}" -- . | sed 's/^/- /' >> release_notes.md
+            git log --oneline "${PREV_TAG}..${CURRENT_REF}" -- . | sed 's/^/- /' >> release_notes.md
           fi
 
           echo "===== Generated release_notes.md ====="
@@ -1460,6 +1664,8 @@ jobs:
             - rpm/hangctl-rpm-rocky9.6
             - v2k/v2k-rpm-rocky9.6
             - v2k/v2k-rpm-rocky9.7
+            - n2k/n2k-rpm-rocky9.6
+            - n2k/n2k-rpm-rocky9.7
             - assets/
             - winpe/
             - completions/
@@ -1490,7 +1696,7 @@ jobs:
             - install.ps1
           EOF
 
-          mkdir -p build/iso-staging/rocky/rpm build/iso-staging/rocky/v2k build/iso-staging/rocky/completions build/iso-staging/rocky/bin
+          mkdir -p build/iso-staging/rocky/rpm build/iso-staging/rocky/v2k build/iso-staging/rocky/n2k build/iso-staging/rocky/completions build/iso-staging/rocky/bin
           cp -a release/rpm/rpm-rocky9.6 build/iso-staging/rocky/rpm/
           if [[ -d release/rpm/hangctl-rpm-rocky9.6 ]]; then
             cp -a release/rpm/hangctl-rpm-rocky9.6 build/iso-staging/rocky/rpm/
@@ -1501,6 +1707,9 @@ jobs:
           for ver in 9.6 9.7; do
             if [[ -d "release/v2k/v2k-rpm-rocky${ver}" ]]; then
               cp -a "release/v2k/v2k-rpm-rocky${ver}" build/iso-staging/rocky/v2k/
+            fi
+            if [[ -d "release/n2k/n2k-rpm-rocky${ver}" ]]; then
+              cp -a "release/n2k/n2k-rpm-rocky${ver}" build/iso-staging/rocky/n2k/
             fi
           done
           if [[ -d release/assets ]]; then
@@ -1553,7 +1762,25 @@ jobs:
 
           find build/iso -type f -name '*.iso' -ls
 
+      - name: Upload release build validation artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-${{ github.run_number }}
+          path: |
+            build/iso/**
+            release/rpm/**
+            release/deb/**
+            release/msi/**
+            release/v2k/**
+            release/n2k/**
+            release/completions/**
+            release/bin/**
+            release_notes.md
+          retention-days: 14
+
       - name: Create GitHub Release
+        if: ${{ env.RELEASE_PUBLISH == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -1567,3 +1794,5 @@ jobs:
             release/rpm/ftctl-rpm-rocky9.6/*.rpm
             release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
             release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.rpm
+            release/n2k/n2k-rpm-rocky9.6/ablestack_n2k-*.rpm
+            release/n2k/n2k-rpm-rocky9.7/ablestack_n2k-*.rpm

@@ -1,0 +1,2309 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------
+# Copyright 2026 ABLECLOUD
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ---------------------------------------------------------------------
+
+set -euo pipefail
+
+n2k_source_http_endpoint_candidate() {
+  local code="${1:-000}"
+  case "${code}" in
+    200|201|202|204|400|401|403|405|415|422) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+n2k_source_http_endpoint_verified() {
+  local code="${1:-000}"
+  case "${code}" in
+    200|201|202|204) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+n2k_source_urlencode() {
+  jq -rn --arg value "${1:-}" '$value | @uri'
+}
+
+n2k_source_probe_v4() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local response="" http_code="" api_error=""
+  local revision path
+  local vmm=false dataprotection=false clustermgmt=false
+  local vmm_revision="" dataprotection_revision="" clustermgmt_revision=""
+  local vmm_http_code="000" dataprotection_http_code="000" clustermgmt_http_code="000"
+
+  for revision in $(n2k_nutanix_v4_candidate_revisions vmm); do
+    path="$(n2k_nutanix_v4_probe_path vmm "${revision}")"
+    response=""
+    api_error=""
+    n2k_nutanix_api_request_capture GET "${pc}" "${path}" \
+      "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+    vmm_http_code="${http_code:-000}"
+    if n2k_nutanix_http_success "${http_code}"; then
+      vmm=true
+      vmm_revision="${revision}"
+      break
+    fi
+  done
+
+  for revision in $(n2k_nutanix_v4_candidate_revisions dataprotection); do
+    path="$(n2k_nutanix_v4_probe_path dataprotection "${revision}")"
+    response=""
+    api_error=""
+    n2k_nutanix_api_request_capture GET "${pc}" "${path}" \
+      "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+    dataprotection_http_code="${http_code:-000}"
+    if n2k_nutanix_http_success "${http_code}"; then
+      dataprotection=true
+      dataprotection_revision="${revision}"
+      break
+    fi
+  done
+
+  for revision in $(n2k_nutanix_v4_candidate_revisions clustermgmt); do
+    path="$(n2k_nutanix_v4_probe_path clustermgmt "${revision}")"
+    response=""
+    api_error=""
+    n2k_nutanix_api_request_capture GET "${pc}" "${path}" \
+      "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+    clustermgmt_http_code="${http_code:-000}"
+    if n2k_nutanix_http_success "${http_code}"; then
+      clustermgmt=true
+      clustermgmt_revision="${revision}"
+      break
+    fi
+  done
+
+  jq -nc \
+    --argjson vmm "${vmm}" \
+    --argjson dataprotection "${dataprotection}" \
+    --argjson clustermgmt "${clustermgmt}" \
+    --arg vmm_revision "${vmm_revision}" \
+    --arg dataprotection_revision "${dataprotection_revision}" \
+    --arg clustermgmt_revision "${clustermgmt_revision}" \
+    --arg vmm_http_code "${vmm_http_code}" \
+    --arg dataprotection_http_code "${dataprotection_http_code}" \
+    --arg clustermgmt_http_code "${clustermgmt_http_code}" \
+    '{
+      vmm:$vmm,
+      dataprotection:$dataprotection,
+      clustermgmt:$clustermgmt,
+      dp_recovery_points:$dataprotection,
+      dp_discover_cluster:false,
+      dp_compute_changed_regions:false,
+      changed_regions:false,
+      byte_source:false,
+      byte_source_candidates:{
+        direct_disk_data:false,
+        recovery_point_export:false,
+        restore_to_temp_vm:true,
+        restore_to_temp_vm_v3_live_data:false
+      },
+      data_plane:false,
+      revisions:{
+        vmm:$vmm_revision,
+        dataprotection:$dataprotection_revision,
+        clustermgmt:$clustermgmt_revision
+      },
+      probe:{
+        vmm:{http_code:$vmm_http_code},
+        dataprotection:{http_code:$dataprotection_http_code},
+        clustermgmt:{http_code:$clustermgmt_http_code},
+        dataprotection_content:{verified:false,reason:"recovery point content APIs require a live recovery point and PE data-plane validation"},
+        byte_source:{
+          verified:false,
+          direct_disk_data:{verified:false,reason:"no v4 VMM disk data endpoint is verified"},
+          recovery_point_export:{verified:false,reason:"no v4 recovery point disk export endpoint is verified"},
+          restore_to_temp_vm:{candidate:true,verified:false,reason:"recovery point restore is a documented candidate but requires explicit live restore and cleanup validation"},
+          restore_to_temp_vm_v3_live_data:{candidate:true,verified:false,offset_max_bytes:16777216,length_max_bytes:16777216,reason:"v3 live disk data can read small windows from the restored VM, but the observed 16MiB offset/length limits make it unsuitable as a full-disk byte source"}
+        }
+      }
+    }'
+}
+
+n2k_source_power_state_normalize() {
+  local state="${1:-}"
+  state="$(printf '%s' "${state}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '_')"
+  state="${state##_}"
+  state="${state%%_}"
+  case "${state}" in
+    off|poweroff|poweredoff|powered_off|koff|stopped|halted) printf 'off' ;;
+    on|poweron|poweredon|powered_on|kon|running) printf 'on' ;;
+    acpi_shutdown|shutting_down|stopping) printf 'stopping' ;;
+    "") printf 'unknown' ;;
+    *) printf '%s' "${state}" ;;
+  esac
+}
+
+n2k_source_power_state_is_off() {
+  [[ "$(n2k_source_power_state_normalize "${1:-}")" == "off" ]]
+}
+
+n2k_source_vm_uuid_from_inventory_raw() {
+  local inventory_raw="$1"
+  printf '%s' "${inventory_raw}" | jq -r '
+    .metadata.uuid
+    // .uuid
+    // .vm_id
+    // .extId
+    // .ext_id
+    // .vm.uuid
+    // .vm.ext_id
+    // .status.uuid
+    // empty
+  '
+}
+
+n2k_source_vm_power_state_from_inventory_raw() {
+  local inventory_raw="$1"
+  printf '%s' "${inventory_raw}" | jq -r '
+    .power_state
+    // .powerState
+    // .status.resources.power_state
+    // .resources.power_state
+    // .status.powerState
+    // .vm.power_state
+    // empty
+  '
+}
+
+n2k_source_vm_power_transition_for_policy() {
+  local policy="$1"
+  case "${policy}" in
+    guest) printf 'ACPI_SHUTDOWN' ;;
+    poweroff) printf 'OFF' ;;
+    *)
+      echo "Unsupported source VM shutdown policy: ${policy}" >&2
+      return 2
+      ;;
+  esac
+}
+
+n2k_source_compact_json_value() {
+  local value="${1:-}"
+  if printf '%s' "${value}" | jq -cse 'if length == 0 then {} elif length == 1 then .[0] else . end' 2>/dev/null; then
+    return 0
+  fi
+  printf '{}'
+}
+
+n2k_source_vm_set_power_state_v2() {
+  local pc="$1" username="$2" password="$3" insecure="$4" vm_uuid="$5" transition="$6"
+  local response="" http_code="" api_error="" body response_json="{}"
+
+  [[ -n "${vm_uuid}" ]] || {
+    echo "VM UUID is required for Nutanix power state transition." >&2
+    return 2
+  }
+  [[ -n "${transition}" ]] || {
+    echo "Power transition is required." >&2
+    return 2
+  }
+
+  body="$(jq -nc --arg transition "${transition}" '{transition:$transition}')"
+  n2k_nutanix_api_request_capture POST "${pc}" "/PrismGateway/services/rest/v2.0/vms/${vm_uuid}/set_power_state" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  response_json="$(n2k_source_compact_json_value "${response}")"
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    jq -nc \
+      --arg status "${http_code}" \
+      --arg error "${api_error}" \
+      --arg vm_uuid "${vm_uuid}" \
+      --arg transition "${transition}" \
+      --argjson response "${response_json}" \
+      '{ok:false,status:$status,error:$error,vm_uuid:$vm_uuid,transition:$transition,response:$response}'
+    return 4
+  fi
+
+  jq -nc \
+    --arg status "${http_code}" \
+    --arg vm_uuid "${vm_uuid}" \
+    --arg transition "${transition}" \
+    --argjson response "${response_json}" \
+    '{ok:true,status:$status,vm_uuid:$vm_uuid,transition:$transition,response:$response}'
+}
+
+n2k_source_vm_wait_power_off() {
+  local pc="$1" vm="$2" username="$3" password="$4" insecure="$5" timeout_sec="$6" poll_sec="$7"
+  local start now state inventory_raw normalized
+
+  start="$(date +%s)"
+  while true; do
+    inventory_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
+    state="$(n2k_source_vm_power_state_from_inventory_raw "${inventory_raw}")"
+    normalized="$(n2k_source_power_state_normalize "${state}")"
+    if [[ "${normalized}" == "off" ]]; then
+      printf '%s' "${state:-off}"
+      return 0
+    fi
+    now="$(date +%s)"
+    if [[ $((now - start)) -ge "${timeout_sec}" ]]; then
+      printf '%s' "${state:-unknown}"
+      return 124
+    fi
+    sleep "${poll_sec}"
+  done
+}
+
+n2k_source_vm_poweroff_fallback() {
+  local pc="$1" vm="$2" username="$3" password="$4" insecure="$5" vm_uuid="$6" before_state="$7" reason="$8" guest_response="$9" timeout_sec="${10}" poll_sec="${11}" guest_after_state="${12:-}"
+  local guest_safe poweroff_response poweroff_safe final_state set_rc wait_rc
+
+  guest_safe="$(n2k_source_compact_json_value "${guest_response:-{\"ok\":false}}")"
+
+  set_rc=0
+  poweroff_response="$(n2k_source_vm_set_power_state_v2 "${pc}" "${username}" "${password}" "${insecure}" "${vm_uuid}" "OFF")" || set_rc=$?
+  poweroff_safe="$(n2k_source_compact_json_value "${poweroff_response:-{\"ok\":false}}")"
+  if [[ "${set_rc}" -ne 0 ]]; then
+    jq -nc \
+      --arg policy "guest" \
+      --arg transition "ACPI_SHUTDOWN" \
+      --arg fallback_policy "poweroff" \
+      --arg fallback_transition "OFF" \
+      --arg fallback_reason "${reason}" \
+      --arg vm_uuid "${vm_uuid}" \
+      --arg before_state "${before_state}" \
+      --arg after_state "${guest_after_state:-${before_state}}" \
+      --argjson guest_response "${guest_safe}" \
+      --argjson poweroff_response "${poweroff_safe}" \
+      '{ok:false,fallback_used:true,fallback_failed:true,policy:$policy,transition:$transition,fallback_policy:$fallback_policy,fallback_transition:$fallback_transition,fallback_reason:$fallback_reason,vm_uuid:$vm_uuid,before_state:$before_state,after_state:$after_state,response:{guest:$guest_response,poweroff:$poweroff_response}}'
+    return "${set_rc}"
+  fi
+
+  wait_rc=0
+  final_state="$(n2k_source_vm_wait_power_off "${pc}" "${vm}" "${username}" "${password}" "${insecure}" "${timeout_sec}" "${poll_sec}")" || wait_rc=$?
+  if [[ "${wait_rc}" -ne 0 ]]; then
+    jq -nc \
+      --arg policy "guest" \
+      --arg transition "ACPI_SHUTDOWN" \
+      --arg fallback_policy "poweroff" \
+      --arg fallback_transition "OFF" \
+      --arg fallback_reason "${reason}" \
+      --arg vm_uuid "${vm_uuid}" \
+      --arg before_state "${before_state}" \
+      --arg after_state "${final_state}" \
+      --argjson guest_response "${guest_safe}" \
+      --argjson poweroff_response "${poweroff_safe}" \
+      '{ok:false,timeout:true,fallback_used:true,policy:$policy,transition:$transition,fallback_policy:$fallback_policy,fallback_transition:$fallback_transition,fallback_reason:$fallback_reason,vm_uuid:$vm_uuid,before_state:$before_state,after_state:$after_state,response:{guest:$guest_response,poweroff:$poweroff_response}}'
+    return "${wait_rc}"
+  fi
+
+  jq -nc \
+    --arg policy "guest" \
+    --arg transition "ACPI_SHUTDOWN" \
+    --arg fallback_policy "poweroff" \
+    --arg fallback_transition "OFF" \
+    --arg fallback_reason "${reason}" \
+    --arg vm_uuid "${vm_uuid}" \
+    --arg before_state "${before_state}" \
+    --arg after_state "${final_state:-off}" \
+    --argjson guest_response "${guest_safe}" \
+    --argjson poweroff_response "${poweroff_safe}" \
+    '{ok:true,fallback_used:true,policy:$policy,transition:$transition,fallback_policy:$fallback_policy,fallback_transition:$fallback_transition,fallback_reason:$fallback_reason,vm_uuid:$vm_uuid,before_state:$before_state,after_state:$after_state,response:{guest:$guest_response,poweroff:$poweroff_response}}'
+}
+
+n2k_source_vm_shutdown() {
+  local pc="$1" vm="$2" username="$3" password="$4" insecure="$5" policy="$6" timeout_sec="$7" poll_sec="$8"
+  local inventory_raw vm_uuid before_state before_normalized transition response_json response_safe after_state set_rc wait_rc
+
+  [[ -n "${pc}" ]] || {
+    echo "Prism endpoint is required for source VM shutdown." >&2
+    return 2
+  }
+  [[ -n "${vm}" ]] || {
+    echo "VM name or UUID is required for source VM shutdown." >&2
+    return 2
+  }
+  [[ -n "${username}" ]] || {
+    echo "Source VM shutdown requires --username or --cred-file." >&2
+    return 2
+  }
+  [[ -n "${password}" ]] || {
+    echo "Source VM shutdown requires --password or --cred-file." >&2
+    return 2
+  }
+  [[ "${timeout_sec}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid shutdown timeout: ${timeout_sec}" >&2
+    return 2
+  }
+  [[ "${poll_sec}" =~ ^[0-9]+$ && "${poll_sec}" -gt 0 ]] || {
+    echo "Invalid shutdown poll interval: ${poll_sec}" >&2
+    return 2
+  }
+
+  transition="$(n2k_source_vm_power_transition_for_policy "${policy}")"
+  inventory_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
+  vm_uuid="$(n2k_source_vm_uuid_from_inventory_raw "${inventory_raw}")"
+  before_state="$(n2k_source_vm_power_state_from_inventory_raw "${inventory_raw}")"
+  before_normalized="$(n2k_source_power_state_normalize "${before_state}")"
+  [[ -n "${vm_uuid}" ]] || {
+    echo "Could not resolve VM UUID for source shutdown: ${vm}" >&2
+    return 4
+  }
+
+  if [[ "${before_normalized}" == "off" ]]; then
+    jq -nc \
+      --arg policy "${policy}" \
+      --arg transition "${transition}" \
+      --arg vm_uuid "${vm_uuid}" \
+      --arg before_state "${before_state:-off}" \
+      '{ok:true,already_off:true,policy:$policy,transition:$transition,vm_uuid:$vm_uuid,before_state:$before_state,after_state:$before_state,response:{}}'
+    return 0
+  fi
+
+  set_rc=0
+  response_json="$(n2k_source_vm_set_power_state_v2 "${pc}" "${username}" "${password}" "${insecure}" "${vm_uuid}" "${transition}")" || set_rc=$?
+  if [[ "${set_rc}" -ne 0 ]]; then
+    response_safe="$(n2k_source_compact_json_value "${response_json:-{\"ok\":false}}")"
+    if [[ "${policy}" == "guest" ]]; then
+      n2k_source_vm_poweroff_fallback "${pc}" "${vm}" "${username}" "${password}" "${insecure}" "${vm_uuid}" "${before_state}" "guest_request_failed" "${response_safe}" "${timeout_sec}" "${poll_sec}" "${before_state}"
+      return $?
+    fi
+    jq -nc \
+      --arg policy "${policy}" \
+      --arg transition "${transition}" \
+      --arg vm_uuid "${vm_uuid}" \
+      --arg before_state "${before_state}" \
+      --argjson response "${response_safe}" \
+      '{ok:false,request_failed:true,policy:$policy,transition:$transition,vm_uuid:$vm_uuid,before_state:$before_state,after_state:$before_state,response:$response}'
+    return "${set_rc}"
+  fi
+  wait_rc=0
+  after_state="$(n2k_source_vm_wait_power_off "${pc}" "${vm}" "${username}" "${password}" "${insecure}" "${timeout_sec}" "${poll_sec}")" || wait_rc=$?
+  if [[ "${wait_rc}" -ne 0 ]]; then
+    if [[ "${policy}" == "guest" ]]; then
+      n2k_source_vm_poweroff_fallback "${pc}" "${vm}" "${username}" "${password}" "${insecure}" "${vm_uuid}" "${before_state}" "guest_timeout" "${response_json}" "${timeout_sec}" "${poll_sec}" "${after_state}"
+      return $?
+    fi
+    jq -nc \
+      --arg policy "${policy}" \
+      --arg transition "${transition}" \
+      --arg vm_uuid "${vm_uuid}" \
+      --arg before_state "${before_state}" \
+      --arg after_state "${after_state}" \
+      --argjson response "${response_json}" \
+      '{ok:false,timeout:true,policy:$policy,transition:$transition,vm_uuid:$vm_uuid,before_state:$before_state,after_state:$after_state,response:$response}'
+    return "${wait_rc}"
+  fi
+
+  jq -nc \
+    --arg policy "${policy}" \
+    --arg transition "${transition}" \
+    --arg vm_uuid "${vm_uuid}" \
+    --arg before_state "${before_state}" \
+    --arg after_state "${after_state:-off}" \
+    --argjson response "${response_json}" \
+    '{ok:true,already_off:false,policy:$policy,transition:$transition,vm_uuid:$vm_uuid,before_state:$before_state,after_state:$after_state,response:$response}'
+}
+
+n2k_source_probe_inventory() {
+  local pc="$1" vm="$2" username="$3" password="$4" insecure="$5"
+  local inventory_raw="" inventory_json=""
+
+  if [[ -z "${vm}" ]]; then
+    jq -nc '{available:false,reason:"vm name was not provided",vm:null,disks:[]}'
+    return 0
+  fi
+
+  if ! inventory_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}" 2>/dev/null)"; then
+    jq -nc --arg vm "${vm}" '{available:false,reason:"vm inventory lookup failed",vm:{name:$vm},disks:[]}'
+    return 0
+  fi
+  if ! inventory_json="$(n2k_nutanix_inventory_from_raw "${inventory_raw}" "${vm}" 2>/dev/null)"; then
+    jq -nc --arg vm "${vm}" '{available:false,reason:"vm inventory normalization failed",vm:{name:$vm},disks:[]}'
+    return 0
+  fi
+
+  jq -c '{available:true,vm:.vm,disks:.disks}' <<<"${inventory_json}"
+}
+
+n2k_source_probe_legacy_changed_regions() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local response="" http_code="" api_error="" candidate=false verified=false reason response_bytes
+
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/data/changed_regions" \
+    "${username}" "${password}" "${insecure}" '{}' response http_code api_error || true
+  response_bytes="${#response}"
+
+  if n2k_source_http_endpoint_candidate "${http_code}"; then
+    candidate=true
+  fi
+  if n2k_source_http_endpoint_verified "${http_code}"; then
+    verified=true
+  fi
+
+  case "${http_code}" in
+    200|201|202|204)
+      reason="legacy changed-region endpoint accepted the probe request"
+      ;;
+    400|415|422)
+      reason="legacy changed-region endpoint exists but requires a valid snapshot path payload"
+      ;;
+    401|403)
+      reason="legacy changed-region endpoint exists but authentication or authorization failed"
+      ;;
+    405)
+      reason="legacy changed-region endpoint exists but rejected the probe method"
+      ;;
+    404)
+      reason="legacy changed-region endpoint was not found"
+      ;;
+    000)
+      reason="legacy changed-region endpoint probe could not connect"
+      ;;
+    *)
+      reason="legacy changed-region endpoint probe returned HTTP ${http_code}"
+      ;;
+  esac
+
+  jq -nc \
+    --arg endpoint "/api/nutanix/v3/data/changed_regions" \
+    --arg status "${http_code}" \
+    --arg reason "${reason}" \
+    --arg error "${api_error}" \
+    --argjson response_bytes "${response_bytes}" \
+    --argjson candidate "${candidate}" \
+    --argjson verified "${verified}" \
+    '{
+      changed_regions:$candidate,
+      candidate:$candidate,
+      verified:$verified,
+      endpoint:$endpoint,
+      probe:{status:$status,reason:$reason,error:$error,response_bytes:$response_bytes}
+    }'
+}
+
+n2k_source_probe_legacy_pd_snapshots() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local pd_response="" pd_http_code="" pd_error="" snap_response="" snap_http_code="" snap_error=""
+  local pd_available=false dr_available=false pd_count=0 dr_count=0
+
+  n2k_nutanix_api_request_capture GET "${pc}" "/PrismGateway/services/rest/v2.0/protection_domains/" \
+    "${username}" "${password}" "${insecure}" "" pd_response pd_http_code pd_error || true
+  if n2k_nutanix_http_success "${pd_http_code}"; then
+    pd_available=true
+    pd_count="$(printf '%s' "${pd_response}" | jq -r '(.metadata.total_entities // .metadata.grand_total_entities // (.entities // [] | length) // 0) | tonumber' 2>/dev/null || printf '0')"
+  fi
+
+  n2k_nutanix_api_request_capture GET "${pc}" "/PrismGateway/services/rest/v2.0/protection_domains/dr_snapshots/?full_details=true&count=20" \
+    "${username}" "${password}" "${insecure}" "" snap_response snap_http_code snap_error || true
+  if n2k_nutanix_http_success "${snap_http_code}"; then
+    dr_available=true
+    dr_count="$(printf '%s' "${snap_response}" | jq -r '(.metadata.total_entities // .metadata.grand_total_entities // (.entities // [] | length) // 0) | tonumber' 2>/dev/null || printf '0')"
+  fi
+
+  jq -nc \
+    --arg pd_status "${pd_http_code}" \
+    --arg dr_status "${snap_http_code}" \
+    --arg pd_error "${pd_error}" \
+    --arg dr_error "${snap_error}" \
+    --argjson pd_available "${pd_available}" \
+    --argjson dr_available "${dr_available}" \
+    --argjson pd_count "${pd_count}" \
+    --argjson dr_count "${dr_count}" \
+    '{
+      protection_domains:{
+        available:$pd_available,
+        count:$pd_count,
+        probe:{status:$pd_status,error:$pd_error}
+      },
+      dr_snapshots:{
+        available:$dr_available,
+        count:$dr_count,
+        full_details:true,
+        probe:{status:$dr_status,error:$dr_error}
+      }
+    }'
+}
+
+n2k_source_probe_v3_vm_snapshots() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local response="" http_code="" api_error="" available=false
+  local body='{"kind":"vm_snapshot","length":1}'
+
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/vm_snapshots/list" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if n2k_nutanix_http_success "${http_code}"; then
+    available=true
+  fi
+
+  jq -nc \
+    --arg endpoint "/api/nutanix/v3/vm_snapshots" \
+    --arg list_endpoint "/api/nutanix/v3/vm_snapshots/list" \
+    --arg status "${http_code}" \
+    --arg error "${api_error}" \
+    --argjson available "${available}" \
+    '{
+      vm_snapshots:$available,
+      available:$available,
+      endpoint:$endpoint,
+      list_endpoint:$list_endpoint,
+      probe:{status:$status,error:$error}
+    }'
+}
+
+n2k_source_legacy_create_protection_domain() {
+  local pc="$1" username="$2" password="$3" insecure="$4" pd_name="$5"
+  local body response="" http_code="" api_error=""
+
+  [[ -n "${pd_name}" ]] || {
+    echo "Protection Domain name is required." >&2
+    return 2
+  }
+
+  body="$(jq -nc --arg pd_name "${pd_name}" '{value:$pd_name,annotations:["created-by:ablestack-n2k"]}')"
+  n2k_nutanix_api_request_capture POST "${pc}" "/PrismGateway/services/rest/v2.0/protection_domains/" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "Protection Domain create failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_legacy_get_protection_domain() {
+  local pc="$1" username="$2" password="$3" insecure="$4" pd_name="$5"
+  local pd_path response="" http_code="" api_error=""
+
+  [[ -n "${pd_name}" ]] || {
+    echo "Protection Domain name is required." >&2
+    return 2
+  }
+
+  pd_path="$(n2k_source_urlencode "${pd_name}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/PrismGateway/services/rest/v2.0/protection_domains/${pd_path}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "Protection Domain lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_legacy_protect_vm() {
+  local pc="$1" username="$2" password="$3" insecure="$4" pd_name="$5" vm="$6"
+  local pd_path body response="" http_code="" api_error=""
+
+  [[ -n "${pd_name}" ]] || {
+    echo "Protection Domain name is required." >&2
+    return 2
+  }
+  [[ -n "${vm}" ]] || {
+    echo "VM name is required for Protection Domain membership." >&2
+    return 2
+  }
+
+  pd_path="$(n2k_source_urlencode "${pd_name}")"
+  body="$(jq -nc --arg vm "${vm}" '{names:[$vm],ignore_dup_or_missing_vms:true}')"
+  n2k_nutanix_api_request_capture POST "${pc}" "/PrismGateway/services/rest/v2.0/protection_domains/${pd_path}/protect_vms" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "Protection Domain VM attach failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_legacy_create_oob_snapshot() {
+  local pc="$1" username="$2" password="$3" insecure="$4" pd_name="$5"
+  local retention_seconds="${6:-3600}" app_consistent="${7:-false}"
+  local pd_path start_time body response="" http_code="" api_error=""
+
+  [[ -n "${pd_name}" ]] || {
+    echo "Protection Domain name is required." >&2
+    return 2
+  }
+  case "${app_consistent}" in
+    true|false) ;;
+    1) app_consistent=true ;;
+    0) app_consistent=false ;;
+    *) echo "Invalid app_consistent value: ${app_consistent}" >&2; return 2 ;;
+  esac
+
+  pd_path="$(n2k_source_urlencode "${pd_name}")"
+  start_time="$(printf '%s000000' "$(date +%s)")"
+  body="$(jq -nc \
+    --argjson start_time "${start_time}" \
+    --argjson retention_seconds "${retention_seconds}" \
+    --argjson app_consistent "${app_consistent}" \
+    '{
+      app_consistent:$app_consistent,
+      remote_site_names:[],
+      schedule_start_time_usecs:$start_time,
+      snapshot_retention_time_secs:$retention_seconds
+    }')"
+  n2k_nutanix_api_request_capture POST "${pc}" "/PrismGateway/services/rest/v2.0/protection_domains/${pd_path}/oob_schedules" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "Protection Domain OOB snapshot request failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_legacy_list_pd_snapshots() {
+  local pc="$1" username="$2" password="$3" insecure="$4" pd_name="$5" count="${6:-20}"
+  local pd_path response="" http_code="" api_error=""
+
+  [[ -n "${pd_name}" ]] || {
+    echo "Protection Domain name is required." >&2
+    return 2
+  }
+
+  pd_path="$(n2k_source_urlencode "${pd_name}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/PrismGateway/services/rest/v2.0/protection_domains/${pd_path}/dr_snapshots/?full_details=true&count=${count}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "Protection Domain snapshot lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_legacy_wait_pd_snapshot_count() {
+  local pc="$1" username="$2" password="$3" insecure="$4" pd_name="$5" min_count="$6" timeout_seconds="${7:-180}"
+  local start now response count
+
+  start="$(date +%s)"
+  while true; do
+    response="$(n2k_source_legacy_list_pd_snapshots "${pc}" "${username}" "${password}" "${insecure}" "${pd_name}" 20)"
+    count="$(printf '%s' "${response}" | jq -r '(.entities // []) | length')"
+    if [[ "${count}" -ge "${min_count}" ]]; then
+      printf '%s' "${response}"
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now - start >= timeout_seconds )); then
+      echo "Timed out waiting for Protection Domain snapshots: ${pd_name}" >&2
+      return 4
+    fi
+    sleep 5
+  done
+}
+
+n2k_source_legacy_latest_pd_snapshot() {
+  local snapshots_json="$1"
+  printf '%s' "${snapshots_json}" | jq -c '(.entities // []) | sort_by(.snapshot_create_time_usecs // 0) | last // empty'
+}
+
+n2k_source_legacy_pd_snapshot_paths_from_json() {
+  local snapshot_json="$1"
+
+  printf '%s' "${snapshot_json}" | jq -c '
+    def nonempty_string($v):
+      if $v == null then empty
+      else ($v | tostring | select(length > 0)) end;
+
+    def vm_handles($vm):
+      [
+        nonempty_string($vm.vm_handle),
+        nonempty_string($vm.vm_id),
+        nonempty_string($vm.consistency_group)
+      ] | unique;
+
+    def disk_path($snapshot_id; $vm; $live_path):
+      ($live_path | capture("^(?<container>/[^/]+)/(?<rel>[.]acropolis/vmdisk/(?<vdisk_uuid>[^/]+))$")?) as $m
+      | select($m != null)
+      | {
+          vdisk_uuid: $m.vdisk_uuid,
+          live_path: $live_path,
+          container: $m.container,
+          vm_name: ($vm.vm_name // ""),
+          vm_id: ($vm.vm_id // ""),
+          vm_handle: ($vm.vm_handle // null),
+          consistency_group: ($vm.consistency_group // ""),
+          candidate_paths: (vm_handles($vm) | map($m.container + "/.snapshot/" + ($snapshot_id | tostring) + "/" + . + "/" + $m.rel))
+        };
+
+    . as $snapshot
+    | ($snapshot.snapshot_id // "") as $snapshot_id
+    | [
+        ($snapshot.vms // [])[]? as $vm
+        | ($vm.vm_files // [])[]? as $live_path
+        | disk_path($snapshot_id; $vm; $live_path)
+      ] as $paths
+    | {
+        schema:"ablestack-n2k/legacy-pd-snapshot-paths-v1",
+        source_api:"legacy",
+        path_status:"candidate_unverified",
+        protection_domain_name:($snapshot.protection_domain_name // ""),
+        snapshot_id:$snapshot_id,
+        snapshot_uuid:($snapshot.snapshot_uuid // ""),
+        snapshot_create_time_usecs:($snapshot.snapshot_create_time_usecs // null),
+        state:($snapshot.state // ""),
+        disks:(($paths | map({(.vdisk_uuid): .}) | add) // {}),
+        disk_count:($paths | length)
+      }'
+}
+
+n2k_source_v3_create_vm_snapshot() {
+  local pc="$1" username="$2" password="$3" insecure="$4" vm_uuid="$5" name="$6"
+  local retention_seconds="${7:-3600}" snapshot_type="${8:-CRASH_CONSISTENT}"
+  local expiration_time_msecs body response="" http_code="" api_error=""
+
+  [[ -n "${vm_uuid}" ]] || {
+    echo "VM UUID is required for v3 VM snapshot creation." >&2
+    return 2
+  }
+  [[ -n "${name}" ]] || {
+    echo "Snapshot name is required for v3 VM snapshot creation." >&2
+    return 2
+  }
+  [[ "${retention_seconds}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid v3 VM snapshot retention seconds: ${retention_seconds}" >&2
+    return 2
+  }
+  case "${snapshot_type}" in
+    CRASH_CONSISTENT|APPLICATION_CONSISTENT) ;;
+    crash|crash_consistent|crash-consistent) snapshot_type="CRASH_CONSISTENT" ;;
+    app|application|application_consistent|application-consistent) snapshot_type="APPLICATION_CONSISTENT" ;;
+    *) echo "Invalid v3 VM snapshot type: ${snapshot_type}" >&2; return 2 ;;
+  esac
+
+  expiration_time_msecs="$(( ($(date +%s) + retention_seconds) * 1000 ))"
+  body="$(jq -nc \
+    --arg name "${name}" \
+    --arg vm_uuid "${vm_uuid}" \
+    --arg snapshot_type "${snapshot_type}" \
+    --argjson expiration_time_msecs "${expiration_time_msecs}" \
+    '{
+      metadata:{kind:"vm_snapshot"},
+      spec:{
+        name:$name,
+        snapshot_type:$snapshot_type,
+        expiration_time_msecs:$expiration_time_msecs,
+        resources:{entity_uuid:$vm_uuid}
+      }
+    }')"
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/vm_snapshots" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v3 VM snapshot create failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v3_get_vm_snapshot() {
+  local pc="$1" username="$2" password="$3" insecure="$4" snapshot_uuid="$5"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${snapshot_uuid}" ]] || {
+    echo "VM snapshot UUID is required." >&2
+    return 2
+  }
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/nutanix/v3/vm_snapshots/${snapshot_uuid}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v3 VM snapshot lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v3_wait_vm_snapshot() {
+  local pc="$1" username="$2" password="$3" insecure="$4" snapshot_uuid="$5" timeout_seconds="${6:-180}"
+  local start now response state file_count
+
+  start="$(date +%s)"
+  while true; do
+    response="$(n2k_source_v3_get_vm_snapshot "${pc}" "${username}" "${password}" "${insecure}" "${snapshot_uuid}")"
+    state="$(printf '%s' "${response}" | jq -r '.status.state // ""')"
+    file_count="$(printf '%s' "${response}" | jq -r '(.status.snapshot_file_list // []) | length')"
+    if [[ "${state}" == "COMPLETE" && "${file_count}" -gt 0 ]]; then
+      printf '%s' "${response}"
+      return 0
+    fi
+    case "${state}" in
+      ERROR|FAILED|FAILURE)
+        echo "v3 VM snapshot failed: ${snapshot_uuid}" >&2
+        return 4
+        ;;
+    esac
+    now="$(date +%s)"
+    if (( now - start >= timeout_seconds )); then
+      echo "Timed out waiting for v3 VM snapshot: ${snapshot_uuid}" >&2
+      return 4
+    fi
+    sleep 2
+  done
+}
+
+n2k_source_v3_delete_vm_snapshot() {
+  local pc="$1" username="$2" password="$3" insecure="$4" snapshot_uuid="$5"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${snapshot_uuid}" ]] || {
+    echo "VM snapshot UUID is required." >&2
+    return 2
+  }
+  n2k_nutanix_api_request_capture DELETE "${pc}" "/api/nutanix/v3/vm_snapshots/${snapshot_uuid}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    if [[ "${http_code}" == "404" ]]; then
+      jq -nc --arg status "${http_code}" --arg uuid "${snapshot_uuid}" \
+        '{ok:true,already_absent:true,status:$status,uuid:$uuid}'
+      return 0
+    fi
+    echo "v3 VM snapshot delete failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  n2k_source_compact_json_value "${response:-{\"ok\":true}}"
+}
+
+n2k_source_v3_vm_snapshot_paths_from_json() {
+  local snapshot_json="$1"
+
+  printf '%s' "${snapshot_json}" | jq -c '
+    def disk_path($file):
+      ($file.file_path // "" | capture("^(?<container>/[^/]+)/(?<rel>[.]acropolis/vmdisk/(?<vdisk_uuid>[^/]+))$")?) as $m
+      | select($m != null)
+      | {
+          vdisk_uuid:$m.vdisk_uuid,
+          live_path:($file.file_path // ""),
+          snapshot_file_path:($file.snapshot_file_path // ""),
+          container:$m.container,
+          candidate_paths:([($file.snapshot_file_path // empty)] | map(select(length > 0)))
+        };
+
+    . as $snapshot
+    | [
+        ($snapshot.status.snapshot_file_list // [])[]? as $file
+        | disk_path($file)
+      ] as $paths
+    | {
+        schema:"ablestack-n2k/v3-vm-snapshot-paths-v1",
+        source_api:"v3",
+        path_status:"api_provided",
+        snapshot_uuid:($snapshot.metadata.uuid // ""),
+        snapshot_name:($snapshot.status.name // $snapshot.spec.name // ""),
+        snapshot_type:($snapshot.status.snapshot_type // $snapshot.spec.snapshot_type // ""),
+        entity_uuid:($snapshot.status.resources.entity_uuid // $snapshot.spec.resources.entity_uuid // ""),
+        state:($snapshot.status.state // ""),
+        disks:(($paths | map({(.vdisk_uuid): .}) | add) // {}),
+        disk_count:($paths | length)
+      }'
+}
+
+n2k_source_v4_revision_or_select() {
+  local namespace="$1" revision="${2:-}" pc="$3" username="$4" password="$5" insecure="$6"
+  if [[ -n "${revision}" ]]; then
+    printf '%s' "${revision}"
+    return 0
+  fi
+  n2k_nutanix_v4_select_revision "${namespace}" "${pc}" "${username}" "${password}" "${insecure}"
+}
+
+n2k_source_v4_create_recovery_point_body() {
+  local name="$1" vm_ext_id="$2" retention_seconds="$3"
+  local expiration_time
+
+  [[ "${retention_seconds}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid v4 recovery point retention seconds: ${retention_seconds}" >&2
+    return 2
+  }
+  expiration_time="$(date -u -d "+${retention_seconds} seconds" +%Y-%m-%dT%H:%M:%SZ)"
+  jq -nc \
+    --arg name "${name}" \
+    --arg expiration_time "${expiration_time}" \
+    --arg vm_ext_id "${vm_ext_id}" \
+    '{
+      name:$name,
+      expirationTime:$expiration_time,
+      vmRecoveryPoints:[{vmExtId:$vm_ext_id}]
+    }'
+}
+
+n2k_source_v4_create_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" vm_ext_id="$5" name="$6"
+  local retention_seconds="${7:-3600}" revision="${8:-}"
+  local body response="" http_code="" api_error="" endpoint
+
+  [[ -n "${vm_ext_id}" ]] || {
+    echo "VM extId is required for v4 recovery point creation." >&2
+    return 2
+  }
+  [[ -n "${name}" ]] || {
+    echo "Recovery point name is required for v4 recovery point creation." >&2
+    return 2
+  }
+
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  body="$(n2k_source_v4_create_recovery_point_body "${name}" "${vm_ext_id}" "${retention_seconds}")"
+  endpoint="/api/dataprotection/${revision}/config/recovery-points"
+  n2k_nutanix_api_request_capture POST "${pc}" "${endpoint}" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point create failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    printf '%s' "${response}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_get_task() {
+  local pc="$1" username="$2" password="$3" insecure="$4" task_ext_id="$5"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${task_ext_id}" ]] || {
+    echo "Task extId is required." >&2
+    return 2
+  }
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/prism/v4.0/config/tasks/${task_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 task lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_wait_task() {
+  local pc="$1" username="$2" password="$3" insecure="$4" task_ext_id="$5" timeout_seconds="${6:-180}"
+  local start now response status
+
+  start="$(date +%s)"
+  while true; do
+    response="$(n2k_source_v4_get_task "${pc}" "${username}" "${password}" "${insecure}" "${task_ext_id}")"
+    status="$(printf '%s' "${response}" | jq -r '.data.status // ""')"
+    case "${status}" in
+      SUCCEEDED)
+        printf '%s' "${response}"
+        return 0
+        ;;
+      FAILED|CANCELED|CANCELLED)
+        echo "v4 task failed: ${task_ext_id} status=${status}" >&2
+        printf '%s' "${response}" >&2
+        return 4
+        ;;
+    esac
+    now="$(date +%s)"
+    if (( now - start >= timeout_seconds )); then
+      echo "Timed out waiting for v4 task: ${task_ext_id}" >&2
+      return 4
+    fi
+    sleep 3
+  done
+}
+
+n2k_source_v4_wait_task_terminal() {
+  local pc="$1" username="$2" password="$3" insecure="$4" task_ext_id="$5" timeout_seconds="${6:-180}"
+  local start now response status
+
+  start="$(date +%s)"
+  while true; do
+    response="$(n2k_source_v4_get_task "${pc}" "${username}" "${password}" "${insecure}" "${task_ext_id}")"
+    status="$(printf '%s' "${response}" | jq -r '.data.status // ""')"
+    case "${status}" in
+      SUCCEEDED|FAILED|CANCELED|CANCELLED)
+        printf '%s' "${response}"
+        return 0
+        ;;
+    esac
+    now="$(date +%s)"
+    if (( now - start >= timeout_seconds )); then
+      echo "Timed out waiting for v4 task terminal state: ${task_ext_id}" >&2
+      printf '%s' "${response}"
+      return 4
+    fi
+    sleep 3
+  done
+}
+
+n2k_source_v4_list_recovery_points() {
+  local pc="$1" username="$2" password="$3" insecure="$4" revision="${5:-}" limit="${6:-100}"
+  local response="" http_code="" api_error=""
+
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/dataprotection/${revision}/config/recovery-points?\$limit=${limit}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point list failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_find_recovery_point_by_name() {
+  local pc="$1" username="$2" password="$3" insecure="$4" name="$5" vm_ext_id="$6" revision="${7:-}"
+  local list_json
+
+  list_json="$(n2k_source_v4_list_recovery_points "${pc}" "${username}" "${password}" "${insecure}" "${revision}" 100)"
+  printf '%s' "${list_json}" | jq -c --arg name "${name}" --arg vm_ext_id "${vm_ext_id}" '
+    [
+      .data[]?
+      | select((.name // "") == $name)
+      | select(
+          $vm_ext_id == ""
+          or (([.vmRecoveryPoints[]?.vmExtId] | index($vm_ext_id)) != null)
+        )
+    ]
+    | sort_by(.creationTime // "")
+    | last // empty
+  '
+}
+
+n2k_source_v4_get_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" revision="${6:-}"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_get_vm_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" vm_recovery_point_ext_id="$6" revision="${7:-}"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required." >&2
+    return 2
+  }
+  [[ -n "${vm_recovery_point_ext_id}" ]] || {
+    echo "VM recovery point extId is required." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}/vm-recovery-points/${vm_recovery_point_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 VM recovery point lookup failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_delete_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" revision="${6:-}"
+  local response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  n2k_nutanix_api_request_capture DELETE "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}" \
+    "${username}" "${password}" "${insecure}" "" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point delete failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_restore_recovery_point_body() {
+  local recovery_point_ext_id="$1" vm_recovery_point_ext_id="$2" temp_vm_name="$3"
+  local cluster_ext_id="${4:-}" strict_mode="${5:-false}"
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required for v4 restore." >&2
+    return 2
+  }
+  [[ -n "${vm_recovery_point_ext_id}" ]] || {
+    echo "VM recovery point extId is required for v4 restore." >&2
+    return 2
+  }
+  case "${strict_mode}" in
+    true|false) ;;
+    0) strict_mode=false ;;
+    1) strict_mode=true ;;
+    *)
+      echo "Invalid v4 restore strict mode: ${strict_mode}" >&2
+      return 2
+      ;;
+  esac
+
+  jq -nc \
+    --arg cluster_ext_id "${cluster_ext_id}" \
+    --arg vm_recovery_point_ext_id "${vm_recovery_point_ext_id}" \
+    --arg temp_vm_name "${temp_vm_name}" \
+    --argjson strict_mode "${strict_mode}" \
+    '{
+      vmRecoveryPointRestoreOverrides:[
+        {
+          vmRecoveryPointExtId:$vm_recovery_point_ext_id,
+          isStrictMode:$strict_mode,
+          vmOverrideSpec:(
+            {
+              "$objectType":"dataprotection.v4.config.AhvVmOverrideSpec",
+              description:"n2k temporary restore VM for recovery-point byte-source validation"
+            }
+            + (if $temp_vm_name != "" then {name:$temp_vm_name} else {} end)
+          )
+        }
+      ]
+    }
+    | if $cluster_ext_id != "" then . + {clusterExtId:$cluster_ext_id} else . end'
+}
+
+n2k_source_v4_restore_recovery_point() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5"
+  local vm_recovery_point_ext_id="$6" temp_vm_name="$7" cluster_ext_id="${8:-}" strict_mode="${9:-false}" revision="${10:-}"
+  local body response="" http_code="" api_error=""
+
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  body="$(n2k_source_v4_restore_recovery_point_body "${recovery_point_ext_id}" "${vm_recovery_point_ext_id}" "${temp_vm_name}" "${cluster_ext_id}" "${strict_mode}")"
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}/\$actions/restore" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 recovery point restore failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    printf '%s' "${response}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_recovery_point_index_from_json() {
+  local recovery_point_json="$1" vm_recovery_point_json="$2"
+
+  jq -nc \
+    --argjson rp "${recovery_point_json}" \
+    --argjson vmrp "${vm_recovery_point_json}" \
+    '
+      def root($x): if ($x.data | type) == "object" then $x.data else $x end;
+      def first_nonempty(xs):
+        reduce xs[] as $x (""; if . != "" then . elif ($x // "") != "" then ($x | tostring) else . end);
+      (root($rp)) as $r
+      | (root($vmrp)) as $v
+      | (
+          if (($v | type) == "object" and (($v.extId // "") != "")) then $v
+          else (($r.vmRecoveryPoints // []) | .[0] // {})
+          end
+        ) as $vm
+      | (($vm.diskRecoveryPoints // []) | map({
+          disk_recovery_point_ext_id: first_nonempty([.diskRecoveryPointExtId, .disk_recovery_point_ext_id, .extId, .ext_id]),
+          disk_ext_id: first_nonempty([.diskExtId, .disk_ext_id]),
+          capacity_bytes: (
+            (.capacityBytes // .capacity_bytes // .sizeBytes // .size_bytes // null) as $capacity
+            | if $capacity == null then null else ($capacity | tonumber? // null) end
+          ),
+          status: (.status // ""),
+          recovery_point_ext_id: ($r.extId // ""),
+          vm_recovery_point_ext_id: ($vm.extId // ""),
+          vm_ext_id: ($vm.vmExtId // "")
+        })) as $disk_list
+      | {
+          schema:"ablestack-n2k/v4-recovery-point-index-v1",
+          source_api:"v4",
+          path_status:"metadata_only_data_plane_unverified",
+          recovery_point_ext_id:($r.extId // ""),
+          recovery_point_name:($r.name // ""),
+          status:($r.status // ""),
+          creation_time:($r.creationTime // null),
+          expiration_time:($r.expirationTime // null),
+          vm_recovery_point_ext_id:($vm.extId // ""),
+          vm_ext_id:($vm.vmExtId // ""),
+          disk_count:($disk_list | length),
+          disks:(($disk_list | map({((if (.disk_ext_id // "") != "" then .disk_ext_id else .disk_recovery_point_ext_id end)): .}) | add) // {})
+        }
+    '
+}
+
+n2k_source_v4_vm_disk_recovery_point_ref_json() {
+  local recovery_point_ext_id="$1" vm_recovery_point_ext_id="$2" disk_recovery_point_ext_id="$3"
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required for v4 disk reference." >&2
+    return 2
+  }
+  [[ -n "${vm_recovery_point_ext_id}" ]] || {
+    echo "VM recovery point extId is required for v4 disk reference." >&2
+    return 2
+  }
+  [[ -n "${disk_recovery_point_ext_id}" ]] || {
+    echo "Disk recovery point extId is required for v4 disk reference." >&2
+    return 2
+  }
+
+  jq -nc \
+    --arg recovery_point_ext_id "${recovery_point_ext_id}" \
+    --arg vm_recovery_point_ext_id "${vm_recovery_point_ext_id}" \
+    --arg disk_recovery_point_ext_id "${disk_recovery_point_ext_id}" \
+    '{
+      "$objectType":"dataprotection.v4.content.VmDiskRecoveryPointReference",
+      recoveryPointExtId:$recovery_point_ext_id,
+      vmRecoveryPointExtId:$vm_recovery_point_ext_id,
+      diskRecoveryPointExtId:$disk_recovery_point_ext_id
+    }'
+}
+
+n2k_source_v4_discover_changed_regions_body() {
+  local disk_ref_json="$1" reference_disk_ref_json="${2:-}"
+  local reference_arg="null"
+
+  if [[ -n "${reference_disk_ref_json}" ]]; then
+    reference_arg="${reference_disk_ref_json}"
+  fi
+  jq -nc \
+    --argjson disk_ref "${disk_ref_json}" \
+    --argjson reference_disk_ref "${reference_arg}" \
+    '{
+      "$objectType":"dataprotection.v4.content.ClusterDiscoverSpec",
+      operation:"COMPUTE_CHANGED_REGIONS",
+      "$specItemDiscriminator":"dataprotection.v4.content.ComputeChangedRegionsClusterDiscoverSpec",
+      spec:({
+        "$objectType":"dataprotection.v4.content.ComputeChangedRegionsClusterDiscoverSpec",
+        diskRecoveryPoint:$disk_ref
+      } + (
+        if $reference_disk_ref == null then {}
+        else {referenceDiskRecoveryPoint:$reference_disk_ref}
+        end
+      ))
+    }'
+}
+
+n2k_source_v4_discover_changed_regions_cluster() {
+  local pc="$1" username="$2" password="$3" insecure="$4" recovery_point_ext_id="$5" disk_ref_json="$6"
+  local reference_disk_ref_json="${7:-}" revision="${8:-}"
+  local body response="" http_code="" api_error=""
+
+  [[ -n "${recovery_point_ext_id}" ]] || {
+    echo "Recovery point extId is required for v4 discover-cluster." >&2
+    return 2
+  }
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+  body="$(n2k_source_v4_discover_changed_regions_body "${disk_ref_json}" "${reference_disk_ref_json}")"
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/dataprotection/${revision}/config/recovery-points/${recovery_point_ext_id}/\$actions/discover-cluster" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "v4 discover-cluster failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    printf '%s' "${response}" >&2
+    return 4
+  fi
+  printf '%s' "${response}"
+}
+
+n2k_source_v4_compute_changed_regions_body() {
+  local reference_disk_ref_json="${1:-}" offset="${2:-0}" length="${3:-}" block_size="${4:-32768}"
+
+  [[ "${offset}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid v4 changed-region offset: ${offset}" >&2
+    return 2
+  }
+  [[ -z "${length}" || "${length}" =~ ^[0-9]+$ ]] || {
+    echo "Invalid v4 changed-region length: ${length}" >&2
+    return 2
+  }
+  case "${block_size}" in
+    32768|65536|131072|262144) ;;
+    *) echo "Invalid v4 changed-region block size: ${block_size}" >&2; return 2 ;;
+  esac
+
+  jq -nc \
+    --argjson offset "${offset}" \
+    --arg length "${length}" \
+    --argjson block_size "${block_size}" \
+    --argjson reference_disk_ref "${reference_disk_ref_json:-null}" \
+    '{
+      "$objectType":"dataprotection.v4.content.VmRecoveryPointChangedRegionsComputeSpec",
+      offset:$offset,
+      blockSizeByte:$block_size
+    }
+    + (if $length == "" then {} else {length:($length | tonumber)} end)
+    + (if $reference_disk_ref == null then {} else {
+        referenceRecoveryPointExtId:$reference_disk_ref.recoveryPointExtId,
+        referenceVmRecoveryPointExtId:$reference_disk_ref.vmRecoveryPointExtId,
+        referenceDiskRecoveryPointExtId:$reference_disk_ref.diskRecoveryPointExtId
+      } end)'
+}
+
+n2k_source_v4_changed_regions_to_canonical() {
+  local disk_id="$1" response_json="$2" current_ref_json="$3" reference_ref_json="${4:-null}"
+
+  jq -c \
+    --arg disk_id "${disk_id}" \
+    --argjson current_ref "${current_ref_json}" \
+    --argjson reference_ref "${reference_ref_json:-null}" \
+    '
+      def metadata_value($name):
+        ((.metadata.extraInfo // .metadata.extra_info // [])
+          | map(select((.name // "") == $name))
+          | .[0].value // null);
+      def normalize_region:
+        {
+          offset:(.offset // .start // .startOffset),
+          length:(.length // .len // .size),
+          type:((.regionType // .region_type // .type // "regular") | tostring | ascii_downcase)
+        };
+      def number_or_null($v):
+        if $v == null then null else ($v | tonumber? // null) end;
+      {
+        schema:"ablestack-n2k/changed-regions-v1",
+        source_api:"v4",
+        current_recovery_point_id:($current_ref.recoveryPointExtId // ""),
+        base_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+        reference_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+        file_size:number_or_null(metadata_value("fileSize")),
+        next_offset:number_or_null(metadata_value("nextOffset")),
+        disks:{
+          ($disk_id):((.data // .regions // .changedRegions // .regionList // []) | map(normalize_region))
+        }
+      }
+    ' <<<"${response_json}"
+}
+
+n2k_source_v4_base64url_decode() {
+  local value="${1:-}" rem pad=""
+  value="${value//-/+}"
+  value="${value//_/\/}"
+  rem=$(( ${#value} % 4 ))
+  if (( rem > 0 )); then
+    pad="$(printf '=%.0s' $(seq 1 $((4 - rem))))"
+  fi
+  printf '%s' "${value}${pad}" | base64 -d 2>/dev/null || true
+}
+
+n2k_source_v4_jwt_content_revision() {
+  local jwt="${1:-}" payload decoded
+  payload="${jwt#*.}"
+  payload="${payload%%.*}"
+  decoded="$(n2k_source_v4_base64url_decode "${payload}")"
+  [[ -n "${decoded}" ]] || return 0
+  jq -r '
+    def values:
+      if type == "array" then .[]
+      elif type == "string" then .
+      else empty
+      end;
+    [(.scope | values), (.scp | values), (.aud | values)]
+    | map(tostring)
+    | map(capture("/api/dataprotection/(?<revision>[^/]+)/content").revision?)
+    | map(select(. != null and length > 0))
+    | .[0] // empty
+  ' <<<"${decoded}" 2>/dev/null || true
+}
+
+n2k_source_v4_discover_cluster_ip() {
+  local discover_json="$1"
+  jq -r '
+    .data.clusterIp.ipv4.value
+    // .data.clusterIp.ipv4.ipAddress.value
+    // .data.clusterIp.ipv4
+    // .data.clusterIp.value
+    // .data.clusterIp
+    // empty
+  ' <<<"${discover_json}"
+}
+
+n2k_source_v4_discover_jwt() {
+  local discover_json="$1"
+  jq -r '.data.jwtToken // .jwtToken // empty' <<<"${discover_json}"
+}
+
+n2k_source_v4_discover_compute_path() {
+  local discover_json="$1"
+  jq -r '
+    def href_path:
+      capture("^https?://[^/]+(?<path>/.*)$").path? // .;
+    [
+      .data.links[]?,
+      .links[]?
+    ]
+    | map(select(((.rel // .name // "") | test("compute|changed"; "i"))))
+    | .[0].href // empty
+    | if length > 0 then href_path else empty end
+  ' <<<"${discover_json}" 2>/dev/null || true
+}
+
+n2k_source_v4_compute_changed_regions_path() {
+  local revision="$1" recovery_point_ext_id="$2" vm_recovery_point_ext_id="$3" disk_recovery_point_ext_id="$4"
+  printf "/api/dataprotection/%s/content/recovery-points/%s/vm-recovery-points/%s/disk-recovery-points/%s/\$actions/compute-changed-regions" \
+    "${revision}" "${recovery_point_ext_id}" "${vm_recovery_point_ext_id}" "${disk_recovery_point_ext_id}"
+}
+
+n2k_source_v4_compute_changed_regions_capture() {
+  local pe_ip="$1" jwt="$2" path="$3" insecure="$4" body="$5"
+  local response_var="$6" status_var="$7" error_var="$8"
+  local tmp_file err_file code rc err_text connect_timeout max_time
+  tmp_file="$(mktemp)"
+  err_file="$(mktemp)"
+  connect_timeout="${N2K_NUTANIX_CONNECT_TIMEOUT:-10}"
+  max_time="${N2K_NUTANIX_MAX_TIME:-120}"
+
+  local -a args=(--silent --show-error --output "${tmp_file}" --write-out "%{http_code}" --connect-timeout "${connect_timeout}" --max-time "${max_time}")
+  if [[ "${insecure}" == "1" ]]; then
+    args+=(--insecure)
+  fi
+  args+=(
+    -X POST
+    -H "Content-Type: application/json"
+    -H "Accept: application/json"
+    -H "cookie: NTNX_IGW_SESSION=${jwt}"
+    -H "NTNX-Request-Id: $(n2k_nutanix_request_id)"
+    -d "${body}"
+  )
+
+  rc=0
+  code="$(curl "${args[@]}" "https://${pe_ip}:9440${path}" 2>"${err_file}")" || rc=$?
+  err_text="$(cat "${err_file}" 2>/dev/null || true)"
+  printf -v "${response_var}" '%s' "$(cat "${tmp_file}" 2>/dev/null || true)"
+  printf -v "${status_var}" '%s' "${code:-000}"
+  printf -v "${error_var}" '%s' "${err_text}"
+  rm -f "${tmp_file}" "${err_file}"
+  return "${rc}"
+}
+
+n2k_source_v4_changed_region_pairs_from_indexes() {
+  local current_index_json="$1" reference_index_json="${2:-null}"
+
+  jq -nc \
+    --argjson current "${current_index_json}" \
+    --argjson reference "${reference_index_json:-null}" \
+    '
+      def ref($rp; $vm; $d): {
+        "$objectType":"dataprotection.v4.content.VmDiskRecoveryPointReference",
+        recoveryPointExtId:$rp,
+        vmRecoveryPointExtId:$vm,
+        diskRecoveryPointExtId:($d.disk_recovery_point_ext_id // "")
+      };
+      def find_reference($key; $disk):
+        if ($reference | type) != "object" then null
+        elif ($reference.disks[$key] // null) != null then $reference.disks[$key]
+        elif (($disk.disk_ext_id // "") | length) > 0 then
+          ([$reference.disks | to_entries[]? | select((.value.disk_ext_id // "") == $disk.disk_ext_id) | .value] | .[0] // null)
+        else null
+        end;
+      ($current.recovery_point_ext_id // "") as $current_rp
+      | ($current.vm_recovery_point_ext_id // "") as $current_vmrp
+      | ($reference.recovery_point_ext_id // "") as $reference_rp
+      | ($reference.vm_recovery_point_ext_id // "") as $reference_vmrp
+      | [
+          $current.disks | to_entries[]?
+          | select((.value.disk_recovery_point_ext_id // "") != "")
+          | . as $entry
+          | (find_reference($entry.key; $entry.value)) as $reference_disk
+          | {
+              disk_key:$entry.key,
+              capacity_bytes:($entry.value.capacity_bytes // null),
+              disk_ext_id:($entry.value.disk_ext_id // ""),
+              current_ref:ref($current_rp; $current_vmrp; $entry.value),
+              reference_ref:(
+                if $reference_disk == null or (($reference_disk.disk_recovery_point_ext_id // "") == "") then null
+                else ref($reference_rp; $reference_vmrp; $reference_disk)
+                end
+              )
+            }
+        ]'
+}
+
+n2k_source_v4_compute_changed_regions_for_pair() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local current_ref_json="$5" reference_ref_json="${6:-null}" revision="${7:-}" max_pages="${8:-256}" block_size="${9:-32768}"
+  local recovery_point_ext_id vm_recovery_point_ext_id disk_recovery_point_ext_id
+  local discover_json pe_ip jwt jwt_revision compute_revision compute_path
+  local discover_error_file discover_error
+  local start_offset=0 page_count=0 body response="" http_code="" api_error="" response_json regions="[]"
+  local file_size="null" next_offset="" region_count bytes_total
+
+  recovery_point_ext_id="$(jq -r '.recoveryPointExtId // empty' <<<"${current_ref_json}")"
+  vm_recovery_point_ext_id="$(jq -r '.vmRecoveryPointExtId // empty' <<<"${current_ref_json}")"
+  disk_recovery_point_ext_id="$(jq -r '.diskRecoveryPointExtId // empty' <<<"${current_ref_json}")"
+  revision="$(n2k_source_v4_revision_or_select dataprotection "${revision}" "${pc}" "${username}" "${password}" "${insecure}")"
+
+  discover_error_file="$(mktemp)"
+  if ! discover_json="$(n2k_source_v4_discover_changed_regions_cluster \
+    "${pc}" "${username}" "${password}" "${insecure}" \
+    "${recovery_point_ext_id}" "${current_ref_json}" "${reference_ref_json}" "${revision}" 2>"${discover_error_file}")"; then
+    discover_error="$(cat "${discover_error_file}" 2>/dev/null || true)"
+    rm -f "${discover_error_file}"
+    jq -nc \
+      --arg status "discover_failed" \
+      --arg error "${discover_error}" \
+      --arg revision "${revision}" \
+      --argjson current_ref "${current_ref_json}" \
+      --argjson reference_ref "${reference_ref_json:-null}" \
+      '{ok:false,status:$status,error:$error,revision:$revision,current_ref:$current_ref,reference_ref:$reference_ref,response:null}'
+    return 0
+  fi
+  rm -f "${discover_error_file}"
+  pe_ip="$(n2k_source_v4_discover_cluster_ip "${discover_json}")"
+  jwt="$(n2k_source_v4_discover_jwt "${discover_json}")"
+  if [[ -z "${pe_ip}" || -z "${jwt}" ]]; then
+    jq -nc \
+      --arg status "discover_incomplete" \
+      --arg pe_ip "${pe_ip}" \
+      --arg revision "${revision}" \
+      --argjson current_ref "${current_ref_json}" \
+      --argjson reference_ref "${reference_ref_json:-null}" \
+      --argjson discover "${discover_json}" \
+      '{ok:false,status:$status,pe_ip:$pe_ip,revision:$revision,current_ref:$current_ref,reference_ref:$reference_ref,response:$discover}'
+    return 0
+  fi
+  jwt_revision="$(n2k_source_v4_jwt_content_revision "${jwt}")"
+  compute_revision="${jwt_revision:-${revision}}"
+  compute_path="$(n2k_source_v4_discover_compute_path "${discover_json}")"
+  if [[ -z "${compute_path}" ]]; then
+    compute_path="$(n2k_source_v4_compute_changed_regions_path "${compute_revision}" "${recovery_point_ext_id}" "${vm_recovery_point_ext_id}" "${disk_recovery_point_ext_id}")"
+  fi
+
+  while true; do
+    body="$(n2k_source_v4_compute_changed_regions_body "${reference_ref_json}" "${start_offset}" "" "${block_size}")"
+    n2k_source_v4_compute_changed_regions_capture "${pe_ip}" "${jwt}" "${compute_path}" "${insecure}" "${body}" response http_code api_error || true
+
+    response_json="null"
+    if printf '%s' "${response}" | jq empty >/dev/null 2>&1; then
+      response_json="$(printf '%s' "${response}" | jq -c .)"
+    fi
+    if ! n2k_nutanix_http_success "${http_code}"; then
+      jq -nc \
+        --arg status "${http_code}" \
+        --arg error "${api_error}" \
+        --arg pe_ip "${pe_ip}" \
+        --arg revision "${revision}" \
+        --arg compute_revision "${compute_revision}" \
+        --arg compute_path "${compute_path}" \
+        --argjson current_ref "${current_ref_json}" \
+        --argjson reference_ref "${reference_ref_json:-null}" \
+        --argjson response "${response_json}" \
+        '{
+          ok:false,
+          status:$status,
+          error:$error,
+          pe_ip:$pe_ip,
+          revision:$revision,
+          compute_revision:$compute_revision,
+          compute_path:$compute_path,
+          current_ref:$current_ref,
+          reference_ref:$reference_ref,
+          response:$response
+        }'
+      return 0
+    fi
+
+    file_size="$(printf '%s' "${response_json}" | jq -r '
+      ((.metadata.extraInfo // .metadata.extra_info // [])
+        | map(select((.name // "") == "fileSize"))
+        | .[0].value // null)
+    ')"
+    regions="$(jq -cs '
+      def normalize_region:
+        {
+          offset:(.offset // .start // .startOffset),
+          length:(.length // .len // .size),
+          type:((.regionType // .region_type // .type // "regular") | tostring | ascii_downcase)
+        };
+      .[0] + ((.[1].data // .[1].regions // .[1].changedRegions // .[1].regionList // []) | map(normalize_region))
+    ' <(printf '%s\n' "${regions}") <(printf '%s\n' "${response_json}"))"
+    next_offset="$(printf '%s' "${response_json}" | jq -r '
+      ((.metadata.extraInfo // .metadata.extra_info // [])
+        | map(select((.name // "") == "nextOffset"))
+        | .[0].value // empty)
+    ')"
+    page_count="$((page_count + 1))"
+
+    [[ -n "${next_offset}" ]] || break
+    [[ "${next_offset}" =~ ^[0-9]+$ ]] || break
+    [[ "${next_offset}" -gt 0 ]] || break
+    if [[ "${next_offset}" -le "${start_offset}" ]]; then
+      break
+    fi
+    if [[ "${page_count}" -ge "${max_pages}" ]]; then
+      jq -nc \
+        --arg status "pagination_limit" \
+        --arg pe_ip "${pe_ip}" \
+        --arg compute_path "${compute_path}" \
+        --argjson page_count "${page_count}" \
+        --argjson current_ref "${current_ref_json}" \
+        --argjson reference_ref "${reference_ref_json:-null}" \
+        '{ok:false,status:$status,pe_ip:$pe_ip,compute_path:$compute_path,page_count:$page_count,current_ref:$current_ref,reference_ref:$reference_ref,response:null}'
+      return 0
+    fi
+    start_offset="${next_offset}"
+  done
+
+  region_count="$(printf '%s' "${regions}" | jq -r 'length')"
+  bytes_total="$(printf '%s' "${regions}" | jq -r 'map(.length) | add // 0')"
+	  jq -nc \
+	    --argjson current_ref "${current_ref_json}" \
+	    --argjson reference_ref "${reference_ref_json:-null}" \
+	    --arg pe_ip "${pe_ip}" \
+	    --arg revision "${revision}" \
+    --arg compute_revision "${compute_revision}" \
+    --arg compute_path "${compute_path}" \
+	    --argjson file_size "${file_size}" \
+	    --argjson page_count "${page_count}" \
+	    --argjson region_count "${region_count}" \
+	    --argjson bytes_total "${bytes_total}" \
+	    --slurpfile regions <(printf '%s\n' "${regions}") \
+	    '{
+	      ok:true,
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v4",
+      current_recovery_point_id:($current_ref.recoveryPointExtId // ""),
+      base_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+      reference_recovery_point_id:(if $reference_ref == null then "" else ($reference_ref.recoveryPointExtId // "") end),
+      pe_ip:$pe_ip,
+      revision:$revision,
+      compute_revision:$compute_revision,
+      compute_path:$compute_path,
+      file_size:$file_size,
+	      page_count:$page_count,
+	      region_count:$region_count,
+	      bytes_total:$bytes_total,
+	      disk_recovery_point_ext_id:($current_ref.diskRecoveryPointExtId // ""),
+	      regions:($regions[0] // [])
+	    }'
+}
+
+n2k_source_v4_collect_changed_regions_from_indexes() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local current_index_json="$5" reference_index_json="${6:-null}" manifest="$7"
+  local current_recovery_point_id="${8:-}" reference_recovery_point_id="${9:-}" revision="${10:-}" max_pages="${11:-256}" block_size="${12:-32768}"
+  local pairs_json pair_count idx pair disk_key capacity_bytes result
+  local disk_id regions regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
+  local total_regions=0 total_bytes=0 mapped_count=0
+
+  pairs_json="$(n2k_source_v4_changed_region_pairs_from_indexes "${current_index_json}" "${reference_index_json}")"
+  pair_count="$(printf '%s' "${pairs_json}" | jq -r 'length')"
+  if [[ "${pair_count}" -eq 0 ]]; then
+    jq -nc \
+      --arg current_recovery_point_id "${current_recovery_point_id}" \
+      --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+      '{
+        schema:"ablestack-n2k/changed-regions-v1",
+        source_api:"v4",
+        ok:false,
+        reason:"no v4 disk recovery point pairs",
+        current_recovery_point_id:$current_recovery_point_id,
+        base_recovery_point_id:$reference_recovery_point_id,
+        reference_recovery_point_id:$reference_recovery_point_id,
+        disks:{},
+        disk_mappings:{},
+        errors:[],
+        skipped:[]
+      }'
+    return 0
+  fi
+
+  idx=0
+  while [[ "${idx}" -lt "${pair_count}" ]]; do
+    pair="$(printf '%s' "${pairs_json}" | jq -c --argjson idx "${idx}" '.[$idx]')"
+    disk_key="$(printf '%s' "${pair}" | jq -r '.disk_key')"
+    capacity_bytes="$(printf '%s' "${pair}" | jq -r '.capacity_bytes // null')"
+    result="$(n2k_source_v4_compute_changed_regions_for_pair \
+      "${pc}" "${username}" "${password}" "${insecure}" \
+      "$(printf '%s' "${pair}" | jq -c '.current_ref')" \
+      "$(printf '%s' "${pair}" | jq -c '.reference_ref')" \
+      "${revision}" "${max_pages}" "${block_size}")"
+
+    if ! printf '%s' "${result}" | jq -e '.ok == true' >/dev/null; then
+      errors="$(jq -cs '.[0] + [.[1]]' <(printf '%s\n' "${errors}") <(printf '%s\n' "${result}"))"
+      idx="$((idx + 1))"
+      continue
+    fi
+
+    disk_id="$(n2k_source_manifest_disk_id_for_snapshot_file "${manifest}" "${disk_key}" "${capacity_bytes}" "${idx}")"
+    if [[ -z "${disk_id}" ]]; then
+      skipped="$(jq -cs '.[0] + [.[1]]' \
+        <(printf '%s\n' "${skipped}") \
+        <(jq -nc --arg disk_key "${disk_key}" --argjson capacity_bytes "${capacity_bytes}" '{disk_key:$disk_key,capacity_bytes:$capacity_bytes,reason:"v4 disk recovery point was not mapped to a manifest disk"}'))"
+      idx="$((idx + 1))"
+      continue
+    fi
+
+	    regions="$(printf '%s' "${result}" | jq -c '.regions // []')"
+	    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
+	      <(printf '%s\n' "${regions_by_disk}") <(printf '%s\n' "${regions}"))"
+	    file_size="$(printf '%s' "${result}" | jq -r '.file_size // null')"
+	    pe_ip="$(printf '%s' "${result}" | jq -r '.pe_ip // ""')"
+	    compute_path="$(printf '%s' "${result}" | jq -r '.compute_path // ""')"
+	    mappings="$(jq -c \
+	      --arg disk_id "${disk_id}" \
+	      --arg disk_key "${disk_key}" \
+	      --argjson pair "${pair}" \
+	      --argjson file_size "${file_size}" \
+	      --arg pe_ip "${pe_ip}" \
+	      --arg compute_path "${compute_path}" \
+	      '. + {($disk_id):{disk_key:$disk_key,current_ref:$pair.current_ref,reference_ref:$pair.reference_ref,file_size:$file_size,pe_ip:$pe_ip,compute_path:$compute_path}}' \
+	      <<<"${mappings}")"
+    total_regions="$((total_regions + $(printf '%s' "${result}" | jq -r '.region_count // 0')))"
+    total_bytes="$((total_bytes + $(printf '%s' "${result}" | jq -r '.bytes_total // 0')))"
+    mapped_count="$((mapped_count + 1))"
+    idx="$((idx + 1))"
+  done
+
+	  jq -nc \
+	    --arg current_recovery_point_id "${current_recovery_point_id}" \
+	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+	    --argjson mapped_count "${mapped_count}" \
+	    --argjson total_regions "${total_regions}" \
+	    --argjson total_bytes "${total_bytes}" \
+	    --slurpfile disks <(printf '%s\n' "${regions_by_disk}") \
+	    --slurpfile mappings <(printf '%s\n' "${mappings}") \
+	    --slurpfile errors <(printf '%s\n' "${errors}") \
+	    --slurpfile skipped <(printf '%s\n' "${skipped}") \
+	    '{
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v4",
+	      ok:((($errors[0] // []) | length) == 0 and $mapped_count > 0),
+	      current_recovery_point_id:$current_recovery_point_id,
+	      base_recovery_point_id:$reference_recovery_point_id,
+	      reference_recovery_point_id:$reference_recovery_point_id,
+	      disk_count:$mapped_count,
+	      region_count:$total_regions,
+	      bytes_total:$total_bytes,
+	      disks:($disks[0] // {}),
+	      disk_mappings:($mappings[0] // {}),
+	      errors:($errors[0] // []),
+	      skipped:($skipped[0] // [])
+	    }'
+}
+
+n2k_source_legacy_changed_region_candidate_pairs_from_indexes() {
+  local current_index_json="$1" reference_index_json="$2" max_pairs="${3:-40}"
+
+  jq -nc \
+    --argjson current "${current_index_json}" \
+    --argjson reference "${reference_index_json}" \
+    --argjson max_pairs "${max_pairs}" \
+    '
+      [
+        ($current.disks // {}) | to_entries[]? as $current_disk
+        | ($reference.disks[$current_disk.key] // null) as $reference_disk
+        | select($reference_disk != null)
+        | ($current_disk.value.candidate_paths // [])[]? as $current_path
+        | ($reference_disk.candidate_paths // [])[]? as $reference_path
+        | {
+            vdisk_uuid:$current_disk.key,
+            snapshot_file_path:$current_path,
+            reference_snapshot_file_path:$reference_path
+          }
+      ][0:$max_pairs]'
+}
+
+n2k_source_legacy_changed_regions_try_pair() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local snapshot_file_path="$5" reference_snapshot_file_path="$6" start_offset="${7:-0}" end_offset="${8:-}"
+  local endpoint="${9:-/api/nutanix/v3/data/changed_regions}"
+  local body response="" http_code="" api_error="" response_json="null" verified=false
+
+  body="$(n2k_source_legacy_changed_regions_body "${snapshot_file_path}" "${reference_snapshot_file_path}" "${start_offset}" "${end_offset}")"
+  n2k_nutanix_api_request_capture POST "${pc}" "${endpoint}" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+
+  if n2k_nutanix_http_success "${http_code}"; then
+    verified=true
+  fi
+  if printf '%s' "${response}" | jq empty >/dev/null 2>&1; then
+    response_json="$(printf '%s' "${response}" | jq -c .)"
+  fi
+
+  jq -nc \
+    --arg endpoint "${endpoint}" \
+    --arg status "${http_code}" \
+    --arg error "${api_error}" \
+    --arg snapshot_file_path "${snapshot_file_path}" \
+    --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
+    --argjson verified "${verified}" \
+    --argjson response "${response_json}" \
+    '{
+      verified:$verified,
+      endpoint:$endpoint,
+      status:$status,
+      error:$error,
+      snapshot_file_path:$snapshot_file_path,
+      reference_snapshot_file_path:$reference_snapshot_file_path,
+      response:$response
+    }'
+}
+
+n2k_source_legacy_collect_changed_regions_for_pair() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local disk_key="$5" snapshot_file_path="$6" reference_snapshot_file_path="${7:-}"
+  local current_recovery_point_id="${8:-}" reference_recovery_point_id="${9:-}" max_pages="${10:-256}"
+  local start_offset=0 page_count=0 body response="" http_code="" api_error="" response_json regions="[]"
+  local file_size="null" next_offset="" region_count bytes_total
+
+  while true; do
+    body="$(n2k_source_legacy_changed_regions_body "${snapshot_file_path}" "${reference_snapshot_file_path}" "${start_offset}")"
+    n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/data/changed_regions" \
+      "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+
+    response_json="null"
+    if printf '%s' "${response}" | jq empty >/dev/null 2>&1; then
+      response_json="$(printf '%s' "${response}" | jq -c .)"
+    fi
+    if ! n2k_nutanix_http_success "${http_code}"; then
+      jq -nc \
+        --arg disk_key "${disk_key}" \
+        --arg status "${http_code}" \
+        --arg error "${api_error}" \
+        --arg snapshot_file_path "${snapshot_file_path}" \
+        --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
+        --argjson response "${response_json}" \
+        '{
+          ok:false,
+          disk_key:$disk_key,
+          status:$status,
+          error:$error,
+          snapshot_file_path:$snapshot_file_path,
+          reference_snapshot_file_path:$reference_snapshot_file_path,
+          response:$response
+        }'
+      return 0
+    fi
+
+    file_size="$(printf '%s' "${response_json}" | jq -r '.file_size // null')"
+    regions="$(jq -cs '.[0] + ((.[1].region_list // .[1].regions // .[1].changed_regions // []) | map({offset:(.offset // .start // .start_offset), length:(.length // .len // .size), type:((.type // .region_type // "regular") | tostring | ascii_downcase)}))' \
+      <(printf '%s\n' "${regions}") <(printf '%s\n' "${response_json}"))"
+    next_offset="$(printf '%s' "${response_json}" | jq -r '.next_offset // empty')"
+    page_count="$((page_count + 1))"
+
+    [[ -n "${next_offset}" ]] || break
+    [[ "${next_offset}" =~ ^[0-9]+$ ]] || break
+    if [[ "${next_offset}" -le "${start_offset}" ]]; then
+      break
+    fi
+    if [[ "${page_count}" -ge "${max_pages}" ]]; then
+      jq -nc \
+        --arg disk_key "${disk_key}" \
+        --arg snapshot_file_path "${snapshot_file_path}" \
+        --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
+        --argjson page_count "${page_count}" \
+        '{ok:false,disk_key:$disk_key,status:"pagination_limit",snapshot_file_path:$snapshot_file_path,reference_snapshot_file_path:$reference_snapshot_file_path,page_count:$page_count,response:null}'
+      return 0
+    fi
+    start_offset="${next_offset}"
+  done
+
+  region_count="$(printf '%s' "${regions}" | jq -r 'length')"
+  bytes_total="$(printf '%s' "${regions}" | jq -r 'map(.length) | add // 0')"
+	  jq -nc \
+	    --arg disk_key "${disk_key}" \
+	    --arg current_recovery_point_id "${current_recovery_point_id}" \
+	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+    --arg snapshot_file_path "${snapshot_file_path}" \
+    --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
+	    --argjson file_size "${file_size}" \
+	    --argjson page_count "${page_count}" \
+	    --argjson region_count "${region_count}" \
+	    --argjson bytes_total "${bytes_total}" \
+	    --slurpfile regions <(printf '%s\n' "${regions}") \
+	    '{
+	      ok:true,
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v3",
+      disk_key:$disk_key,
+      current_recovery_point_id:$current_recovery_point_id,
+      base_recovery_point_id:$reference_recovery_point_id,
+      reference_recovery_point_id:$reference_recovery_point_id,
+      snapshot_file_path:$snapshot_file_path,
+      reference_snapshot_file_path:(if $reference_snapshot_file_path == "" then null else $reference_snapshot_file_path end),
+	      file_size:$file_size,
+	      page_count:$page_count,
+	      region_count:$region_count,
+	      bytes_total:$bytes_total,
+	      disks:{($disk_key):($regions[0] // [])}
+	    }'
+}
+
+n2k_source_manifest_disk_id_for_snapshot_file() {
+  local manifest="$1" vdisk_uuid="$2" file_size="${3:-null}" ordinal="${4:-0}"
+
+  jq -r \
+    --arg vdisk_uuid "${vdisk_uuid}" \
+    --argjson file_size "${file_size}" \
+    --argjson ordinal "${ordinal}" \
+    '
+      def disk_size($d):
+        (($d.size_bytes // $d.disk_size_bytes // $d.capacity_bytes // $d.size // null) | tonumber?);
+      .disks as $disks
+      | (
+          [$disks[]? | select(
+              (.disk_id // "") == $vdisk_uuid
+              or (.device_key // "") == $vdisk_uuid
+              or (.nutanix.vdisk_uuid // "") == $vdisk_uuid
+            ) | (.disk_id // .device_key // "")]
+          | map(select(length > 0))
+          | .[0]
+        ) as $direct
+      | if ($direct // "") != "" then $direct
+        else
+          ([$disks[]? | select(($file_size != null) and (disk_size(.) == $file_size)) | (.disk_id // .device_key // "")]
+           | map(select(length > 0))) as $size_matches
+          | if ($size_matches | length) == 1 then $size_matches[0]
+            elif ($ordinal < ($disks | length)) and ($file_size != null) and (disk_size($disks[$ordinal]) == $file_size) then
+              ($disks[$ordinal].disk_id // $disks[$ordinal].device_key // "")
+            else
+              ""
+            end
+        end
+    ' "${manifest}"
+}
+
+n2k_source_v3_collect_changed_regions_from_indexes() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local current_index_json="$5" reference_index_json="$6" manifest="$7"
+  local current_recovery_point_id="${8:-}" reference_recovery_point_id="${9:-}" max_pages="${10:-256}"
+  local pairs_json pair_count idx pair vdisk_uuid snapshot_file_path reference_snapshot_file_path result
+  local file_size disk_id regions regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
+  local total_regions=0 total_bytes=0 mapped_count=0
+
+  pairs_json="$(n2k_source_legacy_changed_region_candidate_pairs_from_indexes "${current_index_json}" "${reference_index_json}" 200)"
+  pair_count="$(printf '%s' "${pairs_json}" | jq -r 'length')"
+  if [[ "${pair_count}" -eq 0 ]]; then
+    jq -nc \
+      --arg current_recovery_point_id "${current_recovery_point_id}" \
+      --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+      '{
+        schema:"ablestack-n2k/changed-regions-v1",
+        source_api:"v3",
+        ok:false,
+        reason:"no comparable candidate paths",
+        current_recovery_point_id:$current_recovery_point_id,
+        base_recovery_point_id:$reference_recovery_point_id,
+        reference_recovery_point_id:$reference_recovery_point_id,
+        disks:{},
+        disk_mappings:{},
+        errors:[],
+        skipped:[]
+      }'
+    return 0
+  fi
+
+  idx=0
+  while [[ "${idx}" -lt "${pair_count}" ]]; do
+    pair="$(printf '%s' "${pairs_json}" | jq -c --argjson idx "${idx}" '.[$idx]')"
+    vdisk_uuid="$(printf '%s' "${pair}" | jq -r '.vdisk_uuid')"
+    snapshot_file_path="$(printf '%s' "${pair}" | jq -r '.snapshot_file_path')"
+    reference_snapshot_file_path="$(printf '%s' "${pair}" | jq -r '.reference_snapshot_file_path')"
+    result="$(n2k_source_legacy_collect_changed_regions_for_pair \
+      "${pc}" "${username}" "${password}" "${insecure}" \
+      "${vdisk_uuid}" "${snapshot_file_path}" "${reference_snapshot_file_path}" \
+      "${current_recovery_point_id}" "${reference_recovery_point_id}" "${max_pages}")"
+
+    if ! printf '%s' "${result}" | jq -e '.ok == true' >/dev/null; then
+      errors="$(jq -cs '.[0] + [.[1]]' <(printf '%s\n' "${errors}") <(printf '%s\n' "${result}"))"
+      idx="$((idx + 1))"
+      continue
+    fi
+
+    file_size="$(printf '%s' "${result}" | jq -r '.file_size // null')"
+    disk_id="$(n2k_source_manifest_disk_id_for_snapshot_file "${manifest}" "${vdisk_uuid}" "${file_size}" "${idx}")"
+    if [[ -z "${disk_id}" ]]; then
+      skipped="$(jq -cs '.[0] + [.[1]]' \
+        <(printf '%s\n' "${skipped}") \
+        <(jq -nc --arg vdisk_uuid "${vdisk_uuid}" --argjson file_size "${file_size}" --arg snapshot_file_path "${snapshot_file_path}" '{vdisk_uuid:$vdisk_uuid,file_size:$file_size,snapshot_file_path:$snapshot_file_path,reason:"snapshot file was not mapped to a manifest disk"}'))"
+      idx="$((idx + 1))"
+      continue
+    fi
+
+	    regions="$(printf '%s' "${result}" | jq -c --arg vdisk_uuid "${vdisk_uuid}" '.disks[$vdisk_uuid] // []')"
+	    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
+	      <(printf '%s\n' "${regions_by_disk}") <(printf '%s\n' "${regions}"))"
+	    mappings="$(jq -c \
+	      --arg disk_id "${disk_id}" \
+	      --arg vdisk_uuid "${vdisk_uuid}" \
+	      --arg snapshot_file_path "${snapshot_file_path}" \
+      --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
+      --argjson file_size "${file_size}" \
+      '. + {($disk_id):{vdisk_uuid:$vdisk_uuid,file_size:$file_size,snapshot_file_path:$snapshot_file_path,reference_snapshot_file_path:$reference_snapshot_file_path}}' \
+      <<<"${mappings}")"
+    total_regions="$((total_regions + $(printf '%s' "${result}" | jq -r '.region_count // 0')))"
+    total_bytes="$((total_bytes + $(printf '%s' "${result}" | jq -r '.bytes_total // 0')))"
+    mapped_count="$((mapped_count + 1))"
+    idx="$((idx + 1))"
+  done
+
+	  jq -nc \
+	    --arg current_recovery_point_id "${current_recovery_point_id}" \
+	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+	    --argjson mapped_count "${mapped_count}" \
+	    --argjson total_regions "${total_regions}" \
+	    --argjson total_bytes "${total_bytes}" \
+	    --slurpfile disks <(printf '%s\n' "${regions_by_disk}") \
+	    --slurpfile mappings <(printf '%s\n' "${mappings}") \
+	    --slurpfile errors <(printf '%s\n' "${errors}") \
+	    --slurpfile skipped <(printf '%s\n' "${skipped}") \
+	    '{
+	      schema:"ablestack-n2k/changed-regions-v1",
+	      source_api:"v3",
+	      ok:((($errors[0] // []) | length) == 0 and $mapped_count > 0),
+	      current_recovery_point_id:$current_recovery_point_id,
+	      base_recovery_point_id:$reference_recovery_point_id,
+	      reference_recovery_point_id:$reference_recovery_point_id,
+	      disk_count:$mapped_count,
+	      region_count:$total_regions,
+	      bytes_total:$total_bytes,
+	      disks:($disks[0] // {}),
+	      disk_mappings:($mappings[0] // {}),
+	      errors:($errors[0] // []),
+	      skipped:($skipped[0] // [])
+	    }'
+}
+
+n2k_source_legacy_verify_changed_region_paths() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local current_index_json="$5" reference_index_json="$6" max_pairs="${7:-40}"
+  local pairs_json pair_count idx pair attempt attempts="[]" verified_attempt=""
+  local snapshot_file_path reference_snapshot_file_path status
+
+  pairs_json="$(n2k_source_legacy_changed_region_candidate_pairs_from_indexes "${current_index_json}" "${reference_index_json}" "${max_pairs}")"
+  pair_count="$(printf '%s' "${pairs_json}" | jq -r 'length')"
+  if [[ "${pair_count}" -eq 0 ]]; then
+    jq -nc '{verified:false,reason:"no comparable candidate paths",attempt_count:0,attempts:[]}'
+    return 0
+  fi
+
+  idx=0
+  while [[ "${idx}" -lt "${pair_count}" ]]; do
+    pair="$(printf '%s' "${pairs_json}" | jq -c --argjson idx "${idx}" '.[$idx]')"
+    snapshot_file_path="$(printf '%s' "${pair}" | jq -r '.snapshot_file_path')"
+    reference_snapshot_file_path="$(printf '%s' "${pair}" | jq -r '.reference_snapshot_file_path')"
+    attempt="$(n2k_source_legacy_changed_regions_try_pair \
+      "${pc}" "${username}" "${password}" "${insecure}" \
+      "${snapshot_file_path}" "${reference_snapshot_file_path}" 0)"
+    status="$(printf '%s' "${attempt}" | jq -r '.status')"
+    attempts="$(jq -cs '.[0] + [.[1]] | .[0:10]' <(printf '%s\n' "${attempts}") <(printf '%s\n' "${attempt}"))"
+    if n2k_nutanix_http_success "${status}"; then
+      verified_attempt="${attempt}"
+      break
+    fi
+    idx="$((idx + 1))"
+  done
+
+  if [[ -n "${verified_attempt}" ]]; then
+    jq -nc \
+      --argjson attempt "${verified_attempt}" \
+      --argjson attempt_count "$((idx + 1))" \
+      '{verified:true,reason:"changed-region path pair verified",attempt_count:$attempt_count,selected:$attempt}'
+  else
+    jq -nc \
+      --argjson attempt_count "${pair_count}" \
+      --argjson attempts "${attempts}" \
+      '{
+        verified:false,
+        reason:"all candidate snapshot path pairs were rejected",
+        attempt_count:$attempt_count,
+        attempts:$attempts
+      }'
+  fi
+}
+
+n2k_source_legacy_changed_regions_body() {
+  local snapshot_file_path="$1" reference_snapshot_file_path="${2:-}" start_offset="${3:-0}" end_offset="${4:-}"
+
+  if [[ -n "${end_offset}" ]]; then
+    jq -nc \
+      --arg snapshot_file_path "${snapshot_file_path}" \
+      --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
+      --argjson start_offset "${start_offset}" \
+      --argjson end_offset "${end_offset}" \
+      '{
+        snapshot_file_path:$snapshot_file_path,
+        start_offset:$start_offset,
+        end_offset:$end_offset
+      } + (if $reference_snapshot_file_path == "" then {} else {reference_snapshot_file_path:$reference_snapshot_file_path} end)'
+  else
+    jq -nc \
+      --arg snapshot_file_path "${snapshot_file_path}" \
+      --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
+      --argjson start_offset "${start_offset}" \
+      '{
+        snapshot_file_path:$snapshot_file_path,
+        start_offset:$start_offset
+      } + (if $reference_snapshot_file_path == "" then {} else {reference_snapshot_file_path:$reference_snapshot_file_path} end)'
+  fi
+}
+
+n2k_source_legacy_compute_changed_regions() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local snapshot_file_path="$5" reference_snapshot_file_path="${6:-}" start_offset="${7:-0}" end_offset="${8:-}"
+  local body response="" http_code="" api_error=""
+
+  [[ -n "${snapshot_file_path}" ]] || {
+    echo "snapshot_file_path is required for legacy changed regions." >&2
+    return 2
+  }
+
+  body="$(n2k_source_legacy_changed_regions_body "${snapshot_file_path}" "${reference_snapshot_file_path}" "${start_offset}" "${end_offset}")"
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/data/changed_regions" \
+    "${username}" "${password}" "${insecure}" "${body}" response http_code api_error || true
+
+  if ! n2k_nutanix_http_success "${http_code}"; then
+    echo "Legacy changed-region request failed: HTTP ${http_code}${api_error:+ ${api_error}}" >&2
+    return 4
+  fi
+
+  printf '%s' "${response}"
+}
+
+n2k_source_legacy_changed_regions_to_canonical() {
+  local disk_id="$1" response_json="$2" base_recovery_point_id="${3:-}" reference_recovery_point_id="${4:-}"
+
+  printf '%s' "${response_json}" | jq -c \
+    --arg disk_id "${disk_id}" \
+    --arg base_recovery_point_id "${base_recovery_point_id}" \
+    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+    '
+      def normalize_region:
+        {
+          offset: (.offset // .start // .start_offset),
+          length: (.length // .len // .size),
+          type: ((.type // .region_type // "regular") | tostring | ascii_downcase)
+        };
+      {
+        schema:"ablestack-n2k/changed-regions-v1",
+        source_api:"legacy",
+        base_recovery_point_id:$base_recovery_point_id,
+        reference_recovery_point_id:$reference_recovery_point_id,
+        file_size:(.file_size // .fileSize // null),
+        next_offset:(.next_offset // .nextOffset // null),
+        disks:{
+          ($disk_id): ((.region_list // .regions // .changed_regions // []) | map(normalize_region))
+        }
+      }
+    '
+}
+
+n2k_source_v3_source_endpoint_candidates() {
+  local pc="$1" username="$2" password="$3" insecure="$4"
+  local candidates v3_clusters="" v4_clusters="" http_code="" api_error="" endpoint
+
+  candidates="$(jq -nc --arg endpoint "${pc}" '[$endpoint]')"
+
+  n2k_nutanix_api_request_capture POST "${pc}" "/api/nutanix/v3/clusters/list" \
+    "${username}" "${password}" "${insecure}" '{"kind":"cluster","offset":0,"length":100}' \
+    v3_clusters http_code api_error || true
+  if n2k_nutanix_http_success "${http_code}"; then
+    while IFS= read -r endpoint; do
+      [[ -n "${endpoint}" && "${endpoint}" != "null" ]] || continue
+      candidates="$(jq -c --arg endpoint "${endpoint}" '. + [$endpoint]' <<<"${candidates}")"
+    done < <(printf '%s' "${v3_clusters}" | jq -r '
+      .entities[]?
+      | select(((.status.resources.config.service_list // .spec.resources.config.service_list // []) | index("AOS")) != null)
+      | .status.resources.network.external_ip // .spec.resources.network.external_ip // empty
+    ' 2>/dev/null)
+  fi
+
+  n2k_nutanix_api_request_capture GET "${pc}" "/api/clustermgmt/v4.0/config/clusters?\$limit=100" \
+    "${username}" "${password}" "${insecure}" "" v4_clusters http_code api_error || true
+  if n2k_nutanix_http_success "${http_code}"; then
+    while IFS= read -r endpoint; do
+      [[ -n "${endpoint}" && "${endpoint}" != "null" ]] || continue
+      candidates="$(jq -c --arg endpoint "${endpoint}" '. + [$endpoint]' <<<"${candidates}")"
+    done < <(printf '%s' "${v4_clusters}" | jq -r '
+      .data[]?
+      | select(((.config.clusterFunction // .clusterFunction // []) | index("AOS")) != null)
+      | .network.externalAddress.ipv4.value // empty
+    ' 2>/dev/null)
+  fi
+
+  jq -c 'reduce .[] as $endpoint ([]; if (($endpoint == null) or ($endpoint == "") or (index($endpoint) != null)) then . else . + [$endpoint] end)' <<<"${candidates}"
+}
+
+n2k_source_probe_v3_source_endpoint() {
+  local pc="$1" username="$2" password="$3" insecure="$4" vm="${5:-}"
+  local candidates endpoint v3_json changed_json inventory_json item results="[]" selected=""
+
+  candidates="$(n2k_source_v3_source_endpoint_candidates "${pc}" "${username}" "${password}" "${insecure}")"
+  while IFS= read -r endpoint; do
+    [[ -n "${endpoint}" && "${endpoint}" != "null" ]] || continue
+    v3_json="$(n2k_source_probe_v3_vm_snapshots "${endpoint}" "${username}" "${password}" "${insecure}")"
+    changed_json="$(n2k_source_probe_legacy_changed_regions "${endpoint}" "${username}" "${password}" "${insecure}")"
+    if [[ -n "${vm}" ]]; then
+      inventory_json="$(n2k_source_probe_inventory "${endpoint}" "${vm}" "${username}" "${password}" "${insecure}")"
+    else
+      inventory_json="$(jq -nc '{available:true,reason:"vm lookup skipped"}')"
+    fi
+    item="$(jq -nc \
+      --arg endpoint "${endpoint}" \
+      --argjson v3 "${v3_json}" \
+      --argjson changed "${changed_json}" \
+      --argjson inventory "${inventory_json}" \
+      '{
+        endpoint:$endpoint,
+        vm_snapshots:(($v3.vm_snapshots // $v3.available // false) | if type == "boolean" then . else false end),
+        changed_regions:(($changed.changed_regions // $changed.candidate // false) | if type == "boolean" then . else false end),
+        changed_regions_verified:(($changed.verified // false) | if type == "boolean" then . else false end),
+        changed_regions_endpoint:($changed.endpoint // ""),
+        changed_regions_probe:($changed.probe // {}),
+        vm_available:(($inventory.available // false) | if type == "boolean" then . else false end),
+        probe:{vm_snapshots:$v3,changed_regions:$changed,inventory:$inventory}
+      }')"
+    results="$(jq -cs '.[0] + [.[1]]' <(printf '%s\n' "${results}") <(printf '%s\n' "${item}"))"
+    if [[ -z "${selected}" ]] && [[ "$(jq -r '.vm_snapshots and .changed_regions and .vm_available' <<<"${item}")" == "true" ]]; then
+      selected="${item}"
+    fi
+  done < <(jq -r '.[]' <<<"${candidates}")
+
+  if [[ -z "${selected}" ]]; then
+    selected="$(jq -c '(. as $all | (map(select(.vm_snapshots and .changed_regions)) | .[0]) // $all[0] // {})' <<<"${results}")"
+  fi
+
+  jq -nc \
+    --argjson selected "${selected}" \
+    --argjson candidates_json "${candidates}" \
+    --argjson probes "${results}" \
+    '{
+      vm_snapshots:(($selected.vm_snapshots // false) | if type == "boolean" then . else false end),
+      available:(($selected.vm_snapshots // false) | if type == "boolean" then . else false end),
+      changed_regions:(($selected.changed_regions // false) | if type == "boolean" then . else false end),
+      changed_regions_candidate:(($selected.changed_regions // false) | if type == "boolean" then . else false end),
+      changed_regions_verified:(($selected.changed_regions_verified // false) | if type == "boolean" then . else false end),
+      changed_regions_endpoint:($selected.changed_regions_endpoint // ""),
+      changed_regions_probe:($selected.changed_regions_probe // {}),
+      vm_available:(($selected.vm_available // false) | if type == "boolean" then . else false end),
+      source_endpoint:($selected.endpoint // ""),
+      source_endpoint_candidates:$candidates_json,
+      source_endpoint_probes:$probes
+    }'
+}
+
+n2k_source_probe_capabilities() {
+  local pc="$1" vm="$2" username="$3" password="$4" insecure="$5" probe_legacy="$6"
+  local v4_json v3_json v3_source_json inventory_json legacy_json pd_json
+
+  v4_json="$(n2k_source_probe_v4 "${pc}" "${username}" "${password}" "${insecure}")"
+  v3_json="$(n2k_source_probe_v3_source_endpoint "${pc}" "${username}" "${password}" "${insecure}" "${vm}")"
+  inventory_json="$(n2k_source_probe_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}")"
+  pd_json="$(n2k_source_probe_legacy_pd_snapshots "${pc}" "${username}" "${password}" "${insecure}")"
+
+  if [[ "${probe_legacy}" == "true" ]]; then
+    v3_source_json="$(jq -c '{changed_regions, candidate:changed_regions_candidate, verified:changed_regions_verified, endpoint:changed_regions_endpoint, probe:changed_regions_probe}' <<<"${v3_json}")"
+    legacy_json="${v3_source_json}"
+  else
+    legacy_json="$(jq -nc '{changed_regions:false,candidate:false,verified:false,endpoint:"",probe:{status:null,reason:"legacy probe was not requested",error:""}}')"
+  fi
+
+  legacy_json="$(jq -cs '.[0] * .[1]' <(printf '%s\n' "${legacy_json}") <(printf '%s\n' "${pd_json}"))"
+
+  jq -nc \
+    --argjson v4 "${v4_json}" \
+    --argjson v3 "${v3_json}" \
+    --argjson inventory "${inventory_json}" \
+    --argjson legacy "${legacy_json}" \
+    '{
+      api:{
+        v4:$v4,
+        v3:$v3,
+        legacy:$legacy
+      },
+      inventory:$inventory,
+      cold_export:{available:false},
+      manual_disk:{available:true}
+    }'
+}

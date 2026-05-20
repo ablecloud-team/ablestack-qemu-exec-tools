@@ -11,3 +11,10 @@ Thumbs.db
 # Local one-off test scripts and credentials
 tests/local/
 tests/ftctl/
+
+# RPM build work directories
+rpmbuild/
+rpmbuild_*/
+
+# Generated RPM artifacts
+build/rpm-n2k/*.rpm
