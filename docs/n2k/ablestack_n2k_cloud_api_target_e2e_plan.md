@@ -141,34 +141,38 @@ Filesystem import behavior was rechecked on 2026-05-19:
   directly under the selected Cloud storage pool path and must use
   `--target-map-json` or the wizard-generated map to avoid generic names such
   as `rhel-disk0.qcow2`.
-- For host-local FileSystem imports, omit `--cloud-disk-offering-id` unless the
-  offering is known to be local-storage compatible. The RBD-tagged `Custom1`
-  offering is rejected by Cloud for local storage imports.
+- When `--cloud-disk-offering-id` is omitted, n2k must use or create its own
+  visible writeback disk offering for the selected storage pool type. This
+  avoids Cloud's implicit default import offering and prevents RBD-tagged
+  offerings from being reused for local FileSystem imports.
 
 LVM/block is out of scope for the current Cloud target test pass and should be
 treated as a next version topic.
 
 ### Disk offerings
 
-The disk offering is selected by `--cloud-disk-offering-id` and is passed to
-`importVolume` as `diskofferingid` only when provided.
+The disk offering can be overridden by `--cloud-disk-offering-id`. When it is
+omitted, n2k resolves the selected Cloud storage pool and automatically uses or
+creates an n2k-managed writeback offering, then passes that offering to
+`importVolume` as `diskofferingid`.
 
 | Name | ID | Notes |
 | --- | --- | --- |
+| `N2K Migration Writeback` | auto-created | Customized, untagged, `storagetype=shared`, `cachemode=writeback`; default for RBD/shared pools |
+| `N2K Migration Writeback Local` | auto-created | Customized, untagged, `storagetype=local`, `cachemode=writeback`; default for host-local pools |
 | `Custom1` | `1da3a4e3-3a1a-4afd-bd28-19df910b334a` | Customized, tag `rbd`; use for RBD tests only |
 | `FTCTL Internal Root Disk` | `bf9b2567-abe0-420b-bdba-44c8779232f0` | Internal candidate, not preferred for n2k |
 | `FTCTL Internal Data Disk` | `20de1c04-f650-4900-af23-34567bfe2fa9` | Internal candidate, not preferred for n2k |
 
-Disk offering is intentionally optional in n2k. One negative/compatibility case
-must omit `--cloud-disk-offering-id` and verify that n2k does not block before
-the Cloud API call. If Cloud rejects the import due policy, record that as a
-Cloud policy result rather than an n2k argument validation failure.
+The n2k-managed offerings must be active, customized, untagged, and
+`cachemode=writeback`. If a same-name offering exists with incompatible
+properties, n2k must fail before `importVolume` so the operator can fix or delete
+the conflicting offering. Explicit `--cloud-disk-offering-id` remains available
+for compatibility and emergency override tests.
 
-For C04-C06 FileSystem/local storage cases, the disk offering must be omitted.
-On 2026-05-19, passing `Custom1` to the 22.1 local storage pool failed with
-Cloud error text indicating that the disk offering should use local storage.
-When omitted, Cloud selected `Default Custom Offering for Volume Import - Local
-Storage` for the imported local qcow2 root volume.
+For C04-C06 FileSystem/local storage cases, the normal path should omit
+`--cloud-disk-offering-id` and verify that n2k resolves
+`N2K Migration Writeback Local`.
 
 ### Optional host placement
 
@@ -240,8 +244,9 @@ During cutoff:
   - `--target-format raw`
   - `--dst "rbd:rbd/${RBD_PREFIX}"`
   - `--cloud-storage-id 91cae554-3fce-3f93-89d1-cefaf9bf8122`
-- Include `--cloud-disk-offering-id 1da3a4e3-3a1a-4afd-bd28-19df910b334a` for
-  the main RBD pass, then omit it in the compatibility case.
+- Omit `--cloud-disk-offering-id` for the normal RBD pass and verify that n2k
+  resolves `N2K Migration Writeback`. Use an explicit offering ID only for
+  override compatibility cases.
 - For FileSystem local storage:
   - Run n2k on the same ABLESTACK host selected by `--cloud-host-id`.
   - Use the matching host-scoped `--cloud-storage-id`.
@@ -249,8 +254,8 @@ During cutoff:
   - Use `--dst /var/lib/libvirt/images`.
   - Use `--target-map-json` so every target file is created directly under
     `/var/lib/libvirt/images` with a case-specific basename.
-  - Omit `--cloud-disk-offering-id` unless a local-storage-compatible offering
-    has been explicitly selected.
+  - Omit `--cloud-disk-offering-id` for the normal path and verify that n2k
+    resolves `N2K Migration Writeback Local`.
 
 After each case:
 
@@ -294,7 +299,8 @@ export CLOUD_API_KEY='<runtime-only>'
 export CLOUD_SECRET_KEY='<runtime-only>'
 export CLOUD_ZONE_ID='d5551005-3372-43e5-8a2b-5742057bbabd'
 export CLOUD_STORAGE_ID='91cae554-3fce-3f93-89d1-cefaf9bf8122'
-export CLOUD_DISK_OFFERING_ID='1da3a4e3-3a1a-4afd-bd28-19df910b334a'
+# Optional override only. Normal tests omit this so n2k resolves its writeback offering.
+# export CLOUD_DISK_OFFERING_ID='1da3a4e3-3a1a-4afd-bd28-19df910b334a'
 export CLOUD_NETWORK_ID='fa2d6e6c-0003-4ab0-92a2-e3e41c9ccbac'
 export CLOUD_SERVICE_OFFERING_ID='<select-before-test>'
 
@@ -321,7 +327,6 @@ ablestack_n2k --json preflight \
   --cloud-service-offering-id "${CLOUD_SERVICE_OFFERING_ID}" \
   --cloud-network-id "${CLOUD_NETWORK_ID}" \
   --cloud-storage-id "${CLOUD_STORAGE_ID}" \
-  --cloud-disk-offering-id "${CLOUD_DISK_OFFERING_ID}" \
   --target-storage rbd
 ```
 
@@ -347,7 +352,6 @@ ablestack_n2k --json \
   --cloud-service-offering-id "${CLOUD_SERVICE_OFFERING_ID}" \
   --cloud-network-id "${CLOUD_NETWORK_ID}" \
   --cloud-storage-id "${CLOUD_STORAGE_ID}" \
-  --cloud-disk-offering-id "${CLOUD_DISK_OFFERING_ID}" \
   --split phase1 \
   --force-v3
 ```
@@ -372,7 +376,6 @@ ablestack_n2k --json \
   --cloud-service-offering-id "${CLOUD_SERVICE_OFFERING_ID}" \
   --cloud-network-id "${CLOUD_NETWORK_ID}" \
   --cloud-storage-id "${CLOUD_STORAGE_ID}" \
-  --cloud-disk-offering-id "${CLOUD_DISK_OFFERING_ID}" \
   --shutdown guest \
   --apply \
   --start \
@@ -401,7 +404,6 @@ ablestack_n2k --json \
   --cloud-service-offering-id "${CLOUD_SERVICE_OFFERING_ID}" \
   --cloud-network-id "${CLOUD_NETWORK_ID}" \
   --cloud-storage-id "${CLOUD_STORAGE_ID}" \
-  --cloud-disk-offering-id "${CLOUD_DISK_OFFERING_ID}" \
   --shutdown guest \
   --apply \
   --start \
@@ -486,8 +488,11 @@ Result:
   - Service offering: `NoLimit-HA-WB` / `49b2a775-4dba-4b4b-8f92-554b111898bf`
   - Network: `L2-Network` / `fa2d6e6c-0003-4ab0-92a2-e3e41c9ccbac`
   - Primary storage: `Primary Storage Glue RBD` / `91cae554-3fce-3f93-89d1-cefaf9bf8122`
-  - Disk offering: `Custom1` / `1da3a4e3-3a1a-4afd-bd28-19df910b334a`
-- Required Cloud APIs are exposed: `listVolumesForImport`, `importVolume`,
+  - Disk offering at the time: `Custom1` /
+    `1da3a4e3-3a1a-4afd-bd28-19df910b334a`; current tests should omit explicit
+    disk offering and verify the n2k-managed writeback offering.
+- Required Cloud APIs are exposed: `listStoragePools`, `listDiskOfferings`,
+  `createDiskOffering`, `listVolumesForImport`, `importVolume`,
   `deployVirtualMachineForVolume`, `attachVolume`, `startVirtualMachine`, and
   `queryAsyncJobResult`.
 - Installed help and bash completion expose the Cloud target options.
@@ -887,8 +892,10 @@ Result:
     `rhel` reached `OFF`. Final snapshot
     `f62d98f4-fc88-4036-9e9b-019b0b4520e1` applied 43 regions / 545280 bytes
     across all three disks.
-  - Retrying the cutover without `--cloud-disk-offering-id` passed. Cloud
-    imported the root qcow2 as volume
+  - Retrying the cutover without `--cloud-disk-offering-id` passed on the older
+    behavior where Cloud selected its default local import offering. Current n2k
+    builds should instead resolve `N2K Migration Writeback Local` before
+    `importVolume`. Cloud imported the root qcow2 as volume
     `2d7778cc-b7ad-497a-820a-47406805c48b`, converted it to `ROOT`, deployed
     VM `a231e17e-c365-49d2-8e64-9918f0a8f68b`, attached data volumes
     `ad93fb6c-9307-4176-8647-9d9f5617fc77` and
@@ -988,8 +995,10 @@ Result:
   - Target files were created directly under `/var/lib/libvirt/images` on
     `ablecube22-2`: `n2k-cloud-c05-win10-fs-disk0.qcow2` and
     `n2k-cloud-c05-win10-fs-disk1.qcow2`.
-  - Cloud cutover succeeded without `--cloud-disk-offering-id`. Cloud selected
-    `Default Custom Offering for Volume Import - Local Storage`, imported the
+  - Cloud cutover succeeded without `--cloud-disk-offering-id` on the older
+    behavior where Cloud selected `Default Custom Offering for Volume Import -
+    Local Storage`. Current n2k builds should instead resolve
+    `N2K Migration Writeback Local` before `importVolume`. The run imported the
     root qcow2 as volume `a7f6f959-58bc-4d78-8d02-5a630d452b61`, converted it
     to `ROOT`, deployed VM `1acbfb58-b7a6-486f-934f-d40495b704e7`, attached
     data volume `ae2d2361-a0eb-4ab3-9454-2899374333c0`, and started the VM.
@@ -1083,8 +1092,10 @@ Result:
     `centos7-bios-ide` reached `OFF`.
   - Target file `n2k-cloud-c06-centos7-bios-ide-fs-disk0.qcow2` was created
     directly under `/var/lib/libvirt/images` on `ablecube22-3`.
-  - Cloud cutover succeeded without `--cloud-disk-offering-id`. Cloud selected
-    `Default Custom Offering for Volume Import - Local Storage`, imported the
+  - Cloud cutover succeeded without `--cloud-disk-offering-id` on the older
+    behavior where Cloud selected `Default Custom Offering for Volume Import -
+    Local Storage`. Current n2k builds should instead resolve
+    `N2K Migration Writeback Local` before `importVolume`. The run imported the
     root qcow2 as volume `6b01a1ef-6693-4654-a583-bee56025c2ee`, converted it
     to `ROOT`, deployed VM `7b84acd0-107c-49c5-b4bb-c4c1bf50b37f`, and started
     the VM.

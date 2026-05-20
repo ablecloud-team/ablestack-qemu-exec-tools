@@ -90,7 +90,7 @@ Observed target resources:
 | RBD pool path | `rbd` |
 | RBD storage provider | `ABLESTACK` |
 | Active KVM hosts | `ablecube22-1`, `ablecube22-2`, `ablecube22-3` |
-| Disk offering candidate | `Custom1`, tag `rbd` |
+| Default disk offering policy | n2k-managed `N2K Migration Writeback`, no tags, `cachemode=writeback` |
 
 RBD import path behavior:
 
@@ -175,6 +175,14 @@ The design adds a target provider layer:
       "network_ids": [],
       "storage_id": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
       "disk_offering_id": "",
+      "resolved_disk_offering": {
+        "id": "",
+        "name": "N2K Migration Writeback",
+        "storage_type": "shared",
+        "cache_mode": "writeback",
+        "customized": true,
+        "created": false
+      },
       "host_id": "",
       "account": "",
       "domain_id": "",
@@ -203,7 +211,7 @@ Add target provider options to `preflight`, `plan`, `init`, `run`, and `cutover`
 --cloud-cpu-speed <mhz>            Dynamic offering CPU speed detail, default 1000
 --cloud-network-id <uuid>          Repeatable network ID option
 --cloud-storage-id <uuid>          Target primary storage pool
---cloud-disk-offering-id <uuid>    Disk offering used by importVolume
+--cloud-disk-offering-id <uuid>    Optional override for the auto-managed n2k disk offering
 --cloud-host-id <uuid>             Optional host placement
 --cloud-account <name>             Optional target account
 --cloud-domain-id <uuid>           Optional target domain
@@ -278,6 +286,7 @@ Responsibilities:
 - Deploy the VM from the imported root volume.
 - Attach data disks.
 - Start and verify the VM.
+- Resolve or create the n2k-managed writeback disk offering.
 - Record Cloud IDs in the manifest.
 - Clean up partially created Cloud resources on failure when safe.
 
@@ -287,6 +296,8 @@ Candidate functions:
 n2k_cloud_target_preflight
 n2k_cloud_target_disk_import_path
 n2k_cloud_target_list_volume_for_import
+n2k_cloud_target_resolve_disk_offering
+n2k_cloud_target_create_n2k_disk_offering
 n2k_cloud_target_import_volume
 n2k_cloud_target_deploy_vm_for_volume
 n2k_cloud_target_attach_data_volume
@@ -308,37 +319,74 @@ Cloud API cutover replaces libvirt XML generation.
    - derive Cloud import path
    - call listVolumesForImport(storageid, path)
    - fail if the disk is not visible or is already managed
-5. Import root disk:
+5. Resolve the disk offering used for imported volumes:
+   - if `--cloud-disk-offering-id` is supplied, use that explicit offering ID
+   - otherwise query the selected storage pool and choose the n2k-managed
+     writeback offering for `shared` or `local` storage
+   - create the n2k offering when it does not exist
+   - fail if a same-name n2k offering exists but is not active, customized,
+     untagged, and `cachemode=writeback`
+6. Import root disk:
    - importVolume(storageid, path, name, diskofferingid, account/domain/project)
    - wait for async job
    - record volume ID
-6. Deploy VM:
+7. Deploy VM:
    - deployVirtualMachineForVolume(zoneid, serviceofferingid, volumeid, name, displayname, networkids, hostid, startvm=false)
    - wait for async job
    - record VM ID
-7. Ensure the imported root volume is a Cloud ROOT volume:
+8. Ensure the imported root volume is a Cloud ROOT volume:
    - listVolumes(id=<root_volume_id>)
    - if the attached volume is still DATADISK, call updateVolume(id, type=ROOT, path=<import_path>)
    - wait for async job and verify the final type is ROOT
-8. Import every data disk:
+9. Import every data disk:
    - importVolume(...)
    - wait for async job
    - record volume ID
-9. Attach every data disk:
+10. Attach every data disk:
    - attachVolume(id, virtualmachineid, deviceid)
    - wait for async job
-10. Start VM when requested:
+11. Start VM when requested:
    - startVirtualMachine(id)
    - wait for async job
-11. Verify:
+12. Verify:
    - listVirtualMachines(id)
    - expected state is Running when start was requested
-12. Mark cutover phase done.
+13. Mark cutover phase done.
 ```
 
 Root disk deployment uses `deployVirtualMachineForVolume`, not the normal `deployVirtualMachine`. The imported root volume is initially a `DATADISK` from `importVolume`. On the current ABLESTACK Cloud build, `deployVirtualMachineForVolume` attaches the imported volume and assigns `deviceId=0` plus the dummy template ID, but may leave `volume_type=DATADISK`. n2k therefore verifies the attached volume with `listVolumes(id=<root_volume_id>)` and, when needed, calls the exposed `updateVolume(id=<root_volume_id>, type=ROOT, path=<import_path>)` API before data-disk attach or VM start. Passing the original import path is required because the current Cloud `updateVolume` implementation can clear the volume path when it is omitted; without the path the KVM agent receives a ROOT volume with `path=null` and fails before libvirt domain creation. If the final volume type is still not `ROOT`, or the root path is empty after conversion, the flow must fail before start.
 
 The ABLESTACK Cloud API currently exposed by `ablestack-diplo` does not publish a `templateid` parameter for `deployVirtualMachineForVolume`. The management-server implementation creates and uses the KVM import dummy template named `kvm-default-vm-import-dummy-template` internally, then assigns that template ID to the imported root volume before VM creation. Therefore n2k does not pass `templateid`; if a future Cloud build exposes the parameter, n2k can add a `--cloud-template-id` option without changing the rest of the import flow.
+
+## N2K disk offering policy
+
+By default, n2k must not rely on ABLESTACK Cloud's implicit `Default Custom
+Offering for Volume Import` offering. Instead, when the operator does not supply
+`--cloud-disk-offering-id`, n2k owns a visible, Cloud-managed disk offering:
+
+| Storage scope | Offering name | Required properties |
+| --- | --- | --- |
+| Shared storage | `N2K Migration Writeback` | customized, no tags, `storagetype=shared`, `cachemode=writeback` |
+| Host-local storage | `N2K Migration Writeback Local` | customized, no tags, `storagetype=local`, `cachemode=writeback` |
+
+The offering is intentionally untagged so it can apply to all storage pools of
+the matching Cloud storage type. n2k resolves the target storage pool through
+`listStoragePools`, maps host-scoped pools to `local` and every other scope to
+`shared`, then calls `listDiskOfferings`. If the matching n2k offering exists and
+has the required properties, n2k reuses it. If it does not exist, n2k creates it
+with `createDiskOffering(customized=true, provisioningtype=thin,
+cachemode=writeback, storagetype=<shared|local>)`.
+
+If an offering with the reserved n2k name and matching storage type already
+exists but is not active, is not customized, has tags, or has a cache mode other
+than `writeback`, n2k fails before `importVolume`. n2k does not silently repair a
+conflicting operator-managed offering. The operator can either correct or delete
+the conflicting offering, or intentionally override the behavior with
+`--cloud-disk-offering-id`.
+
+After a successful automatic resolve/create, n2k records
+`target.cloud.resolved_disk_offering` and the effective
+`target.cloud.disk_offering_id` in the manifest. Secrets are not recorded.
 
 ## Disk mapping
 

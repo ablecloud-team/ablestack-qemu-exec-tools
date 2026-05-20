@@ -114,6 +114,31 @@ For RBD:
 
 - existing RBD image-name import behavior remains unchanged.
 
+## Disk Offering Policy
+
+Cloud FileSystem/qcow2 and RBD imports must use an explicit disk offering during
+`importVolume`. n2k therefore no longer depends on Cloud's implicit
+`Default Custom Offering for Volume Import` selection when the operator omits
+`--cloud-disk-offering-id`.
+
+Runtime behavior:
+
+1. If `--cloud-disk-offering-id` is supplied, n2k passes that explicit ID to
+   `importVolume`.
+2. If it is omitted, n2k resolves the selected Cloud storage pool.
+3. Host-scoped storage pools use the `local` n2k offering.
+4. Cluster/zone-scoped storage pools use the `shared` n2k offering.
+5. n2k reuses or creates a visible writeback offering:
+   - `N2K Migration Writeback` for shared storage
+   - `N2K Migration Writeback Local` for local storage
+6. The offering must be customized, untagged, active, and
+   `cachemode=writeback`.
+
+The offerings are intentionally untagged so they are suitable for every storage
+pool of the matching storage type. This keeps the storage path fix and the cache
+policy consistent: the selected storage pool controls file placement, while the
+n2k-managed offering controls the imported volume cache mode.
+
 ## Failure Handling
 
 Cloud target cutover must be fail-fast. If any Cloud API step fails or returns
@@ -146,6 +171,14 @@ After resolving the Cloud storage pool, n2k records a non-secret summary:
         "path": "/mnt/glue-gfs",
         "cluster_id": "...",
         "cluster_name": "..."
+      },
+      "resolved_disk_offering": {
+        "id": "...",
+        "name": "N2K Migration Writeback",
+        "storage_type": "shared",
+        "cache_mode": "writeback",
+        "customized": true,
+        "created": false
       }
     }
   }

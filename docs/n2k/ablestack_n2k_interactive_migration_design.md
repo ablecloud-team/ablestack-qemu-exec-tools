@@ -70,7 +70,7 @@ or fully preseeded:
 --cloud-network-id <uuid>
 --cloud-network-ids <csv>
 --cloud-storage-id <uuid>
---cloud-disk-offering-id <uuid>
+--cloud-disk-offering-id <uuid>  # optional override; omitted means auto n2k writeback offering
 --cloud-host-id <uuid>
 --cloud-account <name>
 --cloud-domain-id <uuid>
@@ -193,6 +193,7 @@ The wizard uses existing API helpers and adds only light list/selection logic:
   - `listServiceOfferings`
   - `listNetworks`
   - `listStoragePools`
+  - `listDiskOfferings`
   - `listHosts`
 
 When a required value is supplied by option or environment, the wizard does not
@@ -200,6 +201,12 @@ override it. When an API list has exactly one item, that item is selected
 without prompting. When multiple items exist, the operator chooses by number.
 When running with `--yes` and a required multi-choice value is missing, the
 wizard fails instead of guessing.
+
+The wizard does not ask for a disk offering by default. For Cloud targets, n2k
+uses or creates the reserved writeback disk offering for the selected storage
+pool type during cutover. The operator sees a disk offering prompt only if they
+explicitly want to override the n2k-managed offering with
+`--cloud-disk-offering-id`.
 
 ## Target map generation
 

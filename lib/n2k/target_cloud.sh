@@ -17,6 +17,18 @@
 
 set -euo pipefail
 
+n2k_cloud_target_disk_offering_name() {
+  local storage_type="$1"
+  case "${storage_type}" in
+    local)
+      printf '%s' "${N2K_CLOUD_LOCAL_DISK_OFFERING_NAME:-N2K Migration Writeback Local}"
+      ;;
+    *)
+      printf '%s' "${N2K_CLOUD_SHARED_DISK_OFFERING_NAME:-N2K Migration Writeback}"
+      ;;
+  esac
+}
+
 n2k_cloud_target_config_json() {
   local endpoint="${1:-}" zone_id="${2:-}" service_offering_id="${3:-}" network_ids_csv="${4:-}"
   local storage_id="${5:-}" disk_offering_id="${6:-}" host_id="${7:-}" account="${8:-}" domain_id="${9:-}"
@@ -288,6 +300,148 @@ n2k_cloud_target_storage_pool_config_json() {
     }
     | with_entries(select((.value | tostring | length) > 0))
   '
+}
+
+n2k_cloud_target_disk_offering_storage_type_from_pool() {
+  local pool_json="$1"
+  printf '%s' "${pool_json}" | jq -r '
+    ((.scope // "") | tostring | ascii_downcase) as $scope
+    | ((.local // .islocal // .isLocal // .uselocalstorage // false) | tostring | ascii_downcase) as $local
+    | if $scope == "host" or $local == "true" then "local" else "shared" end
+  '
+}
+
+n2k_cloud_target_disk_offerings_by_name_json() {
+  local endpoint="$1" api_key="$2" secret_key="$3" name="$4" storage_type="$5"
+  local response
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listDiskOfferings" \
+    "$(jq -nc --arg name "${name}" --arg storagetype "${storage_type}" '{name:$name,storagetype:$storagetype,listall:true}')")"; then
+    return 1
+  fi
+  printf '%s' "${response}" | jq -c '(.listdiskofferingsresponse.diskoffering // [])'
+}
+
+n2k_cloud_target_usable_disk_offering_json() {
+  local offerings_json="$1" name="$2" storage_type="$3"
+  printf '%s' "${offerings_json}" | jq -c \
+    --arg name "${name}" \
+    --arg storage_type "${storage_type}" \
+    '
+      def st: ((.storagetype // "") | tostring | ascii_downcase);
+      def cache: ((.cachemode // "") | tostring | ascii_downcase);
+      def state: ((.state // "Active") | tostring | ascii_downcase);
+      def customized: ((.iscustomized // .customized // false) == true);
+      def untagged: (((.tags // "") | tostring | length) == 0);
+      map(select(
+        (.name // "") == $name
+        and st == $storage_type
+        and cache == "writeback"
+        and state == "active"
+        and customized
+        and untagged
+      ))
+      | .[0] // empty
+    '
+}
+
+n2k_cloud_target_disk_offering_conflict_count() {
+  local offerings_json="$1" name="$2" storage_type="$3"
+  printf '%s' "${offerings_json}" | jq -r \
+    --arg name "${name}" \
+    --arg storage_type "${storage_type}" \
+    '
+      [
+        .[]
+        | select(
+            (.name // "") == $name
+            and (((.storagetype // "") | tostring | ascii_downcase) == $storage_type)
+          )
+      ]
+      | length
+    '
+}
+
+n2k_cloud_target_disk_offering_summary_json() {
+  local offering_json="$1" created="$2"
+  jq -nc \
+    --argjson offering "${offering_json}" \
+    --argjson created "${created}" \
+    '
+      {
+        id: ($offering.id // ""),
+        name: ($offering.name // ""),
+        storage_type: (($offering.storagetype // "") | tostring | ascii_downcase),
+        cache_mode: (($offering.cachemode // "") | tostring | ascii_downcase),
+        customized: (($offering.iscustomized // $offering.customized // false) == true),
+        created: $created
+      }
+    '
+}
+
+n2k_cloud_target_create_n2k_disk_offering() {
+  local endpoint="$1" api_key="$2" secret_key="$3" name="$4" storage_type="$5"
+  local display_text response
+  display_text="${N2K_CLOUD_DISK_OFFERING_DISPLAY_TEXT:-ABLESTACK N2K migration disk offering with writeback cache}"
+  if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "createDiskOffering" \
+    "$(jq -nc \
+      --arg name "${name}" \
+      --arg displaytext "${display_text}" \
+      --arg storagetype "${storage_type}" \
+      '{
+        name:$name,
+        displaytext:$displaytext,
+        customized:true,
+        provisioningtype:"thin",
+        storagetype:$storagetype,
+        cachemode:"writeback",
+        displayoffering:true
+      }')")"; then
+    return 1
+  fi
+  printf '%s\n' "Created Cloud N2K disk offering: ${name} (${storage_type}, writeback)" >&2
+  printf '%s' "${response}" >/dev/null
+}
+
+n2k_cloud_target_resolve_disk_offering() {
+  local endpoint="$1" api_key="$2" secret_key="$3" pool_json="$4"
+  local storage_type name offerings offering conflict_count
+  storage_type="$(n2k_cloud_target_disk_offering_storage_type_from_pool "${pool_json}")"
+  name="$(n2k_cloud_target_disk_offering_name "${storage_type}")"
+
+  offerings="$(n2k_cloud_target_disk_offerings_by_name_json "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}")" || return $?
+  offering="$(n2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}")"
+  if [[ -n "${offering}" ]]; then
+    n2k_cloud_target_disk_offering_summary_json "${offering}" false
+    return 0
+  fi
+
+  conflict_count="$(n2k_cloud_target_disk_offering_conflict_count "${offerings}" "${name}" "${storage_type}")"
+  if [[ "${conflict_count}" -gt 0 ]]; then
+    echo "Cloud N2K disk offering exists but is not compatible: name=${name} storage_type=${storage_type} required_cache=writeback customized=true tags=empty" >&2
+    printf '%s\n' "${offerings}" >&2
+    return 2
+  fi
+
+  n2k_cloud_target_create_n2k_disk_offering "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}" || return $?
+  offerings="$(n2k_cloud_target_disk_offerings_by_name_json "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}")" || return $?
+  offering="$(n2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}")"
+  [[ -n "${offering}" ]] || {
+    echo "Cloud N2K disk offering was created but could not be verified: name=${name} storage_type=${storage_type}" >&2
+    printf '%s\n' "${offerings}" >&2
+    return 1
+  }
+  n2k_cloud_target_disk_offering_summary_json "${offering}" true
+}
+
+n2k_cloud_target_record_disk_offering() {
+  local manifest="$1" offering_json="$2"
+  local offering_compact tmp
+  offering_compact="$(printf '%s' "${offering_json}" | jq -c .)"
+  tmp="$(mktemp)"
+  jq --argjson offering "${offering_compact}" '
+    .target.cloud.resolved_disk_offering = $offering
+    | .target.cloud.disk_offering_id = ($offering.id // .target.cloud.disk_offering_id // "")
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 
 n2k_cloud_target_file_storage_path_from_pool() {
@@ -593,7 +747,7 @@ n2k_cloud_target_preflight_json() {
   local api command response available_json="{}" ok=true
   n2k_cloud_require_credentials "${endpoint}" "${api_key}" "${secret_key}"
   response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listApis")"
-  for api in listVolumesForImport importVolume deployVirtualMachineForVolume updateVolume attachVolume startVirtualMachine queryAsyncJobResult; do
+  for api in listStoragePools listDiskOfferings createDiskOffering listVolumesForImport importVolume deployVirtualMachineForVolume updateVolume attachVolume startVirtualMachine queryAsyncJobResult; do
     if printf '%s' "${response}" | jq -e --arg api "${api}" '(.listapisresponse.api // []) | map(.name) | index($api) != null' >/dev/null; then
       command=true
     else
@@ -611,7 +765,7 @@ n2k_cloud_target_cutover() {
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
   local disk_offering_id owner_params root_import root_volume_id deploy vm_id data_volumes_json jobs_json
   local import_result attach_result start_result result_json disk_name source_deploy_params root_volume_result root_volume_json root_volume_update_job root_volume_converted
-  local pool_json pool_path import_volume_id
+  local pool_json pool_path import_volume_id disk_offering_json
 
   runtime="$(n2k_cloud_target_resolve_runtime_json "${manifest}" "${endpoint_arg}" "${api_key_arg}" "${secret_key_arg}" "${cred_file}")"
   endpoint="$(jq -r '.endpoint // ""' <<<"${runtime}")"
@@ -675,6 +829,27 @@ n2k_cloud_target_cutover() {
     n2k_cloud_target_record_result "${manifest}" "${result_json}"
     printf '%s' "${result_json}"
     return 0
+  fi
+
+  if [[ -z "${disk_offering_id}" ]]; then
+    if [[ -z "${pool_json:-}" ]]; then
+      pool_json="$(n2k_cloud_target_storage_pool_json "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}")" || return $?
+      [[ -n "${pool_json}" ]] || {
+        echo "Cloud storage pool was not found: ${storage_id}" >&2
+        return 2
+      }
+      n2k_cloud_target_record_storage_pool "${manifest}" "${pool_json}"
+    fi
+    disk_offering_json="$(n2k_cloud_target_resolve_disk_offering "${endpoint}" "${api_key}" "${secret_key}" "${pool_json}")" || return $?
+    disk_offering_id="$(jq -r '.id // empty' <<<"${disk_offering_json}")"
+    [[ -n "${disk_offering_id}" ]] || {
+      echo "Cloud N2K disk offering resolution did not return an id." >&2
+      printf '%s\n' "${disk_offering_json}" >&2
+      return 1
+    }
+    n2k_cloud_target_record_disk_offering "${manifest}" "${disk_offering_json}"
+  else
+    disk_offering_json="$(jq -nc --arg id "${disk_offering_id}" '{id:$id,source:"explicit"}')"
   fi
 
   target_path="$(jq -r '.disks[0].transfer.target_path' "${manifest}")"
@@ -745,8 +920,10 @@ n2k_cloud_target_cutover() {
     --argjson data_volumes "${data_volumes_json}" \
     --argjson jobs "${jobs_json}" \
     --argjson deployment_properties "${source_deploy_params}" \
+    --argjson disk_offering "${disk_offering_json}" \
     --argjson started "$(if [[ "${start_vm}" -eq 1 ]]; then printf true; else printf false; fi)" \
     '{provider:$provider,endpoint:$endpoint,validated:true,applied:true,started:$started,vm_id:$vm_id,root_volume_id:$root_volume_id,root_volume:$root_volume,root_volume_converted:$root_volume_converted,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties}
+     + (if ($disk_offering | length) > 0 then {disk_offering:$disk_offering} else {} end)
      + (if ($root_volume_update_job_id | length) > 0 then {root_volume_update_job_id:$root_volume_update_job_id} else {} end)')"
   n2k_cloud_target_record_result "${manifest}" "${result_json}"
   printf '%s' "${result_json}"

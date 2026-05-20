@@ -134,7 +134,7 @@ Options:
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Cloud disk offering ID for imported volumes
+                          Optional override; default uses N2K writeback offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -200,7 +200,7 @@ Options:
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Cloud disk offering ID for imported volumes
+                          Optional override; default uses N2K writeback offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -264,7 +264,7 @@ Options:
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Cloud disk offering ID for imported volumes
+                          Optional override; default uses N2K writeback offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -378,7 +378,7 @@ Cloud options:
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID; prompt/list when omitted
   --cloud-disk-offering-id <id>
-                          Optional Cloud disk offering ID
+                          Optional override; default uses N2K writeback offering
   --cloud-host-id <id>    Required for local FileSystem profile when multiple hosts exist
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -445,7 +445,7 @@ Options:
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Cloud disk offering ID for imported volumes
+                          Optional override; default uses N2K writeback offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -595,7 +595,7 @@ Options:
   --cloud-network-ids <s> Comma-separated Cloud network IDs
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Cloud disk offering ID for imported volumes
+                          Optional override; default uses N2K writeback offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
