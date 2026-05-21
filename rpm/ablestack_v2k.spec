@@ -28,16 +28,20 @@ Requires:       bash
 Requires:       bash-completion
 Requires:       jq
 Requires:       python3
+Requires:       python3-pip
 Requires:       openssl
 Requires:       nbd
 Requires:       nbdkit
 Requires:       nbdkit-vddk-plugin
 Requires:       qemu-img
 Requires:       libvirt-client
+Requires:       tar
 
 %description
 ablestack_v2k provides ABLESTACK VMware-to-KVM (V2K) migration scripts and libraries.
-Assets such as VDDK and govc are handled by the offline ISO installer.
+The package includes the offline V2K compatibility runtime assets used by v2k:
+govc, VDDK payloads, pyVmomi wheels, compatibility profile definitions, and an
+optional WinPE ISO when one is staged at RPM build time.
 
 %prep
 %setup -q
@@ -60,14 +64,49 @@ cp -a lib/v2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/v2k/ 2>/dev
 mkdir -p %{buildroot}/usr/share/ablestack/v2k
 cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/ 2>/dev/null || :
 
+# Offline runtime asset payload used by %post and by air-gapped repair flows.
+mkdir -p %{buildroot}/usr/share/ablestack/v2k/runtime-assets
+if [ -d assets ]; then
+  cp -a assets %{buildroot}/usr/share/ablestack/v2k/runtime-assets/
+fi
+mkdir -p %{buildroot}/usr/share/ablestack/v2k/runtime-assets/share/ablestack/v2k
+cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/runtime-assets/share/ablestack/v2k/ 2>/dev/null || :
+
+# Optional WinPE ISO payload. The release workflow stages the generated WinPE
+# ISO into winpe/ before building the release V2K RPM. Local builds without an
+# ISO still create the target directory so install scripts can place one later.
+mkdir -p %{buildroot}/usr/share/ablestack/v2k/winpe
+if ls winpe/*.iso >/dev/null 2>&1; then
+  install -m 0444 winpe/*.iso %{buildroot}/usr/share/ablestack/v2k/winpe/
+fi
+
 # Bash completion (standard location)
 mkdir -p %{buildroot}%{_datadir}/bash-completion/completions
 install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/completions/%{name}
+
+%post
+if [ -x /usr/local/bin/v2k_test_install.sh ] && [ -d /usr/share/ablestack/v2k/runtime-assets/assets ]; then
+  /usr/local/bin/v2k_test_install.sh \
+    --repo-root /usr/share/ablestack/v2k/runtime-assets \
+    --compat-root /usr/share/ablestack/v2k/compat \
+    --skip-install \
+    --install-assets \
+    --install-profile all \
+    --validate-profile all
+fi
+
+if [ -d /usr/share/ablestack/v2k/winpe ]; then
+  winpe_iso="$(find /usr/share/ablestack/v2k/winpe -maxdepth 1 -type f -name '*.iso' | sort | head -n 1 || true)"
+  if [ -n "${winpe_iso}" ]; then
+    ln -sfn "${winpe_iso}" /usr/share/ablestack/v2k/winpe.iso
+  fi
+fi
 
 %preun
 if [ "$1" -eq 0 ]; then
   # Remove installer-managed compatibility runtime assets on final erase.
   rm -rf /usr/share/ablestack/v2k/compat >/dev/null 2>&1 || true
+  rm -rf /usr/share/ablestack/v2k/runtime-assets >/dev/null 2>&1 || true
   rm -f /etc/profile.d/v2k-compat.sh >/dev/null 2>&1 || true
 
   # Remove installer-managed WinPE staging when the V2K add-on is erased.
@@ -87,7 +126,9 @@ fi
 /usr/local/bin/ablestack_v2k
 /usr/local/bin/v2k_test_install.sh
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
-/usr/share/ablestack/v2k/compat/*
+/usr/share/ablestack/v2k/compat
+/usr/share/ablestack/v2k/runtime-assets
+/usr/share/ablestack/v2k/winpe
 %{_datadir}/bash-completion/completions/%{name}
 
 %changelog

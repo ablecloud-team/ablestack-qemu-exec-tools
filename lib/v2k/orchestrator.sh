@@ -214,6 +214,11 @@ v2k_cmd_run_foreground() {
   local compat_profile="${V2K_COMPAT_PROFILE:-auto}"
   local init_mode="govc"
   local init_target_format="" init_target_storage="" init_target_map_json=""
+  local target_provider="libvirt" target_provider_arg_set=0
+  local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
+  local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
+  local cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id=""
+  local cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local init_force_block_device="0"
 
   # ---------------------------------------------------------------------------
@@ -253,6 +258,27 @@ v2k_cmd_run_foreground() {
       --target-format) init_target_format="${2:-}"; shift 2;;
       --target-storage) init_target_storage="${2:-}"; shift 2;;
       --target-map-json) init_target_map_json="${2:-}"; shift 2;;
+      --target-provider) target_provider="${2:-}"; target_provider_arg_set=1; shift 2;;
+      --cloud-endpoint) cloud_endpoint="${2:-}"; shift 2;;
+      --cloud-api-key) cloud_api_key="${2:-}"; shift 2;;
+      --cloud-secret-key) cloud_secret_key="${2:-}"; shift 2;;
+      --cloud-cred-file) cloud_cred_file="${2:-}"; shift 2;;
+      --cloud-zone-id) cloud_zone_id="${2:-}"; shift 2;;
+      --cloud-service-offering-id) cloud_service_offering_id="${2:-}"; shift 2;;
+      --cloud-network-id)
+        cloud_network_ids="${cloud_network_ids:+${cloud_network_ids},}${2:-}"
+        shift 2
+        ;;
+      --cloud-network-ids) cloud_network_ids="${2:-}"; shift 2;;
+      --cloud-storage-id) cloud_storage_id="${2:-}"; shift 2;;
+      --cloud-disk-offering-id) cloud_disk_offering_id="${2:-}"; shift 2;;
+      --cloud-host-id) cloud_host_id="${2:-}"; shift 2;;
+      --cloud-account) cloud_account="${2:-}"; shift 2;;
+      --cloud-domain-id) cloud_domain_id="${2:-}"; shift 2;;
+      --cloud-project-id) cloud_project_id="${2:-}"; shift 2;;
+      --cloud-name) cloud_name="${2:-}"; shift 2;;
+      --cloud-display-name) cloud_display_name="${2:-}"; shift 2;;
+      --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; shift 2;;
       --force-block-device) init_force_block_device="1"; shift 1;;
       *) v2k_die "Unknown option for run: $1" ;;
     esac
@@ -263,6 +289,7 @@ v2k_cmd_run_foreground() {
   # ---------------------------------------------------------------------------
   case "${shutdown}" in manual|guest|poweroff) ;; *) v2k_die "invalid --shutdown: ${shutdown}";; esac
   case "${kvm_vm_policy}" in none|define-only|define-and-start) ;; *) v2k_die "invalid --kvm-vm-policy: ${kvm_vm_policy}";; esac
+  v2k_valid_target_provider "${target_provider}" || v2k_die "invalid --target-provider: ${target_provider}"
   [[ "${incr_interval}" =~ ^[0-9]+$ ]] || v2k_die "--incr-interval must be integer seconds"
   [[ "${max_incr}" =~ ^[0-9]+$ ]] || v2k_die "--max-incr must be integer"
   [[ "${converge_threshold_sec}" =~ ^[0-9]+$ ]] || v2k_die "--converge-threshold-sec must be integer seconds"
@@ -329,9 +356,24 @@ v2k_cmd_run_foreground() {
   # init args setup
   local -a init_args=( --vm "${vm}" --vcenter "${vcenter_host}" --dst "${dst}" --mode "${init_mode}" )
   init_args+=( --compat-profile "${V2K_COMPAT_PROFILE:-auto}" )
+  [[ "${target_provider_arg_set}" -eq 1 ]] && init_args+=( --target-provider "${target_provider}" )
   [[ -n "${init_target_format}" ]] && init_args+=( --target-format "${init_target_format}" )
   [[ -n "${init_target_storage}" ]] && init_args+=( --target-storage "${init_target_storage}" )
   [[ -n "${init_target_map_json}" ]] && init_args+=( --target-map-json "${init_target_map_json}" )
+  [[ -n "${cloud_endpoint}" ]] && init_args+=( --cloud-endpoint "${cloud_endpoint}" )
+  [[ -n "${cloud_cred_file}" ]] && init_args+=( --cloud-cred-file "${cloud_cred_file}" )
+  [[ -n "${cloud_zone_id}" ]] && init_args+=( --cloud-zone-id "${cloud_zone_id}" )
+  [[ -n "${cloud_service_offering_id}" ]] && init_args+=( --cloud-service-offering-id "${cloud_service_offering_id}" )
+  [[ -n "${cloud_network_ids}" ]] && init_args+=( --cloud-network-ids "${cloud_network_ids}" )
+  [[ -n "${cloud_storage_id}" ]] && init_args+=( --cloud-storage-id "${cloud_storage_id}" )
+  [[ -n "${cloud_disk_offering_id}" ]] && init_args+=( --cloud-disk-offering-id "${cloud_disk_offering_id}" )
+  [[ -n "${cloud_host_id}" ]] && init_args+=( --cloud-host-id "${cloud_host_id}" )
+  [[ -n "${cloud_account}" ]] && init_args+=( --cloud-account "${cloud_account}" )
+  [[ -n "${cloud_domain_id}" ]] && init_args+=( --cloud-domain-id "${cloud_domain_id}" )
+  [[ -n "${cloud_project_id}" ]] && init_args+=( --cloud-project-id "${cloud_project_id}" )
+  [[ -n "${cloud_name}" ]] && init_args+=( --cloud-name "${cloud_name}" )
+  [[ -n "${cloud_display_name}" ]] && init_args+=( --cloud-display-name "${cloud_display_name}" )
+  [[ -n "${cloud_cpu_speed}" ]] && init_args+=( --cloud-cpu-speed "${cloud_cpu_speed}" )
   [[ "${init_force_block_device}" == "1" ]] && init_args+=( --force-block-device )
 
   # -----------------------------------------------------------------------------
@@ -636,6 +678,23 @@ v2k_cmd_run_foreground() {
   fi
 
   cutover_args+=("${cutover_extra[@]}")
+  [[ "${target_provider_arg_set}" -eq 1 ]] && cutover_args+=(--target-provider "${target_provider}")
+  [[ -n "${cloud_endpoint}" ]] && cutover_args+=(--cloud-endpoint "${cloud_endpoint}")
+  [[ -n "${cloud_api_key}" ]] && cutover_args+=(--cloud-api-key "${cloud_api_key}")
+  [[ -n "${cloud_secret_key}" ]] && cutover_args+=(--cloud-secret-key "${cloud_secret_key}")
+  [[ -n "${cloud_cred_file}" ]] && cutover_args+=(--cloud-cred-file "${cloud_cred_file}")
+  [[ -n "${cloud_zone_id}" ]] && cutover_args+=(--cloud-zone-id "${cloud_zone_id}")
+  [[ -n "${cloud_service_offering_id}" ]] && cutover_args+=(--cloud-service-offering-id "${cloud_service_offering_id}")
+  [[ -n "${cloud_network_ids}" ]] && cutover_args+=(--cloud-network-ids "${cloud_network_ids}")
+  [[ -n "${cloud_storage_id}" ]] && cutover_args+=(--cloud-storage-id "${cloud_storage_id}")
+  [[ -n "${cloud_disk_offering_id}" ]] && cutover_args+=(--cloud-disk-offering-id "${cloud_disk_offering_id}")
+  [[ -n "${cloud_host_id}" ]] && cutover_args+=(--cloud-host-id "${cloud_host_id}")
+  [[ -n "${cloud_account}" ]] && cutover_args+=(--cloud-account "${cloud_account}")
+  [[ -n "${cloud_domain_id}" ]] && cutover_args+=(--cloud-domain-id "${cloud_domain_id}")
+  [[ -n "${cloud_project_id}" ]] && cutover_args+=(--cloud-project-id "${cloud_project_id}")
+  [[ -n "${cloud_name}" ]] && cutover_args+=(--cloud-name "${cloud_name}")
+  [[ -n "${cloud_display_name}" ]] && cutover_args+=(--cloud-display-name "${cloud_display_name}")
+  [[ -n "${cloud_cpu_speed}" ]] && cutover_args+=(--cloud-cpu-speed "${cloud_cpu_speed}")
 
   v2k_cmd_cutover "${cutover_args[@]}"
 

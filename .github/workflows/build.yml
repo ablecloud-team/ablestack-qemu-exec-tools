@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 # NOTE (WinPE ISO)
 # - WinPE ISO artifacts are produced by the dedicated WinPE release workflows.
@@ -382,20 +383,43 @@ jobs:
 
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*","${EPEL_REPO_ID}" makecache
 
+      - name: Stage WinPE ISO into V2K RPM source
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: winpe-iso-release
+          path: winpe
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Show staged WinPE ISO for V2K RPM
+        if: ${{ github.event_name == 'workflow_run' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[INFO] WinPE files staged before V2K RPM build:"
+          find winpe -maxdepth 1 -type f -printf '%f %s bytes\n' | sort || true
+          test -n "$(find winpe -maxdepth 1 -type f -iname '*.iso' -print -quit)"
+
       - name: Build V2K RPM (separate path)
         run: |
           set -e
           # Build V2K RPM in an isolated path to avoid overlap with other packaging jobs
           make v2k-rpm
  
-      - name: Verify ablestack_v2k rpm contains bash completion
+      - name: Verify ablestack_v2k rpm contains bash completion and runtime assets
         shell: bash
         run: |
           set -euo pipefail
           RPM_FILE=$(ls -1 build/rpm-v2k/ablestack_v2k-*.rpm | head -n 1)
           echo "[INFO] verifying rpm: ${RPM_FILE}"
           rpm -qlp "${RPM_FILE}" | grep -E "bash-completion/completions/ablestack_v2k$" >/dev/null
-          echo "[OK] bash completion is packaged"
+          rpm -qlp "${RPM_FILE}" | grep -E "/usr/share/ablestack/v2k/runtime-assets/assets/govc_Linux_x86_64.tar.gz$" >/dev/null
+          rpm -qlp "${RPM_FILE}" | grep -E "/usr/share/ablestack/v2k/runtime-assets/assets/VMware-vix-disklib-.*[.]tar[.]gz$" >/dev/null
+          if find winpe -maxdepth 1 -type f -iname '*.iso' | grep -q .; then
+            rpm -qlp "${RPM_FILE}" | grep -E "/usr/share/ablestack/v2k/winpe/.*[.]iso$" >/dev/null
+          fi
+          echo "[OK] bash completion and runtime assets are packaged"
 
       - name: Create V2K RPM repo (offline) for ABLESTACK (Rocky ${{ matrix.host_os_minor }})
         run: |
@@ -424,12 +448,14 @@ jobs:
           REQ_PKGS=(
             jq
             python3
+            python3-pip
             openssl
             nbd
             nbdkit
             nbdkit-vddk-plugin
             qemu-img
             libvirt-client
+            tar
           )
 
           BASELINE_FILE="rpm/v2k_baseline_pkgs_ablestack_${ROCKY_MINOR}.txt"
@@ -1297,6 +1323,36 @@ jobs:
               printf '%s\n' "${repo_dir}"
           }
 
+          has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+          resolve_first_cmd() {
+              local cmd=
+              for cmd in "$@"; do
+                  if has_cmd "${cmd}"; then
+                      command -v "${cmd}"
+                      return 0
+                  fi
+              done
+              return 1
+          }
+
+          rpm_pkg_manager_cmd() {
+              resolve_first_cmd dnf aspm || {
+                  echo "[ERROR] Neither dnf nor ABLESTACK aspm was found." >&2
+                  return 127
+              }
+          }
+
+          rpm_pkg_manager() {
+              local cmd=
+              cmd="$(rpm_pkg_manager_cmd)" || return $?
+              sudo "${cmd}" "$@"
+          }
+
+          rpm_pkg_clean_all() {
+              rpm_pkg_manager clean all || true
+          }
+
           case "$DISTRO" in
               rocky|rhel|centos|almalinux|fedora)
                   echo "[INFO] Detected RPM-based system ($DISTRO $MAJOR_VERSION)"
@@ -1319,10 +1375,10 @@ jobs:
           enabled=1
           gpgcheck=0
           EOR
-                  sudo dnf clean all
-                  sudo dnf -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
+                  rpm_pkg_clean_all
+                  rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
                   sudo rm -f /etc/yum.repos.d/ablestack-qemu-exec-tools.repo
-                  sudo dnf clean all
+                  rpm_pkg_clean_all
 
                   # ======================================================================
                   # HANGCTL add-on (ABLESTACK Host only, Rocky 9.6 preferred)
@@ -1348,14 +1404,14 @@ jobs:
           enabled=1
           gpgcheck=0
           EOH
-                          sudo dnf clean all
-                          if sudo dnf -y --disablerepo="*" --enablerepo="ablestack-vm-hangctl" install ablestack_vm_hangctl; then
+                          rpm_pkg_clean_all
+                          if rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-vm-hangctl" install ablestack_vm_hangctl; then
                               echo "[OK] ablestack_vm_hangctl installed."
                           else
                               echo "[WARN] Failed to install ablestack_vm_hangctl from ISO repo. Continuing."
                           fi
                           sudo rm -f "${HANGCTL_REPO_FILE}"
-                          sudo dnf clean all
+                          rpm_pkg_clean_all
                       else
                           echo "[WARN] HANGCTL RPM repo not found in ISO: ${HANGCTL_REPO_DIR} (skip)"
                       fi
@@ -1382,14 +1438,14 @@ jobs:
           enabled=1
           gpgcheck=0
           EOFCTL
-                          sudo dnf clean all
-                          if sudo dnf -y --disablerepo="*" --enablerepo="ablestack-vm-ftctl" install ablestack_vm_ftctl; then
+                          rpm_pkg_clean_all
+                          if rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-vm-ftctl" install ablestack_vm_ftctl; then
                               echo "[OK] ablestack_vm_ftctl installed."
                           else
                               echo "[WARN] Failed to install ablestack_vm_ftctl from ISO repo. Continuing."
                           fi
                           sudo rm -f "${FTCTL_REPO_FILE}"
-                          sudo dnf clean all
+                          rpm_pkg_clean_all
                       else
                           echo "[WARN] FTCTL RPM repo not found in ISO: ${FTCTL_REPO_DIR} (skip)"
                       fi
@@ -1412,14 +1468,14 @@ jobs:
           enabled=1
           gpgcheck=0
           EON
-                          sudo dnf clean all
-                          if sudo dnf -y --disablerepo="*" --enablerepo="ablestack-n2k" install ablestack_n2k; then
+                          rpm_pkg_clean_all
+                          if rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-n2k" install ablestack_n2k; then
                               echo "[OK] ablestack_n2k installed."
                           else
                               echo "[WARN] Failed to install ablestack_n2k from ISO repo. Continuing."
                           fi
                           sudo rm -f "${N2K_REPO_FILE}"
-                          sudo dnf clean all
+                          rpm_pkg_clean_all
                       else
                           echo "[WARN] No bundled N2K repo matches host Rocky ${VERSION_ID:-unknown}."
                           echo "[WARN] Expected: ${ISO_MNT}/n2k/n2k-rpm-rocky${VERSION_ID:-<minor>}"
@@ -1438,8 +1494,6 @@ jobs:
                       if V2K_REPO_DIR="$(resolve_v2k_repo_dir)"; then
                           echo "[INFO] ABLESTACK ${VERSION_ID:-unknown} detected. Installing V2K add-on..."
 
-                          has_cmd() { command -v "$1" >/dev/null 2>&1; }
-
                           # 1) Install ablestack_v2k RPM from ISO local repo
                           V2K_REPO_FILE=/etc/yum.repos.d/ablestack-v2k.repo
                           sudo tee "${V2K_REPO_FILE}" >/dev/null <<-EOV
@@ -1449,26 +1503,34 @@ jobs:
           enabled=1
           gpgcheck=0
           EOV
-                          sudo dnf clean all
-                          sudo dnf -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
-                            sudo dnf -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
-                            sudo dnf -y localinstall "${V2K_REPO_DIR}"/*.rpm
+                          rpm_pkg_clean_all
+                          rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
+                            rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
+                            rpm_pkg_manager -y localinstall "${V2K_REPO_DIR}"/*.rpm
                           sudo rm -f "${V2K_REPO_FILE}"
-                          sudo dnf clean all
+                          rpm_pkg_clean_all
 
-                          # 2) Install compatibility profile assets from ISO
+                          # 2) Validate RPM-installed compatibility profiles first.
+                          #    RPM %post now installs govc, VDDK, pyVmomi wheels, and
+                          #    profile definitions. Keep ISO asset install as a repair
+                          #    fallback for older RPMs or manually damaged hosts.
                           V2K_INSTALLER_BIN="$(command -v v2k_test_install.sh || true)"
                           if [[ -z "${V2K_INSTALLER_BIN}" && -x "${ISO_MNT}/bin/v2k_test_install.sh" ]]; then
                               V2K_INSTALLER_BIN="${ISO_MNT}/bin/v2k_test_install.sh"
                           fi
                           if [[ -x "${V2K_INSTALLER_BIN}" ]]; then
-                              echo "[INFO] Installing V2K compatibility profiles from ISO assets..."
-                              sudo "${V2K_INSTALLER_BIN}" \
-                                --repo-root "${ISO_MNT}" \
-                                --skip-install \
-                                --install-assets \
-                                --install-profile all \
-                                --validate-profile all
+                              echo "[INFO] Validating V2K compatibility profiles installed by RPM..."
+                              if sudo "${V2K_INSTALLER_BIN}" --skip-install --validate-profile all; then
+                                  echo "[OK] V2K compatibility profiles are already ready from RPM."
+                              else
+                                  echo "[WARN] RPM-installed V2K profiles are incomplete. Repairing from ISO assets..."
+                                  sudo "${V2K_INSTALLER_BIN}" \
+                                    --repo-root "${ISO_MNT}" \
+                                    --skip-install \
+                                    --install-assets \
+                                    --install-profile all \
+                                    --validate-profile all
+                              fi
                           else
                               echo "[WARN] v2k_test_install.sh not found after ablestack_v2k installation."
                               echo "[WARN] Skipping compatibility profile asset installation."
@@ -1567,11 +1629,37 @@ jobs:
             sudo rm -rf "${path}"
           }
 
+          has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+          resolve_first_cmd() {
+            local cmd=
+            for cmd in "$@"; do
+              if has_cmd "${cmd}"; then
+                command -v "${cmd}"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          rpm_pkg_manager_cmd() {
+            resolve_first_cmd dnf aspm || {
+              echo "[ERROR] Neither dnf nor ABLESTACK aspm was found." >&2
+              return 127
+            }
+          }
+
+          rpm_pkg_manager() {
+            local cmd=
+            cmd="$(rpm_pkg_manager_cmd)" || return $?
+            sudo "${cmd}" "$@"
+          }
+
           case "${DISTRO}" in
             rocky|rhel|centos|almalinux|fedora)
               echo "[INFO] Detected RPM-based system (${DISTRO} ${VERSION_ID:-unknown})"
-              sudo dnf -y remove ablestack_v2k ablestack_n2k ablestack_vm_hangctl ablestack_vm_ftctl ablestack-qemu-exec-tools || true
-              sudo dnf clean all || true
+              rpm_pkg_manager -y remove ablestack_v2k ablestack_n2k ablestack_vm_hangctl ablestack_vm_ftctl ablestack-qemu-exec-tools || true
+              rpm_pkg_manager clean all || true
               ;;
             ubuntu|debian)
               echo "[INFO] Detected DEB-based system (${DISTRO} ${VERSION_ID:-unknown})"
@@ -1769,13 +1857,13 @@ jobs:
           name: release-validation-${{ github.run_number }}
           path: |
             build/iso/**
-            release/rpm/**
-            release/deb/**
-            release/msi/**
-            release/v2k/**
-            release/n2k/**
-            release/completions/**
-            release/bin/**
+            release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm
+            release/rpm/hangctl-rpm-rocky9.6/ablestack_vm_hangctl-*.rpm
+            release/rpm/ftctl-rpm-rocky9.6/ablestack_vm_ftctl-*.rpm
+            release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
+            release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.rpm
+            release/n2k/n2k-rpm-rocky9.6/ablestack_n2k-*.rpm
+            release/n2k/n2k-rpm-rocky9.7/ablestack_n2k-*.rpm
             release_notes.md
           retention-days: 14
 
@@ -1787,6 +1875,7 @@ jobs:
           shopt -s nullglob
 
           OUT_DIR="release/upload-assets"
+          rm -rf "${OUT_DIR}"
           mkdir -p "${OUT_DIR}"
 
           copy_plain() {
@@ -1816,10 +1905,10 @@ jobs:
           for rpm in release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm; do
             copy_plain "${rpm}"
           done
-          for rpm in release/rpm/hangctl-rpm-rocky9.6/*.rpm; do
+          for rpm in release/rpm/hangctl-rpm-rocky9.6/ablestack_vm_hangctl-*.rpm; do
             copy_plain "${rpm}"
           done
-          for rpm in release/rpm/ftctl-rpm-rocky9.6/*.rpm; do
+          for rpm in release/rpm/ftctl-rpm-rocky9.6/ablestack_vm_ftctl-*.rpm; do
             copy_plain "${rpm}"
           done
 
@@ -1831,6 +1920,18 @@ jobs:
               copy_rpm_with_suffix "${rpm}" "rocky${ver}"
             done
           done
+
+          unexpected_rpm="$(find "${OUT_DIR}" -maxdepth 1 -type f -name '*.rpm' \
+            ! -name 'ablestack-qemu-exec-tools-*.rpm' \
+            ! -name 'ablestack_vm_hangctl-*.rpm' \
+            ! -name 'ablestack_vm_ftctl-*.rpm' \
+            ! -name 'ablestack_v2k-*.rpm' \
+            ! -name 'ablestack_n2k-*.rpm' \
+            -print -quit)"
+          if [[ -n "${unexpected_rpm}" ]]; then
+            echo "[ERR] Dependency RPM would be published: ${unexpected_rpm}" >&2
+            exit 2
+          fi
 
           echo "[INFO] GitHub Release assets to upload:"
           find "${OUT_DIR}" -maxdepth 1 -type f -printf '%f\n' | sort

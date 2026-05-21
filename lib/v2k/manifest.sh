@@ -19,9 +19,14 @@
 
 set -euo pipefail
 
-V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
+if [[ ! -f "${V2K_LIB_DIR}/compat.sh" ]]; then
+  V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+  V2K_LIB_DIR="${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k"
+fi
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+source "${V2K_LIB_DIR}/compat.sh"
 
 # Manifest helpers
 # - manifest.json is the source of truth for pipeline steps
@@ -106,6 +111,8 @@ v2k_manifest_clear_rbd_mapped_device() {
 }
 v2k_manifest_init() {
   local manifest="$1" run_id="$2" workdir="$3" vm="$4" vcenter="$5" mode="$6" dst="$7" inv_json="$8"
+  local target_provider="${9:-libvirt}" cloud_json="${10:-}"
+  [[ -n "${cloud_json}" ]] || cloud_json="{}"
 
   local created_at
   created_at="$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')"
@@ -170,10 +177,21 @@ v2k_manifest_init() {
     return 2
   fi
 
-  # storage_map JSON 정규화
-  local map_compact
+  # storage_map / cloud JSON 정규화
+  local map_compact cloud_compact
   if ! map_compact="$(printf '%s' "${storage_map_json}" | jq -c '.' 2>/dev/null)"; then
     echo "[ERR] V2K_TARGET_STORAGE_MAP_JSON is not valid JSON: ${storage_map_json}" >&2
+    return 2
+  fi
+  case "${target_provider}" in
+    libvirt|ablestack-cloud) ;;
+    *) echo "Unsupported target provider: ${target_provider}" >&2; return 2;;
+  esac
+  if [[ -z "${cloud_json}" ]]; then
+    cloud_json="{}"
+  fi
+  if ! cloud_compact="$(printf '%s' "${cloud_json}" | jq -c '.' 2>/dev/null)"; then
+    echo "[ERR] cloud target JSON is not valid JSON: ${cloud_json}" >&2
     return 2
   fi
 
@@ -192,6 +210,7 @@ v2k_manifest_init() {
     --arg dst "${dst}" \
     --arg fmt "${target_format}" \
     --arg st "${storage_type}" \
+    --arg target_provider "${target_provider}" \
     --arg force_block_device "${force_block_device}" \
     --arg vcenter_host "${vcenter_host}" \
     --arg vddk_server "${vddk_server}" \
@@ -207,6 +226,7 @@ v2k_manifest_init() {
     --arg compat_vddk_libdir "${compat_vddk_libdir}" \
     --arg vmhash "${vmhash}" \
     --argjson storage_map "${map_compact}" \
+    --argjson cloud "${cloud_compact}" \
     '
     def strip_vim_url($u):
       ($u|tostring)
@@ -327,6 +347,7 @@ v2k_manifest_init() {
         },
         target: {
           type:"kvm",
+          provider:$target_provider,
           format:$fmt,
           dst_root:$dst,
           storage:{
@@ -334,7 +355,8 @@ v2k_manifest_init() {
             map:$storage_map,
             force_block_device: ($force_block_device == "1")
           },
-          libvirt:{ name:$inv.vm.name, uefi:true, tpm:false }
+          libvirt:{ name:$inv.vm.name, uefi:true, tpm:false },
+          cloud:$cloud
         },
         disks: $disks,
         policy:{purge_snapshots_on_success:true},
@@ -348,6 +370,7 @@ v2k_manifest_init() {
         },
         runtime:{
           split:{phase1:{done:false,ts:""},phase2:{done:false,ts:""}},
+          cloud:{},
           progress:{percent:0,last_step:""},
           sync_within_deadline:null,
           sync_issues:[],

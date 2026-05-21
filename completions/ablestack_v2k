@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2207
 # ---------------------------------------------------------------------
 # Copyright 2026 ABLECLOUD
 #
@@ -26,7 +28,7 @@ _ablestack_v2k()
   )
 
   local -a commands=(
-    run auto init cbt snapshot sync verify cutover cleanup status
+    run auto wizard migrate interactive init cbt snapshot sync verify cutover cleanup status
   )
 
   local -a compat_profiles=(
@@ -67,8 +69,12 @@ _ablestack_v2k()
   fi
 
   case "${prev}" in
-    --workdir|--manifest|--log|--cred-file|--vddk-cred-file|--dst|--winpe-iso|--virtio-iso)
+    --workdir|--manifest|--log|--cred-file|--vddk-cred-file|--cloud-cred-file|--dst|--winpe-iso|--virtio-iso)
       COMPREPLY=( $(compgen -f -- "${cur}") )
+      return 0
+      ;;
+    --file-root)
+      COMPREPLY=( $(compgen -d -- "${cur}") )
       return 0
       ;;
     --compat-profile)
@@ -99,6 +105,18 @@ _ablestack_v2k()
       COMPREPLY=( $(compgen -W "file block rbd" -- "${cur}") )
       return 0
       ;;
+    --target-provider)
+      COMPREPLY=( $(compgen -W "libvirt ablestack-cloud" -- "${cur}") )
+      return 0
+      ;;
+    --target-profile|--profile)
+      COMPREPLY=( $(compgen -W "cloud-rbd cloud-filesystem cloud-qcow2 libvirt-rbd libvirt-qcow2" -- "${cur}") )
+      return 0
+      ;;
+    --run-id|--vm|--vcenter|--username|--password|--target-map-json|--rbd-pool|--cloud-endpoint|--cloud-api-key|--cloud-secret-key|--cloud-zone-id|--cloud-service-offering-id|--cloud-network-id|--cloud-network-ids|--cloud-storage-id|--cloud-disk-offering-id|--cloud-host-id|--cloud-account|--cloud-domain-id|--cloud-project-id|--cloud-name|--cloud-display-name|--cloud-cpu-speed|--jobs|--chunk|--coalesce-gap|--base-args|--incr-args|--cutover-args|--deadline-sec|--max-incr-phase2|--max-incr|--incr-interval|--converge-threshold-sec|--shutdown-timeout|--vcpu|--memory|--network|--bridge|--vlan|--winpe-timeout|--name|--samples)
+      COMPREPLY=()
+      return 0
+      ;;
   esac
 
   case "${cmd}" in
@@ -120,10 +138,41 @@ _ablestack_v2k()
         --no-cleanup --keep-snapshots --keep-workdir
         --jobs --chunk --coalesce-gap
         --base-args --incr-args --cutover-args
-        --mode --target-format --target-storage --target-map-json --force-block-device
+        --mode --target-format --target-storage --target-map-json --target-provider --force-block-device
+        --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
+        --cloud-zone-id --cloud-service-offering-id
+        --cloud-network-id --cloud-network-ids
+        --cloud-storage-id --cloud-disk-offering-id --cloud-host-id
+        --cloud-account --cloud-domain-id --cloud-project-id
+        --cloud-name --cloud-display-name --cloud-cpu-speed
       )
       if [[ "${cur}" == -* ]]; then
         COMPREPLY=( $(compgen -W "${run_opts[*]} ${global_opts[*]}" -- "${cur}") )
+      else
+        COMPREPLY=()
+      fi
+      return 0
+      ;;
+
+    wizard|migrate|interactive)
+      local -a wizard_opts=(
+        --vm --vcenter --username --password
+        --cred-file --vddk-cred-file --compat-profile --insecure
+        --target-profile --profile --target-provider
+        --target-format --target-storage --target-map-json
+        --dst --rbd-pool --file-root
+        --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
+        --cloud-zone-id --cloud-service-offering-id
+        --cloud-network-id --cloud-network-ids
+        --cloud-storage-id --cloud-disk-offering-id --cloud-host-id
+        --cloud-account --cloud-domain-id --cloud-project-id
+        --cloud-name --cloud-display-name --cloud-cpu-speed
+        --split --shutdown
+        --define-only --apply --start
+        --yes -y --print-command
+      )
+      if [[ "${cur}" == -* ]]; then
+        COMPREPLY=( $(compgen -W "${wizard_opts[*]} ${global_opts[*]}" -- "${cur}") )
       else
         COMPREPLY=()
       fi
@@ -141,7 +190,13 @@ _ablestack_v2k()
       local -a init_opts=(
         --vm --vcenter --dst
         --mode --cred-file --vddk-cred-file --compat-profile
-        --target-format --target-storage --target-map-json --force-block-device
+        --target-format --target-storage --target-map-json --target-provider --force-block-device
+        --cloud-endpoint --cloud-cred-file
+        --cloud-zone-id --cloud-service-offering-id
+        --cloud-network-id --cloud-network-ids
+        --cloud-storage-id --cloud-disk-offering-id --cloud-host-id
+        --cloud-account --cloud-domain-id --cloud-project-id
+        --cloud-name --cloud-display-name --cloud-cpu-speed
       )
       if [[ "${cur}" == -* ]]; then
         COMPREPLY=( $(compgen -W "${init_opts[*]} ${global_opts[*]}" -- "${cur}") )
@@ -211,7 +266,7 @@ _ablestack_v2k()
     cutover)
       local -a cutover_opts=(
         --shutdown --shutdown-force --shutdown-timeout
-        --define-only --start
+        --define-only --apply --start
         --vcpu --memory
         --network --bridge --vlan
         --winpe-bootstrap --no-winpe-bootstrap
@@ -219,6 +274,13 @@ _ablestack_v2k()
         --linux-bootstrap --no-linux-bootstrap
         --safe-mode
         --force-cleanup
+        --target-provider
+        --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
+        --cloud-zone-id --cloud-service-offering-id
+        --cloud-network-id --cloud-network-ids
+        --cloud-storage-id --cloud-disk-offering-id --cloud-host-id
+        --cloud-account --cloud-domain-id --cloud-project-id
+        --cloud-name --cloud-display-name --cloud-cpu-speed
       )
       if [[ "${cur}" == -* ]]; then
         COMPREPLY=( $(compgen -W "${cutover_opts[*]} ${global_opts[*]}" -- "${cur}") )
