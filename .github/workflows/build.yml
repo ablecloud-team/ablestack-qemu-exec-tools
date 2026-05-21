@@ -429,11 +429,10 @@ jobs:
           WORKDIR="release/v2k/v2k-rpm-rocky${ROCKY_MINOR}"
           mkdir -p "$WORKDIR"
 
-          # Collect the V2K RPM output into the final offline release directory.
-          find . -type f -name "*.rpm" \
-            ! -path "./${WORKDIR}/*" \
-            \( -iname "*ablestack*v2k*.rpm" -o -iname "*ablestack_v2k*.rpm" \) \
-            -exec cp -v {} "$WORKDIR"/ \;
+          # Collect only installable V2K binary RPMs into the final offline repo.
+          # Source RPMs carry the full bundled asset tree and can push the Rocky
+          # release ISO over GitHub's 2 GiB single-asset limit.
+          cp -v build/rpm-v2k/ablestack_v2k-*.noarch.rpm "$WORKDIR"/
 
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
@@ -1263,9 +1262,8 @@ jobs:
             - V2K (ABLESTACK Host add-on):
                 v2k/v2k-rpm-rocky9.6 (offline RPM repo for ablestack_v2k)
                 v2k/v2k-rpm-rocky9.7 (offline RPM repo for ablestack_v2k)
-                assets/govc_Linux_x86_64.tar.gz
-                assets/VMware-vix-disklib-*.tar.gz
-                assets/v2k/wheels (pyvmomi offline wheels)
+                Runtime assets are bundled inside the ablestack_v2k RPM:
+                  govc, VDDK, pyVmomi wheels, compatibility profiles, WinPE ISO
             - N2K (ABLESTACK Host add-on):
                 n2k/n2k-rpm-rocky9.6 (offline RPM repo for ablestack_n2k)
                 n2k/n2k-rpm-rocky9.7 (offline RPM repo for ablestack_n2k)
@@ -1754,8 +1752,6 @@ jobs:
             - v2k/v2k-rpm-rocky9.7
             - n2k/n2k-rpm-rocky9.6
             - n2k/n2k-rpm-rocky9.7
-            - assets/
-            - winpe/
             - completions/
             - install-linux.sh
             - uninstall-linux.sh
@@ -1800,15 +1796,6 @@ jobs:
               cp -a "release/n2k/n2k-rpm-rocky${ver}" build/iso-staging/rocky/n2k/
             fi
           done
-          if [[ -d release/assets ]]; then
-            cp -a release/assets build/iso-staging/rocky/
-          fi
-          if [[ -d release/share ]]; then
-            cp -a release/share build/iso-staging/rocky/
-          fi
-          if [[ -d release/winpe ]]; then
-            cp -a release/winpe build/iso-staging/rocky/
-          fi
           if [[ -d release/completions ]]; then
             cp -a release/completions/. build/iso-staging/rocky/completions/
           fi
@@ -1860,10 +1847,10 @@ jobs:
             release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm
             release/rpm/hangctl-rpm-rocky9.6/ablestack_vm_hangctl-*.rpm
             release/rpm/ftctl-rpm-rocky9.6/ablestack_vm_ftctl-*.rpm
-            release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.rpm
-            release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.rpm
-            release/n2k/n2k-rpm-rocky9.6/ablestack_n2k-*.rpm
-            release/n2k/n2k-rpm-rocky9.7/ablestack_n2k-*.rpm
+            release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.noarch.rpm
+            release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.noarch.rpm
+            release/n2k/n2k-rpm-rocky9.6/ablestack_n2k-*.noarch.rpm
+            release/n2k/n2k-rpm-rocky9.7/ablestack_n2k-*.noarch.rpm
             release_notes.md
           retention-days: 14
 
@@ -1913,10 +1900,10 @@ jobs:
           done
 
           for ver in 9.6 9.7; do
-            for rpm in "release/v2k/v2k-rpm-rocky${ver}"/ablestack_v2k-*.rpm; do
+            for rpm in "release/v2k/v2k-rpm-rocky${ver}"/ablestack_v2k-*.noarch.rpm; do
               copy_rpm_with_suffix "${rpm}" "rocky${ver}"
             done
-            for rpm in "release/n2k/n2k-rpm-rocky${ver}"/ablestack_n2k-*.rpm; do
+            for rpm in "release/n2k/n2k-rpm-rocky${ver}"/ablestack_n2k-*.noarch.rpm; do
               copy_rpm_with_suffix "${rpm}" "rocky${ver}"
             done
           done
