@@ -19,34 +19,50 @@
 
 set -euo pipefail
 
-V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
+if [[ ! -f "${V2K_LIB_DIR}/logging.sh" ]]; then
+  V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+  V2K_LIB_DIR="${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k"
+fi
 V2K_NBD_LOCK_ROOT="/var/lock/ablestack-v2k/reservations"
 
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
+source "${V2K_LIB_DIR}/logging.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+source "${V2K_LIB_DIR}/compat.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
+source "${V2K_LIB_DIR}/manifest.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
+source "${V2K_LIB_DIR}/vmware_govc.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/transfer_base.sh"
+source "${V2K_LIB_DIR}/transfer_base.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/transfer_patch.sh"
+source "${V2K_LIB_DIR}/transfer_patch.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/target_libvirt.sh"
+source "${V2K_LIB_DIR}/target_libvirt.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/verify.sh"
+source "${V2K_LIB_DIR}/cloudstack_api.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/nbd_utils.sh"
+source "${V2K_LIB_DIR}/target_cloud.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/v2k_target_device.sh"
+source "${V2K_LIB_DIR}/verify.sh"
+# shellcheck source=/dev/null
+source "${V2K_LIB_DIR}/nbd_utils.sh"
+# shellcheck source=/dev/null
+source "${V2K_LIB_DIR}/v2k_target_device.sh"
 
 # [Global Variable for LVM Lock FD]
 # We use a global variable to hold the file descriptor for the LVM lock
 # so that it persists across function calls until cleanup.
 V2K_LVM_LOCK_FD=""
+
+v2k_valid_target_provider() {
+  case "${1:-}" in
+    libvirt|ablestack-cloud) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 v2k_nbd_has_children_types() {
   # Return 0 if dev has suspicious children types (lvm/crypt/raid), meaning "not clean".
@@ -1445,7 +1461,10 @@ EOF
   # - If multiple exist, select the lexicographically last one
   # ------------------------------------------------------------------
   local kver
-  kver="$(chroot "${rootmnt}" /bin/bash -lc 'ls -1 /lib/modules 2>/dev/null | sort | tail -n1' || true)"
+  # Resolve the kernel version from the mounted guest filesystem on the host.
+  # Older guests can have a minimal or unusual chroot PATH, so avoid depending
+  # on guest utilities like sort before the bootstrap environment is repaired.
+  kver="$(find "${rootmnt}/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort | tail -n1 || true)"
   if [[ -z "${kver}" ]]; then
     v2k_event ERROR "linux_bootstrap" "" "kernel_version_not_found" \
       "{\"note\":\"/lib/modules empty or missing\"}"
@@ -1830,6 +1849,11 @@ v2k_cmd_init() {
 
   # New: target override options (CLI -> env)
   local target_format="" target_storage="" target_map_json=""
+  local target_provider="libvirt"
+  local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
+  local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
+  local cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id=""
+  local cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local force_block_device=0
 
   while [[ $# -gt 0 ]]; do
@@ -1846,6 +1870,27 @@ v2k_cmd_init() {
       --target-format) target_format="${2:-}"; shift 2;;
       --target-storage) target_storage="${2:-}"; shift 2;;
       --target-map-json) target_map_json="${2:-}"; shift 2;;
+      --target-provider) target_provider="${2:-}"; shift 2;;
+      --cloud-endpoint) cloud_endpoint="${2:-}"; shift 2;;
+      --cloud-api-key) cloud_api_key="${2:-}"; shift 2;;
+      --cloud-secret-key) cloud_secret_key="${2:-}"; shift 2;;
+      --cloud-cred-file) cloud_cred_file="${2:-}"; shift 2;;
+      --cloud-zone-id) cloud_zone_id="${2:-}"; shift 2;;
+      --cloud-service-offering-id) cloud_service_offering_id="${2:-}"; shift 2;;
+      --cloud-network-id)
+        cloud_network_ids="${cloud_network_ids:+${cloud_network_ids},}${2:-}"
+        shift 2
+        ;;
+      --cloud-network-ids) cloud_network_ids="${2:-}"; shift 2;;
+      --cloud-storage-id) cloud_storage_id="${2:-}"; shift 2;;
+      --cloud-disk-offering-id) cloud_disk_offering_id="${2:-}"; shift 2;;
+      --cloud-host-id) cloud_host_id="${2:-}"; shift 2;;
+      --cloud-account) cloud_account="${2:-}"; shift 2;;
+      --cloud-domain-id) cloud_domain_id="${2:-}"; shift 2;;
+      --cloud-project-id) cloud_project_id="${2:-}"; shift 2;;
+      --cloud-name) cloud_name="${2:-}"; shift 2;;
+      --cloud-display-name) cloud_display_name="${2:-}"; shift 2;;
+      --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; shift 2;;
 
       --force-block-device) force_block_device=1; shift 1;;
 
@@ -1855,6 +1900,7 @@ v2k_cmd_init() {
 
   [[ -n "${vm}" && -n "${vcenter}" && -n "${dst}" ]] || { echo "init requires --vm --vcenter --dst" >&2; exit 2; }
   [[ "${mode}" == "govc" ]] || { echo "Only --mode govc is supported in v1" >&2; exit 2; }
+  v2k_valid_target_provider "${target_provider}" || { echo "Invalid --target-provider: ${target_provider}" >&2; exit 2; }
 
   if [[ -n "${cred_file}" ]]; then
     v2k_vmware_load_cred_file "${cred_file}"
@@ -1980,15 +2026,27 @@ EOF
     fi
   fi
 
+  local cloud_config_json
+  cloud_config_json="$(v2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    if [[ -n "${cloud_cred_file}" ]]; then
+      v2k_cloud_load_cred_file "${cloud_cred_file}"
+    fi
+    if [[ -z "${cloud_endpoint}" ]]; then
+      cloud_endpoint="${V2K_CLOUD_ENDPOINT:-${ABLESTACK_CLOUD_ENDPOINT:-${CLOUDSTACK_ENDPOINT:-}}}"
+      cloud_config_json="$(v2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
+    fi
+  fi
+
   # Log init start with target overrides for observability
   v2k_event INFO "init" "" "phase_start" \
-    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
+    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_provider\":\"${target_provider}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
 
   local inv_json
   inv_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter}")"
 
   # Build manifest using inventory json + target settings (from env)
-  v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}"
+  v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
   v2k_manifest_set_compat_requested_profile "${V2K_MANIFEST}" "${V2K_COMPAT_PROFILE:-auto}"
   v2k_manifest_set_compat_selected_profile "${V2K_MANIFEST}" "${V2K_COMPAT_SELECTED_PROFILE:-}"
   v2k_manifest_set_compat_detected_vcenter_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_VCENTER_VERSION:-}"
@@ -2331,11 +2389,124 @@ v2k_cutover_prepare_rbd_mappings() {
     v2k_event INFO "cutover" "${disk_id}" "rbd_map_ready" "{\"target\":\"${target_path}\",\"mapped\":\"${mapped_path}\",\"stable_path\":\"${stable_path}\"}"
   done
 }
+
+v2k_windows_winpe_bootstrap_libvirt() {
+  local manifest="$1"
+  local vm="$2"
+  local winpe_iso="$3"
+  local virtio_iso="$4"
+  local winpe_timeout="$5"
+  local undefine_after="${6:-0}"
+
+  local winpe_iso_resolved virtio_iso_resolved cdrom0 cdrom1 fw sb
+  winpe_iso_resolved="$(v2k_resolve_winpe_iso "${winpe_iso}" || true)"
+  virtio_iso_resolved="$(v2k_resolve_virtio_iso "${virtio_iso}" || true)"
+
+  if [[ -z "${winpe_iso_resolved}" || ! -f "${winpe_iso_resolved}" ]]; then
+    echo "WinPE ISO not found. Expected ${winpe_iso}. Set --winpe-iso or install WinPE ISO under /usr/share/ablestack/v2k/." >&2
+    return 71
+  fi
+
+  if [[ -z "${virtio_iso_resolved}" || ! -f "${virtio_iso_resolved}" ]]; then
+    echo "VirtIO ISO not found. Expected ${virtio_iso}. Set --virtio-iso or install it under /usr/share/virtio-win/." >&2
+    return 72
+  fi
+
+  v2k_event INFO "winpe" "" "phase_start" \
+    "{\"vm\":\"${vm}\",\"winpe_iso\":\"${winpe_iso_resolved}\",\"virtio_iso\":\"${virtio_iso_resolved}\",\"timeout\":${winpe_timeout}}"
+
+  fw="$(jq -r '.source.vm.firmware // empty' "${manifest}" 2>/dev/null || true)"
+  sb="$(jq -r '.source.vm.secure_boot // false' "${manifest}" 2>/dev/null || true)"
+  case "${sb}" in true|1|yes|on) sb=1 ;; *) sb=0 ;; esac
+
+  if [[ "${fw}" == "efi" && "${sb}" -eq 1 ]]; then
+    v2k_event INFO "winpe" "" "secureboot_temp_disable" "{\"vm\":\"${vm}\"}"
+    v2k_target_set_uefi_secureboot "${vm}" 0
+  fi
+
+  v2k_target_set_boot_cdrom_only "${vm}"
+
+  cdrom0="$(v2k_target_attach_cdrom "${vm}" "${winpe_iso_resolved}")"
+  cdrom1="$(v2k_target_attach_cdrom "${vm}" "${virtio_iso_resolved}")"
+
+  virsh start "${vm}" >/dev/null 2>&1 || true
+  v2k_target_send_key_space "${vm}" 15
+
+  if v2k_target_wait_shutdown "${vm}" "${winpe_timeout}"; then
+    v2k_event INFO "winpe" "" "phase_done" "{\"vm\":\"${vm}\"}"
+  else
+    v2k_event ERROR "winpe" "" "phase_timeout" "{\"vm\":\"${vm}\",\"timeout\":${winpe_timeout}}"
+    v2k_target_detach_disk "${vm}" "${cdrom1}" || true
+    v2k_target_detach_disk "${vm}" "${cdrom0}" || true
+    v2k_target_set_boot_hd "${vm}" || true
+    if [[ "${fw}" == "efi" && "${sb}" -eq 1 ]]; then
+      v2k_target_set_uefi_secureboot "${vm}" 1 || true
+    fi
+    if [[ "${undefine_after}" -eq 1 ]]; then
+      v2k_target_undefine_libvirt "${vm}" || true
+    fi
+    return 63
+  fi
+
+  v2k_target_detach_disk "${vm}" "${cdrom1}" || true
+  v2k_target_detach_disk "${vm}" "${cdrom0}" || true
+  v2k_target_set_boot_hd "${vm}"
+
+  if [[ "${fw}" == "efi" && "${sb}" -eq 1 ]]; then
+    v2k_event INFO "winpe" "" "secureboot_restore" "{\"vm\":\"${vm}\"}"
+    v2k_target_set_uefi_secureboot "${vm}" 1
+  fi
+
+  if [[ "${undefine_after}" -eq 1 ]]; then
+    v2k_target_undefine_libvirt "${vm}" || true
+  fi
+}
+
+v2k_cloud_windows_winpe_bootstrap() {
+  local winpe_iso="$1"
+  local virtio_iso="$2"
+  local winpe_timeout="$3"
+  local tmp_manifest tmp_vm xml_path base_name
+
+  if ! v2k_cutover_prepare_rbd_mappings "${V2K_MANIFEST}"; then
+    echo "Failed to prepare persistent RBD mappings for Cloud WinPE bootstrap." >&2
+    return 66
+  fi
+
+  mkdir -p "${V2K_WORKDIR}/artifacts"
+  base_name="$(jq -r '.target.cloud.name // .source.vm.name // "v2k-winpe"' "${V2K_MANIFEST}")"
+  base_name="$(printf '%s' "${base_name}" | tr -cs '[:alnum:]_.-' '-' | sed 's/^-//; s/-$//')"
+  base_name="${base_name:-v2k-winpe}"
+  tmp_vm="v2k-winpe-${base_name}"
+  tmp_vm="${tmp_vm:0:60}"
+  tmp_manifest="${V2K_WORKDIR}/artifacts/${tmp_vm}.manifest.json"
+
+  jq --arg vm "${tmp_vm}" '.target.libvirt.name = $vm' "${V2K_MANIFEST}" > "${tmp_manifest}"
+
+  v2k_event INFO "cutover" "" "cloud_winpe_bootstrap_requested" "{\"vm\":\"${tmp_vm}\"}"
+  v2k_target_undefine_libvirt "${tmp_vm}" || true
+
+  xml_path="$(v2k_target_generate_libvirt_xml "${tmp_manifest}")"
+  if v2k_target_define_libvirt "${xml_path}"; then
+    v2k_event INFO "cutover" "" "cloud_winpe_libvirt_defined" "{\"vm\":\"${tmp_vm}\",\"xml_path\":\"${xml_path}\"}"
+  else
+    echo "Cloud WinPE temporary libvirt define failed." >&2
+    return 65
+  fi
+
+  v2k_windows_winpe_bootstrap_libvirt "${tmp_manifest}" "${tmp_vm}" "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}" 1
+}
+
 v2k_cmd_cutover() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
   v2k_restore_runtime_env_from_workdir
-  local shutdown="guest" define_only=0 start_vm=0
+  local shutdown="guest" define_only=0 apply_define=0 start_vm=0
+  local target_provider="" target_provider_arg_set=0
+  local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
+  local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
+  local cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id=""
+  local cloud_name="" cloud_display_name="" cloud_cpu_speed="" cloud_config_arg_set=0
   local safe_mode=0
   local winpe_bootstrap=1
   local winpe_cli_set=0 start_cli_set=0
@@ -2357,7 +2528,8 @@ v2k_cmd_cutover() {
       --shutdown-force) shutdown_force=1; shift 1;;
       --shutdown-timeout) shutdown_timeout="${2:-}"; shift 2;;
       --define-only) define_only=1; shift 1;;
-      --start) start_vm=1; start_cli_set=1; shift 1;;
+      --apply) apply_define=1; shift 1;;
+      --start) start_vm=1; apply_define=1; start_cli_set=1; shift 1;;
       --vcpu) vcpu="${2:-}"; vcpu_set=1; shift 2;;
       --memory) memory="${2:-}"; memory_set=1; shift 2;;
       --network) network="${2:-}"; shift 2;;
@@ -2385,6 +2557,28 @@ v2k_cmd_cutover() {
         linux_bootstrap=0
         shift 1
         ;;
+      --target-provider) target_provider="${2:-}"; target_provider_arg_set=1; shift 2;;
+      --cloud-endpoint) cloud_endpoint="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-api-key) cloud_api_key="${2:-}"; shift 2;;
+      --cloud-secret-key) cloud_secret_key="${2:-}"; shift 2;;
+      --cloud-cred-file) cloud_cred_file="${2:-}"; shift 2;;
+      --cloud-zone-id) cloud_zone_id="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-service-offering-id) cloud_service_offering_id="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-network-id)
+        cloud_network_ids="${cloud_network_ids:+${cloud_network_ids},}${2:-}"
+        cloud_config_arg_set=1
+        shift 2
+        ;;
+      --cloud-network-ids) cloud_network_ids="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-storage-id) cloud_storage_id="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-disk-offering-id) cloud_disk_offering_id="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-host-id) cloud_host_id="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-account) cloud_account="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-domain-id) cloud_domain_id="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-project-id) cloud_project_id="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-name) cloud_name="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-display-name) cloud_display_name="${2:-}"; cloud_config_arg_set=1; shift 2;;
+      --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; cloud_config_arg_set=1; shift 2;;
 
       --force-cleanup) force_cleanup=1; shift 1;;
       *) echo "Unknown option: $1" >&2; exit 2;;
@@ -2392,6 +2586,17 @@ v2k_cmd_cutover() {
   done
 
   export V2K_SAFE_MODE="${safe_mode}"
+
+  if [[ "${target_provider_arg_set}" -eq 1 || "${cloud_config_arg_set}" -eq 1 ]]; then
+    local cloud_config_json
+    cloud_config_json="$(v2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
+    v2k_cloud_target_apply_manifest_config "${V2K_MANIFEST}" "$(if [[ "${target_provider_arg_set}" -eq 1 ]]; then printf '%s' "${target_provider}"; else printf ''; fi)" "${cloud_config_json}"
+  fi
+  target_provider="$(jq -r '.target.provider // "libvirt"' "${V2K_MANIFEST}")"
+  v2k_valid_target_provider "${target_provider}" || { echo "Invalid target provider in manifest: ${target_provider}" >&2; exit 2; }
+  if [[ "${target_provider}" == "libvirt" && "${apply_define}" -eq 1 && "${start_vm}" -eq 0 ]]; then
+    define_only=1
+  fi
 
   # -------------------------------------------------------------------
   # Auto WinPE policy:
@@ -2526,6 +2731,85 @@ v2k_cmd_cutover() {
     exit "${_rc}"
   fi
 
+  # Cloud targets also need the Linux storage bootstrap before import/deploy.
+  # Without this, VMware-origin Rocky/RHEL guests can boot into dracut initqueue
+  # because the active initramfs only contains VMware storage drivers.
+  if [[ "${target_provider}" == "ablestack-cloud" ]] && v2k_is_linux_guest; then
+    local do_cloud_linux_bootstrap=0
+    if [[ "${linux_bootstrap}" -eq 1 ]]; then
+      do_cloud_linux_bootstrap=1
+    elif [[ "${linux_bootstrap}" -eq 0 ]]; then
+      do_cloud_linux_bootstrap=0
+    else
+      if v2k_linux_bootstrap_enabled_default; then
+        do_cloud_linux_bootstrap=1
+      fi
+    fi
+
+    if [[ "${do_cloud_linux_bootstrap}" -eq 1 ]]; then
+      v2k_event INFO "cutover" "" "cloud_linux_bootstrap_requested" "{}"
+      if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+        echo "[v2k] Cloud Linux bootstrap(initramfs) requested (guestFamily=linuxGuest)"
+      fi
+      v2k_linux_bootstrap_initramfs "${V2K_MANIFEST}"
+      local rc=$?
+      if [[ "${rc}" -ne 0 ]]; then
+        v2k_event ERROR "cutover" "" "cloud_linux_bootstrap_failed" "{\"code\":${rc}}"
+        if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+          echo "[v2k] Cloud Linux bootstrap(initramfs) failed (guestFamily=linuxGuest)"
+        fi
+        echo "Cloud Linux bootstrap (initramfs rebuild) failed. code=${rc}" >&2
+        exit 74
+      fi
+      v2k_event INFO "cutover" "" "cloud_linux_bootstrap_done" "{}"
+      if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+        echo "[v2k] Cloud Linux bootstrap(initramfs) done (guestFamily=linuxGuest)"
+      fi
+    else
+      v2k_event INFO "cutover" "" "cloud_linux_bootstrap_skipped" "{\"reason\":\"cli_or_policy\"}"
+    fi
+  fi
+
+  if [[ "${target_provider}" == "ablestack-cloud" && "${is_windows}" -eq 1 && "${winpe_bootstrap}" -eq 1 ]]; then
+    if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+      echo "[v2k] Cloud Windows WinPE bootstrap requested (guestFamily=windowsGuest)"
+    fi
+    v2k_cloud_windows_winpe_bootstrap "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}"
+    local rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
+      v2k_event ERROR "cutover" "" "cloud_winpe_bootstrap_failed" "{\"code\":${rc}}"
+      echo "Cloud Windows WinPE bootstrap failed. code=${rc}" >&2
+      exit "${rc}"
+    fi
+    v2k_event INFO "cutover" "" "cloud_winpe_bootstrap_done" "{}"
+    if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+      echo "[v2k] Cloud Windows WinPE bootstrap done (guestFamily=windowsGuest)"
+    fi
+  fi
+
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    local cloud_result cloud_error_file cloud_rc cloud_error_text cloud_error_json
+    cloud_error_file="$(mktemp)"
+    if cloud_result="$(v2k_cloud_target_cutover "${V2K_MANIFEST}" "${define_only}" "${apply_define}" "${start_vm}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" 2>"${cloud_error_file}")"; then
+      rm -f "${cloud_error_file}"
+    else
+      cloud_rc=$?
+      cloud_error_text="$(cat "${cloud_error_file}")"
+      [[ -n "${cloud_error_text}" ]] && printf '%s\n' "${cloud_error_text}" >&2
+      cloud_error_json="$(jq -nc --arg error "${cloud_error_text}" '{error:$error}')"
+      v2k_event ERROR "cutover" "" "cloud_target_cutover_failed" "${cloud_error_json}"
+      rm -f "${cloud_error_file}"
+      return "${cloud_rc}"
+    fi
+    v2k_event INFO "cutover" "" "cloud_target_cutover" "${cloud_result}"
+    if [[ "${define_only}" -eq 1 || "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]]; then
+      v2k_manifest_phase_done "${V2K_MANIFEST}" "cutover"
+    fi
+    v2k_json_or_text_ok "cutover" "${cloud_result}" "Cloud cutover completed: $(jq -r '.vm_id // .provider' <<<"${cloud_result}")"
+    sleep 3
+    return 0
+  fi
+
   # ------------------------------------------------------------
   # Linux virtio/initramfs bootstrap (Method B)
   # - Host mounts target disk0 and rebuilds initramfs in chroot.
@@ -2612,77 +2896,9 @@ v2k_cmd_cutover() {
 
   # Optional: WinPE bootstrap phase (driver injection) before first Windows boot
   if [[ "${winpe_bootstrap}" -eq 1 ]]; then
-    local vm winpe_iso_resolved virtio_iso_resolved cdrom0 cdrom1
+    local vm
     vm="$(jq -r '.target.libvirt.name' "${V2K_MANIFEST}")"
-
-    winpe_iso_resolved="$(v2k_resolve_winpe_iso "${winpe_iso}" || true)"
-    virtio_iso_resolved="$(v2k_resolve_virtio_iso "${virtio_iso}" || true)"
-
-    if [[ -z "${winpe_iso_resolved}" || ! -f "${winpe_iso_resolved}" ]]; then
-      echo "WinPE ISO not found. Expected ${winpe_iso}. Set --winpe-iso or install WinPE ISO under /usr/share/ablestack/v2k/." >&2
-      exit 71
-    fi
-
-    if [[ -z "${virtio_iso_resolved}" || ! -f "${virtio_iso_resolved}" ]]; then
-      echo "VirtIO ISO not found. Expected ${virtio_iso}. Set --virtio-iso or install it under /usr/share/virtio-win/." >&2
-      exit 72
-    fi
-
-    v2k_event INFO "winpe" "" "phase_start" \
-      "{\"winpe_iso\":\"${winpe_iso_resolved}\",\"virtio_iso\":\"${virtio_iso_resolved}\",\"timeout\":${winpe_timeout}}"
-
-    # --- SecureBoot handling for WinPE bootstrap ---
-    # Policy: If source VM is EFI + SecureBoot, temporarily disable SecureBoot for WinPE boot,
-    # then restore after bootstrap. (WinPE ISO is typically not SecureBoot-signed.)
-    local fw sb
-    fw="$(jq -r '.source.vm.firmware // empty' "${V2K_MANIFEST}" 2>/dev/null || true)"
-    sb="$(jq -r '.source.vm.secure_boot // false' "${V2K_MANIFEST}" 2>/dev/null || true)"
-    case "${sb}" in true|1|yes|on) sb=1 ;; *) sb=0 ;; esac
-
-    if [[ "${fw}" == "efi" && "${sb}" -eq 1 ]]; then
-      v2k_event INFO "winpe" "" "secureboot_temp_disable" "{}"
-      v2k_target_set_uefi_secureboot "${vm}" 0
-    fi
-
-    # boot order: cdrom only (hd is not listed)
-    v2k_target_set_boot_cdrom_only "${vm}"
-
-    cdrom0="$(v2k_target_attach_cdrom "${vm}" "${winpe_iso_resolved}")"
-    cdrom1="$(v2k_target_attach_cdrom "${vm}" "${virtio_iso_resolved}")"
-
-    # Start VM (WinPE)
-    virsh start "${vm}" >/dev/null 2>&1 || true
-
-    # Press-any-key handling: send SPACE 1/sec for 15 sec
-    v2k_target_send_key_space "${vm}" 15
-
-    if v2k_target_wait_shutdown "${vm}" "${winpe_timeout}"; then
-      v2k_event INFO "winpe" "" "phase_done" "{}"
-    else
-      v2k_event ERROR "winpe" "" "phase_timeout" "{\"timeout\":${winpe_timeout}}"
-      # best-effort cleanup
-      v2k_target_detach_disk "${vm}" "${cdrom1}" || true
-      v2k_target_detach_disk "${vm}" "${cdrom0}" || true
-      v2k_target_set_boot_hd "${vm}" || true
-
-      # Best-effort restore SecureBoot as well
-      if [[ "${fw}" == "efi" && "${sb}" -eq 1 ]]; then
-        v2k_target_set_uefi_secureboot "${vm}" 1 || true
-      fi
-
-      exit 63
-    fi
-
-    # Detach ISOs and restore normal boot
-    v2k_target_detach_disk "${vm}" "${cdrom1}" || true
-    v2k_target_detach_disk "${vm}" "${cdrom0}" || true
-    v2k_target_set_boot_hd "${vm}"
-
-    # Restore SecureBoot if it was enabled on source
-    if [[ "${fw}" == "efi" && "${sb}" -eq 1 ]]; then
-      v2k_event INFO "winpe" "" "secureboot_restore" "{}"
-      v2k_target_set_uefi_secureboot "${vm}" 1
-    fi
+    v2k_windows_winpe_bootstrap_libvirt "${V2K_MANIFEST}" "${vm}" "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}" 0
   fi
 
   # WinPE may trigger host-side auto-unmap on guest shutdown. Re-prepare persistent RBD maps before the final boot.

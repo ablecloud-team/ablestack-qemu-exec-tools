@@ -285,7 +285,19 @@ v2k-rpm:
 	  echo "[ERR] Built RPM not found under build/rpm-v2k" >&2; exit 2; \
 	fi; \
 	rpm -qlp "$$RPM_FILE" | grep -qE "bash-completion/completions/$(V2K_NAME)$$" || \
-	  (echo "[ERR] completion file missing in RPM: $$RPM_FILE" >&2; exit 2)
+	  (echo "[ERR] completion file missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/govc_Linux_x86_64.tar.gz$$" || \
+	  (echo "[ERR] govc runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/VMware-vix-disklib-.*[.]tar[.]gz$$" || \
+	  (echo "[ERR] VDDK runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/vsphere80/govc_Linux_x86_64.tar.gz$$" || \
+	  (echo "[ERR] profile govc runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/compat/vsphere80/profile.json$$" || \
+	  (echo "[ERR] compat profile missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	if find winpe -maxdepth 1 -type f -name '*.iso' 2>/dev/null | grep -q .; then \
+	  rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/winpe/.*[.]iso$$" || \
+	    (echo "[ERR] staged WinPE ISO missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	fi
 
 	@echo "V2K RPM package created: build/rpm-v2k/"
 

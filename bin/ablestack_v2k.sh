@@ -93,6 +93,8 @@ Global options (all commands):
 
 Commands:
   run (alias: auto)       Full pipeline orchestration (init -> cbt -> base -> incr* -> final -> verify -> cutover -> cleanup)
+  wizard (aliases: migrate, interactive)
+                          Guided migration wizard using n2k-style target profiles
   init                    Initialize workdir and manifest
   cbt                     CBT operations: enable|status
   snapshot                Snapshot operations: base|incr|final
@@ -173,12 +175,32 @@ Extra args:
 Init-stage options:
   --mode govc                               Inventory mode (default: govc)
   --target-format qcow2|raw                 Target image format (default: qcow2)
+  --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)
   --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>
       Required for block and rbd targets.
       block example: --target-map-json '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
       rbd example:   --target-map-json '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
   --force-block-device
+
+ABLESTACK Cloud target options:
+  --cloud-endpoint <url>
+  --cloud-api-key <key>
+  --cloud-secret-key <secret>
+  --cloud-cred-file <file>
+  --cloud-zone-id <id>
+  --cloud-service-offering-id <id>
+  --cloud-network-id <id>                   Repeatable
+  --cloud-network-ids <id,id,...>
+  --cloud-storage-id <id>
+  --cloud-disk-offering-id <id>
+  --cloud-host-id <id>
+  --cloud-account <account>
+  --cloud-domain-id <id>
+  --cloud-project-id <id>
+  --cloud-name <name>
+  --cloud-display-name <name>
+  --cloud-cpu-speed <MHz>                   Default: 1000
 
 Cleanup policy:
   --no-cleanup                              Skip cleanup (default: cleanup runs)
@@ -189,6 +211,69 @@ Examples:
   ablestack_v2k run --vm my-vm --vcenter vc.example.local --cred-file ./govc.env
   ablestack_v2k run --vm my-vm --vcenter vc.example.local --cred-file ./govc.env --split phase1
   ablestack_v2k run --vm my-vm --vcenter vc.example.local --cred-file ./govc.env --target-storage rbd --target-map-json '{"scsi0:0":"rbd:pool/my-vm-disk0"}'
+EOF
+}
+
+usage_wizard() {
+  cat <<'EOF'
+Usage:
+  ablestack_v2k wizard [options...]
+  ablestack_v2k migrate [options...]
+  ablestack_v2k interactive [options...]
+
+Purpose:
+  Prompt for the minimum inputs needed to run a v2k migration and derive the
+  target profile, workdir, target name, destination, and target disk map where
+  possible.
+
+Common options:
+  --vm <name|moref>
+  --vcenter <host>
+  --cred-file <file>
+  --vddk-cred-file <file>
+  --username <user>
+  --password <pass>
+  --compat-profile <id|auto>                Default: auto
+  --split full|phase1|phase2                Default: phase1
+  --shutdown manual|guest|poweroff          Default: guest
+  --yes, -y                                 Non-interactive confirmation
+  --print-command                           Print the generated run command only
+
+Target profiles:
+  --target-profile cloud-rbd                ABLESTACK Cloud + RBD/raw
+  --target-profile cloud-filesystem         ABLESTACK Cloud + file/qcow2
+  --target-profile libvirt-rbd              Existing libvirt + RBD/raw path
+  --target-profile libvirt-qcow2            Existing libvirt + file/qcow2 path
+  --target-provider libvirt|ablestack-cloud
+  --target-storage file|block|rbd
+  --target-format qcow2|raw
+  --dst <path>
+  --target-map-json <json>
+  --rbd-pool <pool>                         Default: rbd
+  --file-root <path>                        Default: /var/lib/libvirt/images
+
+ABLESTACK Cloud options:
+  --cloud-endpoint <url>
+  --cloud-api-key <key>
+  --cloud-secret-key <secret>
+  --cloud-cred-file <file>
+  --cloud-zone-id <id>
+  --cloud-service-offering-id <id>
+  --cloud-network-id <id>                   Repeatable
+  --cloud-network-ids <id,id,...>
+  --cloud-storage-id <id>
+  --cloud-disk-offering-id <id>
+  --cloud-host-id <id>
+  --cloud-account <account>
+  --cloud-domain-id <id>
+  --cloud-project-id <id>
+  --cloud-name <name>
+  --cloud-display-name <name>
+  --cloud-cpu-speed <MHz>                   Default: 1000
+
+Examples:
+  ablestack_v2k wizard --cred-file ./govc.env --cloud-cred-file ./cloud.env
+  ablestack_v2k wizard --yes --vm my-vm --vcenter vc.example.local --cred-file ./govc.env --target-profile cloud-rbd --cloud-endpoint http://cloud:8080/client/api --cloud-zone-id <zone> --cloud-service-offering-id <offering> --cloud-network-id <network> --cloud-storage-id <storage>
 EOF
 }
 
@@ -203,11 +288,28 @@ Options:
   --vddk-cred-file <file>
   --compat-profile <id|auto>   Compatibility profile (default: auto)
   --target-format qcow2|raw                 Target image format (default: qcow2)
+  --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)
   --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>
       block example: '{"scsi0:0":"/dev/sdb","scsi0:1":"/dev/sdc"}'
       rbd example:   '{"scsi0:0":"rbd:pool/vm-disk0","scsi0:1":"rbd:pool/vm-disk1"}'
   --force-block-device
+
+ABLESTACK Cloud target options:
+  --cloud-endpoint <url>                    Stored as non-secret manifest metadata
+  --cloud-zone-id <id>
+  --cloud-service-offering-id <id>
+  --cloud-network-id <id>                   Repeatable
+  --cloud-network-ids <id,id,...>
+  --cloud-storage-id <id>
+  --cloud-disk-offering-id <id>
+  --cloud-host-id <id>
+  --cloud-account <account>
+  --cloud-domain-id <id>
+  --cloud-project-id <id>
+  --cloud-name <name>
+  --cloud-display-name <name>
+  --cloud-cpu-speed <MHz>                   Default: 1000
 
 Notes:
   - If only --cred-file is provided, init auto-generates workdir/vddk.cred.
@@ -309,6 +411,27 @@ Options:
   --safe-mode                               Default: off
   --force-cleanup                           Default: off
 
+ABLESTACK Cloud target options:
+  --apply                                   Import/deploy/attach but do not force start unless --start is set
+  --target-provider libvirt|ablestack-cloud
+  --cloud-endpoint <url>
+  --cloud-api-key <key>
+  --cloud-secret-key <secret>
+  --cloud-cred-file <file>
+  --cloud-zone-id <id>
+  --cloud-service-offering-id <id>
+  --cloud-network-id <id>                   Repeatable
+  --cloud-network-ids <id,id,...>
+  --cloud-storage-id <id>
+  --cloud-disk-offering-id <id>
+  --cloud-host-id <id>
+  --cloud-account <account>
+  --cloud-domain-id <id>
+  --cloud-project-id <id>
+  --cloud-name <name>
+  --cloud-display-name <name>
+  --cloud-cpu-speed <MHz>                   Default: 1000
+
 Notes:
   - Current libvirt XML generation uses VM inventory values for CPU/memory and source MAC plus auto-detected host bridge.
   - --vcpu, --memory, --network, --bridge, and --vlan are accepted by cutover but are not currently reflected in the generated XML.
@@ -357,6 +480,7 @@ usage_command() {
   local cmd="${1:-}"
   case "${cmd}" in
     run|auto) usage_run ;;
+    wizard|migrate|interactive) usage_wizard ;;
     init) usage_init ;;
     cbt) usage_cbt ;;
     snapshot) usage_snapshot ;;
@@ -439,6 +563,7 @@ source_v2k_lib logging.sh
 source_v2k_lib manifest.sh
 source_v2k_lib orchestrator.sh
 source_v2k_lib fleet.sh
+source_v2k_lib interactive.sh
 
 v2k_compat_bootstrap_env "" "" || true
 v2k_resolve_vddk_libdir
@@ -463,6 +588,9 @@ if ! lsmod | grep -q "^nbd"; then
 fi
 
 case "${CMD}" in
+  wizard|migrate|interactive)
+    v2k_cmd_wizard "${shifted_args[@]}"
+    ;;
   run|auto)
     if v2k_fleet_should_handle_run "${shifted_args[@]}"; then
       v2k_fleet_cmd_run "${shifted_args[@]}"

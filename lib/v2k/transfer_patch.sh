@@ -16,19 +16,24 @@
 # ---------------------------------------------------------------------
 set -euo pipefail
 
-V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
+if [[ ! -f "${V2K_LIB_DIR}/logging.sh" ]]; then
+  V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+  V2K_LIB_DIR="${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k"
+fi
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/logging.sh"
+source "${V2K_LIB_DIR}/logging.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+source "${V2K_LIB_DIR}/compat.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/manifest.sh"
+source "${V2K_LIB_DIR}/manifest.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/vmware_govc.sh"
+source "${V2K_LIB_DIR}/vmware_govc.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/nbd_utils.sh"
+source "${V2K_LIB_DIR}/nbd_utils.sh"
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/v2k_target_device.sh"
+source "${V2K_LIB_DIR}/v2k_target_device.sh"
 
 V2K_PY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

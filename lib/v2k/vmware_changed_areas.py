@@ -103,10 +103,13 @@ def _connect() -> Any:
 
 
 def _find_vm(content: Any, name: str) -> vim.VirtualMachine:
+    requested = (name or "").strip()
+    fallback_name = requested.rsplit("/", 1)[-1] if "/" in requested else requested
     container = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
     try:
         for vm in container.view:
-            if vm.name == name:
+            moid = str(getattr(vm, "_moId", "") or "")
+            if vm.name == requested or vm.name == fallback_name or moid == requested:
                 return vm
     finally:
         container.Destroy()

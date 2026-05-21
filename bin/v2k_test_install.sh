@@ -105,6 +105,31 @@ can_run_unprivileged() {
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+resolve_first_cmd() {
+  local cmd
+  for cmd in "$@"; do
+    if has_cmd "${cmd}"; then
+      command -v "${cmd}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+pkg_manager_cmd() {
+  resolve_first_cmd dnf aspm || {
+    echo "[ERR] Neither dnf nor ABLESTACK aspm was found." >&2
+    return 127
+  }
+}
+
+rpm_query_cmd() {
+  resolve_first_cmd rpm aspkg || {
+    echo "[ERR] Neither rpm nor ABLESTACK aspkg was found." >&2
+    return 127
+  }
+}
+
 repo_root() {
   local here
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -155,17 +180,22 @@ os_id() {
 
 install_pkgs_dnf() {
   local pkgs=("$@")
-  echo "[INFO] Installing packages via dnf: ${pkgs[*]}"
-  dnf -y install "${pkgs[@]}"
+  local cmd
+  cmd="$(pkg_manager_cmd)" || return $?
+  echo "[INFO] Installing packages via $(basename "${cmd}"): ${pkgs[*]}"
+  "${cmd}" -y install "${pkgs[@]}"
 }
 
 ensure_epel() {
-  if rpm -q epel-release >/dev/null 2>&1; then
+  local rpm_cmd pkg_cmd
+  rpm_cmd="$(rpm_query_cmd)" || exit $?
+  if "${rpm_cmd}" -q epel-release >/dev/null 2>&1; then
     echo "[OK] epel-release already installed"
     return 0
   fi
   echo "[INFO] Installing epel-release (required for nbd/nbdkit on many systems)"
-  dnf -y install epel-release || {
+  pkg_cmd="$(pkg_manager_cmd)" || exit $?
+  "${pkg_cmd}" -y install epel-release || {
     echo "[ERR] Failed to install epel-release." >&2
     echo "      If you are in an air-gapped environment, provide epel-release RPM in a local repo and retry." >&2
     exit 2
@@ -320,6 +350,15 @@ resolve_profile_govc_asset() {
 resolve_profile_vddk_asset() {
   local root="$1" profile="$2"
   local profile_root tgz
+
+  if [[ "${profile}" == "vsphere80" ]]; then
+    tgz="$(ls -1 "${root}"/assets/VMware-vix-disklib-*.tar.gz 2>/dev/null | sort | tail -n1 || true)"
+    if [[ -n "${tgz}" ]]; then
+      printf '%s' "${tgz}"
+      return 0
+    fi
+  fi
+
   profile_root="$(profile_asset_root "${root}" "${profile}")"
   tgz="$(ls -1 "${profile_root}"/VMware-vix-disklib-*.tar.gz 2>/dev/null | sort | tail -n1 || true)"
   if [[ -n "${tgz}" ]]; then
@@ -500,9 +539,10 @@ check_nbdkit_vddk_plugin() {
 
   local candidates=(nbdkit-plugin-vddk nbdkit-vddk-plugin)
   echo "[WARN] nbdkit vddk plugin not detected. Trying to install plugin package if available..."
-  local pkg
+  local pkg pkg_cmd
+  pkg_cmd="$(pkg_manager_cmd)" || exit $?
   for pkg in "${candidates[@]}"; do
-    if dnf -y install "${pkg}" >/dev/null 2>&1; then
+    if "${pkg_cmd}" -y install "${pkg}" >/dev/null 2>&1; then
       echo "[OK] Installed plugin package: ${pkg}"
       break
     fi

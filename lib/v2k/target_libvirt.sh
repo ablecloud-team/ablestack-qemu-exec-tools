@@ -311,6 +311,26 @@ v2k_target_define_libvirt() {
   _v2k_trace_cmd "virsh-define" virsh define "${xml}" >/dev/null
 }
 
+v2k_target_undefine_libvirt() {
+  local vm="$1"
+  _v2k_trace_env_once
+  _v2k_trace "ENTER undefine_libvirt vm=${vm}"
+
+  if ! virsh dominfo "${vm}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local state
+  state="$(virsh domstate "${vm}" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]' || true)"
+  if [[ "${state}" == "running" || "${state}" == "paused" || "${state}" == "in shutdown" ]]; then
+    _v2k_trace_cmd "virsh-destroy" virsh destroy "${vm}" >/dev/null 2>&1 || true
+  fi
+
+  _v2k_trace_cmd "virsh-undefine-nvram" virsh undefine "${vm}" --nvram >/dev/null 2>&1 \
+    || _v2k_trace_cmd "virsh-undefine" virsh undefine "${vm}" >/dev/null 2>&1 \
+    || true
+}
+
 v2k_target_start_vm() {
   local manifest="$1"
   local vm

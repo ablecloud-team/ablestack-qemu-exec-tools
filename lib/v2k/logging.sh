@@ -17,9 +17,14 @@
 
 set -euo pipefail
 
-V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
+if [[ ! -f "${V2K_LIB_DIR}/compat.sh" ]]; then
+  V2K_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+  V2K_LIB_DIR="${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k"
+fi
 # shellcheck source=/dev/null
-source "${V2K_ROOT_DIR}/lib/ablestack-qemu-exec-tools/v2k/compat.sh"
+source "${V2K_LIB_DIR}/compat.sh"
 
 # ---------------------------------------------------------------------
 # Progress helpers (state machine observability)
