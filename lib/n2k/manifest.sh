@@ -385,7 +385,7 @@ n2k_manifest_resume_summary() {
       end) as $resume
     | ([ "init", "preflight", "plan", "base_sync", "incr_sync", "final_sync", "cutover", "cleanup" ] | map(select(done(.))) | length) as $done_count
     | $resume + {
-        percent: (($done_count * 100 / 8) | floor),
+        percent: (if ($resume.completed // false) then 100 else (($done_count * 100 / 8) | floor) end),
         last_step: ($m.runtime.progress.last_step // "")
       }
   ' "${manifest}"
@@ -513,6 +513,12 @@ n2k_manifest_record_sync_summary() {
       | .runtime.sync.last_changed_bytes = $bytes_written
       | .runtime.sync.last_region_count = $regions
       | .runtime.sync.final_ready = $final_ready
+      | .runtime.sync.phase_summaries = (.runtime.sync.phase_summaries // {})
+      | .runtime.sync.phase_summaries[$phase] = {
+          bytes_written: $bytes_written,
+          regions: $regions,
+          recovery_point_id: $recovery_point_id
+        }
       | if ($recovery_point_id | length) > 0 then
           .runtime.sync.last_recovery_point_id = $recovery_point_id
           | if $final_ready then
@@ -651,11 +657,63 @@ n2k_manifest_set_cold_source() {
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 
+n2k_manifest_sync_progress_summary() {
+  local manifest="$1"
+  jq -c '
+    def num($v): (($v // 0) | tonumber? // 0);
+    def pct($done; $total):
+      if ($total | tonumber) > 0 then
+        ([((($done | tonumber) * 100 / ($total | tonumber)) | floor), 100] | min)
+      else 0 end;
+    def norm_step($s):
+      ($s // "" | tostring | ascii_downcase) as $x
+      | if ($x | test("sync[-_. ]?base|base_sync")) then "BASE_SYNC"
+        elif ($x | test("sync[-_. ]?incr|incr_sync")) then "INCR_SYNC"
+        elif ($x | test("sync[-_. ]?final|final_sync")) then "FINAL_SYNC"
+        elif ($x | test("snapshot.*base|recovery-point-base|v3-snapshot-base")) then "BASE_SNAP"
+        elif ($x | test("snapshot.*incr|recovery-point-incr|v3-snapshot-incr")) then "INCR_SNAP"
+        elif ($x | test("snapshot.*final|recovery-point-final|v3-snapshot-final")) then "FINAL_SNAP"
+        elif ($x | test("shutdown")) then "GUEST_SHUTDOWN"
+        elif ($x | test("cleanup|define-target|cutover")) then "MIGRATION_COMPLETED"
+        elif ($x | length) > 0 then ($x | ascii_upcase)
+        else "INIT" end;
+    . as $m
+    | ($m.runtime.progress.last_step // "") as $raw_step
+    | norm_step($raw_step) as $step
+    | ([ $m.disks[]? | num(.size_bytes) ] | add // 0) as $base_total
+    | ([ $m.disks[]? | num(.metrics.base_bytes_written) ] | add // 0) as $base_done_raw
+    | (if ($m.phases.base_sync.done // false) then $base_total else $base_done_raw end) as $base_done
+    | num($m.runtime.sync.phase_summaries.incr_sync.bytes_written) as $incr_done
+    | num($m.runtime.sync.phase_summaries.final_sync.bytes_written) as $final_done
+    | (if $step == "BASE_SYNC" then
+        {mode:"base", kind:"logical", done_bytes:$base_done, total_bytes:$base_total, percent:pct($base_done; $base_total)}
+      elif $step == "INCR_SYNC" then
+        {mode:"incr", kind:"delta", done_bytes:$incr_done, total_bytes:$incr_done, percent:(if $incr_done > 0 or ($m.phases.incr_sync.done // false) then 100 else 0 end)}
+      elif $step == "FINAL_SYNC" then
+        {mode:"final", kind:"delta", done_bytes:$final_done, total_bytes:$final_done, percent:(if $final_done > 0 or ($m.phases.final_sync.done // false) then 100 else 0 end)}
+      else
+        {mode:"", kind:"", done_bytes:0, total_bytes:0, percent:0}
+      end) as $sync
+    | ($base_done + $incr_done + $final_done) as $cum_done
+    | ($base_total + $incr_done + $final_done) as $cum_total
+    | {
+        display_step:$step,
+        sync_progress:$sync,
+        sync_total:{
+          done_bytes:$cum_done,
+          known_total_bytes:$cum_total,
+          percent:pct($cum_done; $cum_total)
+        }
+      }
+  ' "${manifest}"
+}
+
 n2k_manifest_status_summary() {
   local manifest="$1" events_log="${2:-}"
-  local resume
+  local resume sync_progress
   resume="$(n2k_manifest_resume_summary "${manifest}")"
-  jq -c --arg events_log "${events_log}" --argjson resume "${resume}" '
+  sync_progress="$(n2k_manifest_sync_progress_summary "${manifest}")"
+  jq -c --arg events_log "${events_log}" --argjson resume "${resume}" --argjson sync_progress "${sync_progress}" '
     {
       schema: .schema,
       run_id: .run.run_id,
@@ -676,6 +734,9 @@ n2k_manifest_status_summary() {
       phases: .phases,
       runtime: .runtime,
       resume: $resume,
+      display_step: $sync_progress.display_step,
+      sync_progress: $sync_progress.sync_progress,
+      sync_total: $sync_progress.sync_total,
       cleanup: {
         items_total: ((.runtime.cleanup.items // []) | length),
         items_pending: ((.runtime.cleanup.items // []) | map(select((.removed // false) | not)) | length)

@@ -34,6 +34,7 @@
 | ABLESTACK 대상 | Cloud API 또는 libvirt가 준비된 호스트 |
 | 대상 스토리지 | RBD, Cloud FileSystem/qcow2, libvirt qcow2, block 중 선택 |
 | 대상 네트워크 | Cloud network ID 또는 libvirt bridge/NAT network |
+| Nutanix NFS allowlist | `ablestack_n2k` 실행 호스트의 IP 또는 subnet이 원본 VM 디스크가 위치한 Nutanix Storage Container filesystem allowlist/whitelist에 등록되어 있어야 함 |
 | `ablestack_n2k` RPM | 실행 호스트에 설치되어 있어야 함 |
 
 ### AHV/Nutanix 측 사전 점검
@@ -51,6 +52,7 @@
 | 최종 중단 방식 | `phase2` cutover 시 `guest`, `poweroff`, `manual`, `none` 중 어떤 방식으로 원본 VM 변경을 멈출지 결정한다. 권장값은 `guest`이다. |
 | 특수 장치 | GPU, PCI passthrough, vTPM, affinity policy, 특수 부팅 설정이 있으면 대상 환경에서 동일하게 지원되는지 사전에 확인한다. |
 | NFS 데이터 경로 | 현재 검증된 데이터 경로는 v3 snapshot/NFS이다. `ablestack_n2k` 실행 호스트가 Nutanix CVM 또는 cluster NFS export를 읽을 수 있어야 한다. |
+| Storage Container allowlist | 원본 VM 디스크가 위치한 모든 Nutanix Storage Container의 filesystem allowlist/whitelist에 `ablestack_n2k` 실행 호스트 IP 또는 subnet을 등록한다. PC를 endpoint로 사용해도 실제 디스크 읽기는 선택된 PE/CVM의 NFS export에서 수행되므로, 해당 PE/CVM 기준 allowlist가 필요하다. |
 
 ### AHV/Nutanix 측 방화벽 포트
 
@@ -65,6 +67,8 @@
 | n2k 실행 호스트 | Prism Central 또는 Prism Element | TCP `80` | HTTP에서 HTTPS로 redirect되는 환경 확인용 | 선택 |
 
 `ablestack_n2k`는 기본 NFS mount 옵션으로 `ro,vers=3,nolock,proto=tcp`를 사용한다. 따라서 최소 동작에는 TCP `2049`가 핵심이지만, NFSv3 mount 협상이나 환경별 NFS service 구성 때문에 `111`, `20048-20050`, `7508`이 막혀 있으면 mount 또는 읽기 단계에서 실패할 수 있다.
+
+포트가 열려 있어도 Nutanix Storage Container filesystem allowlist/whitelist에 `ablestack_n2k` 실행 호스트의 source IP가 등록되어 있지 않으면 NFS mount가 거부된다. 여러 ABLESTACK 호스트 중 작업 호스트가 자동 선택될 수 있는 환경에서는 단일 호스트 IP보다 변환 호스트 subnet을 등록하는 것이 안전하다. 예를 들어 작업 호스트가 `10.10.22.1`, `10.10.22.2`, `10.10.22.3` 중 하나라면 Nutanix Storage Container에 `10.10.22.0/24` 또는 세 호스트 IP를 모두 등록한다.
 
 대상 ABLESTACK 쪽 포트도 별도로 확인해야 한다.
 
@@ -1061,6 +1065,27 @@ Cloud FileSystem/qcow2 대상에서 자주 발생한다. 선택한 Cloud storage
 1. Wizard 또는 manifest의 Cloud storage ID가 맞는지 확인한다.
 2. qcow2 파일이 Cloud storage pool path 바로 아래에 있는지 확인한다.
 3. `/var/lib/libvirt/images`에 생성된 파일을 Cloud storage로 import하려고 하지 않았는지 확인한다.
+
+### Nutanix NFS mount가 access denied로 실패하는 경우
+
+v3 snapshot/NFS 데이터 경로에서는 Prism API로 snapshot을 만든 뒤, `ablestack_n2k` 실행 호스트가 Nutanix Storage Container NFS export를 직접 mount해서 디스크 데이터를 읽는다. 따라서 Prism API 접속이 성공해도 Storage Container filesystem allowlist/whitelist가 맞지 않으면 동기화 단계에서 실패한다.
+
+대표 오류:
+
+```text
+Nutanix NFS export mount failed.
+Source endpoint: 10.10.131.10
+Client source IP: 10.10.22.2
+Container: /default-container-...
+Error: mount.nfs: access denied by server while mounting 10.10.131.10:/default-container-...
+```
+
+확인할 항목:
+
+1. 오류의 `Client source IP`가 Nutanix Storage Container filesystem allowlist/whitelist에 등록되어 있는지 확인한다.
+2. 여러 ABLESTACK 호스트 중 변환 호스트가 자동 선택될 수 있으면 모든 변환 호스트 IP 또는 subnet을 등록한다.
+3. Prism Central을 endpoint로 사용해도 실제 디스크 읽기는 선택된 Prism Element/CVM의 NFS export에서 수행되므로, 오류의 `Source endpoint` 기준 Storage Container 설정을 확인한다.
+4. 포트 방화벽이 TCP `2049`와 필요한 NFSv3 보조 포트를 허용하는지 확인한다.
 
 ### phase2가 실행되지 않는 경우
 

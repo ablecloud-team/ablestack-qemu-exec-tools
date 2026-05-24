@@ -288,7 +288,7 @@ Options:
   --max-incr-phase2 <n>   Maximum Phase2 incremental rounds
   --max-final-bytes <n>   Optional changed-byte threshold for Phase2 final gate
   --wait-seconds <N>      Source snapshot wait timeout
-  --retention-seconds <N> Source snapshot retention time
+  --retention-seconds <N> Source snapshot retention time (default: 1209600, 14 days)
   --snapshot-type <type>  CRASH_CONSISTENT|APPLICATION_CONSISTENT
   --shutdown <policy>     manual|none|guest|poweroff
   --shutdown-timeout-sec <sec>
@@ -303,6 +303,10 @@ Options:
   --cleanup-source-points Delete Nutanix source snapshots after successful cutover
                            (default)
   --keep-source-points    Keep Nutanix source snapshots after successful cutover
+  --foreground            Run in the current process until the selected split completes
+                           (default for CLI and wizard)
+  --background            Start a detached worker and return after launch
+                           (intended for Cloud/API orchestration)
   --define-only           Generate target XML without virsh define/start
   --apply                 Run virsh define for the generated target XML
   --start                 Run virsh define and start the target VM
@@ -498,7 +502,7 @@ Options:
   --restore-strict-mode <0|1>
                            Use strict mode for v4 VM restore override
   --wait-seconds <N>      Wait timeout for PD snapshot materialization
-  --retention-seconds <N> Legacy PD snapshot retention time
+  --retention-seconds <N> Legacy PD snapshot retention time (default: 1209600, 14 days)
   --app-consistent        Request app-consistent legacy snapshot
 
 Notes:

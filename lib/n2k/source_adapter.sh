@@ -619,7 +619,7 @@ n2k_source_legacy_protect_vm() {
 
 n2k_source_legacy_create_oob_snapshot() {
   local pc="$1" username="$2" password="$3" insecure="$4" pd_name="$5"
-  local retention_seconds="${6:-3600}" app_consistent="${7:-false}"
+  local retention_seconds="${6:-${N2K_DEFAULT_RETENTION_SECONDS:-1209600}}" app_consistent="${7:-false}"
   local pd_path start_time body response="" http_code="" api_error=""
 
   [[ -n "${pd_name}" ]] || {
@@ -751,7 +751,7 @@ n2k_source_legacy_pd_snapshot_paths_from_json() {
 
 n2k_source_v3_create_vm_snapshot() {
   local pc="$1" username="$2" password="$3" insecure="$4" vm_uuid="$5" name="$6"
-  local retention_seconds="${7:-3600}" snapshot_type="${8:-CRASH_CONSISTENT}"
+  local retention_seconds="${7:-${N2K_DEFAULT_RETENTION_SECONDS:-1209600}}" snapshot_type="${8:-CRASH_CONSISTENT}"
   local expiration_time_msecs body response="" http_code="" api_error=""
 
   [[ -n "${vm_uuid}" ]] || {
@@ -929,7 +929,7 @@ n2k_source_v4_create_recovery_point_body() {
 
 n2k_source_v4_create_recovery_point() {
   local pc="$1" username="$2" password="$3" insecure="$4" vm_ext_id="$5" name="$6"
-  local retention_seconds="${7:-3600}" revision="${8:-}"
+  local retention_seconds="${7:-${N2K_DEFAULT_RETENTION_SECONDS:-1209600}}" revision="${8:-}"
   local body response="" http_code="" api_error="" endpoint
 
   [[ -n "${vm_ext_id}" ]] || {

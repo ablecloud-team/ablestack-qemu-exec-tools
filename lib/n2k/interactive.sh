@@ -763,7 +763,7 @@ n2k_cmd_wizard() {
     "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_host_id}" \
     "${cloud_name}" "${target_map_json:-}"
 
-  local -a run_args=(--vm "${vm}" --pc "${pc}" --username "${username}" --password "${password}" --insecure "${insecure}")
+  local -a run_args=(--foreground --vm "${vm}" --pc "${pc}" --username "${username}" --password "${password}" --insecure "${insecure}")
   run_args+=(--inventory-source api --source-api "${source_api}" --split "${split}" --shutdown "${shutdown}")
   [[ "${force_v3}" == "true" ]] && run_args+=(--force-v3)
   run_args+=(--target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")

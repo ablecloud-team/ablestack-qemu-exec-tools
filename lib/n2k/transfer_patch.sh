@@ -74,6 +74,69 @@ n2k_validate_region_array() {
   ' <<<"${regions}" >/dev/null
 }
 
+n2k_changed_regions_full_copy_from_source_map() {
+  local source_map_json="$1" manifest="$2" recovery_point_id="${3:-}" reference_recovery_point_id="${4:-}" reason="${5:-changed-region metadata is unavailable}"
+  local count idx disk_id source_path size_bytes regions_by_disk="{}" mappings="{}" skipped="[]"
+  local mapped_count=0 total_bytes=0
+
+  count="$(jq -r '.disks | length' "${manifest}")"
+  for ((idx=0; idx<count; idx++)); do
+    disk_id="$(jq -r ".disks[${idx}].disk_id // .disks[${idx}].device_key // empty" "${manifest}")"
+    source_path="$(n2k_source_for_disk "${source_map_json}" "${manifest}" "${idx}")"
+    size_bytes="$(jq -r ".disks[${idx}].size_bytes // .disks[${idx}].capacity_bytes // .disks[${idx}].disk_size // 0" "${manifest}")"
+    if [[ -z "${disk_id}" || -z "${source_path}" || ! "${size_bytes}" =~ ^[0-9]+$ || "${size_bytes}" -le 0 ]]; then
+      skipped="$(jq -c \
+        --arg disk_id "${disk_id}" \
+        --arg source_path "${source_path}" \
+        --arg size_bytes "${size_bytes}" \
+        '. + [{disk_id:$disk_id,source_path:$source_path,size_bytes:$size_bytes,reason:"unable to build full-copy fallback region"}]' \
+        <<<"${skipped}")"
+      continue
+    fi
+
+    regions_by_disk="$(jq -c \
+      --arg disk_id "${disk_id}" \
+      --argjson size_bytes "${size_bytes}" \
+      '. + {($disk_id):[{offset:0,length:$size_bytes,type:"regular"}]}' \
+      <<<"${regions_by_disk}")"
+    mappings="$(jq -c \
+      --arg disk_id "${disk_id}" \
+      --arg source_path "${source_path}" \
+      --argjson size_bytes "${size_bytes}" \
+      '. + {($disk_id):{source_path:$source_path,file_size:$size_bytes,fallback:"full-copy"}}' \
+      <<<"${mappings}")"
+    total_bytes=$((total_bytes + size_bytes))
+    mapped_count=$((mapped_count + 1))
+  done
+
+  jq -nc \
+    --arg recovery_point_id "${recovery_point_id}" \
+    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+    --arg reason "${reason}" \
+    --argjson mapped_count "${mapped_count}" \
+    --argjson total_bytes "${total_bytes}" \
+    --slurpfile disks <(printf '%s\n' "${regions_by_disk}") \
+    --slurpfile mappings <(printf '%s\n' "${mappings}") \
+    --slurpfile skipped <(printf '%s\n' "${skipped}") \
+    '{
+      schema:"ablestack-n2k/changed-regions-v1",
+      source_api:"v3",
+      ok:($mapped_count > 0),
+      fallback:"full-copy",
+      reason:$reason,
+      current_recovery_point_id:$recovery_point_id,
+      base_recovery_point_id:$reference_recovery_point_id,
+      reference_recovery_point_id:$reference_recovery_point_id,
+      disk_count:$mapped_count,
+      region_count:$mapped_count,
+      bytes_total:$total_bytes,
+      disks:($disks[0] // {}),
+      disk_mappings:($mappings[0] // {}),
+      errors:[],
+      skipped:($skipped[0] // [])
+    }'
+}
+
 n2k_patch_source_is_nutanix_v3_data_uri() {
   [[ "${1:-}" == nutanix-v3-data://* ]]
 }

@@ -55,8 +55,23 @@ n2k_source_is_nutanix_nfs_uri() {
   [[ "${1:-}" == nutanix-nfs://* ]]
 }
 
+n2k_source_nfs_host_from_endpoint() {
+  local host="$1"
+  host="${host#http://}"
+  host="${host#https://}"
+  host="${host%%/*}"
+  if [[ "${host}" == \[*\]* ]]; then
+    host="${host#\[}"
+    host="${host%%\]*}"
+  elif [[ "${host}" == *:* ]]; then
+    host="${host%%:*}"
+  fi
+  printf '%s' "${host}"
+}
+
 n2k_source_nfs_uri_from_path() {
   local host="$1" snapshot_path="$2"
+  host="$(n2k_source_nfs_host_from_endpoint "${host}")"
   [[ -n "${host}" ]] || {
     echo "NFS host is required for Nutanix NFS source paths." >&2
     return 2
@@ -104,6 +119,7 @@ n2k_source_nfs_mounts_file() {
 
 n2k_source_nfs_mount_uri() {
   local uri="$1" parts host container rel mount_root mount_point mounts_file mounted_here=0
+  local route_source="" mount_output="" mount_status=0
   parts="$(n2k_source_nfs_uri_parts "${uri}")"
   host="$(jq -r '.host' <<<"${parts}")"
   container="$(jq -r '.container' <<<"${parts}")"
@@ -117,7 +133,21 @@ n2k_source_nfs_mount_uri() {
 
   mkdir -p "${mount_point}" "$(dirname "${mounts_file}")"
   if ! mountpoint -q "${mount_point}"; then
-    mount -t nfs -o "${N2K_NUTANIX_NFS_OPTIONS:-ro,vers=3,nolock,proto=tcp}" "${host}:/${container}" "${mount_point}"
+    route_source="$(ip route get "${host}" 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -1 || true)"
+    mount_output="$(mount -t nfs -o "${N2K_NUTANIX_NFS_OPTIONS:-ro,vers=3,nolock,proto=tcp}" "${host}:/${container}" "${mount_point}" 2>&1)" || mount_status=$?
+    if [[ "${mount_status}" -ne 0 ]]; then
+      cat >&2 <<EOF
+Nutanix NFS export mount failed.
+Source endpoint: ${host}
+Client source IP: ${route_source:-unknown}
+Container: /${container}
+Mount point: ${mount_point}
+NFS options: ${N2K_NUTANIX_NFS_OPTIONS:-ro,vers=3,nolock,proto=tcp}
+Error: ${mount_output:-mount exited with status ${mount_status}}
+Action: add the client source IP or its subnet to the Nutanix storage container filesystem allowlist/whitelist, and confirm the export can be mounted from the conversion host.
+EOF
+      return "${mount_status}"
+    fi
     mounted_here=1
   fi
   if [[ "${mounted_here}" -eq 1 ]]; then
@@ -150,6 +180,7 @@ n2k_source_prepare_file_path() {
 
 n2k_source_map_from_v3_nfs_changed_regions() {
   local changed_regions_json="$1" nfs_host="$2"
+  nfs_host="$(n2k_source_nfs_host_from_endpoint "${nfs_host}")"
   [[ -n "${nfs_host}" ]] || {
     echo "NFS host is required to build source-map from v3 changed-region metadata." >&2
     return 2
@@ -170,6 +201,12 @@ n2k_source_map_from_v3_nfs_changed_regions() {
 n2k_source_map_from_v3_nfs_path_index() {
   local manifest="$1" path_index_json="$2" nfs_host="$3"
   local entries count idx item vdisk_uuid snapshot_file_path uri local_path file_size disk_id source_map="{}"
+  local mapped_count=0 mount_errors="[]" missing_files="[]"
+  [[ -n "${nfs_host}" ]] || {
+    echo "NFS host is required to build source-map from v3 path index." >&2
+    return 2
+  }
+  nfs_host="$(n2k_source_nfs_host_from_endpoint "${nfs_host}")"
   [[ -n "${nfs_host}" ]] || {
     echo "NFS host is required to build source-map from v3 path index." >&2
     return 2
@@ -182,15 +219,39 @@ n2k_source_map_from_v3_nfs_path_index() {
     snapshot_file_path="$(jq -r '.value.snapshot_file_path // empty' <<<"${item}")"
     [[ -n "${snapshot_file_path}" ]] || continue
     uri="$(n2k_source_nfs_uri_from_path "${nfs_host}" "${snapshot_file_path}")"
-    if ! local_path="$(n2k_source_nfs_mount_uri "${uri}" 2>/dev/null)"; then
+    local err_file
+    err_file="$(mktemp)"
+    if ! local_path="$(n2k_source_nfs_mount_uri "${uri}" 2>"${err_file}")"; then
+      mount_errors="$(jq -c \
+        --arg uri "${uri}" \
+        --arg error "$(cat "${err_file}")" \
+        '. + [{uri:$uri,error:$error}]' <<<"${mount_errors}")"
+      rm -f "${err_file}"
       continue
     fi
-    [[ -e "${local_path}" ]] || continue
+    rm -f "${err_file}"
+    if [[ ! -e "${local_path}" ]]; then
+      missing_files="$(jq -c \
+        --arg uri "${uri}" \
+        --arg local_path "${local_path}" \
+        '. + [{uri:$uri,local_path:$local_path}]' <<<"${missing_files}")"
+      continue
+    fi
     file_size="$(n2k_storage_file_size_bytes "${local_path}")"
     disk_id="$(n2k_source_manifest_disk_id_for_snapshot_file "${manifest}" "${vdisk_uuid}" "${file_size}" "${idx}")"
     [[ -n "${disk_id}" ]] || continue
     source_map="$(jq -c --arg disk_id "${disk_id}" --arg uri "${uri}" '. + {($disk_id):$uri}' <<<"${source_map}")"
+    mapped_count=$((mapped_count + 1))
   done
+  if [[ "${mapped_count}" -eq 0 ]]; then
+    jq -nc \
+      --arg host "${nfs_host}" \
+      --argjson snapshot_disk_count "${count}" \
+      --argjson mount_errors "${mount_errors}" \
+      --argjson missing_files "${missing_files}" \
+      '{message:"Unable to build Nutanix NFS source map from v3 snapshot paths",source_endpoint:$host,snapshot_disk_count:$snapshot_disk_count,mount_errors:$mount_errors,missing_files:$missing_files}' >&2
+    return 2
+  fi
   printf '%s' "${source_map}"
 }
 
