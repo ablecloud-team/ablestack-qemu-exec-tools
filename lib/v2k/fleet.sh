@@ -1586,6 +1586,56 @@ v2k_fleet_base_total_bytes_physical_or_logical() {
   echo "logical ${logical}"
 }
 
+
+v2k_fleet_calc_sync_total() {
+  local workdir="$1" manifest="$2" progress_json="${3:-{}}"
+  local events_log="${workdir}/events.log"
+  local E M
+  E="$(v2k_fleet_events_tail_valid_json "${events_log}" 12000)"
+  M="$(printf '%s' "${E}" | v2k_fleet_meaningful_events 2>/dev/null || echo '[]')"
+
+  local base_info base_kind base_total base_done progress_mode progress_done
+  base_info="$(v2k_fleet_base_total_bytes_physical_or_logical "${manifest}")"
+  base_kind="${base_info%% *}"
+  base_total="${base_info#* }"
+  [[ "${base_total}" =~ ^[0-9]+$ ]] || base_total=0
+  progress_mode="$(printf '%s' "${progress_json}" | jq -r '.sync.mode // ""' 2>/dev/null || echo "")"
+  progress_done="$(printf '%s' "${progress_json}" | jq -r '.sync.done_bytes // 0' 2>/dev/null || echo 0)"
+  [[ "${progress_done}" =~ ^[0-9]+$ ]] || progress_done=0
+
+  local base_done_flag
+  base_done_flag="$(jq -r '.phases.base_sync.done // false' "${manifest}" 2>/dev/null || echo false)"
+  if [[ "${base_done_flag}" == "true" ]]; then
+    base_done="${base_total}"
+  elif [[ "${progress_mode}" == "base" ]]; then
+    base_done="${progress_done}"
+  else
+    base_done=0
+  fi
+
+  local delta_total delta_done
+  delta_total="$(printf '%s' "${M}" | jq -r '
+    map(select((.phase=="sync.incr" or .phase=="sync.final") and .event=="changed_areas_fetched") | (.detail.bytes // 0))
+    | add // 0
+  ' 2>/dev/null || echo 0)"
+  delta_done="$(printf '%s' "${M}" | jq -r '
+    map(select((.phase=="sync.incr" or .phase=="sync.final") and .event=="disk_done") | (.detail.bytes_written // 0))
+    | add // 0
+  ' 2>/dev/null || echo 0)"
+  [[ "${delta_total}" =~ ^[0-9]+$ ]] || delta_total=0
+  [[ "${delta_done}" =~ ^[0-9]+$ ]] || delta_done=0
+
+  local total=$((base_total + delta_total))
+  local done=$((base_done + delta_done))
+  local pct=0
+  if (( total > 0 )); then
+    pct=$(( done * 100 / total ))
+    (( pct > 100 )) && pct=100
+  fi
+
+  jq -cn     --arg kind "${base_kind}"     --argjson done "${done}"     --argjson total "${total}"     --argjson pct "${pct}"     '{kind:$kind,done_bytes:$done,known_total_bytes:$total,percent:$pct}'
+}
+
 v2k_fleet_last_step_from_events() {
   # Args: workdir
   # Returns: "step_label" or empty
@@ -1677,6 +1727,9 @@ v2k_fleet_cmd_status() {
     local step="-"
     local sync="-"
     local history="{}"
+    local progress_json='{"sync":{"mode":"","kind":"","done_bytes":0,"total_bytes":0,"percent":0}}'
+    local sync_total_json='{"done_bytes":0,"known_total_bytes":0,"percent":0}'
+    local display_step="-"
 
     if [[ -f "${current_manifest}" ]]; then
       # 1. Determine Phase (Initial Guess)
@@ -1701,6 +1754,11 @@ v2k_fleet_cmd_status() {
 
       step=$(echo "${detail_json}" | jq -r '.step // "Ready"')
       sync=$(echo "${detail_json}" | jq -r '.sync_display // "-"')
+
+      progress_json="$(v2k_fleet_calc_step_progress "${current_vm_dir}" "${current_manifest}" "${state}" "${phase}")"
+      sync_total_json="$(v2k_fleet_calc_sync_total "${current_vm_dir}" "${current_manifest}" "${progress_json}")"
+      display_step="$(printf '%s' "${progress_json}" | jq -r '.step // ""' 2>/dev/null || echo "")"
+      [[ -n "${display_step}" && "${display_step}" != "null" ]] || display_step="${step}"
       
       if [[ "${json_out}" -eq 1 ]]; then
         history=$(echo "${detail_json}" | jq -c '.history // {}')
@@ -1761,8 +1819,9 @@ v2k_fleet_cmd_status() {
 
     if [[ "${json_out}" -eq 1 ]]; then
       items_json+=("$(jq -cn --arg vm "${vm_name}" --arg ph "${phase}" --arg st "${state}" \
-        --arg step "${step}" --arg sync "${sync}" --arg wd "${short_wd}" --argjson hist "${history}" \
-        '{vm:$vm, phase:$ph, state:$st, step:$step, sync:$sync, workdir:$wd, history:$hist}')")
+        --arg step "${step}" --arg display_step "${display_step}" --arg sync "${sync}" --arg wd "${short_wd}" \
+        --argjson hist "${history}" --argjson progress "${progress_json}" --argjson sync_total "${sync_total_json}" \
+        '{vm:$vm, phase:$ph, state:$st, step:$step, display_step:$display_step, sync:$sync, workdir:$wd, history:$hist, sync_progress:$progress.sync, sync_total:$sync_total}')")
     else
        # Table row format: VM PHASE STATE STEP SYNC WORKDIR
        items_json+=("${vm_name}|${phase}|${state}|${step}|${sync}|${short_wd}")

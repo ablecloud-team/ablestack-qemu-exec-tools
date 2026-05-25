@@ -322,6 +322,44 @@ n2k_cmd_status() {
   [[ "${watch}" -eq 0 ]] || n2k_die "status --watch is not implemented yet"
   [[ -z "${vm}" ]] || n2k_die "fleet status by --vm is not implemented yet"
 
+  local runner_state_file="${N2K_WORKDIR:+${N2K_WORKDIR%/}/runner.json}"
+  if [[ ( -z "${N2K_MANIFEST:-}" || ! -f "${N2K_MANIFEST}" ) && -n "${runner_state_file}" && -f "${runner_state_file}" ]]; then
+    local runner_summary
+    runner_summary="$(jq -c --arg workdir "${N2K_WORKDIR:-}" --slurpfile runner "${runner_state_file}" '
+      ($runner[0] // {}) as $r
+      | {
+          run_id: "",
+          source: {vm: "", mode: ""},
+          target: {storage: "", format: ""},
+          disks_count: 0,
+          workdir: $workdir,
+          phases: {},
+          runtime: {runner: $r, progress: {last_step: ($r.state // "starting")}},
+          resume: {
+            completed: false,
+            can_resume: false,
+            next_step: ($r.state // "starting"),
+            last_step: ($r.state // "starting"),
+            percent: 0,
+            reason: "background runner has started; manifest is not initialized yet"
+          },
+          display_step: "Init",
+          sync_progress: {mode: "Starting", done_bytes: 0, total_bytes: 0, percent: 0},
+          sync_total: {done_bytes: 0, known_total_bytes: 0, percent: 0}
+        }
+    ')"
+    if [[ "${N2K_JSON_OUT:-0}" -eq 1 ]]; then
+      if [[ "${resume_only}" -eq 1 ]]; then
+        printf '%s\n' "${runner_summary}" | jq -c '.resume'
+      else
+        printf '%s\n' "${runner_summary}"
+      fi
+    else
+      printf 'Workdir: %s\nLast step: %s\nProgress: 0%%\n' "${N2K_WORKDIR:-}" "$(printf '%s\n' "${runner_summary}" | jq -r '.resume.last_step // "starting"')"
+    fi
+    return 0
+  fi
+
   n2k_require_manifest
   local summary
   summary="$(n2k_manifest_status_summary "${N2K_MANIFEST}" "${N2K_EVENTS_LOG:-}")"
@@ -726,7 +764,169 @@ n2k_cmd_plan() {
   fi
 }
 
+n2k_run_resolved_v3_source_endpoint_from_manifest() {
+  local manifest="$1" fallback="${2:-}"
+
+  if [[ -z "${manifest}" || ! -f "${manifest}" ]]; then
+    printf '%s\n' "${fallback}"
+    return 0
+  fi
+
+  jq -r --arg fallback "${fallback}" '
+    [
+      .source.api.namespaces.v3.source_endpoint?,
+      .runtime.preflight.api.v3.source_endpoint?,
+      .runtime.preflight.modes["v3-incremental"].source_endpoint?,
+      .runtime.preflight.modes.v3.source_endpoint?
+    ]
+    | map(select(type == "string" and length > 0))
+    | .[0] // $fallback
+  ' "${manifest}"
+}
+
+n2k_default_retention_seconds() {
+  printf '%s\n' "${N2K_DEFAULT_RETENTION_SECONDS:-1209600}"
+}
+
+n2k_run_warn_recovery_point_expiration() {
+  local manifest="$1" kind="$2" context="${3:-run}" warn_before_seconds="${4:-${N2K_RECOVERY_POINT_EXPIRY_WARN_SECONDS:-3600}}"
+  local expiry_msecs expiry_seconds now_seconds seconds_left point_id point_name
+  [[ -f "${manifest}" ]] || return 0
+  expiry_msecs="$(jq -r --arg kind "${kind}" '
+    .runtime.recovery_points[$kind].metadata.v3.snapshot.status.expiration_time_msecs //
+    .runtime.recovery_points[$kind].metadata.v3.snapshot.spec.expiration_time_msecs //
+    .runtime.recovery_points[$kind].metadata.v4.recovery_point.expirationTime //
+    empty
+  ' "${manifest}")"
+  [[ -n "${expiry_msecs}" && "${expiry_msecs}" != "null" ]] || return 0
+  point_id="$(jq -r --arg kind "${kind}" '.runtime.recovery_points[$kind].id // ""' "${manifest}")"
+  point_name="$(jq -r --arg kind "${kind}" '.runtime.recovery_points[$kind].name // ""' "${manifest}")"
+  now_seconds="$(date +%s)"
+  if [[ "${expiry_msecs}" =~ ^[0-9]+$ ]]; then
+    expiry_seconds=$((expiry_msecs / 1000))
+  else
+    expiry_seconds="$(date -d "${expiry_msecs}" +%s 2>/dev/null || printf 0)"
+  fi
+  [[ "${expiry_seconds}" -gt 0 ]] || return 0
+  seconds_left=$((expiry_seconds - now_seconds))
+  if [[ "${seconds_left}" -le 0 ]]; then
+    n2k_event WARN "${context}" "" "reference_recovery_point_expired" \
+      "$(jq -nc --arg kind "${kind}" --arg id "${point_id}" --arg name "${point_name}" --argjson expired_by_seconds "$((-seconds_left))" --arg expires_at "$(date -d "@${expiry_seconds}" -Iseconds)" '{kind:$kind,id:$id,name:$name,expires_at:$expires_at,expired_by_seconds:$expired_by_seconds}')"
+  elif [[ "${seconds_left}" -le "${warn_before_seconds}" ]]; then
+    n2k_event WARN "${context}" "" "reference_recovery_point_expiring_soon" \
+      "$(jq -nc --arg kind "${kind}" --arg id "${point_id}" --arg name "${point_name}" --argjson seconds_left "${seconds_left}" --arg expires_at "$(date -d "@${expiry_seconds}" -Iseconds)" '{kind:$kind,id:$id,name:$name,expires_at:$expires_at,seconds_left:$seconds_left}')"
+  fi
+}
+
+n2k_run_self_executable() {
+  local self="${N2K_SELF:-}"
+  if [[ -z "${self}" ]]; then
+    self="$(command -v ablestack_n2k 2>/dev/null || true)"
+  fi
+  if [[ -z "${self}" && -x "${N2K_ROOT_DIR:-}/bin/ablestack_n2k.sh" ]]; then
+    self="${N2K_ROOT_DIR}/bin/ablestack_n2k.sh"
+  fi
+  [[ -n "${self}" ]] || n2k_die "Unable to resolve ablestack_n2k executable for background run"
+  printf '%s\n' "${self}"
+}
+
+n2k_run_runner_state_file() {
+  [[ -n "${N2K_WORKDIR:-}" ]] || n2k_die "background run requires a resolved workdir"
+  printf '%s\n' "${N2K_WORKDIR%/}/runner.json"
+}
+
+n2k_run_write_runner_state() {
+  local state="$1" pid="${2:-}" split="${3:-}" log_file="${4:-}" exit_code="${5:-}"
+  local state_file
+  state_file="$(n2k_run_runner_state_file)"
+  mkdir -p "$(dirname "${state_file}")"
+  jq -nc \
+    --arg state "${state}" \
+    --arg pid "${pid}" \
+    --arg split "${split}" \
+    --arg workdir "${N2K_WORKDIR:-}" \
+    --arg manifest "${N2K_MANIFEST:-}" \
+    --arg events_log "${N2K_EVENTS_LOG:-}" \
+    --arg log_file "${log_file}" \
+    --arg exit_code "${exit_code}" \
+    --arg updated_at "$(date -Iseconds)" \
+    '{
+      state: $state,
+      pid: (if $pid == "" then null else ($pid | tonumber) end),
+      split: $split,
+      workdir: $workdir,
+      manifest: $manifest,
+      events_log: $events_log,
+      log_file: $log_file,
+      exit_code: (if $exit_code == "" then null else ($exit_code | tonumber) end),
+      updated_at: $updated_at
+    }' > "${state_file}"
+}
+
+n2k_run_start_background() {
+  local split="$1"
+  shift
+  [[ "${split}" == "phase1" || "${split}" == "phase2" ]] || n2k_die "--background supports --split phase1 or phase2"
+  [[ -n "${N2K_WORKDIR:-}" ]] || n2k_die "--background requires a workdir"
+
+  mkdir -p "${N2K_WORKDIR}"
+  [[ -n "${N2K_MANIFEST:-}" ]] || N2K_MANIFEST="${N2K_WORKDIR}/manifest.json"
+  [[ -n "${N2K_EVENTS_LOG:-}" ]] || N2K_EVENTS_LOG="${N2K_WORKDIR}/events.log"
+  export N2K_MANIFEST N2K_EVENTS_LOG
+
+  local self log_file
+  self="$(n2k_run_self_executable)"
+  log_file="${N2K_WORKDIR%/}/run-${split}.log"
+  n2k_run_write_runner_state "starting" "" "${split}" "${log_file}" ""
+
+  local -a worker_cmd=("${self}")
+  [[ -n "${N2K_WORKDIR:-}" ]] && worker_cmd+=(--workdir "${N2K_WORKDIR}")
+  [[ -n "${N2K_RUN_ID:-}" ]] && worker_cmd+=(--run-id "${N2K_RUN_ID}")
+  [[ -n "${N2K_MANIFEST:-}" ]] && worker_cmd+=(--manifest "${N2K_MANIFEST}")
+  [[ -n "${N2K_EVENTS_LOG:-}" ]] && worker_cmd+=(--log "${N2K_EVENTS_LOG}")
+  [[ "${N2K_DRY_RUN:-0}" -eq 1 ]] && worker_cmd+=(--dry-run)
+  [[ "${N2K_FORCE:-0}" -eq 1 ]] && worker_cmd+=(--force)
+  worker_cmd+=(run --foreground "$@")
+
+  (
+    n2k_run_write_runner_state "running" "${BASHPID}" "${split}" "${log_file}" ""
+    set +e
+    "${worker_cmd[@]}"
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 0 ]]; then
+      n2k_run_write_runner_state "done" "${BASHPID}" "${split}" "${log_file}" "${rc}"
+    else
+      n2k_run_write_runner_state "failed" "${BASHPID}" "${split}" "${log_file}" "${rc}"
+    fi
+    exit "${rc}"
+  ) >> "${log_file}" 2>&1 < /dev/null &
+  local pid=$!
+  disown "${pid}" 2>/dev/null || true
+  n2k_run_write_runner_state "running" "${pid}" "${split}" "${log_file}" ""
+  sleep 0.2
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    n2k_run_write_runner_state "failed" "${pid}" "${split}" "${log_file}" "1"
+    n2k_die "background n2k worker failed to start; see ${log_file}"
+  fi
+
+  local payload
+  payload="$(jq -nc --arg workdir "${N2K_WORKDIR}" --arg manifest "${N2K_MANIFEST}" --arg events_log "${N2K_EVENTS_LOG}" --arg log_file "${log_file}" --argjson pid "${pid}" --arg split "${split}" '{workdir:$workdir,manifest:$manifest,events_log:$events_log,log_file:$log_file,pid:$pid,split:$split}')"
+  if [[ "${N2K_JSON_OUT:-0}" -eq 1 ]]; then
+    jq -nc --arg phase "run.background" --argjson payload "${payload}" '{ok:true,phase:$phase,payload:$payload}'
+  else
+    printf 'n2k background run started. PID: %s Workdir: %s Log: %s\n' "${pid}" "${N2K_WORKDIR}" "${log_file}"
+  fi
+}
+
 n2k_cmd_run() {
+  local -a foreground_run_args=()
+  local arg
+  for arg in "$@"; do
+    [[ "${arg}" == "--background" ]] && continue
+    foreground_run_args+=("${arg}")
+  done
+
   if [[ "${N2K_RESUME:-0}" -eq 1 ]]; then
     if [[ -z "${N2K_MANIFEST:-}" && -n "${N2K_WORKDIR:-}" ]]; then
       N2K_MANIFEST="${N2K_WORKDIR}/manifest.json"
@@ -765,13 +965,16 @@ n2k_cmd_run() {
   local deadline_sec="${N2K_RUN_DEFAULT_DEADLINE_SEC:-120}"
   local max_incr_phase2="${N2K_RUN_DEFAULT_MAX_INCR_PHASE2:-20}"
   local max_final_bytes="${N2K_RUN_DEFAULT_MAX_FINAL_BYTES:--1}"
-  local wait_seconds="180" retention_seconds="3600" snapshot_type="CRASH_CONSISTENT"
+  local wait_seconds="180" retention_seconds
+  retention_seconds="$(n2k_default_retention_seconds)"
+  local snapshot_type="CRASH_CONSISTENT"
   local shutdown="manual" cutover_policy="define-only" cutover_args_str=""
   local shutdown_timeout_sec="${N2K_RUN_DEFAULT_SHUTDOWN_TIMEOUT_SEC:-300}"
   local shutdown_poll_sec="${N2K_RUN_DEFAULT_SHUTDOWN_POLL_SEC:-5}"
   local skip_plan=0 allow_experimental=false probe_legacy=false
   local libvirt_network_mode="" libvirt_bridge="" libvirt_network=""
   local cleanup_source_points=true
+  local execution_mode="foreground"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -832,6 +1035,8 @@ n2k_cmd_run() {
       --network|--libvirt-network) libvirt_network="${2:-}"; shift 2 ;;
       --cleanup-source-points) cleanup_source_points=true; shift 1 ;;
       --keep-source-points) cleanup_source_points=false; shift 1 ;;
+      --foreground) execution_mode="foreground"; shift 1 ;;
+      --background) execution_mode="background"; shift 1 ;;
       --define-only) cutover_policy="define-only"; shift 1 ;;
       --apply) cutover_policy="apply"; shift 1 ;;
       --start) cutover_policy="start"; shift 1 ;;
@@ -909,6 +1114,19 @@ n2k_cmd_run() {
 
   n2k_run_set_manifest_paths_from_workdir
 
+  if [[ "${execution_mode}" == "background" ]]; then
+    if [[ "${split}" == "phase2" ]]; then
+      n2k_require_manifest
+      n2k_manifest_split_is_done "${N2K_MANIFEST}" "phase1" || \
+        n2k_die "run --split phase2 requires a completed phase1 marker in the manifest"
+    else
+      [[ -n "${vm}" ]] || n2k_die "run --background --split ${split} requires --vm"
+      [[ -n "${pc}" ]] || n2k_die "run --background --split ${split} requires --pc"
+    fi
+    n2k_run_start_background "${split}" "${foreground_run_args[@]}"
+    return 0
+  fi
+
   if [[ "${split}" == "phase2" ]]; then
     n2k_require_manifest
     n2k_manifest_split_is_done "${N2K_MANIFEST}" "phase1" || \
@@ -957,6 +1175,9 @@ n2k_cmd_run() {
   [[ -n "${vm}" ]] || n2k_die "run could not resolve VM name from args or manifest"
   [[ -n "${pc}" ]] || n2k_die "run could not resolve Prism endpoint from args or manifest"
   source_endpoint="${pc}"
+  if [[ "${source_api}" == "v3" ]]; then
+    source_endpoint="$(n2k_run_resolved_v3_source_endpoint_from_manifest "${N2K_MANIFEST}" "${pc}")"
+  fi
   if [[ "${source_api}" == "v3" && -n "${username}" && -n "${password}" ]]; then
     local v3_source_probe v3_source_endpoint
     v3_source_probe="$(n2k_source_probe_v3_source_endpoint "${pc}" "${username}" "${password}" "${insecure}" "${vm}")"
@@ -1038,6 +1259,7 @@ n2k_cmd_run() {
   if [[ "${split}" == "phase2" ]]; then
     n2k_run_manifest_has_recovery_point "${N2K_MANIFEST}" "incr" || \
       n2k_die "run --split phase2 requires an incremental recovery point from phase1"
+    n2k_run_warn_recovery_point_expiration "${N2K_MANIFEST}" "incr" "run.phase2"
   fi
 
   local ready=1 iter=0 elapsed_sec=0 changed_bytes=0 changed_regions=0 start_ts end_ts
@@ -1165,6 +1387,11 @@ n2k_cmd_run() {
     n2k_event INFO "run" "" "source_points_cleanup_skipped" '{"reason":"operator requested source recovery point retention"}'
   fi
 
+  local completion_cleanup_plan
+  completion_cleanup_plan="$(n2k_cleanup_plan_json "${N2K_MANIFEST}" true true)"
+  n2k_event INFO "run" "" "cleanup_plan_created" "${completion_cleanup_plan}"
+  n2k_manifest_phase_done "${N2K_MANIFEST}" "cleanup"
+
   if [[ "${split}" == "phase2" ]]; then
     n2k_manifest_mark_split_done "${N2K_MANIFEST}" "phase2"
   fi
@@ -1180,7 +1407,8 @@ n2k_cmd_snapshot() {
   local create_pd=false protect_vm=false create_oob_snapshot=false create_vm_snapshot=false create_recovery_point=false
   local verify_changed_regions=false collect_changed_regions=false reference_kind=""
   local restore_to_temp_vm=false temp_vm_name="" restore_cluster_id="" restore_strict_mode=false
-  local wait_seconds="180" retention_seconds="3600" app_consistent=false snapshot_type="CRASH_CONSISTENT"
+  local wait_seconds="180" retention_seconds app_consistent=false snapshot_type="CRASH_CONSISTENT"
+  retention_seconds="$(n2k_default_retention_seconds)"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name) name="${2:-}"; shift 2 ;;
@@ -1656,7 +1884,15 @@ n2k_cmd_sync() {
   export N2K_NUTANIX_PASSWORD="${password}"
   export N2K_NUTANIX_INSECURE="${insecure}"
   if [[ -z "${nfs_host}" ]]; then
-    nfs_host="${pc}"
+    if [[ "${source_map_from_v3_nfs}" == "true" ]]; then
+      nfs_host="$(n2k_run_resolved_v3_source_endpoint_from_manifest "${N2K_MANIFEST}" "${pc}")"
+    else
+      nfs_host="${pc}"
+    fi
+  fi
+  if [[ "${source_map_from_v3_nfs}" == "true" && -n "${nfs_host}" && "${nfs_host}" != "${pc}" ]]; then
+    n2k_event INFO "sync" "" "v3_source_nfs_endpoint_selected" \
+      "$(jq -nc --arg pc "${pc}" --arg nfs_host "${nfs_host}" '{pc:$pc,nfs_host:$nfs_host}')"
   fi
   if [[ -n "${nfs_mount_root}" ]]; then
     export N2K_NUTANIX_NFS_MOUNT_ROOT="${nfs_mount_root}"
@@ -1681,30 +1917,46 @@ n2k_cmd_sync() {
       n2k_transfer_cold_base_all "${N2K_MANIFEST}" "${source_map}"
       n2k_json_or_text_ok "sync.base" "{}" "Base sync done."
       ;;
-    incr|final)
-      local source_map changed_regions
-      if [[ -n "${changed_regions_json_arg}" ]]; then
-        changed_regions="$(n2k_load_changed_regions_json "${changed_regions_json_arg}")"
-      else
-        changed_regions="$(jq -c --arg kind "${which}" '.runtime.recovery_points[$kind].metadata.v3.changed_regions // .runtime.recovery_points[$kind].metadata.legacy.changed_regions // empty' "${N2K_MANIFEST}")"
-        [[ -n "${changed_regions}" && "${changed_regions}" != "null" ]] || {
-          echo "sync ${which} requires --changed-regions-json/--changed-regions-file or a collected changed_regions entry in the manifest." >&2
-          return 2
-        }
-      fi
-      if [[ -n "${source_map_json_arg}" ]]; then
-        source_map="$(n2k_load_source_map_json "${source_map_json_arg}")"
-      elif [[ "${source_map_from_v3_nfs}" == "true" ]]; then
-        source_map="$(n2k_source_map_from_v3_nfs_changed_regions "${changed_regions}" "${nfs_host}")"
-      else
-        source_map="$(n2k_load_source_map_json "${source_map_json_arg}")"
-      fi
-      if [[ -z "${recovery_point_id}" ]]; then
-        recovery_point_id="$(jq -r --arg kind "${which}" '.runtime.recovery_points[$kind].id // empty' "${N2K_MANIFEST}")"
-      fi
-      n2k_transfer_patch_all "${N2K_MANIFEST}" "${which}" "${source_map}" "${changed_regions}" "${recovery_point_id}"
-      n2k_json_or_text_ok "sync.${which}" "{}" "$(printf '%s' "${which}" | tr '[:lower:]' '[:upper:]') sync done."
-      ;;
+	    incr|final)
+	      local source_map changed_regions changed_regions_ok
+	      if [[ -n "${changed_regions_json_arg}" ]]; then
+	        changed_regions="$(n2k_load_changed_regions_json "${changed_regions_json_arg}")"
+	      else
+	        changed_regions="$(jq -c --arg kind "${which}" '.runtime.recovery_points[$kind].metadata.v3.changed_regions // .runtime.recovery_points[$kind].metadata.legacy.changed_regions // empty' "${N2K_MANIFEST}")"
+	        [[ -n "${changed_regions}" && "${changed_regions}" != "null" ]] || {
+	          echo "sync ${which} requires --changed-regions-json/--changed-regions-file or a collected changed_regions entry in the manifest." >&2
+	          return 2
+	        }
+	      fi
+	      if [[ -z "${recovery_point_id}" ]]; then
+	        recovery_point_id="$(jq -r --arg kind "${which}" '.runtime.recovery_points[$kind].id // empty' "${N2K_MANIFEST}")"
+	      fi
+	      if [[ -n "${source_map_json_arg}" ]]; then
+	        source_map="$(n2k_load_source_map_json "${source_map_json_arg}")"
+	      elif [[ "${source_map_from_v3_nfs}" == "true" ]]; then
+	        changed_regions_ok="$(jq -r '(.ok // false) | tostring' <<<"${changed_regions}")"
+	        if [[ "${changed_regions_ok}" == "true" ]]; then
+	          source_map="$(n2k_source_map_from_v3_nfs_changed_regions "${changed_regions}" "${nfs_host}")"
+	        else
+	          local path_index fallback_reason reference_recovery_point_id
+	          path_index="$(jq -c --arg kind "${which}" '.runtime.recovery_points[$kind].metadata.v3.path_index // empty' "${N2K_MANIFEST}")"
+	          [[ -n "${path_index}" && "${path_index}" != "null" ]] || {
+	            echo "sync ${which} could not use changed-region metadata and has no v3 path_index for full-copy fallback." >&2
+	            return 2
+	          }
+	          fallback_reason="$(jq -r '.reason // (if ((.errors // []) | length) > 0 then "changed-region API returned errors" else "changed-region metadata is unavailable" end)' <<<"${changed_regions}")"
+	          reference_recovery_point_id="$(jq -r '.reference_recovery_point_id // .base_recovery_point_id // empty' <<<"${changed_regions}")"
+	          n2k_event WARN "sync.${which}" "" "changed_regions_full_copy_fallback" \
+	            "$(jq -nc --arg reason "${fallback_reason}" --arg recovery_point_id "${recovery_point_id}" --arg reference_recovery_point_id "${reference_recovery_point_id}" --argjson changed_regions "${changed_regions}" '{reason:$reason,recovery_point_id:$recovery_point_id,reference_recovery_point_id:$reference_recovery_point_id,changed_regions:$changed_regions}')"
+	          source_map="$(n2k_source_map_from_v3_nfs_path_index "${N2K_MANIFEST}" "${path_index}" "${nfs_host}")"
+	          changed_regions="$(n2k_changed_regions_full_copy_from_source_map "${source_map}" "${N2K_MANIFEST}" "${recovery_point_id}" "${reference_recovery_point_id}" "${fallback_reason}")"
+	        fi
+	      else
+	        source_map="$(n2k_load_source_map_json "${source_map_json_arg}")"
+	      fi
+	      n2k_transfer_patch_all "${N2K_MANIFEST}" "${which}" "${source_map}" "${changed_regions}" "${recovery_point_id}"
+	      n2k_json_or_text_ok "sync.${which}" "{}" "$(printf '%s' "${which}" | tr '[:lower:]' '[:upper:]') sync done."
+	      ;;
     *)
       n2k_die "Invalid sync phase: ${which}"
       ;;
