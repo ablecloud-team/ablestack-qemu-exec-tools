@@ -1347,6 +1347,25 @@ jobs:
               sudo "${cmd}" "$@"
           }
 
+          rpm_query_cmd() {
+              resolve_first_cmd rpm aspkg || {
+                  echo "[ERROR] Neither rpm nor ABLESTACK aspkg was found." >&2
+                  return 127
+              }
+          }
+
+          rpm_query() {
+              local cmd=
+              cmd="$(rpm_query_cmd)" || return $?
+              "${cmd}" "$@"
+          }
+
+          log_rpm_pkg_if_installed() {
+              local pkg="${1-}"
+              [[ -n "${pkg}" ]] || return 0
+              rpm_query -q "${pkg}" || true
+          }
+
           rpm_pkg_clean_all() {
               rpm_pkg_manager clean all || true
           }
@@ -1375,6 +1394,7 @@ jobs:
           EOR
                   rpm_pkg_clean_all
                   rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-qemu-exec-tools" install ablestack-qemu-exec-tools
+                  log_rpm_pkg_if_installed ablestack-qemu-exec-tools
                   sudo rm -f /etc/yum.repos.d/ablestack-qemu-exec-tools.repo
                   rpm_pkg_clean_all
 
@@ -1405,6 +1425,7 @@ jobs:
                           rpm_pkg_clean_all
                           if rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-vm-hangctl" install ablestack_vm_hangctl; then
                               echo "[OK] ablestack_vm_hangctl installed."
+                              log_rpm_pkg_if_installed ablestack_vm_hangctl
                           else
                               echo "[WARN] Failed to install ablestack_vm_hangctl from ISO repo. Continuing."
                           fi
@@ -1439,6 +1460,7 @@ jobs:
                           rpm_pkg_clean_all
                           if rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-vm-ftctl" install ablestack_vm_ftctl; then
                               echo "[OK] ablestack_vm_ftctl installed."
+                              log_rpm_pkg_if_installed ablestack_vm_ftctl
                           else
                               echo "[WARN] Failed to install ablestack_vm_ftctl from ISO repo. Continuing."
                           fi
@@ -1469,6 +1491,7 @@ jobs:
                           rpm_pkg_clean_all
                           if rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-n2k" install ablestack_n2k; then
                               echo "[OK] ablestack_n2k installed."
+                              log_rpm_pkg_if_installed ablestack_n2k
                           else
                               echo "[WARN] Failed to install ablestack_n2k from ISO repo. Continuing."
                           fi
@@ -1505,6 +1528,7 @@ jobs:
                           rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
                             rpm_pkg_manager -y --disablerepo="*" --enablerepo="ablestack-v2k" install ablestack_v2k || \
                             rpm_pkg_manager -y localinstall "${V2K_REPO_DIR}"/*.rpm
+                          log_rpm_pkg_if_installed ablestack_v2k
                           sudo rm -f "${V2K_REPO_FILE}"
                           rpm_pkg_clean_all
 
@@ -1603,6 +1627,8 @@ jobs:
         run: |
           set -e
           bash -n release/install-linux.sh
+          grep -q 'resolve_first_cmd dnf aspm' release/install-linux.sh
+          grep -q 'resolve_first_cmd rpm aspkg' release/install-linux.sh
 
       - name: Create uninstall-linux.sh
         run: |
@@ -1653,10 +1679,44 @@ jobs:
             sudo "${cmd}" "$@"
           }
 
+          rpm_query_cmd() {
+            resolve_first_cmd rpm aspkg || {
+              echo "[ERROR] Neither rpm nor ABLESTACK aspkg was found." >&2
+              return 127
+            }
+          }
+
+          rpm_query() {
+            local cmd=
+            cmd="$(rpm_query_cmd)" || return $?
+            "${cmd}" "$@"
+          }
+
+          rpm_pkg_installed() {
+            local pkg="${1-}"
+            [[ -n "${pkg}" ]] || return 1
+            rpm_query -q "${pkg}" >/dev/null 2>&1
+          }
+
+          remove_rpm_pkgs_if_installed() {
+            local pkg=
+            local pkgs_to_remove=()
+            for pkg in "$@"; do
+              if rpm_pkg_installed "${pkg}"; then
+                pkgs_to_remove+=("${pkg}")
+              else
+                echo "[INFO] RPM package not installed, skip: ${pkg}"
+              fi
+            done
+            if (( ${#pkgs_to_remove[@]} > 0 )); then
+              rpm_pkg_manager -y remove "${pkgs_to_remove[@]}" || true
+            fi
+          }
+
           case "${DISTRO}" in
             rocky|rhel|centos|almalinux|fedora)
               echo "[INFO] Detected RPM-based system (${DISTRO} ${VERSION_ID:-unknown})"
-              rpm_pkg_manager -y remove ablestack_v2k ablestack_n2k ablestack_vm_hangctl ablestack_vm_ftctl ablestack-qemu-exec-tools || true
+              remove_rpm_pkgs_if_installed ablestack_v2k ablestack_n2k ablestack_vm_hangctl ablestack_vm_ftctl ablestack-qemu-exec-tools
               rpm_pkg_manager clean all || true
               ;;
             ubuntu|debian)
@@ -1700,6 +1760,8 @@ jobs:
         run: |
           set -e
           bash -n release/uninstall-linux.sh
+          grep -q 'resolve_first_cmd dnf aspm' release/uninstall-linux.sh
+          grep -q 'resolve_first_cmd rpm aspkg' release/uninstall-linux.sh
 
       - name: Generate release notes (changelog)
         run: |
