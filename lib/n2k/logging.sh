@@ -44,7 +44,7 @@ n2k_event() {
     --arg phase "${phase}" \
     --arg disk "${disk}" \
     --arg event "${event}" \
-    --argjson payload "${payload}" \
-    '{ts:$ts,level:$level,phase:$phase,disk:$disk,event:$event,payload:$payload}' \
+    --slurpfile payload_json <(printf '%s' "${payload}") \
+    '{ts:$ts,level:$level,phase:$phase,disk:$disk,event:$event,payload:$payload_json[0]}' \
     >> "${log}"
 }

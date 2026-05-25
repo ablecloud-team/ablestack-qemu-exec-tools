@@ -562,8 +562,10 @@ n2k_manifest_record_recovery_point() {
     --arg name "${name}" \
     --arg source_api "${source_api}" \
     --arg ts "${ts}" \
-    --argjson metadata "${metadata_json}" \
+    --slurpfile metadata_json_file <(printf '%s' "${metadata_json}") \
     '
+      ($metadata_json_file[0]) as $metadata
+      |
       .runtime.sync = (.runtime.sync // {})
       | .runtime.sync.last_recovery_point_id = $recovery_point_id
       | .runtime.sync.last_recovery_point_kind = $rp_key
