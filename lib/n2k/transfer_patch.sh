@@ -165,6 +165,66 @@ n2k_patch_source_safe_name() {
   printf '%s' "${raw}" | tr -c 'A-Za-z0-9_.-' '_'
 }
 
+n2k_patch_source_cache_dir() {
+  printf '%s/source-cache' "${N2K_WORKDIR:-$(pwd)}"
+}
+
+n2k_patch_source_regular_bytes() {
+  local regions="$1"
+  jq -r '
+    map(select(((.type // "regular") | ascii_downcase) as $t | ($t == "regular" or $t == "")) | (.length // .len // .size // 0))
+    | add // 0
+  ' <<<"${regions}"
+}
+
+n2k_patch_source_check_cache_space() {
+  local cache_dir="$1" regions="$2" disk_id="$3" phase="$4"
+  local bytes_needed available margin
+  bytes_needed="$(n2k_patch_source_regular_bytes "${regions}")"
+  margin="${N2K_SOURCE_CACHE_MIN_FREE_BYTES:-1073741824}"
+  [[ "${bytes_needed}" =~ ^[0-9]+$ ]] || bytes_needed=0
+  [[ "${margin}" =~ ^[0-9]+$ ]] || margin=1073741824
+
+  mkdir -p "${cache_dir}"
+  available="$(df -PB1 "${cache_dir}" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  [[ "${available}" =~ ^[0-9]+$ ]] || return 0
+  if (( available < bytes_needed + margin )); then
+    cat >&2 <<EOF
+Insufficient free space for n2k source-cache materialization.
+Phase: ${phase}
+Disk: ${disk_id}
+Cache directory: ${cache_dir}
+Estimated regular changed bytes: ${bytes_needed}
+Available bytes: ${available}
+Required safety margin bytes: ${margin}
+Action: free local space, move the workdir to a larger filesystem, or rerun after cleaning stale source-cache directories.
+EOF
+    return 2
+  fi
+}
+
+n2k_patch_source_is_cache_file() {
+  local path="$1" cache_dir
+  cache_dir="$(n2k_patch_source_cache_dir)"
+  [[ -n "${path}" && "${path}" == "${cache_dir}/"* ]]
+}
+
+n2k_patch_source_cleanup_cache_file() {
+  local path="$1" disk_id="$2" phase="$3" cache_dir
+  n2k_patch_source_is_cache_file "${path}" || return 0
+  if [[ "${N2K_KEEP_SOURCE_CACHE:-0}" == "1" || "${N2K_KEEP_SOURCE_CACHE:-}" == "true" ]]; then
+    n2k_event INFO "sync.${phase}" "${disk_id}" "source_cache_kept" \
+      "$(jq -nc --arg path "${path}" '{path:$path}')"
+    return 0
+  fi
+
+  rm -f -- "${path}" || true
+  cache_dir="$(n2k_patch_source_cache_dir)"
+  rmdir -- "${cache_dir}" 2>/dev/null || true
+  n2k_event INFO "sync.${phase}" "${disk_id}" "source_cache_removed" \
+    "$(jq -nc --arg path "${path}" '{path:$path}')"
+}
+
 n2k_patch_source_require_nutanix_v3_data_env() {
   [[ -n "${N2K_NUTANIX_PC:-}" ]] || {
     echo "Nutanix v3 data source requires --pc or manifest source pc." >&2
@@ -235,20 +295,22 @@ n2k_patch_source_materialize_nutanix_v3_data() {
   local source_uri="$1" regions="$2" disk_id="$3" phase="$4"
   local uri_json vm_uuid vm_disk_uuid cache_dir safe_disk out_file max_end chunk_max
   local offset length region_type cursor remaining chunk_len chunk_file
+  local materialized_ok=0
 
   n2k_patch_source_require_nutanix_v3_data_env
   uri_json="$(n2k_patch_source_nutanix_v3_data_uri_parts "${source_uri}")"
   vm_uuid="$(jq -r '.vm_uuid' <<<"${uri_json}")"
   vm_disk_uuid="$(jq -r '.disk_uuid' <<<"${uri_json}")"
-  cache_dir="${N2K_WORKDIR:-$(pwd)}/source-cache"
+  cache_dir="$(n2k_patch_source_cache_dir)"
   safe_disk="$(n2k_patch_source_safe_name "${disk_id}")"
   out_file="${cache_dir}/${phase}-${safe_disk}.raw"
   max_end="$(jq -r 'map(.offset + .length) | max // 0' <<<"${regions}")"
   chunk_max="${N2K_NUTANIX_DATA_CHUNK_MAX:-16777216}"
 
-  mkdir -p "${cache_dir}"
+  n2k_patch_source_check_cache_space "${cache_dir}" "${regions}" "${disk_id}" "${phase}"
   rm -f "${out_file}"
   truncate -s "${max_end}" "${out_file}"
+  trap '[[ "${materialized_ok}" -eq 1 ]] || rm -f -- "${out_file}"; [[ -z "${chunk_file:-}" ]] || rm -f -- "${chunk_file}"' RETURN
 
   while IFS=$'\t' read -r offset length region_type; do
     [[ -n "${offset}" && -n "${length}" ]] || continue
@@ -277,6 +339,8 @@ n2k_patch_source_materialize_nutanix_v3_data() {
     done
   done < <(jq -r '.[] | [(.offset | tostring), (.length | tostring), (.type // "regular")] | @tsv' <<<"${regions}")
 
+  materialized_ok=1
+  trap - RETURN
   printf '%s' "${out_file}"
 }
 
@@ -284,16 +348,18 @@ n2k_patch_source_materialize_image_regions() {
   local source_path="$1" regions="$2" disk_id="$3" phase="$4"
   local cache_dir safe_disk out_file max_end image_format source_device
   local offset length region_type rc=0
+  local materialized_ok=0
 
   n2k_storage_require_command qemu-nbd "image patch source materialization"
-  cache_dir="${N2K_WORKDIR:-$(pwd)}/source-cache"
+  cache_dir="$(n2k_patch_source_cache_dir)"
   safe_disk="$(n2k_patch_source_safe_name "${disk_id}")"
   out_file="${cache_dir}/${phase}-${safe_disk}.raw"
   max_end="$(jq -r 'map(.offset + .length) | max // 0' <<<"${regions}")"
 
-  mkdir -p "${cache_dir}"
+  n2k_patch_source_check_cache_space "${cache_dir}" "${regions}" "${disk_id}" "${phase}"
   rm -f "${out_file}"
   truncate -s "${max_end}" "${out_file}"
+  trap '[[ "${materialized_ok}" -eq 1 ]] || rm -f -- "${out_file}"; [[ -z "${source_device:-}" ]] || n2k_storage_unmap_qcow2_nbd "${source_device}" >/dev/null 2>&1 || true' RETURN
 
   image_format="$(n2k_storage_detect_image_format "${source_path}")"
   source_device="$(n2k_storage_connect_readonly_nbd "${source_path}" "${image_format}")"
@@ -319,6 +385,8 @@ n2k_patch_source_materialize_image_regions() {
 
   n2k_storage_unmap_qcow2_nbd "${source_device}"
   [[ "${rc}" -eq 0 ]] || return "${rc}"
+  materialized_ok=1
+  trap - RETURN
   printf '%s' "${out_file}"
 }
 
@@ -381,7 +449,7 @@ n2k_transfer_patch_all() {
 
 n2k_transfer_patch_one() {
   local manifest="$1" phase="$2" source_map_json="$3" changed_regions_json="$4" idx="$5" recovery_point_id="${6:-}"
-  local disk_id source_path patch_source_path target_path target_format target_storage rbd_access_mode regions region_count bytes_written phase_key
+  local disk_id source_path patch_source_path target_path target_format target_storage rbd_access_mode regions region_count bytes_written phase_key patch_rc=0
 
   case "${phase}" in
     incr) phase_key="incr_sync" ;;
@@ -426,10 +494,12 @@ n2k_transfer_patch_one() {
 
   patch_source_path="$(n2k_patch_source_prepare "${source_path}" "${regions}" "${disk_id}" "${phase}")"
   if [[ "${target_storage}" == "rbd" && "${rbd_access_mode}" == "krbd" ]]; then
-    N2K_RBD_PATCH_MAP_MODE="krbd" n2k_storage_patch_target "${patch_source_path}" "${target_path}" "${target_storage}" "${target_format}" "${regions}"
+    N2K_RBD_PATCH_MAP_MODE="krbd" n2k_storage_patch_target "${patch_source_path}" "${target_path}" "${target_storage}" "${target_format}" "${regions}" || patch_rc=$?
   else
-    n2k_storage_patch_target "${patch_source_path}" "${target_path}" "${target_storage}" "${target_format}" "${regions}"
+    n2k_storage_patch_target "${patch_source_path}" "${target_path}" "${target_storage}" "${target_format}" "${regions}" || patch_rc=$?
   fi
+  n2k_patch_source_cleanup_cache_file "${patch_source_path}" "${disk_id}" "${phase}" || true
+  [[ "${patch_rc}" -eq 0 ]] || return "${patch_rc}"
 
   n2k_manifest_mark_patch_done "${manifest}" "${idx}" "${phase_key}" "${bytes_written}" "${region_count}" "${recovery_point_id}"
   n2k_event INFO "sync.${phase}" "${disk_id}" "patch_disk_done" \

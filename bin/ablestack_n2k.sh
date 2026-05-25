@@ -536,10 +536,12 @@ Options:
   --insecure <0|1>         Allow insecure TLS for Prism API source URIs
   --source-map-from-v3-nfs
                            Build source map from v3 snapshot metadata and NFS
-  --nfs-host <host>        Nutanix NFS host for v3 snapshot file paths
-  --nfs-mount-root <path>  Local mount root for Nutanix NFS sources
-  --changed-regions-json <js>
-                           Changed-region JSON for incr/final sync
+	  --nfs-host <host>        Nutanix NFS host for v3 snapshot file paths
+	  --nfs-mount-root <path>  Local mount root for Nutanix NFS sources
+	  --keep-source-cache      Keep materialized source-cache files after incr/final
+	                           patch sync for debugging; default removes them
+	  --changed-regions-json <js>
+	                           Changed-region JSON for incr/final sync
   --changed-regions-file <file>
                            Changed-region JSON file for incr/final sync
   --recovery-point-id <id>
@@ -623,13 +625,16 @@ Usage:
 Options:
   --keep-source-points    Keep source snapshots or recovery points
   --keep-workdir          Keep local workdir
-  --remove-source-points  Remove recorded source points, requires global --force
-  --remove-workdir        Remove empty workdir entries, requires global --force
-  --apply                 Apply the cleanup plan
+	  --remove-source-points  Remove recorded source points, requires global --force
+	  --remove-workdir        Remove empty workdir entries, requires global --force
+	  --remove-source-cache   Remove workdir/source-cache garbage
+	  --gc-source-cache       Alias for --remove-source-cache
+	  --apply                 Apply the cleanup plan
 
 Notes:
   - Without --apply, this command only prints the cleanup plan.
-  - Cleanup only removes resources recorded in the manifest.
+  - Cleanup removes resources recorded in the manifest and, when requested,
+    the source-cache directory under the current workdir.
 EOF
 }
 

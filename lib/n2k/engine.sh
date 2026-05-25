@@ -1846,12 +1846,13 @@ n2k_cmd_sync() {
       --username) username="${2:-}"; shift 2 ;;
       --password) password="${2:-}"; shift 2 ;;
       --insecure) insecure="${2:-}"; shift 2 ;;
-      --source-map-from-v3-nfs) source_map_from_v3_nfs=true; shift 1 ;;
-      --nfs-host) nfs_host="${2:-}"; shift 2 ;;
-      --nfs-mount-root) nfs_mount_root="${2:-}"; shift 2 ;;
-      --jobs|--chunk|--coalesce-gap)
-        shift 2
-        ;;
+	      --source-map-from-v3-nfs) source_map_from_v3_nfs=true; shift 1 ;;
+	      --nfs-host) nfs_host="${2:-}"; shift 2 ;;
+	      --nfs-mount-root) nfs_mount_root="${2:-}"; shift 2 ;;
+	      --keep-source-cache) export N2K_KEEP_SOURCE_CACHE=1; shift 1 ;;
+	      --jobs|--chunk|--coalesce-gap)
+	        shift 2
+	        ;;
       *) n2k_die "Unknown option for sync: $1" ;;
     esac
   done
@@ -2101,13 +2102,14 @@ n2k_cmd_cutover() {
   n2k_json_or_text_ok "cutover" "$(jq -nc --arg xml_path "${xml_path}" '{xml_path:$xml_path}')" "Cutover artifact generated: ${xml_path}"
 }
 n2k_cleanup_plan_json() {
-  local manifest="$1" keep_source_points="$2" keep_workdir="$3"
+  local manifest="$1" keep_source_points="$2" keep_workdir="$3" remove_source_cache="${4:-false}"
   local workdir
   workdir="$(jq -r '.run.workdir // ""' "${manifest}")"
   jq -c \
     --arg workdir "${workdir}" \
     --argjson keep_source_points "${keep_source_points}" \
     --argjson keep_workdir "${keep_workdir}" \
+    --argjson remove_source_cache "${remove_source_cache}" \
     '
       def in_workdir($p):
         ($workdir | length) > 0 and (($p + "/") | startswith($workdir + "/"));
@@ -2117,18 +2119,29 @@ n2k_cleanup_plan_json() {
           keep_source_points: $keep_source_points,
           keep_workdir: $keep_workdir,
           items: (
-            $items
+            (
+              $items
+              + (if $remove_source_cache and (($workdir | length) > 0) then [{
+                  kind:"source-cache",
+                  path:($workdir + "/source-cache"),
+                  cleanup_allowed:true,
+                  removed:false
+                }] else [] end)
+            )
             | map(select((.removed // false) | not))
+            | unique_by(.kind + ":" + (.path // ""))
             | map(. + {
                 action: (
-                  if (.source_resource // false) and $keep_source_points then "keep"
+                  if (.kind // "") == "source-cache" and $remove_source_cache then "remove"
+                  elif (.source_resource // false) and $keep_source_points then "keep"
                   elif ((.cleanup_allowed // false) | not) then "keep"
                   elif (.path // "" | in_workdir(.)) then "remove"
                   else "keep"
                   end
                 ),
                 reason: (
-                  if (.source_resource // false) and $keep_source_points then "source resource is kept"
+                  if (.kind // "") == "source-cache" and $remove_source_cache then "source-cache garbage"
+                  elif (.source_resource // false) and $keep_source_points then "source resource is kept"
                   elif ((.cleanup_allowed // false) | not) then "cleanup is not allowed"
                   elif (.path // "" | in_workdir(.)) then "recorded workdir artifact"
                   else "path is outside workdir"
@@ -2142,7 +2155,8 @@ n2k_cleanup_plan_json() {
 
 n2k_cleanup_apply_plan() {
   local manifest="$1" plan="$2"
-  local path kind action
+  local path kind action workdir
+  workdir="$(jq -r '.run.workdir // ""' "${manifest}")"
 
   while IFS=$'\t' read -r action path kind; do
     [[ "${action}" == "remove" ]] || continue
@@ -2153,9 +2167,15 @@ n2k_cleanup_apply_plan() {
       n2k_event INFO "cleanup" "" "artifact_removed" \
         "$(jq -nc --arg path "${path}" --arg kind "${kind}" '{path:$path,kind:$kind}')"
     elif [[ -d "${path}" ]]; then
-      rmdir -- "${path}" 2>/dev/null || true
+      if [[ "${kind}" == "source-cache" && -n "${workdir}" && "${path}" == "${workdir}/source-cache" ]]; then
+        rm -rf -- "${path}"
+      else
+        rmdir -- "${path}" 2>/dev/null || true
+      fi
       if [[ ! -d "${path}" ]]; then
         n2k_manifest_mark_cleanup_item_removed "${manifest}" "${path}"
+        n2k_event INFO "cleanup" "" "artifact_removed" \
+          "$(jq -nc --arg path "${path}" --arg kind "${kind}" '{path:$path,kind:$kind}')"
       fi
     else
       n2k_manifest_mark_cleanup_item_removed "${manifest}" "${path}"
@@ -2164,7 +2184,7 @@ n2k_cleanup_apply_plan() {
 }
 
 n2k_cmd_cleanup() {
-  local keep_source_points=true keep_workdir=true apply_cleanup=0
+  local keep_source_points=true keep_workdir=true remove_source_cache=false apply_cleanup=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2174,15 +2194,16 @@ n2k_cmd_cleanup() {
         keep_source_points=false
         shift 1
         ;;
-      --keep-workdir) keep_workdir=true; shift 1 ;;
-      --remove-workdir)
-        [[ "${N2K_FORCE:-0}" -eq 1 ]] || n2k_die "--remove-workdir requires --force"
-        keep_workdir=false
-        shift 1
-        ;;
-      --apply) apply_cleanup=1; shift 1 ;;
-      *) n2k_die "Unknown option for cleanup: $1" ;;
-    esac
+	      --keep-workdir) keep_workdir=true; shift 1 ;;
+	      --remove-workdir)
+	        [[ "${N2K_FORCE:-0}" -eq 1 ]] || n2k_die "--remove-workdir requires --force"
+	        keep_workdir=false
+	        shift 1
+	        ;;
+	      --remove-source-cache|--gc-source-cache) remove_source_cache=true; shift 1 ;;
+	      --apply) apply_cleanup=1; shift 1 ;;
+	      *) n2k_die "Unknown option for cleanup: $1" ;;
+	    esac
   done
 
   if [[ -z "${N2K_MANIFEST:-}" && -n "${N2K_WORKDIR:-}" ]]; then
@@ -2196,7 +2217,7 @@ n2k_cmd_cleanup() {
   n2k_require_manifest
 
   local plan
-  plan="$(n2k_cleanup_plan_json "${N2K_MANIFEST}" "${keep_source_points}" "${keep_workdir}")"
+  plan="$(n2k_cleanup_plan_json "${N2K_MANIFEST}" "${keep_source_points}" "${keep_workdir}" "${remove_source_cache}")"
   n2k_event INFO "cleanup" "" "cleanup_plan_created" "${plan}"
 
   if [[ "${apply_cleanup}" -eq 1 && "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
