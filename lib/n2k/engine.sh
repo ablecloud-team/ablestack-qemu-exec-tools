@@ -143,7 +143,7 @@ n2k_require_manifest() {
 n2k_json_or_text_ok() {
   local phase="$1" json_payload="$2" text="$3"
   if [[ "${N2K_JSON_OUT:-0}" -eq 1 ]]; then
-    jq -nc --arg phase "${phase}" --argjson payload "${json_payload}" '{ok:true,phase:$phase,payload:$payload}'
+    jq -nc --arg phase "${phase}" --slurpfile payload_json <(printf '%s' "${json_payload}") '{ok:true,phase:$phase,payload:$payload_json[0]}'
   else
     echo "${text}"
   fi
@@ -1563,12 +1563,12 @@ n2k_cmd_snapshot() {
         [[ -n "${name}" ]] || name="${snapshot_name}"
       fi
       metadata_json="$(jq -nc \
-        --argjson create_response "${create_response}" \
-        --argjson snapshot "${snapshot_json}" \
-        --argjson paths "${path_index}" \
-        --argjson validation "${validation_json}" \
-        --argjson changed_regions "${changed_regions_json}" \
-        '{v3:{create_response:$create_response,snapshot:$snapshot,path_index:$paths,changed_regions_validation:$validation,changed_regions:$changed_regions}}')"
+        --slurpfile create_response_json <(printf '%s' "${create_response}") \
+        --slurpfile snapshot_json_file <(printf '%s' "${snapshot_json}") \
+        --slurpfile paths_json <(printf '%s' "${path_index}") \
+        --slurpfile validation_json_file <(printf '%s' "${validation_json}") \
+        --slurpfile changed_regions_json_file <(printf '%s' "${changed_regions_json}") \
+        '{v3:{create_response:$create_response_json[0],snapshot:$snapshot_json_file[0],path_index:$paths_json[0],changed_regions_validation:$validation_json_file[0],changed_regions:$changed_regions_json_file[0]}}')"
     fi
   elif [[ "${source_api}" == "v4" && ( "${create_recovery_point}" == "true" || "${create_vm_snapshot}" == "true" ) ]]; then
     case "${insecure}" in
@@ -1699,14 +1699,14 @@ n2k_cmd_snapshot() {
       fi
       metadata_json="$(jq -nc \
         --arg revision "${revision}" \
-        --argjson create_response "${create_response}" \
-        --argjson task "${task_json}" \
-        --argjson recovery_point "${rp_json}" \
-        --argjson vm_recovery_point "${vmrp_json}" \
-        --argjson paths "${path_index}" \
-        --argjson changed_regions "${changed_regions_json}" \
-        --argjson restore_to_temp_vm "${restore_to_temp_vm_json}" \
-        '{v4:{revision:$revision,create_response:$create_response,task:$task,recovery_point:$recovery_point,path_index:$paths,vm_recovery_point:$vm_recovery_point,changed_regions:$changed_regions,restore_to_temp_vm:$restore_to_temp_vm}}')"
+        --slurpfile create_response_json <(printf '%s' "${create_response}") \
+        --slurpfile task_json_file <(printf '%s' "${task_json}") \
+        --slurpfile recovery_point_json <(printf '%s' "${rp_json}") \
+        --slurpfile vm_recovery_point_json <(printf '%s' "${vmrp_json}") \
+        --slurpfile paths_json <(printf '%s' "${path_index}") \
+        --slurpfile changed_regions_json_file <(printf '%s' "${changed_regions_json}") \
+        --slurpfile restore_to_temp_vm_json_file <(printf '%s' "${restore_to_temp_vm_json}") \
+        '{v4:{revision:$revision,create_response:$create_response_json[0],task:$task_json_file[0],recovery_point:$recovery_point_json[0],path_index:$paths_json[0],vm_recovery_point:$vm_recovery_point_json[0],changed_regions:$changed_regions_json_file[0],restore_to_temp_vm:$restore_to_temp_vm_json_file[0]}}')"
     fi
   elif [[ "${source_api}" == "legacy" && "${create_oob_snapshot}" == "true" ]]; then
     case "${insecure}" in
@@ -1800,11 +1800,11 @@ n2k_cmd_snapshot() {
         name="${pd_name}:${recovery_point_id}"
       fi
       metadata_json="$(jq -nc \
-        --argjson oob "${oob_response}" \
-        --argjson snapshot "${latest_snapshot}" \
-        --argjson paths "${path_index}" \
-        --argjson validation "${validation_json}" \
-        '{legacy:{oob_schedule:$oob,snapshot:$snapshot,path_index:$paths,changed_regions_validation:$validation}}')"
+        --slurpfile oob_json <(printf '%s' "${oob_response}") \
+        --slurpfile snapshot_json_file <(printf '%s' "${latest_snapshot}") \
+        --slurpfile paths_json <(printf '%s' "${path_index}") \
+        --slurpfile validation_json_file <(printf '%s' "${validation_json}") \
+        '{legacy:{oob_schedule:$oob_json[0],snapshot:$snapshot_json_file[0],path_index:$paths_json[0],changed_regions_validation:$validation_json_file[0]}}')"
     fi
   fi
 
@@ -1818,10 +1818,12 @@ n2k_cmd_snapshot() {
   if [[ "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
     n2k_manifest_record_recovery_point "${N2K_MANIFEST}" "${which}" "${recovery_point_id}" "${name}" "${source_api}" "${metadata_json}"
   fi
+  local recovery_point_payload
+  recovery_point_payload="$(jq -nc --arg kind "${which}" --arg id "${recovery_point_id}" --arg name "${name}" --arg source_api "${source_api}" --slurpfile metadata_json_file <(printf '%s' "${metadata_json}") '{kind:$kind,id:$id,name:$name,source_api:$source_api,metadata:$metadata_json_file[0]}')"
   n2k_event INFO "snapshot.${which}" "" "recovery_point_recorded" \
-    "$(jq -nc --arg kind "${which}" --arg id "${recovery_point_id}" --arg name "${name}" --arg source_api "${source_api}" --argjson metadata "${metadata_json}" '{kind:$kind,id:$id,name:$name,source_api:$source_api,metadata:$metadata}')"
+    "${recovery_point_payload}"
   n2k_json_or_text_ok "snapshot.${which}" \
-    "$(jq -nc --arg id "${recovery_point_id}" --arg name "${name}" --arg source_api "${source_api}" --argjson metadata "${metadata_json}" '{recovery_point_id:$id,name:$name,source_api:$source_api,metadata:$metadata}')" \
+    "$(jq -nc --arg id "${recovery_point_id}" --arg name "${name}" --arg source_api "${source_api}" --slurpfile metadata_json_file <(printf '%s' "${metadata_json}") '{recovery_point_id:$id,name:$name,source_api:$source_api,metadata:$metadata_json_file[0]}')" \
     "Snapshot reference recorded: ${recovery_point_id}"
 }
 n2k_cmd_sync() {
@@ -1844,12 +1846,13 @@ n2k_cmd_sync() {
       --username) username="${2:-}"; shift 2 ;;
       --password) password="${2:-}"; shift 2 ;;
       --insecure) insecure="${2:-}"; shift 2 ;;
-      --source-map-from-v3-nfs) source_map_from_v3_nfs=true; shift 1 ;;
-      --nfs-host) nfs_host="${2:-}"; shift 2 ;;
-      --nfs-mount-root) nfs_mount_root="${2:-}"; shift 2 ;;
-      --jobs|--chunk|--coalesce-gap)
-        shift 2
-        ;;
+	      --source-map-from-v3-nfs) source_map_from_v3_nfs=true; shift 1 ;;
+	      --nfs-host) nfs_host="${2:-}"; shift 2 ;;
+	      --nfs-mount-root) nfs_mount_root="${2:-}"; shift 2 ;;
+	      --keep-source-cache) export N2K_KEEP_SOURCE_CACHE=1; shift 1 ;;
+	      --jobs|--chunk|--coalesce-gap)
+	        shift 2
+	        ;;
       *) n2k_die "Unknown option for sync: $1" ;;
     esac
   done
@@ -1947,7 +1950,7 @@ n2k_cmd_sync() {
 	          fallback_reason="$(jq -r '.reason // (if ((.errors // []) | length) > 0 then "changed-region API returned errors" else "changed-region metadata is unavailable" end)' <<<"${changed_regions}")"
 	          reference_recovery_point_id="$(jq -r '.reference_recovery_point_id // .base_recovery_point_id // empty' <<<"${changed_regions}")"
 	          n2k_event WARN "sync.${which}" "" "changed_regions_full_copy_fallback" \
-	            "$(jq -nc --arg reason "${fallback_reason}" --arg recovery_point_id "${recovery_point_id}" --arg reference_recovery_point_id "${reference_recovery_point_id}" --argjson changed_regions "${changed_regions}" '{reason:$reason,recovery_point_id:$recovery_point_id,reference_recovery_point_id:$reference_recovery_point_id,changed_regions:$changed_regions}')"
+	            "$(jq -nc --arg reason "${fallback_reason}" --arg recovery_point_id "${recovery_point_id}" --arg reference_recovery_point_id "${reference_recovery_point_id}" --slurpfile changed_regions_json_file <(printf '%s' "${changed_regions}") '{reason:$reason,recovery_point_id:$recovery_point_id,reference_recovery_point_id:$reference_recovery_point_id,changed_regions:$changed_regions_json_file[0]}')"
 	          source_map="$(n2k_source_map_from_v3_nfs_path_index "${N2K_MANIFEST}" "${path_index}" "${nfs_host}")"
 	          changed_regions="$(n2k_changed_regions_full_copy_from_source_map "${source_map}" "${N2K_MANIFEST}" "${recovery_point_id}" "${reference_recovery_point_id}" "${fallback_reason}")"
 	        fi
@@ -2099,13 +2102,14 @@ n2k_cmd_cutover() {
   n2k_json_or_text_ok "cutover" "$(jq -nc --arg xml_path "${xml_path}" '{xml_path:$xml_path}')" "Cutover artifact generated: ${xml_path}"
 }
 n2k_cleanup_plan_json() {
-  local manifest="$1" keep_source_points="$2" keep_workdir="$3"
+  local manifest="$1" keep_source_points="$2" keep_workdir="$3" remove_source_cache="${4:-false}"
   local workdir
   workdir="$(jq -r '.run.workdir // ""' "${manifest}")"
   jq -c \
     --arg workdir "${workdir}" \
     --argjson keep_source_points "${keep_source_points}" \
     --argjson keep_workdir "${keep_workdir}" \
+    --argjson remove_source_cache "${remove_source_cache}" \
     '
       def in_workdir($p):
         ($workdir | length) > 0 and (($p + "/") | startswith($workdir + "/"));
@@ -2115,18 +2119,29 @@ n2k_cleanup_plan_json() {
           keep_source_points: $keep_source_points,
           keep_workdir: $keep_workdir,
           items: (
-            $items
+            (
+              $items
+              + (if $remove_source_cache and (($workdir | length) > 0) then [{
+                  kind:"source-cache",
+                  path:($workdir + "/source-cache"),
+                  cleanup_allowed:true,
+                  removed:false
+                }] else [] end)
+            )
             | map(select((.removed // false) | not))
+            | unique_by(.kind + ":" + (.path // ""))
             | map(. + {
                 action: (
-                  if (.source_resource // false) and $keep_source_points then "keep"
+                  if (.kind // "") == "source-cache" and $remove_source_cache then "remove"
+                  elif (.source_resource // false) and $keep_source_points then "keep"
                   elif ((.cleanup_allowed // false) | not) then "keep"
                   elif (.path // "" | in_workdir(.)) then "remove"
                   else "keep"
                   end
                 ),
                 reason: (
-                  if (.source_resource // false) and $keep_source_points then "source resource is kept"
+                  if (.kind // "") == "source-cache" and $remove_source_cache then "source-cache garbage"
+                  elif (.source_resource // false) and $keep_source_points then "source resource is kept"
                   elif ((.cleanup_allowed // false) | not) then "cleanup is not allowed"
                   elif (.path // "" | in_workdir(.)) then "recorded workdir artifact"
                   else "path is outside workdir"
@@ -2140,7 +2155,8 @@ n2k_cleanup_plan_json() {
 
 n2k_cleanup_apply_plan() {
   local manifest="$1" plan="$2"
-  local path kind action
+  local path kind action workdir
+  workdir="$(jq -r '.run.workdir // ""' "${manifest}")"
 
   while IFS=$'\t' read -r action path kind; do
     [[ "${action}" == "remove" ]] || continue
@@ -2151,9 +2167,15 @@ n2k_cleanup_apply_plan() {
       n2k_event INFO "cleanup" "" "artifact_removed" \
         "$(jq -nc --arg path "${path}" --arg kind "${kind}" '{path:$path,kind:$kind}')"
     elif [[ -d "${path}" ]]; then
-      rmdir -- "${path}" 2>/dev/null || true
+      if [[ "${kind}" == "source-cache" && -n "${workdir}" && "${path}" == "${workdir}/source-cache" ]]; then
+        rm -rf -- "${path}"
+      else
+        rmdir -- "${path}" 2>/dev/null || true
+      fi
       if [[ ! -d "${path}" ]]; then
         n2k_manifest_mark_cleanup_item_removed "${manifest}" "${path}"
+        n2k_event INFO "cleanup" "" "artifact_removed" \
+          "$(jq -nc --arg path "${path}" --arg kind "${kind}" '{path:$path,kind:$kind}')"
       fi
     else
       n2k_manifest_mark_cleanup_item_removed "${manifest}" "${path}"
@@ -2162,7 +2184,7 @@ n2k_cleanup_apply_plan() {
 }
 
 n2k_cmd_cleanup() {
-  local keep_source_points=true keep_workdir=true apply_cleanup=0
+  local keep_source_points=true keep_workdir=true remove_source_cache=false apply_cleanup=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2172,15 +2194,16 @@ n2k_cmd_cleanup() {
         keep_source_points=false
         shift 1
         ;;
-      --keep-workdir) keep_workdir=true; shift 1 ;;
-      --remove-workdir)
-        [[ "${N2K_FORCE:-0}" -eq 1 ]] || n2k_die "--remove-workdir requires --force"
-        keep_workdir=false
-        shift 1
-        ;;
-      --apply) apply_cleanup=1; shift 1 ;;
-      *) n2k_die "Unknown option for cleanup: $1" ;;
-    esac
+	      --keep-workdir) keep_workdir=true; shift 1 ;;
+	      --remove-workdir)
+	        [[ "${N2K_FORCE:-0}" -eq 1 ]] || n2k_die "--remove-workdir requires --force"
+	        keep_workdir=false
+	        shift 1
+	        ;;
+	      --remove-source-cache|--gc-source-cache) remove_source_cache=true; shift 1 ;;
+	      --apply) apply_cleanup=1; shift 1 ;;
+	      *) n2k_die "Unknown option for cleanup: $1" ;;
+	    esac
   done
 
   if [[ -z "${N2K_MANIFEST:-}" && -n "${N2K_WORKDIR:-}" ]]; then
@@ -2194,7 +2217,7 @@ n2k_cmd_cleanup() {
   n2k_require_manifest
 
   local plan
-  plan="$(n2k_cleanup_plan_json "${N2K_MANIFEST}" "${keep_source_points}" "${keep_workdir}")"
+  plan="$(n2k_cleanup_plan_json "${N2K_MANIFEST}" "${keep_source_points}" "${keep_workdir}" "${remove_source_cache}")"
   n2k_event INFO "cleanup" "" "cleanup_plan_created" "${plan}"
 
   if [[ "${apply_cleanup}" -eq 1 && "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
