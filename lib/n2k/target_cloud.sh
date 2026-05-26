@@ -225,18 +225,27 @@ n2k_cloud_target_source_deploy_params_json() {
         elif ($s | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
         else "" end;
 
+    def source_mac($vm):
+      (($vm.nics // [])
+       | map(.mac // .macAddress // .mac_address // "")
+       | map((. // "") | tostring | ascii_downcase)
+       | map(select(test("^([0-9a-f]{2}:){5}[0-9a-f]{2}$")))
+       | first) // "";
+
     (.source.vm // {}) as $vm
     | (($vm.cpu // 0) | tonumber? // 0) as $cpu
     | (($vm.memory_mb // 0) | tonumber? // 0) as $memory_mb
     | ((.target.cloud.cpu_speed // "1000") | tostring) as $cpu_speed
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
+    | (source_mac($vm)) as $source_mac
     | (controller(.disks[0].controller.type // "")) as $root_controller
     | (controller((.disks[1:] // [] | map(.controller.type // "") | map(select((. | tostring | length) > 0)) | first) // "")) as $data_controller
     | {}
       + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
       + {"details[0].cpuSpeed": $cpu_speed}
       + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
+      + (if ($source_mac | length) > 0 then {macaddress:$source_mac} else {} end)
       + (if ($root_controller | length) > 0 then {"details[0].rootDiskController": $root_controller} else {} end)
       + (if ($data_controller | length) > 0 then {"details[0].dataDiskController": $data_controller} else {} end)
       + (
