@@ -245,7 +245,7 @@ v2k_vmware_inventory_json() {
   v2k_require_govc_env
 
   local vm_info dev_info
-  local host_moref="" host_name="" hostinfo_json=""
+  local host_moref="" host_name="" host_version="" hostinfo_json=""
   local esxi_mgmt_ip="" esxi_thumbprint=""
 
   vm_info="$(v2k_govc vm.info -json "${vm}")"
@@ -269,6 +269,7 @@ v2k_vmware_inventory_json() {
   # 2-2) ?Œì‹±
   if [[ -n "${hostinfo_json}" ]]; then
     host_name="$(printf '%s' "${hostinfo_json}" | jq -r '.hostSystems[0].summary.config.name // empty' 2>/dev/null || true)"
+    host_version="$(printf '%s' "${hostinfo_json}" | jq -r '.hostSystems[0].summary.config.product.version // .hostSystems[0].config.product.version // empty' 2>/dev/null || true)"
     esxi_thumbprint="$(printf '%s' "${hostinfo_json}" | jq -r '.hostSystems[0].summary.config.sslThumbprint // empty' 2>/dev/null || true)"
     esxi_mgmt_ip="$(v2k_vmware_esxi_mgmt_ip_from_hostinfo_json "${hostinfo_json}" 2>/dev/null | head -n1 || true)"
   fi
@@ -287,6 +288,7 @@ v2k_vmware_inventory_json() {
     --argjson devinfo "${dev_info}" \
     --arg esxi_host "${esxi_mgmt_ip}" \
     --arg esxi_name "${host_name}" \
+    --arg esxi_version "${host_version}" \
     --arg esxi_thumbprint "${esxi_thumbprint}" \
     '
     def VMINFO0: ($vminfo.virtualMachines[0] // {});
@@ -453,6 +455,7 @@ v2k_vmware_inventory_json() {
       },
       esxi_host: $esxi_host,
       esxi_name: $esxi_name,
+      esxi_version: $esxi_version,
       esxi_thumbprint: $esxi_thumbprint,
       disks: disks(controllers)
     }'

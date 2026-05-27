@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${V2K_COMPAT_REAL_PYTHON_BIN:-}" && -x "${V2K_COMPAT_REAL_PYTHON_BIN}" ]]; then
+  exec "${V2K_COMPAT_REAL_PYTHON_BIN}" "$@"
+fi
+
+if [[ "${V2K_COMPAT_ALLOW_SYSTEM_FALLBACK:-0}" == "1" ]]; then
+  while IFS= read -r candidate; do
+    [[ -n "${candidate}" ]] || continue
+    case "${candidate}" in
+      */share/ablestack/v2k/compat/*) continue ;;
+    esac
+    exec "${candidate}" "$@"
+  done < <(which -a python3 2>/dev/null || true)
+fi
+
+echo "Sample compat python wrapper: set V2K_COMPAT_REAL_PYTHON_BIN or V2K_COMPAT_ALLOW_SYSTEM_FALLBACK=1." >&2
+exit 127

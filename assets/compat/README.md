@@ -20,6 +20,14 @@ assets/
         pyvmomi-*.whl
         six-*.whl
         ...
+    esxi55/
+      govc_Linux_x86_64.tar.gz
+      VMware-vix-disklib-6.0.2-3566099.x86_64.tar.gz
+      wheels/
+        pyvmomi-5.5.0.2014.1.1.tar.gz
+        six-*.whl
+        requests-*.whl
+        ...
     vsphere67/
       govc_Linux_x86_64.tar.gz
       VMware-vix-disklib-<version>.tar.gz
@@ -56,6 +64,10 @@ For each selected profile, `bin/v2k_test_install.sh` resolves assets in this ord
 
 - Put version-sensitive assets in `assets/compat/<profile>/...`
 - Keep `assets/...` top-level only for a default fallback set
+- Treat `assets/compat/esxi55` as a strict, self-contained ESXi 5.5 runtime bucket
+- In `assets/compat/esxi55`, VDDK is operator-provided after VMware/Broadcom
+  authentication; the current candidate is VDDK 6.0.2. Public `govc` and
+  pyVmomi dependency assets are staged with the repository assets.
 - Treat `assets/compat/vsphere60` as the legacy toolchain bucket
 - Treat `assets/compat/vsphere67` as the mid-generation toolchain bucket
 - Treat `assets/compat/vsphere80` as the modern/default toolchain bucket

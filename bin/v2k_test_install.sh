@@ -56,6 +56,11 @@ Asset resolution order for each profile:
   1. --offline-wheel-dir
   2. ./assets/compat/<profile>/wheels
   3. ./assets/v2k/wheels
+
+Profiles can opt out of top-level fallback. The ESXi 5.5 profile is strict:
+public govc/pyVmomi assets live under ./assets/compat/esxi55, and the operator
+must add the licensed VMware VDDK archive there before --install-assets can
+install it. The current ESXi 5.5 candidate is VDDK 6.0.2.
 EOF
 }
 
@@ -334,6 +339,52 @@ profile_asset_root() {
   printf '%s/assets/compat/%s' "${root}" "${profile}"
 }
 
+profile_json_for_asset_root() {
+  local root="$1" profile="$2"
+  local profile_json="${root}/share/ablestack/v2k/compat/${profile}/profile.json"
+  [[ -f "${profile_json}" ]] && printf '%s' "${profile_json}"
+}
+
+profile_allows_top_level_fallback() {
+  local root="$1" profile="$2"
+  local profile_json
+  profile_json="$(profile_json_for_asset_root "${root}" "${profile}" || true)"
+  [[ -n "${profile_json}" ]] || return 0
+
+  if has_cmd jq; then
+    [[ "$(jq -r 'if (.asset_policy // {} | has("allow_top_level_fallback")) then .asset_policy.allow_top_level_fallback else true end' "${profile_json}" 2>/dev/null)" == "true" ]]
+    return $?
+  fi
+
+  [[ "$(python3 - <<PY
+import json
+with open(${profile_json@Q}, "r", encoding="utf-8") as f:
+    data = json.load(f)
+print(str((data.get("asset_policy") or {}).get("allow_top_level_fallback", True)).lower())
+PY
+)" == "true" ]]
+}
+
+profile_requires_assets() {
+  local root="$1" profile="$2"
+  local profile_json
+  profile_json="$(profile_json_for_asset_root "${root}" "${profile}" || true)"
+  [[ -n "${profile_json}" ]] || return 1
+
+  if has_cmd jq; then
+    [[ "$(jq -r '.asset_policy.require_profile_assets // false' "${profile_json}" 2>/dev/null)" == "true" ]]
+    return $?
+  fi
+
+  [[ "$(python3 - <<PY
+import json
+with open(${profile_json@Q}, "r", encoding="utf-8") as f:
+    data = json.load(f)
+print(str((data.get("asset_policy") or {}).get("require_profile_assets", False)).lower())
+PY
+)" == "true" ]]
+}
+
 resolve_profile_govc_asset() {
   local root="$1" profile="$2"
   local profile_root tgz
@@ -343,8 +394,10 @@ resolve_profile_govc_asset() {
     printf '%s' "${tgz}"
     return 0
   fi
-  tgz="${root}/assets/govc_Linux_x86_64.tar.gz"
-  [[ -f "${tgz}" ]] && printf '%s' "${tgz}"
+  if profile_allows_top_level_fallback "${root}" "${profile}"; then
+    tgz="${root}/assets/govc_Linux_x86_64.tar.gz"
+    [[ -f "${tgz}" ]] && printf '%s' "${tgz}"
+  fi
 }
 
 resolve_profile_vddk_asset() {
@@ -365,8 +418,10 @@ resolve_profile_vddk_asset() {
     printf '%s' "${tgz}"
     return 0
   fi
-  tgz="$(ls -1 "${root}"/assets/VMware-vix-disklib-*.tar.gz 2>/dev/null | sort | tail -n1 || true)"
-  [[ -n "${tgz}" ]] && printf '%s' "${tgz}"
+  if profile_allows_top_level_fallback "${root}" "${profile}"; then
+    tgz="$(ls -1 "${root}"/assets/VMware-vix-disklib-*.tar.gz 2>/dev/null | sort | tail -n1 || true)"
+    [[ -n "${tgz}" ]] && printf '%s' "${tgz}"
+  fi
 }
 
 resolve_profile_wheel_dir() {
@@ -384,8 +439,10 @@ resolve_profile_wheel_dir() {
     return 0
   fi
 
-  wheel_dir="${root}/assets/v2k/wheels"
-  [[ -d "${wheel_dir}" ]] && printf '%s' "${wheel_dir}"
+  if profile_allows_top_level_fallback "${root}" "${profile}"; then
+    wheel_dir="${root}/assets/v2k/wheels"
+    [[ -d "${wheel_dir}" ]] && printf '%s' "${wheel_dir}"
+  fi
 }
 
 install_profile_template() {
@@ -502,6 +559,10 @@ install_pyvmomi_into_profile() {
     echo "[INFO] Installing pyVmomi for profile=${profile} from wheels: ${wheel_dir}"
     "${pip_bin}" install --no-index --find-links "${wheel_dir}" pyvmomi
   else
+    if profile_requires_assets "${root}" "${profile}"; then
+      echo "[ERR] pyVmomi wheel dir not found for required-asset profile=${profile}" >&2
+      return 2
+    fi
     echo "[INFO] Installing pyVmomi for profile=${profile} from PyPI"
     "${pip_bin}" install pyvmomi
   fi
@@ -636,9 +697,18 @@ validate_installed_profile() {
 
 install_profile_assets() {
   local root="$1" compat_repo_root="$2" compat_install_root="$3" profile="$4"
+  local require_assets=0
+  if profile_requires_assets "${root}" "${profile}"; then
+    require_assets=1
+  fi
+
   install_profile_template "${compat_repo_root}" "${compat_install_root}" "${profile}"
-  install_govc_into_profile "${root}" "${compat_install_root}" "${profile}" || true
-  install_vddk_into_profile "${root}" "${compat_install_root}" "${profile}" || true
+  install_govc_into_profile "${root}" "${compat_install_root}" "${profile}" || {
+    [[ "${require_assets}" -eq 0 ]] || return $?
+  }
+  install_vddk_into_profile "${root}" "${compat_install_root}" "${profile}" || {
+    [[ "${require_assets}" -eq 0 ]] || return $?
+  }
   install_pyvmomi_into_profile "${root}" "${compat_install_root}" "${profile}"
 }
 
@@ -725,6 +795,7 @@ main() {
   echo "  - Install sample profiles only: sudo bin/v2k_test_install.sh --skip-install --install-sample-profiles --install-profile all --compat-root <path> --no-profiled"
   echo "  - Install all sample profiles: sudo bin/v2k_test_install.sh --install-assets --install-profile all"
   echo "  - Install one profile: sudo bin/v2k_test_install.sh --install-assets --install-profile vsphere60"
+  echo "  - Install ESXi 5.5 profile after staging assets: sudo bin/v2k_test_install.sh --install-assets --install-profile esxi55"
   echo "  - Validate installed profiles: sudo bin/v2k_test_install.sh --skip-install --validate-profile all"
   echo "  - Default compat root (if profiled): ${COMPAT_ROOT}"
 }

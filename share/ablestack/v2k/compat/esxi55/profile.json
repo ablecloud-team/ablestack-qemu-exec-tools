@@ -1,0 +1,35 @@
+{
+  "schema": "ablestack-v2k/compat-profile-v1",
+  "id": "esxi55",
+  "label": "ESXi 5.5 compatibility profile",
+  "supported_vcenter": {
+    "min": "5.5",
+    "max": "5.5",
+    "versions": [
+      "5.5"
+    ]
+  },
+  "supported_esxi": {
+    "versions": [
+      "5.5"
+    ]
+  },
+  "toolchain": {
+    "govc": "bin/govc",
+    "python": "venv/bin/python3",
+    "vddk_libdir": "vddk"
+  },
+  "sdk": {
+    "govc_version": "0.46.3",
+    "pyvmomi_version": "5.5.0.2014.1.1",
+    "vddk_version": "6.0.2"
+  },
+  "selection_rules": {
+    "priority": 5,
+    "notes": "Use when the source VM runs on an ESXi 5.5 host, even if managed by vCenter 6.0."
+  },
+  "asset_policy": {
+    "require_profile_assets": true,
+    "allow_top_level_fallback": false
+  }
+}

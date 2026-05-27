@@ -54,7 +54,7 @@ assert_file_contains() {
 }
 
 assert_manifest_values() {
-  local manifest="$1" expected_profile="$2"
+  local manifest="$1" expected_profile="$2" expected_esxi_version="${3:-}"
   jq -e --arg profile "${expected_profile}" --arg root "${COMPAT_ROOT}" '
     .source.compat.selected_profile == $profile
     and .source.compat.requested_profile == "auto"
@@ -62,11 +62,24 @@ assert_manifest_values() {
     and (.source.compat.tools.python_bin == ($root + "/" + $profile + "/venv/bin/python3"))
     and (.source.compat.tools.vddk_libdir == ($root + "/" + $profile + "/vddk"))
   ' "${manifest}" >/dev/null
+
+  if [[ -n "${expected_esxi_version}" ]]; then
+    jq -e --arg version "${expected_esxi_version}" '
+      .source.esxi_version == $version
+      and .source.compat.detected_esxi_version == $version
+    ' "${manifest}" >/dev/null
+  fi
 }
 
 run_case() {
-  local version="$1" expected_profile="$2" compat_mode="${3:-explicit}"
+  local version="$1" expected_profile="$2" compat_mode="${3:-explicit}" host_fixture="${4:-host.info.json}"
+  local expected_call_profile="${5:-${expected_profile}}"
+  local expected_esxi_version=""
+  if [[ "${host_fixture}" == "host.info.esxi55.json" ]]; then
+    expected_esxi_version="5.5.0"
+  fi
   local safe_version="${version//./_}"
+  safe_version="${safe_version}_${expected_profile}_${compat_mode}"
   local workdir="${WORK_ROOT}/${safe_version}"
   local dst="${DST_ROOT}/${safe_version}"
   local cred="${workdir}/govc.env"
@@ -95,7 +108,7 @@ EOF
   export V2K_COMPAT_TEST_ABOUT_VERSION="${version}"
   export V2K_COMPAT_TEST_VM_INFO_JSON_FILE="${FIXTURE_DIR}/vm.info.json"
   export V2K_COMPAT_TEST_DEVICE_INFO_JSON_FILE="${FIXTURE_DIR}/device.info.json"
-  export V2K_COMPAT_TEST_HOST_INFO_JSON_FILE="${FIXTURE_DIR}/host.info.json"
+  export V2K_COMPAT_TEST_HOST_INFO_JSON_FILE="${FIXTURE_DIR}/${host_fixture}"
   export V2K_COMPAT_TEST_CALL_LOG="${call_log}"
   export V2K_VDDK_THUMBPRINT="AA:BB:CC:DD"
   unset V2K_COMPAT_SELECTED_PROFILE V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_COMPAT_DETECTED_VCENTER_VERSION
@@ -115,19 +128,19 @@ EOF
     exit 1
   }
 
-  assert_manifest_values "${manifest}" "${expected_profile}" || {
+  assert_manifest_values "${manifest}" "${expected_profile}" "${expected_esxi_version}" || {
     echo "[ERR] Manifest compat metadata mismatch for version=${version}" >&2
     jq '.source.compat' "${manifest}" >&2
     exit 1
   }
 
-  assert_file_contains "${call_log}" "${COMPAT_ROOT}/${expected_profile}/bin/govc"
+  assert_file_contains "${call_log}" "${COMPAT_ROOT}/${expected_call_profile}/bin/govc"
   assert_file_contains "${call_log}" "about -json"
   assert_file_contains "${call_log}" "vm.info -json demo-vm"
   assert_file_contains "${call_log}" "device.info -json -vm demo-vm"
   assert_file_contains "${call_log}" "host.info -json -host host-11"
 
-  echo "[OK] version=${version} profile=${expected_profile} compat_mode=${compat_mode}"
+  echo "[OK] version=${version} profile=${expected_profile} compat_mode=${compat_mode} host_fixture=${host_fixture}"
 }
 
 main() {
@@ -146,6 +159,7 @@ main() {
     --no-profiled >/dev/null
 
   run_case "6.0.0" "vsphere60"
+  run_case "6.0.0" "esxi55" "explicit" "host.info.esxi55.json" "vsphere60"
   run_case "6.7.0" "vsphere67"
   run_case "8.0.1" "vsphere80"
   run_case "8.0.1" "vsphere80" "implicit"

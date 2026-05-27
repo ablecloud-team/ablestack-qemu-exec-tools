@@ -43,6 +43,27 @@
       },
       "additionalProperties": false
     },
+    "supported_esxi": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+"
+        },
+        "max": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+"
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "toolchain": {
       "type": "object",
       "required": [
@@ -89,6 +110,18 @@
         },
         "notes": {
           "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "asset_policy": {
+      "type": "object",
+      "properties": {
+        "require_profile_assets": {
+          "type": "boolean"
+        },
+        "allow_top_level_fallback": {
+          "type": "boolean"
         }
       },
       "additionalProperties": true

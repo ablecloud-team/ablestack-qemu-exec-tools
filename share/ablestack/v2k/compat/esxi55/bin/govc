@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${V2K_COMPAT_TEST_CALL_LOG:-}" ]]; then
+  printf '%s\t%s\n' "$0" "$*" >> "${V2K_COMPAT_TEST_CALL_LOG}"
+fi
+
+emit_fixture() {
+  local file_var="$1" raw_var="$2"
+  local file="${!file_var:-}"
+  local raw="${!raw_var:-}"
+  if [[ -n "${file}" && -f "${file}" ]]; then
+    cat "${file}"
+    return 0
+  fi
+  if [[ -n "${raw}" ]]; then
+    printf '%s\n' "${raw}"
+    return 0
+  fi
+  return 1
+}
+
+if [[ "${1:-}" == "about" && "${2:-}" == "-json" && -n "${V2K_COMPAT_TEST_ABOUT_VERSION:-}" ]]; then
+  printf '{"About":{"Version":"%s"}}\n' "${V2K_COMPAT_TEST_ABOUT_VERSION}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "about" ]]; then
+  printf 'Version: %s\n' "${V2K_COMPAT_TEST_ABOUT_VERSION:-sample}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "vm.info" && "${2:-}" == "-json" ]]; then
+  emit_fixture V2K_COMPAT_TEST_VM_INFO_JSON_FILE V2K_COMPAT_TEST_VM_INFO_JSON || {
+    echo "Missing VM info fixture for sample govc wrapper." >&2
+    exit 3
+  }
+  exit 0
+fi
+
+if [[ "${1:-}" == "device.info" && "${2:-}" == "-json" ]]; then
+  emit_fixture V2K_COMPAT_TEST_DEVICE_INFO_JSON_FILE V2K_COMPAT_TEST_DEVICE_INFO_JSON || {
+    echo "Missing device info fixture for sample govc wrapper." >&2
+    exit 3
+  }
+  exit 0
+fi
+
+if [[ "${1:-}" == "host.info" && "${2:-}" == "-json" ]]; then
+  emit_fixture V2K_COMPAT_TEST_HOST_INFO_JSON_FILE V2K_COMPAT_TEST_HOST_INFO_JSON || {
+    echo "Missing host info fixture for sample govc wrapper." >&2
+    exit 3
+  }
+  exit 0
+fi
+
+if [[ -n "${V2K_COMPAT_REAL_GOVC_BIN:-}" && -x "${V2K_COMPAT_REAL_GOVC_BIN}" ]]; then
+  exec "${V2K_COMPAT_REAL_GOVC_BIN}" "$@"
+fi
+
+if [[ "${V2K_COMPAT_ALLOW_SYSTEM_FALLBACK:-0}" == "1" ]]; then
+  while IFS= read -r candidate; do
+    [[ -n "${candidate}" ]] || continue
+    case "${candidate}" in
+      */share/ablestack/v2k/compat/*) continue ;;
+    esac
+    exec "${candidate}" "$@"
+  done < <(which -a govc 2>/dev/null || true)
+fi
+
+echo "Sample compat govc wrapper: set V2K_COMPAT_REAL_GOVC_BIN or V2K_COMPAT_ALLOW_SYSTEM_FALLBACK=1." >&2
+exit 127
