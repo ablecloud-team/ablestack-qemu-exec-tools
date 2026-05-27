@@ -129,11 +129,12 @@ v2k_manifest_init() {
   vddk_user="${V2K_VDDK_USER-}"
   vddk_cred_file="${V2K_VDDK_CRED_FILE-}"
 
-  local compat_requested_profile compat_selected_profile compat_detected_vcenter_version
+  local compat_requested_profile compat_selected_profile compat_detected_vcenter_version compat_detected_esxi_version
   local compat_root compat_govc_bin compat_python_bin compat_vddk_libdir
   compat_requested_profile="${V2K_COMPAT_PROFILE:-auto}"
   compat_selected_profile="${V2K_COMPAT_SELECTED_PROFILE-}"
   compat_detected_vcenter_version="${V2K_COMPAT_DETECTED_VCENTER_VERSION-}"
+  compat_detected_esxi_version="${V2K_COMPAT_DETECTED_ESXI_VERSION-}"
   compat_root="${V2K_COMPAT_ROOT-}"
   compat_govc_bin="${V2K_GOVC_BIN-}"
   compat_python_bin="${V2K_PYTHON_BIN-}"
@@ -220,6 +221,7 @@ v2k_manifest_init() {
     --arg compat_requested_profile "${compat_requested_profile}" \
     --arg compat_selected_profile "${compat_selected_profile}" \
     --arg compat_detected_vcenter_version "${compat_detected_vcenter_version}" \
+    --arg compat_detected_esxi_version "${compat_detected_esxi_version}" \
     --arg compat_root "${compat_root}" \
     --arg compat_govc_bin "${compat_govc_bin}" \
     --arg compat_python_bin "${compat_python_bin}" \
@@ -321,6 +323,7 @@ v2k_manifest_init() {
           # ESXi host where the VM is currently running (kept for future use)
           esxi_host: ($inv.esxi_host // ""),
           esxi_name: ($inv.esxi_name // ""),
+          esxi_version: ($inv.esxi_version // ""),
           esxi_thumbprint: ($inv.esxi_thumbprint // ""),
 
           # VDDK 접근 정보 (vCenter 중심)
@@ -337,6 +340,7 @@ v2k_manifest_init() {
             requested_profile: (if ($compat_requested_profile|length) > 0 then $compat_requested_profile else "auto" end),
             selected_profile: (if ($compat_selected_profile|length) > 0 then $compat_selected_profile else "" end),
             detected_vcenter_version: (if ($compat_detected_vcenter_version|length) > 0 then $compat_detected_vcenter_version else "" end),
+            detected_esxi_version: (if ($compat_detected_esxi_version|length) > 0 then $compat_detected_esxi_version else "" end),
             compat_root: (if ($compat_root|length) > 0 then $compat_root else "" end),
             tools: {
               govc_bin: (if ($compat_govc_bin|length) > 0 then $compat_govc_bin else "" end),
@@ -395,6 +399,11 @@ v2k_manifest_get_compat_detected_vcenter_version() {
   jq -r '.source.compat.detected_vcenter_version // empty' "${manifest}" 2>/dev/null
 }
 
+v2k_manifest_get_compat_detected_esxi_version() {
+  local manifest="$1"
+  jq -r '.source.compat.detected_esxi_version // empty' "${manifest}" 2>/dev/null
+}
+
 v2k_manifest_get_compat_root() {
   local manifest="$1"
   jq -r '.source.compat.compat_root // empty' "${manifest}" 2>/dev/null
@@ -445,6 +454,17 @@ v2k_manifest_set_compat_detected_vcenter_version() {
     .source = (.source // {}) |
     .source.compat = (.source.compat // {}) |
     .source.compat.detected_vcenter_version = $detected_version
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+v2k_manifest_set_compat_detected_esxi_version() {
+  local manifest="$1" detected_version="${2:-}"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg detected_version "${detected_version}" '
+    .source = (.source // {}) |
+    .source.compat = (.source.compat // {}) |
+    .source.compat.detected_esxi_version = $detected_version
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 

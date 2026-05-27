@@ -2044,12 +2044,22 @@ EOF
 
   local inv_json
   inv_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter}")"
+  local inv_esxi_version
+  inv_esxi_version="$(printf '%s' "${inv_json}" | jq -r '.esxi_version // empty' 2>/dev/null || true)"
+  if [[ -n "${inv_esxi_version}" ]]; then
+    export V2K_COMPAT_DETECTED_ESXI_VERSION="${inv_esxi_version}"
+    if [[ "${V2K_COMPAT_PROFILE:-auto}" == "auto" ]]; then
+      unset V2K_COMPAT_SELECTED_PROFILE V2K_COMPAT_PROFILE_DIR V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR
+      v2k_compat_resolve_profile "auto" "${V2K_WORKDIR:-}" "" 0
+    fi
+  fi
 
   # Build manifest using inventory json + target settings (from env)
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
   v2k_manifest_set_compat_requested_profile "${V2K_MANIFEST}" "${V2K_COMPAT_PROFILE:-auto}"
   v2k_manifest_set_compat_selected_profile "${V2K_MANIFEST}" "${V2K_COMPAT_SELECTED_PROFILE:-}"
   v2k_manifest_set_compat_detected_vcenter_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_VCENTER_VERSION:-}"
+  v2k_manifest_set_compat_detected_esxi_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_ESXI_VERSION:-}"
   v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}"
   v2k_compat_write_env "${V2K_WORKDIR}" || true
 

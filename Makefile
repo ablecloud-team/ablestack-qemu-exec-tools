@@ -151,7 +151,9 @@ rpm:
 		--transform="s,^,ablestack-qemu-exec-tools-$(VERSION)/," \
 		--exclude=./rpmbuild \
 		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_n2k \
 		--exclude=./rpmbuild_hangctl \
+		--exclude=./rpmbuild_ftctl \
 		--exclude=./build \
 		--exclude=./release \
 		--exclude=./repo \
@@ -185,7 +187,9 @@ hangctl-rpm:
 		--transform="s,^,$(HANGCTL_NAME)-$(VERSION)/," \
 		--exclude=./rpmbuild \
 		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_n2k \
 		--exclude=./rpmbuild_hangctl \
+		--exclude=./rpmbuild_ftctl \
 		--exclude=./build \
 		--exclude=./release \
 		--exclude=./repo \
@@ -217,6 +221,7 @@ ftctl-rpm:
 		--transform="s,^,$(FTCTL_NAME)-$(VERSION)/," \
 		--exclude=./rpmbuild \
 		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_n2k \
 		--exclude=./rpmbuild_hangctl \
 		--exclude=./rpmbuild_ftctl \
 		--exclude=./build \
@@ -259,7 +264,9 @@ v2k-rpm:
 		--transform="s,^,ablestack_v2k-$(VERSION)/," \
 		--exclude=./rpmbuild \
 		--exclude=./rpmbuild_v2k \
+		--exclude=./rpmbuild_n2k \
 		--exclude=./rpmbuild_hangctl \
+		--exclude=./rpmbuild_ftctl \
 		--exclude=./build \
 		--exclude=./release \
 		--exclude=./repo \
@@ -294,6 +301,12 @@ v2k-rpm:
 	  (echo "[ERR] profile govc runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
 	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/compat/vsphere80/profile.json$$" || \
 	  (echo "[ERR] compat profile missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/compat/esxi55/profile.json$$" || \
+	  (echo "[ERR] esxi55 compat profile missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/VMware-vix-disklib-6[.]0[.]2-3566099[.]x86_64[.]tar[.]gz$$" || \
+	  (echo "[ERR] esxi55 VDDK runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/wheels/pyvmomi-5[.]5[.]0[.]2014[.]1[.]1[.]tar[.]gz$$" || \
+	  (echo "[ERR] esxi55 pyVmomi runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
 	if find winpe -maxdepth 1 -type f -name '*.iso' 2>/dev/null | grep -q .; then \
 	  rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/winpe/.*[.]iso$$" || \
 	    (echo "[ERR] staged WinPE ISO missing in RPM: $$RPM_FILE" >&2; exit 2); \

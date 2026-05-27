@@ -40,11 +40,16 @@ ablestack_v2k [global options] <command> [command options]
 Supported profile IDs in the current implementation:
 
 - `auto`
+- `esxi55`
 - `vsphere60`
 - `vsphere67`
 - `vsphere80`
 
 Use `--compat-profile auto` for normal operation. The selected profile is saved in the manifest and reused for follow-up commands.
+When the source VM runs on ESXi 5.5, auto-selection chooses `esxi55` even if the managing vCenter reports 6.0.
+For `esxi55`, only the licensed VMware VDDK archive is operator-provided; the
+current candidate is VDDK 6.0.2 for ESXi 5.5 compatibility. Public `govc` and
+pyVmomi offline dependency assets live under `assets/compat/esxi55/`.
 
 ## `run` / `auto`
 
