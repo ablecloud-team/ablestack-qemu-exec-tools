@@ -24,7 +24,7 @@
   "sdk": {
     "govc_version": "0.46.3",
     "pyvmomi_version": "5.5.0.2014.1.1",
-    "vddk_version": "6.0.2",
+    "vddk_version": "6.5.0",
     "nbdkit_version": "1.14.2"
   },
   "selection_rules": {

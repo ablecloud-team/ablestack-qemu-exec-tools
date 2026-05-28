@@ -63,7 +63,7 @@ Profiles can opt out of top-level fallback. The ESXi 5.5 profile is strict:
 public govc/pyVmomi assets live under ./assets/compat/esxi55, and the operator
 must add the licensed VMware VDDK archive there before --install-assets can
 install it. The ESXi 5.5 profile also carries a legacy nbdkit VDDK runtime so
-VDDK 6.0.2 can be loaded even when the system nbdkit plugin requires VDDK 6.5+.
+the selected VDDK can be loaded without relying on the system nbdkit plugin.
 EOF
 }
 

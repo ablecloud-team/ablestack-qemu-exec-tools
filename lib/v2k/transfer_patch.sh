@@ -296,14 +296,19 @@ v2k_transfer_patch_one() {
 
     # Start nbdkit (read-only) for snapshot view (do NOT swallow failures)
     # IMPORTANT: run in background and wait for pidfile/socket readiness.
-    local nbdkit_bin nbdkit_plugin vddk_ld_library_path
+    local nbdkit_bin nbdkit_plugin vddk_ld_library_path vddk_config
     nbdkit_bin="$(v2k_compat_nbdkit_bin)"
     nbdkit_plugin="$(v2k_compat_nbdkit_vddk_plugin)"
     vddk_ld_library_path="$(v2k_compat_vddk_ld_library_path)"
+    vddk_config="$(v2k_compat_vddk_config_file)"
 
+    echo "[INFO] nbdkit binary: ${nbdkit_bin}" >> "${nbdlog}"
+    echo "[INFO] VDDK libdir: ${VDDK_LIBDIR}" >> "${nbdlog}"
+    echo "[INFO] VDDK config: ${vddk_config}" >> "${nbdlog}"
     LD_LIBRARY_PATH="${vddk_ld_library_path}" \
     "${nbdkit_bin}" -r -U "${sock}" -P "${pidfile}" "${nbdkit_plugin}" \
       libdir="${VDDK_LIBDIR}" \
+      config="${vddk_config}" \
       server="${server}" \
       user="${VDDK_USER}" \
       password=+"${passfile}" \

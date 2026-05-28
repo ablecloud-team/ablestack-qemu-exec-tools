@@ -102,6 +102,39 @@ v2k_cloud_signed_query() {
   printf '%s&signature=%s' "${query}" "${signature_enc}"
 }
 
+v2k_cloud_api_prefers_post() {
+  local command="$1"
+  case "${command}" in
+    createDiskOffering|importVolume|deployVirtualMachineForVolume|updateVolume|attachVolume|startVirtualMachine)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+v2k_cloud_api_method() {
+  local command="$1" query_len="$2"
+  local requested threshold
+  requested="$(printf '%s' "${V2K_CLOUD_API_METHOD:-auto}" | tr '[:lower:]' '[:upper:]')"
+  threshold="${V2K_CLOUD_POST_THRESHOLD:-1800}"
+  [[ "${threshold}" =~ ^[0-9]+$ ]] || threshold=1800
+
+  case "${requested}" in
+    GET|POST)
+      printf '%s' "${requested}"
+      return 0
+      ;;
+  esac
+
+  if v2k_cloud_api_prefers_post "${command}" || (( query_len >= threshold )); then
+    printf '%s' "POST"
+  else
+    printf '%s' "GET"
+  fi
+}
+
 v2k_cloud_command_params_json() {
   local command="$1" api_key="$2" params_json="${3:-}"
   [[ -n "${params_json}" ]] || params_json="{}"
@@ -113,7 +146,7 @@ v2k_cloud_command_params_json() {
 
 v2k_cloud_api_get() {
   local endpoint="$1" api_key="$2" secret_key="$3" command="$4" params_json="${5:-}"
-  local connect_timeout max_time body_params query url
+  local connect_timeout max_time body_params query url method query_len
   [[ -n "${params_json}" ]] || params_json="{}"
   endpoint="$(v2k_cloud_normalize_endpoint "${endpoint}")"
   v2k_cloud_require_credentials "${endpoint}" "${api_key}" "${secret_key}"
@@ -122,12 +155,30 @@ v2k_cloud_api_get() {
 
   body_params="$(v2k_cloud_command_params_json "${command}" "${api_key}" "${params_json}")"
   query="$(v2k_cloud_signed_query "${body_params}" "${secret_key}")"
+  query_len="${#query}"
+  method="$(v2k_cloud_api_method "${command}" "${query_len}")"
   url="${endpoint}?${query}"
 
-  curl --globoff --silent --show-error --fail \
-    --connect-timeout "${connect_timeout}" \
-    --max-time "${max_time}" \
-    "${url}"
+  if [[ "${method}" == "POST" ]]; then
+    if ! curl --globoff --silent --show-error --fail \
+      --request POST \
+      --header "Content-Type: application/x-www-form-urlencoded" \
+      --data-binary "${query}" \
+      --connect-timeout "${connect_timeout}" \
+      --max-time "${max_time}" \
+      "${endpoint}"; then
+      echo "Cloud API request failed: command=${command} method=POST query_length=${query_len}" >&2
+      return 1
+    fi
+  else
+    if ! curl --globoff --silent --show-error --fail \
+      --connect-timeout "${connect_timeout}" \
+      --max-time "${max_time}" \
+      "${url}"; then
+      echo "Cloud API request failed: command=${command} method=GET query_length=${query_len}" >&2
+      return 1
+    fi
+  fi
 }
 
 v2k_cloud_response_body() {

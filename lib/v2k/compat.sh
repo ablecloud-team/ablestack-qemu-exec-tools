@@ -567,6 +567,62 @@ v2k_compat_vddk_ld_library_path() {
   printf '%s' "${out}"
 }
 
+v2k_compat_child_ld_library_path() {
+  local vddk="${VDDK_LIBDIR:-}"
+  local vddk_lib64="" vddk_root="" part out=""
+  if [[ -n "${vddk}" ]]; then
+    if [[ -d "${vddk}/lib64" ]]; then
+      vddk_lib64="$(cd "${vddk}/lib64" 2>/dev/null && pwd -P || printf '%s' "${vddk}/lib64")"
+    fi
+    if [[ -d "${vddk}" ]]; then
+      vddk_root="$(cd "${vddk}" 2>/dev/null && pwd -P || printf '%s' "${vddk}")"
+    fi
+  fi
+
+  IFS=':' read -r -a _v2k_ld_parts <<< "${LD_LIBRARY_PATH:-}"
+  for part in "${_v2k_ld_parts[@]}"; do
+    [[ -n "${part}" ]] || continue
+    local real_part="${part}"
+    if [[ -d "${part}" ]]; then
+      real_part="$(cd "${part}" 2>/dev/null && pwd -P || printf '%s' "${part}")"
+    fi
+    [[ -n "${vddk_lib64}" && "${real_part}" == "${vddk_lib64}" ]] && continue
+    [[ -n "${vddk_root}" && "${real_part}" == "${vddk_root}" ]] && continue
+    out="${out:+${out}:}${part}"
+  done
+  printf '%s' "${out}"
+}
+
+v2k_compat_vddk_child_env_prefix() {
+  local child_ld
+  child_ld="$(v2k_compat_child_ld_library_path)"
+  if [[ -n "${child_ld}" ]]; then
+    printf 'env LD_LIBRARY_PATH="%s"' "${child_ld}"
+  else
+    printf 'env -u LD_LIBRARY_PATH'
+  fi
+}
+
+v2k_compat_vddk_config_file() {
+  if [[ -n "${V2K_VDDK_CONFIG:-}" ]]; then
+    [[ -f "${V2K_VDDK_CONFIG}" ]] || {
+      echo "V2K_VDDK_CONFIG not found: ${V2K_VDDK_CONFIG}" >&2
+      return 1
+    }
+    printf '%s' "${V2K_VDDK_CONFIG}"
+    return 0
+  fi
+
+  local dir="${V2K_WORKDIR:-/tmp}" cfg
+  mkdir -p "${dir}"
+  cfg="${dir}/vddk.conf"
+  if [[ ! -f "${cfg}" ]]; then
+    : > "${cfg}"
+    chmod 600 "${cfg}" 2>/dev/null || true
+  fi
+  printf '%s' "${cfg}"
+}
+
 v2k_compat_extract_version_from_about_json() {
   local about_json="${1:-}"
   [[ -n "${about_json}" ]] || return 1

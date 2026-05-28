@@ -43,7 +43,7 @@ under `assets/compat/esxi55/` and are not allowed to fall back to top-level
 runtime assets.
 
 For `esxi55`, the operator supplies only the licensed VMware VDDK archive. The
-current candidate is VDDK 6.0.2 for ESXi 5.5 compatibility. The public assets
+current candidate is VDDK 6.5.0 for ESXi 5.5 compatibility. The public assets
 (`govc` and pyVmomi offline dependencies) are staged in `assets/compat/esxi55/`
 with the repository assets.
 

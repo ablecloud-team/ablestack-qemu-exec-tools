@@ -224,39 +224,46 @@ v2k_transfer_base_one() {
     # resolve absolute paths to avoid PATH issues (systemd/sudo/nbdkit --run)
     qemu_img_path="$(command -v qemu-img)"
     nbdcopy_path="$(command -v nbdcopy 2>/dev/null || true)"
+    local child_env_prefix
+    child_env_prefix="$(v2k_compat_vddk_child_env_prefix)"
 
     case "${base_method}" in
       convert|qemu-img)
-        run_str="${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
+        run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
         ;;
       nbdcopy)
         if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
            # qcow2 destination: use qemu-nbd as destination NBD server (subprocess mode)
            # nbdcopy SOURCE -- [ qemu-nbd -f qcow2 DEST.qcow2 ]
-           run_str="${nbdcopy_path} --progress \"\$uri\" -- \"[\" qemu-nbd -f qcow2 \"${out_target}\" \"]\""
+           run_str="${child_env_prefix} ${nbdcopy_path} --progress \"\$uri\" -- \"[\" qemu-nbd -f qcow2 \"${out_target}\" \"]\""
          else
-           run_str="${nbdcopy_path} --progress \"\$uri\" \"${out_target}\""
+           run_str="${child_env_prefix} ${nbdcopy_path} --progress \"\$uri\" \"${out_target}\""
         fi
         ;;
       *)
-        run_str="${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
+        run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
         ;;
     esac
 
     echo "[INFO] Base transfer method: ${base_method}" >> "${nbdlog}"
     echo "[INFO] Run string: ${run_str}" >> "${nbdlog}"
 
-    local nbdkit_bin nbdkit_plugin vddk_ld_library_path
+    local nbdkit_bin nbdkit_plugin vddk_ld_library_path vddk_config
     nbdkit_bin="$(v2k_compat_nbdkit_bin)"
     nbdkit_plugin="$(v2k_compat_nbdkit_vddk_plugin)"
     vddk_ld_library_path="$(v2k_compat_vddk_ld_library_path)"
+    vddk_config="$(v2k_compat_vddk_config_file)"
 
     # Validated pattern:
     # nbdkit -r -U - <vddk-plugin> libdir=... server=... user=... password=... thumbprint=... vm="moref=..." snapshot="..." \
     #   --run 'qemu-img convert nbd://?socket=$unixsocket ...'
+    echo "[INFO] nbdkit binary: ${nbdkit_bin}" >> "${nbdlog}"
+    echo "[INFO] VDDK libdir: ${VDDK_LIBDIR}" >> "${nbdlog}"
+    echo "[INFO] VDDK config: ${vddk_config}" >> "${nbdlog}"
     LD_LIBRARY_PATH="${vddk_ld_library_path}" \
     "${nbdkit_bin}" -r -U - "${nbdkit_plugin}" \
       libdir="${VDDK_LIBDIR}" \
+      config="${vddk_config}" \
       server="${server}" \
       user="${VDDK_USER}" \
       password=+"${passfile}" \
