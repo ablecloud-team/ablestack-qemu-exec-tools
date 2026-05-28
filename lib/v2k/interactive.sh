@@ -131,6 +131,14 @@ v2k_cmd_wizard() {
     if [[ -z "${password}" ]]; then [[ "${yes}" -eq 0 ]] || { echo "--password or --cred-file is required with --yes" >&2; return 2; }; v2k_interactive_has_tty || return 2; password="$(v2k_interactive_prompt_secret "vCenter password")"; fi
     export GOVC_URL="https://${vcenter_host}/sdk" GOVC_USERNAME="${username}" GOVC_PASSWORD="${password}" GOVC_INSECURE="${insecure}"
   fi
+  export V2K_COMPAT_PROFILE="${compat_profile}"
+  if [[ "${compat_profile}" != "auto" && "${V2K_COMPAT_SELECTED_PROFILE:-}" != "${compat_profile}" ]]; then
+    unset V2K_COMPAT_SELECTED_PROFILE V2K_COMPAT_PROFILE_DIR V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_NBDKIT_BIN V2K_NBDKIT_VDDK_PLUGIN
+  fi
+  v2k_compat_resolve_profile "${compat_profile}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 0 || {
+    echo "Failed to resolve compatibility profile for wizard: ${compat_profile}" >&2
+    return 2
+  }
   if [[ -z "${vm}" ]]; then
     if choices="$(v2k_interactive_vm_choices 2>/dev/null)" && [[ -n "${choices}" ]]; then vm="$(v2k_interactive_select_tsv "source VM" "${choices}" "" "${yes}" 1)"; else [[ "${yes}" -eq 0 ]] || { echo "--vm is required with --yes" >&2; return 2; }; v2k_interactive_has_tty || return 2; vm="$(v2k_interactive_prompt_text "Source VM" "" 1 "my-vm")"; fi
   fi

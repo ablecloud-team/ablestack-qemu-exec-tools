@@ -674,6 +674,10 @@ v2k_compat_resolve_profile() {
   [[ -n "${requested}" ]] || requested="auto"
   export V2K_COMPAT_PROFILE="${requested}"
 
+  if [[ "${requested}" != "auto" && -n "${V2K_COMPAT_SELECTED_PROFILE:-}" && "${V2K_COMPAT_SELECTED_PROFILE}" != "${requested}" ]]; then
+    unset V2K_COMPAT_SELECTED_PROFILE V2K_COMPAT_PROFILE_DIR V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_NBDKIT_BIN V2K_NBDKIT_VDDK_PLUGIN
+  fi
+
   if [[ -n "${manifest}" ]]; then
     v2k_compat_guard_manifest_profile "${manifest}" "${requested}" || return 1
   fi

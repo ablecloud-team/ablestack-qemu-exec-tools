@@ -244,12 +244,17 @@ v2k_vmware_inventory_json() {
   local vm="$1" vcenter="$2"
   v2k_require_govc_env
 
-  local vm_info dev_info
+  local vm_info dev_info tmpdir vm_info_file dev_info_file rc
   local host_moref="" host_name="" host_version="" hostinfo_json=""
   local esxi_mgmt_ip="" esxi_thumbprint=""
 
   vm_info="$(v2k_govc vm.info -json "${vm}")"
   dev_info="$(v2k_govc device.info -json -vm "${vm}")"
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/v2k-inventory.XXXXXX")"
+  vm_info_file="${tmpdir}/vm.info.json"
+  dev_info_file="${tmpdir}/device.info.json"
+  printf '%s' "${vm_info}" > "${vm_info_file}"
+  printf '%s' "${dev_info}" > "${dev_info_file}"
 
   # 1) VM???¨ÎùºÍ∞?HostSystem MoRef Ï∂îÏ∂ú
   host_moref="$(
@@ -283,14 +288,17 @@ v2k_vmware_inventory_json() {
     fi
   fi
 
-  jq -n --arg vm "${vm}" \
-    --argjson vminfo "${vm_info}" \
-    --argjson devinfo "${dev_info}" \
+  if jq -n --arg vm "${vm}" \
+    --slurpfile vminfo_file "${vm_info_file}" \
+    --slurpfile devinfo_file "${dev_info_file}" \
     --arg esxi_host "${esxi_mgmt_ip}" \
     --arg esxi_name "${host_name}" \
     --arg esxi_version "${host_version}" \
     --arg esxi_thumbprint "${esxi_thumbprint}" \
     '
+    ($vminfo_file[0] // {}) as $vminfo
+    | ($devinfo_file[0] // {}) as $devinfo
+    |
     def VMINFO0: ($vminfo.virtualMachines[0] // {});
     def CFG: (VMINFO0.config // {});
     def HW: (CFG.hardware // {});
@@ -458,7 +466,13 @@ v2k_vmware_inventory_json() {
       esxi_version: $esxi_version,
       esxi_thumbprint: $esxi_thumbprint,
       disks: disks(controllers)
-    }'
+    }'; then
+    rc=0
+  else
+    rc=$?
+  fi
+  rm -rf "${tmpdir}"
+  return "${rc}"
 }
 
 v2k_assign_target_paths() {
