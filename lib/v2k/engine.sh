@@ -2049,7 +2049,7 @@ EOF
   if [[ -n "${inv_esxi_version}" ]]; then
     export V2K_COMPAT_DETECTED_ESXI_VERSION="${inv_esxi_version}"
     if [[ "${V2K_COMPAT_PROFILE:-auto}" == "auto" ]]; then
-      unset V2K_COMPAT_SELECTED_PROFILE V2K_COMPAT_PROFILE_DIR V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR
+      unset V2K_COMPAT_SELECTED_PROFILE V2K_COMPAT_PROFILE_DIR V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_NBDKIT_BIN V2K_NBDKIT_VDDK_PLUGIN
       v2k_compat_resolve_profile "auto" "${V2K_WORKDIR:-}" "" 0
     fi
   fi
@@ -2060,7 +2060,7 @@ EOF
   v2k_manifest_set_compat_selected_profile "${V2K_MANIFEST}" "${V2K_COMPAT_SELECTED_PROFILE:-}"
   v2k_manifest_set_compat_detected_vcenter_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_VCENTER_VERSION:-}"
   v2k_manifest_set_compat_detected_esxi_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_ESXI_VERSION:-}"
-  v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}"
+  v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}" "${V2K_NBDKIT_BIN:-}" "${V2K_NBDKIT_VDDK_PLUGIN:-}"
   v2k_compat_write_env "${V2K_WORKDIR}" || true
 
   v2k_event INFO "init" "" "phase_done" "{\"manifest\":\"${V2K_MANIFEST}\",\"workdir\":\"${V2K_WORKDIR}\"}"

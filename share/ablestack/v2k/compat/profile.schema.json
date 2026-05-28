@@ -83,6 +83,14 @@
         "vddk_libdir": {
           "type": "string",
           "minLength": 1
+        },
+        "nbdkit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nbdkit_vddk_plugin": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -97,6 +105,9 @@
           "type": "string"
         },
         "vddk_version": {
+          "type": "string"
+        },
+        "nbdkit_version": {
           "type": "string"
         }
       },

@@ -63,6 +63,12 @@ assert_manifest_values() {
     and (.source.compat.tools.vddk_libdir == ($root + "/" + $profile + "/vddk"))
   ' "${manifest}" >/dev/null
 
+  if [[ "${expected_profile}" == "esxi55" ]]; then
+    jq -e --arg profile "${expected_profile}" --arg root "${COMPAT_ROOT}" '
+      .source.compat.tools.nbdkit_bin == ($root + "/" + $profile + "/nbdkit/bin/nbdkit")
+    ' "${manifest}" >/dev/null
+  fi
+
   if [[ -n "${expected_esxi_version}" ]]; then
     jq -e --arg version "${expected_esxi_version}" '
       .source.esxi_version == $version
@@ -111,7 +117,7 @@ EOF
   export V2K_COMPAT_TEST_HOST_INFO_JSON_FILE="${FIXTURE_DIR}/${host_fixture}"
   export V2K_COMPAT_TEST_CALL_LOG="${call_log}"
   export V2K_VDDK_THUMBPRINT="AA:BB:CC:DD"
-  unset V2K_COMPAT_SELECTED_PROFILE V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_COMPAT_DETECTED_VCENTER_VERSION
+  unset V2K_COMPAT_SELECTED_PROFILE V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_NBDKIT_BIN V2K_NBDKIT_VDDK_PLUGIN V2K_COMPAT_DETECTED_VCENTER_VERSION
 
   if [[ "${compat_mode}" == "explicit" ]]; then
     init_args+=( --compat-profile auto )

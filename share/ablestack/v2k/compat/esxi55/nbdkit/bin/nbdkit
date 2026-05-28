@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "sample esxi55 nbdkit wrapper: install profile assets for real transfers" >&2
+exit 2
