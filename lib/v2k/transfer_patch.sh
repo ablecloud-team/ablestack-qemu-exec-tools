@@ -39,7 +39,9 @@ V2K_PY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 v2k_require_patch_deps() {
   : "${VDDK_LIBDIR:?missing VDDK_LIBDIR}"
-  command -v nbdkit >/dev/null
+  local nbdkit_bin
+  nbdkit_bin="$(v2k_compat_nbdkit_bin)"
+  [[ -x "${nbdkit_bin}" ]]
   command -v nbd-client >/dev/null
   command -v qemu-nbd >/dev/null
   v2k_has_python_bin
@@ -294,8 +296,13 @@ v2k_transfer_patch_one() {
 
     # Start nbdkit (read-only) for snapshot view (do NOT swallow failures)
     # IMPORTANT: run in background and wait for pidfile/socket readiness.
-    LD_LIBRARY_PATH="${VDDK_LIBDIR}" \
-    nbdkit -r -U "${sock}" -P "${pidfile}" vddk \
+    local nbdkit_bin nbdkit_plugin vddk_ld_library_path
+    nbdkit_bin="$(v2k_compat_nbdkit_bin)"
+    nbdkit_plugin="$(v2k_compat_nbdkit_vddk_plugin)"
+    vddk_ld_library_path="$(v2k_compat_vddk_ld_library_path)"
+
+    LD_LIBRARY_PATH="${vddk_ld_library_path}" \
+    "${nbdkit_bin}" -r -U "${sock}" -P "${pidfile}" "${nbdkit_plugin}" \
       libdir="${VDDK_LIBDIR}" \
       server="${server}" \
       user="${VDDK_USER}" \

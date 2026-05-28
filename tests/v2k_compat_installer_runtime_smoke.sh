@@ -63,6 +63,12 @@ assert_manifest_values() {
     and (.source.compat.tools.vddk_libdir == ($root + "/" + $profile + "/vddk"))
   ' "${manifest}" >/dev/null
 
+  if [[ "${expected_profile}" == "esxi55" ]]; then
+    jq -e --arg profile "${expected_profile}" --arg root "${COMPAT_ROOT}" '
+      .source.compat.tools.nbdkit_bin == ($root + "/" + $profile + "/nbdkit/bin/nbdkit")
+    ' "${manifest}" >/dev/null
+  fi
+
   if [[ -n "${expected_esxi_version}" ]]; then
     jq -e --arg version "${expected_esxi_version}" '
       .source.esxi_version == $version
@@ -73,7 +79,7 @@ assert_manifest_values() {
 
 run_case() {
   local version="$1" expected_profile="$2" compat_mode="${3:-explicit}" host_fixture="${4:-host.info.json}"
-  local expected_call_profile="${5:-${expected_profile}}"
+  local expected_call_profile="${5-${expected_profile}}"
   local expected_esxi_version=""
   if [[ "${host_fixture}" == "host.info.esxi55.json" ]]; then
     expected_esxi_version="5.5.0"
@@ -111,7 +117,9 @@ EOF
   export V2K_COMPAT_TEST_HOST_INFO_JSON_FILE="${FIXTURE_DIR}/${host_fixture}"
   export V2K_COMPAT_TEST_CALL_LOG="${call_log}"
   export V2K_VDDK_THUMBPRINT="AA:BB:CC:DD"
-  unset V2K_COMPAT_SELECTED_PROFILE V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_COMPAT_DETECTED_VCENTER_VERSION
+  export V2K_COMPAT_SELECTED_PROFILE="vsphere60"
+  export V2K_GOVC_BIN="${COMPAT_ROOT}/vsphere60/bin/govc"
+  unset V2K_PYTHON_BIN VDDK_LIBDIR V2K_NBDKIT_BIN V2K_NBDKIT_VDDK_PLUGIN V2K_COMPAT_DETECTED_VCENTER_VERSION
 
   if [[ "${compat_mode}" == "explicit" ]]; then
     init_args+=( --compat-profile auto )
@@ -134,13 +142,63 @@ EOF
     exit 1
   }
 
-  assert_file_contains "${call_log}" "${COMPAT_ROOT}/${expected_call_profile}/bin/govc"
+  if [[ -n "${expected_call_profile}" ]]; then
+    assert_file_contains "${call_log}" "${COMPAT_ROOT}/${expected_call_profile}/bin/govc"
+  fi
   assert_file_contains "${call_log}" "about -json"
   assert_file_contains "${call_log}" "vm.info -json demo-vm"
   assert_file_contains "${call_log}" "device.info -json -vm demo-vm"
   assert_file_contains "${call_log}" "host.info -json -host host-11"
 
   echo "[OK] version=${version} profile=${expected_profile} compat_mode=${compat_mode} host_fixture=${host_fixture}"
+}
+
+run_wizard_case() {
+  local workdir="${WORK_ROOT}/wizard_esxi55"
+  local dst="${DST_ROOT}/wizard_esxi55"
+  local cred="${workdir}/govc.env"
+  local call_log="${workdir}/govc.calls.log"
+
+  rm -rf "${workdir}" "${dst}"
+  mkdir -p "${workdir}" "${dst}"
+
+  cat > "${cred}" <<EOF
+GOVC_URL=https://vc.example.local/sdk
+GOVC_USERNAME=administrator@vsphere.local
+GOVC_PASSWORD=dummy-password
+GOVC_INSECURE=1
+EOF
+
+  export V2K_COMPAT_ROOT="${COMPAT_ROOT}"
+  export V2K_COMPAT_TEST_ABOUT_VERSION="6.0.0"
+  export V2K_COMPAT_TEST_VM_INFO_JSON_FILE="${FIXTURE_DIR}/vm.info.json"
+  export V2K_COMPAT_TEST_DEVICE_INFO_JSON_FILE="${FIXTURE_DIR}/device.info.json"
+  export V2K_COMPAT_TEST_HOST_INFO_JSON_FILE="${FIXTURE_DIR}/host.info.esxi55.json"
+  export V2K_COMPAT_TEST_CALL_LOG="${call_log}"
+  export V2K_WORKDIR="${workdir}"
+  export V2K_MANIFEST="${workdir}/manifest.json"
+  unset V2K_COMPAT_SELECTED_PROFILE V2K_COMPAT_PROFILE_DIR V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_NBDKIT_BIN V2K_NBDKIT_VDDK_PLUGIN V2K_COMPAT_DETECTED_VCENTER_VERSION
+
+  bash "${ROOT_DIR}/bin/ablestack_v2k.sh" \
+    wizard \
+    --yes \
+    --print-command \
+    --vm "demo-vm" \
+    --vcenter "vc.example.local" \
+    --cred-file "${cred}" \
+    --compat-profile esxi55 \
+    --target-profile libvirt-rbd \
+    --dst "rbd:rbd/v2k-wizard-esxi55" >/dev/null
+
+  [[ -f "${call_log}" ]] || {
+    echo "[ERR] wizard govc call log not created: ${call_log}" >&2
+    exit 1
+  }
+  assert_file_contains "${call_log}" "${COMPAT_ROOT}/esxi55/bin/govc"
+  assert_file_contains "${call_log}" "vm.info -json demo-vm"
+  assert_file_contains "${call_log}" "device.info -json -vm demo-vm"
+
+  echo "[OK] wizard explicit esxi55 compat profile uses profile-local govc"
 }
 
 main() {
@@ -160,9 +218,10 @@ main() {
 
   run_case "6.0.0" "vsphere60"
   run_case "6.0.0" "esxi55" "explicit" "host.info.esxi55.json" "vsphere60"
-  run_case "6.7.0" "vsphere67"
-  run_case "8.0.1" "vsphere80"
-  run_case "8.0.1" "vsphere80" "implicit"
+  run_case "6.7.0" "vsphere67" "explicit" "host.info.json" ""
+  run_case "8.0.1" "vsphere80" "explicit" "host.info.json" ""
+  run_case "8.0.1" "vsphere80" "implicit" "host.info.json" ""
+  run_wizard_case
 
   echo "[OK] installer-runtime smoke test passed"
 }

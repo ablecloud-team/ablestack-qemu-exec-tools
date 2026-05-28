@@ -37,7 +37,9 @@ source "${V2K_LIB_DIR}/v2k_target_device.sh"
 
 v2k_require_vddk_env() {
   : "${VDDK_LIBDIR:?missing VDDK_LIBDIR (e.g. /opt/vmware-vix-disklib-distrib/lib64)}"
-  command -v nbdkit >/dev/null
+  local nbdkit_bin
+  nbdkit_bin="$(v2k_compat_nbdkit_bin)"
+  [[ -x "${nbdkit_bin}" ]]
   command -v qemu-img >/dev/null
   v2k_has_govc_bin
 }
@@ -244,11 +246,16 @@ v2k_transfer_base_one() {
     echo "[INFO] Base transfer method: ${base_method}" >> "${nbdlog}"
     echo "[INFO] Run string: ${run_str}" >> "${nbdlog}"
 
+    local nbdkit_bin nbdkit_plugin vddk_ld_library_path
+    nbdkit_bin="$(v2k_compat_nbdkit_bin)"
+    nbdkit_plugin="$(v2k_compat_nbdkit_vddk_plugin)"
+    vddk_ld_library_path="$(v2k_compat_vddk_ld_library_path)"
+
     # Validated pattern:
-    # nbdkit -r -U - vddk libdir=... server=... user=... password=... thumbprint=... vm="moref=..." snapshot="..." \
+    # nbdkit -r -U - <vddk-plugin> libdir=... server=... user=... password=... thumbprint=... vm="moref=..." snapshot="..." \
     #   --run 'qemu-img convert nbd://?socket=$unixsocket ...'
-    LD_LIBRARY_PATH="${VDDK_LIBDIR}" \
-    nbdkit -r -U - vddk \
+    LD_LIBRARY_PATH="${vddk_ld_library_path}" \
+    "${nbdkit_bin}" -r -U - "${nbdkit_plugin}" \
       libdir="${VDDK_LIBDIR}" \
       server="${server}" \
       user="${VDDK_USER}" \

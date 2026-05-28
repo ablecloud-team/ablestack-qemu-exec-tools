@@ -57,10 +57,13 @@ Asset resolution order for each profile:
   2. ./assets/compat/<profile>/wheels
   3. ./assets/v2k/wheels
 
+  1. ./assets/compat/<profile>/nbdkit-vddk-legacy-*.tar.gz
+
 Profiles can opt out of top-level fallback. The ESXi 5.5 profile is strict:
 public govc/pyVmomi assets live under ./assets/compat/esxi55, and the operator
 must add the licensed VMware VDDK archive there before --install-assets can
-install it. The current ESXi 5.5 candidate is VDDK 6.0.2.
+install it. The ESXi 5.5 profile also carries a legacy nbdkit VDDK runtime so
+VDDK 6.0.2 can be loaded even when the system nbdkit plugin requires VDDK 6.5+.
 EOF
 }
 
@@ -314,7 +317,7 @@ list_profiles() {
   echo "[INFO] Sample compat root: ${compat_repo_root}"
   echo "[INFO] Install compat root: ${compat_install_root}"
 
-  local profile profile_json installed govc_asset vddk_asset wheel_dir
+  local profile profile_json installed govc_asset vddk_asset wheel_dir nbdkit_asset
   while IFS= read -r profile; do
     [[ -n "${profile}" ]] || continue
     profile_json="${compat_repo_root}/${profile}/profile.json"
@@ -323,6 +326,7 @@ list_profiles() {
     govc_asset="$(resolve_profile_govc_asset "${root}" "${profile}" || true)"
     vddk_asset="$(resolve_profile_vddk_asset "${root}" "${profile}" || true)"
     wheel_dir="$(resolve_profile_wheel_dir "${root}" "${profile}" || true)"
+    nbdkit_asset="$(resolve_profile_nbdkit_asset "${root}" "${profile}" || true)"
     printf '%s\tinstalled=%s\tsupported=%s\tlabel=%s\n' \
       "${profile}" \
       "${installed}" \
@@ -330,6 +334,7 @@ list_profiles() {
       "$(profile_label "${profile_json}")"
     printf '  govc_asset=%s\n' "$(asset_status "${govc_asset}")"
     printf '  vddk_asset=%s\n' "$(asset_status "${vddk_asset}")"
+    printf '  nbdkit_asset=%s\n' "$(asset_status "${nbdkit_asset}")"
     printf '  wheel_dir=%s\n' "$(asset_status "${wheel_dir}")"
   done < <(compat_profile_ids "${compat_repo_root}")
 }
@@ -445,6 +450,27 @@ resolve_profile_wheel_dir() {
   fi
 }
 
+resolve_profile_nbdkit_asset() {
+  local root="$1" profile="$2"
+  local profile_root tgz
+  profile_root="$(profile_asset_root "${root}" "${profile}")"
+  tgz="$(ls -1 "${profile_root}"/nbdkit-vddk-legacy-*.tar.gz 2>/dev/null | sort | tail -n1 || true)"
+  [[ -n "${tgz}" ]] && printf '%s' "${tgz}"
+}
+
+profile_toolchain_value() {
+  local root="$1" profile="$2" key="$3"
+  local profile_json
+  profile_json="$(profile_json_for_asset_root "${root}" "${profile}" || true)"
+  [[ -n "${profile_json}" ]] || return 1
+  jq -r --arg key "${key}" '.toolchain[$key] // empty' "${profile_json}" 2>/dev/null
+}
+
+profile_has_local_nbdkit_toolchain() {
+  local root="$1" profile="$2"
+  [[ -n "$(profile_toolchain_value "${root}" "${profile}" "nbdkit" || true)" ]]
+}
+
 install_profile_template() {
   local compat_repo_root="$1" compat_install_root="$2" profile="$3"
   local src="${compat_repo_root}/${profile}"
@@ -462,6 +488,7 @@ install_profile_template() {
     mkdir -p "${dst}"
     [[ -f "${dst}/bin/govc" ]] && chmod 0755 "${dst}/bin/govc" 2>/dev/null || true
     [[ -f "${dst}/venv/bin/python3" ]] && chmod 0755 "${dst}/venv/bin/python3" 2>/dev/null || true
+    [[ -f "${dst}/nbdkit/bin/nbdkit" ]] && chmod 0755 "${dst}/nbdkit/bin/nbdkit" 2>/dev/null || true
     return 0
   fi
 
@@ -470,6 +497,7 @@ install_profile_template() {
   cp -a "${src}" "${dst}"
   [[ -f "${dst}/bin/govc" ]] && chmod 0755 "${dst}/bin/govc" 2>/dev/null || true
   [[ -f "${dst}/venv/bin/python3" ]] && chmod 0755 "${dst}/venv/bin/python3" 2>/dev/null || true
+  [[ -f "${dst}/nbdkit/bin/nbdkit" ]] && chmod 0755 "${dst}/nbdkit/bin/nbdkit" 2>/dev/null || true
 }
 
 mark_sample_profile_install() {
@@ -538,6 +566,43 @@ install_vddk_into_profile() {
   cp -a "${distrib}" "${dst}"
   rm -rf "${tmp}"
   echo "[OK] VDDK installed: ${dst}"
+}
+
+install_nbdkit_into_profile() {
+  local root="$1" compat_install_root="$2" profile="$3"
+  local tgz tmp runtime dst
+  tgz="$(resolve_profile_nbdkit_asset "${root}" "${profile}")"
+  if [[ -z "${tgz}" ]]; then
+    if profile_has_local_nbdkit_toolchain "${root}" "${profile}"; then
+      echo "[WARN] legacy nbdkit asset not found for profile=${profile}" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  echo "[INFO] Installing legacy nbdkit for profile=${profile} from ${tgz}"
+  tmp="$(mktemp -d)"
+  tar -xzf "${tgz}" -C "${tmp}"
+
+  runtime="$(find "${tmp}" -maxdepth 4 -type f -path '*/bin/nbdkit' -printf '%h\n' | sed 's#/bin$##' | head -n1 || true)"
+  [[ -n "${runtime}" && -x "${runtime}/bin/nbdkit" ]] || {
+    echo "[ERR] nbdkit binary not found inside ${tgz}" >&2
+    rm -rf "${tmp}"
+    return 2
+  }
+  [[ -f "${runtime}/lib/nbdkit/plugins/nbdkit-vddk-plugin.so" ]] || {
+    echo "[ERR] nbdkit-vddk-plugin.so not found inside ${tgz}" >&2
+    rm -rf "${tmp}"
+    return 2
+  }
+
+  dst="${compat_install_root}/${profile}/nbdkit"
+  rm -rf "${dst}"
+  mkdir -p "$(dirname "${dst}")"
+  cp -a "${runtime}" "${dst}"
+  chmod 0755 "${dst}/bin/nbdkit" "${dst}/lib/nbdkit/plugins/nbdkit-vddk-plugin.so" 2>/dev/null || true
+  rm -rf "${tmp}"
+  echo "[OK] legacy nbdkit installed: ${dst}"
 }
 
 install_pyvmomi_into_profile() {
@@ -658,6 +723,49 @@ check_profile_vddk() {
   echo "[OK] profile=${profile} vddk=${vddk}"
 }
 
+vddk_ld_library_path() {
+  local vddk="$1"
+  local out=""
+  [[ -d "${vddk}/lib64" ]] && out="${vddk}/lib64"
+  [[ -d "${vddk}" ]] && out="${out:+${out}:}${vddk}"
+  [[ -n "${LD_LIBRARY_PATH:-}" ]] && out="${out:+${out}:}${LD_LIBRARY_PATH}"
+  printf '%s' "${out}"
+}
+
+check_profile_nbdkit() {
+  local compat_install_root="$1" profile="$2"
+  local profile_json="${compat_install_root}/${profile}/profile.json"
+  local nbdkit_rel plugin_rel nbdkit_bin plugin vddk
+  nbdkit_rel="$(jq -r '.toolchain.nbdkit // empty' "${profile_json}" 2>/dev/null || true)"
+  plugin_rel="$(jq -r '.toolchain.nbdkit_vddk_plugin // empty' "${profile_json}" 2>/dev/null || true)"
+  [[ -n "${nbdkit_rel}" ]] || return 0
+
+  nbdkit_bin="${compat_install_root}/${profile}/${nbdkit_rel}"
+  [[ -x "${nbdkit_bin}" ]] || {
+    echo "[ERR] profile=${profile} nbdkit not found: ${nbdkit_bin}" >&2
+    return 1
+  }
+
+  if [[ -n "${plugin_rel}" ]]; then
+    plugin="${compat_install_root}/${profile}/${plugin_rel}"
+    [[ -f "${plugin}" ]] || {
+      echo "[ERR] profile=${profile} nbdkit VDDK plugin not found: ${plugin}" >&2
+      return 1
+    }
+
+    vddk="${compat_install_root}/${profile}/vddk"
+    LD_LIBRARY_PATH="$(vddk_ld_library_path "${vddk}")" \
+      "${nbdkit_bin}" "${plugin}" --dump-plugin libdir="${vddk}" >/dev/null 2>&1 || {
+        echo "[ERR] profile=${profile} nbdkit cannot load VDDK from ${vddk}" >&2
+        echo "      Check legacy nbdkit/VDDK ABI compatibility before running migration." >&2
+        return 1
+      }
+    echo "[OK] profile=${profile} nbdkit=${nbdkit_bin} vddk-plugin-load=ok"
+  else
+    echo "[OK] profile=${profile} nbdkit=${nbdkit_bin}"
+  fi
+}
+
 check_profile_json() {
   local compat_install_root="$1" profile="$2"
   local profile_json="${compat_install_root}/${profile}/profile.json"
@@ -692,6 +800,7 @@ validate_installed_profile() {
   else
     check_profile_python "${compat_install_root}" "${profile}"
     check_profile_vddk "${compat_install_root}" "${profile}"
+    check_profile_nbdkit "${compat_install_root}" "${profile}"
   fi
 }
 
@@ -707,6 +816,9 @@ install_profile_assets() {
     [[ "${require_assets}" -eq 0 ]] || return $?
   }
   install_vddk_into_profile "${root}" "${compat_install_root}" "${profile}" || {
+    [[ "${require_assets}" -eq 0 ]] || return $?
+  }
+  install_nbdkit_into_profile "${root}" "${compat_install_root}" "${profile}" || {
     [[ "${require_assets}" -eq 0 ]] || return $?
   }
   install_pyvmomi_into_profile "${root}" "${compat_install_root}" "${profile}"
@@ -750,15 +862,26 @@ main() {
     exit 2
   fi
 
-  if [[ "${INSTALL_SAMPLE_PROFILES}" -eq 0 || "${INSTALL_ASSETS}" -eq 1 ]]; then
-    check_nbdkit_vddk_plugin
-  fi
-
   local profiles_to_process=()
   while IFS= read -r profile; do
     [[ -n "${profile}" ]] || continue
     profiles_to_process+=("${profile}")
   done < <(resolve_profiles "${compat_repo_root}" "${INSTALL_PROFILE:-${VALIDATE_PROFILE:-all}}")
+
+  if [[ "${INSTALL_SAMPLE_PROFILES}" -eq 0 || "${INSTALL_ASSETS}" -eq 1 ]]; then
+    local need_system_nbdkit=0
+    local profile
+    for profile in "${profiles_to_process[@]}"; do
+      if ! profile_has_local_nbdkit_toolchain "${asset_root}" "${profile}"; then
+        need_system_nbdkit=1
+      fi
+    done
+    if [[ "${need_system_nbdkit}" -eq 1 ]]; then
+      check_nbdkit_vddk_plugin
+    else
+      echo "[OK] selected profiles use profile-local nbdkit runtime"
+    fi
+  fi
 
   if [[ "${INSTALL_SAMPLE_PROFILES}" -eq 1 ]]; then
     local profile

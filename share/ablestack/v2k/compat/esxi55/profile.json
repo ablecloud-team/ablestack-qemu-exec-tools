@@ -17,12 +17,15 @@
   "toolchain": {
     "govc": "bin/govc",
     "python": "venv/bin/python3",
-    "vddk_libdir": "vddk"
+    "vddk_libdir": "vddk",
+    "nbdkit": "nbdkit/bin/nbdkit",
+    "nbdkit_vddk_plugin": "nbdkit/lib/nbdkit/plugins/nbdkit-vddk-plugin.so"
   },
   "sdk": {
     "govc_version": "0.46.3",
     "pyvmomi_version": "5.5.0.2014.1.1",
-    "vddk_version": "6.0.2"
+    "vddk_version": "6.0.2",
+    "nbdkit_version": "1.14.2"
   },
   "selection_rules": {
     "priority": 5,

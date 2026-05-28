@@ -389,10 +389,12 @@ v2k_compat_export_tool_paths() {
   local profile="${1:-}"
   [[ -n "${profile}" ]] || return 1
 
-  local govc_bin python_bin vddk_dir
+  local govc_bin python_bin vddk_dir nbdkit_bin nbdkit_plugin
   govc_bin="$(v2k_compat_profile_tool_path "${profile}" "govc" "bin/govc" 2>/dev/null || true)"
   python_bin="$(v2k_compat_profile_tool_path "${profile}" "python" "venv/bin/python3" 2>/dev/null || true)"
   vddk_dir="$(v2k_compat_profile_tool_path "${profile}" "vddk_libdir" "vddk" 2>/dev/null || true)"
+  nbdkit_bin="$(v2k_compat_profile_tool_path "${profile}" "nbdkit" "" 2>/dev/null || true)"
+  nbdkit_plugin="$(v2k_compat_profile_tool_path "${profile}" "nbdkit_vddk_plugin" "" 2>/dev/null || true)"
 
   if [[ -n "${govc_bin}" && -x "${govc_bin}" ]]; then
     export V2K_GOVC_BIN="${govc_bin}"
@@ -403,12 +405,21 @@ v2k_compat_export_tool_paths() {
   if [[ -n "${vddk_dir}" && -d "${vddk_dir}" ]]; then
     export VDDK_LIBDIR="${vddk_dir}"
   fi
+  if [[ -n "${nbdkit_bin}" && -x "${nbdkit_bin}" ]]; then
+    export V2K_NBDKIT_BIN="${nbdkit_bin}"
+  fi
+  if [[ -n "${nbdkit_plugin}" && -f "${nbdkit_plugin}" ]]; then
+    export V2K_NBDKIT_VDDK_PLUGIN="${nbdkit_plugin}"
+  fi
 
   if [[ -n "${python_bin}" ]]; then
     v2k_compat_path_prepend "$(dirname "${python_bin}")"
   fi
   if [[ -n "${govc_bin}" ]]; then
     v2k_compat_path_prepend "$(dirname "${govc_bin}")"
+  fi
+  if [[ -n "${nbdkit_bin}" ]]; then
+    v2k_compat_path_prepend "$(dirname "${nbdkit_bin}")"
   fi
 }
 
@@ -442,7 +453,7 @@ v2k_compat_load_from_manifest() {
   compat_json="$(jq -c '.source.compat // empty' "${manifest}" 2>/dev/null || true)"
   [[ -n "${compat_json}" ]] || return 1
 
-  local requested selected detected detected_esxi root govc_bin python_bin vddk_libdir
+  local requested selected detected detected_esxi root govc_bin python_bin vddk_libdir nbdkit_bin nbdkit_plugin
   requested="$(printf '%s' "${compat_json}" | jq -r '.requested_profile // empty' 2>/dev/null || true)"
   selected="$(printf '%s' "${compat_json}" | jq -r '.selected_profile // empty' 2>/dev/null || true)"
   detected="$(printf '%s' "${compat_json}" | jq -r '.detected_vcenter_version // empty' 2>/dev/null || true)"
@@ -451,6 +462,8 @@ v2k_compat_load_from_manifest() {
   govc_bin="$(printf '%s' "${compat_json}" | jq -r '.tools.govc_bin // empty' 2>/dev/null || true)"
   python_bin="$(printf '%s' "${compat_json}" | jq -r '.tools.python_bin // empty' 2>/dev/null || true)"
   vddk_libdir="$(printf '%s' "${compat_json}" | jq -r '.tools.vddk_libdir // empty' 2>/dev/null || true)"
+  nbdkit_bin="$(printf '%s' "${compat_json}" | jq -r '.tools.nbdkit_bin // empty' 2>/dev/null || true)"
+  nbdkit_plugin="$(printf '%s' "${compat_json}" | jq -r '.tools.nbdkit_vddk_plugin // empty' 2>/dev/null || true)"
 
   [[ -n "${requested}" ]] && export V2K_COMPAT_PROFILE="${requested}"
   [[ -n "${selected}" ]] && export V2K_COMPAT_SELECTED_PROFILE="${selected}"
@@ -460,12 +473,17 @@ v2k_compat_load_from_manifest() {
   [[ -n "${govc_bin}" ]] && export V2K_GOVC_BIN="${govc_bin}"
   [[ -n "${python_bin}" ]] && export V2K_PYTHON_BIN="${python_bin}"
   [[ -n "${vddk_libdir}" ]] && export VDDK_LIBDIR="${vddk_libdir}"
+  [[ -n "${nbdkit_bin}" ]] && export V2K_NBDKIT_BIN="${nbdkit_bin}"
+  [[ -n "${nbdkit_plugin}" ]] && export V2K_NBDKIT_VDDK_PLUGIN="${nbdkit_plugin}"
 
   if [[ -n "${govc_bin}" ]]; then
     v2k_compat_path_prepend "$(dirname "${govc_bin}")"
   fi
   if [[ -n "${python_bin}" ]]; then
     v2k_compat_path_prepend "$(dirname "${python_bin}")"
+  fi
+  if [[ -n "${nbdkit_bin}" ]]; then
+    v2k_compat_path_prepend "$(dirname "${nbdkit_bin}")"
   fi
 
   if [[ -n "${selected}" && -z "${V2K_COMPAT_PROFILE_DIR:-}" ]]; then
@@ -490,6 +508,9 @@ v2k_compat_load_from_workdir() {
   if [[ -n "${V2K_PYTHON_BIN:-}" ]]; then
     v2k_compat_path_prepend "$(dirname "${V2K_PYTHON_BIN}")"
   fi
+  if [[ -n "${V2K_NBDKIT_BIN:-}" ]]; then
+    v2k_compat_path_prepend "$(dirname "${V2K_NBDKIT_BIN}")"
+  fi
 }
 
 v2k_compat_write_env() {
@@ -507,8 +528,43 @@ V2K_COMPAT_PROFILE_DIR=${V2K_COMPAT_PROFILE_DIR:-}
 V2K_GOVC_BIN=${V2K_GOVC_BIN:-}
 V2K_PYTHON_BIN=${V2K_PYTHON_BIN:-}
 VDDK_LIBDIR=${VDDK_LIBDIR:-}
+V2K_NBDKIT_BIN=${V2K_NBDKIT_BIN:-}
+V2K_NBDKIT_VDDK_PLUGIN=${V2K_NBDKIT_VDDK_PLUGIN:-}
 EOF
   chmod 600 "${env_file}" 2>/dev/null || true
+}
+
+v2k_compat_nbdkit_bin() {
+  if [[ -n "${V2K_NBDKIT_BIN:-}" ]]; then
+    printf '%s' "${V2K_NBDKIT_BIN}"
+    return 0
+  fi
+  command -v nbdkit
+}
+
+v2k_compat_nbdkit_vddk_plugin() {
+  if [[ -n "${V2K_NBDKIT_VDDK_PLUGIN:-}" ]]; then
+    printf '%s' "${V2K_NBDKIT_VDDK_PLUGIN}"
+  else
+    printf '%s' "vddk"
+  fi
+}
+
+v2k_compat_vddk_ld_library_path() {
+  local vddk="${VDDK_LIBDIR:-}"
+  local out=""
+  if [[ -n "${vddk}" ]]; then
+    if [[ -d "${vddk}/lib64" ]]; then
+      out="${vddk}/lib64"
+    fi
+    if [[ -d "${vddk}" ]]; then
+      out="${out:+${out}:}${vddk}"
+    fi
+  fi
+  if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+    out="${out:+${out}:}${LD_LIBRARY_PATH}"
+  fi
+  printf '%s' "${out}"
 }
 
 v2k_compat_extract_version_from_about_json() {
@@ -617,6 +673,10 @@ v2k_compat_resolve_profile() {
 
   [[ -n "${requested}" ]] || requested="auto"
   export V2K_COMPAT_PROFILE="${requested}"
+
+  if [[ "${requested}" != "auto" && -n "${V2K_COMPAT_SELECTED_PROFILE:-}" && "${V2K_COMPAT_SELECTED_PROFILE}" != "${requested}" ]]; then
+    unset V2K_COMPAT_SELECTED_PROFILE V2K_COMPAT_PROFILE_DIR V2K_GOVC_BIN V2K_PYTHON_BIN VDDK_LIBDIR V2K_NBDKIT_BIN V2K_NBDKIT_VDDK_PLUGIN
+  fi
 
   if [[ -n "${manifest}" ]]; then
     v2k_compat_guard_manifest_profile "${manifest}" "${requested}" || return 1

@@ -130,7 +130,7 @@ v2k_manifest_init() {
   vddk_cred_file="${V2K_VDDK_CRED_FILE-}"
 
   local compat_requested_profile compat_selected_profile compat_detected_vcenter_version compat_detected_esxi_version
-  local compat_root compat_govc_bin compat_python_bin compat_vddk_libdir
+  local compat_root compat_govc_bin compat_python_bin compat_vddk_libdir compat_nbdkit_bin compat_nbdkit_plugin
   compat_requested_profile="${V2K_COMPAT_PROFILE:-auto}"
   compat_selected_profile="${V2K_COMPAT_SELECTED_PROFILE-}"
   compat_detected_vcenter_version="${V2K_COMPAT_DETECTED_VCENTER_VERSION-}"
@@ -139,6 +139,8 @@ v2k_manifest_init() {
   compat_govc_bin="${V2K_GOVC_BIN-}"
   compat_python_bin="${V2K_PYTHON_BIN-}"
   compat_vddk_libdir="${VDDK_LIBDIR-}"
+  compat_nbdkit_bin="${V2K_NBDKIT_BIN-}"
+  compat_nbdkit_plugin="${V2K_NBDKIT_VDDK_PLUGIN-}"
 
   # Optional env overrides (set by engine.sh from CLI options)
   # - V2K_TARGET_FORMAT: qcow2|raw
@@ -226,6 +228,8 @@ v2k_manifest_init() {
     --arg compat_govc_bin "${compat_govc_bin}" \
     --arg compat_python_bin "${compat_python_bin}" \
     --arg compat_vddk_libdir "${compat_vddk_libdir}" \
+    --arg compat_nbdkit_bin "${compat_nbdkit_bin}" \
+    --arg compat_nbdkit_plugin "${compat_nbdkit_plugin}" \
     --arg vmhash "${vmhash}" \
     --argjson storage_map "${map_compact}" \
     --argjson cloud "${cloud_compact}" \
@@ -345,7 +349,9 @@ v2k_manifest_init() {
             tools: {
               govc_bin: (if ($compat_govc_bin|length) > 0 then $compat_govc_bin else "" end),
               python_bin: (if ($compat_python_bin|length) > 0 then $compat_python_bin else "" end),
-              vddk_libdir: (if ($compat_vddk_libdir|length) > 0 then $compat_vddk_libdir else "" end)
+              vddk_libdir: (if ($compat_vddk_libdir|length) > 0 then $compat_vddk_libdir else "" end),
+              nbdkit_bin: (if ($compat_nbdkit_bin|length) > 0 then $compat_nbdkit_bin else "" end),
+              nbdkit_vddk_plugin: (if ($compat_nbdkit_plugin|length) > 0 then $compat_nbdkit_plugin else "" end)
             }
           }
         },
@@ -424,6 +430,16 @@ v2k_manifest_get_compat_vddk_libdir() {
   jq -r '.source.compat.tools.vddk_libdir // empty' "${manifest}" 2>/dev/null
 }
 
+v2k_manifest_get_compat_nbdkit_bin() {
+  local manifest="$1"
+  jq -r '.source.compat.tools.nbdkit_bin // empty' "${manifest}" 2>/dev/null
+}
+
+v2k_manifest_get_compat_nbdkit_vddk_plugin() {
+  local manifest="$1"
+  jq -r '.source.compat.tools.nbdkit_vddk_plugin // empty' "${manifest}" 2>/dev/null
+}
+
 v2k_manifest_set_compat_requested_profile() {
   local manifest="$1" requested_profile="${2:-auto}"
   local tmp
@@ -469,21 +485,25 @@ v2k_manifest_set_compat_detected_esxi_version() {
 }
 
 v2k_manifest_set_compat_tool_paths() {
-  local manifest="$1" compat_root="${2:-}" govc_bin="${3:-}" python_bin="${4:-}" vddk_libdir="${5:-}"
+  local manifest="$1" compat_root="${2:-}" govc_bin="${3:-}" python_bin="${4:-}" vddk_libdir="${5:-}" nbdkit_bin="${6:-}" nbdkit_plugin="${7:-}"
   local tmp
   tmp="$(mktemp)"
   jq \
     --arg compat_root "${compat_root}" \
     --arg govc_bin "${govc_bin}" \
     --arg python_bin "${python_bin}" \
-    --arg vddk_libdir "${vddk_libdir}" '
+    --arg vddk_libdir "${vddk_libdir}" \
+    --arg nbdkit_bin "${nbdkit_bin}" \
+    --arg nbdkit_plugin "${nbdkit_plugin}" '
     .source = (.source // {}) |
     .source.compat = (.source.compat // {}) |
     .source.compat.compat_root = $compat_root |
     .source.compat.tools = (.source.compat.tools // {}) |
     .source.compat.tools.govc_bin = $govc_bin |
     .source.compat.tools.python_bin = $python_bin |
-    .source.compat.tools.vddk_libdir = $vddk_libdir
+    .source.compat.tools.vddk_libdir = $vddk_libdir |
+    .source.compat.tools.nbdkit_bin = $nbdkit_bin |
+    .source.compat.tools.nbdkit_vddk_plugin = $nbdkit_plugin
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 

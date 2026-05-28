@@ -305,6 +305,8 @@ v2k-rpm:
 	  (echo "[ERR] esxi55 compat profile missing in RPM: $$RPM_FILE" >&2; exit 2); \
 	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/VMware-vix-disklib-6[.]0[.]2-3566099[.]x86_64[.]tar[.]gz$$" || \
 	  (echo "[ERR] esxi55 VDDK runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/nbdkit-vddk-legacy-1[.]14[.]2-rocky9-x86_64[.]tar[.]gz$$" || \
+	  (echo "[ERR] esxi55 legacy nbdkit runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
 	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/wheels/pyvmomi-5[.]5[.]0[.]2014[.]1[.]1[.]tar[.]gz$$" || \
 	  (echo "[ERR] esxi55 pyVmomi runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
 	if find winpe -maxdepth 1 -type f -name '*.iso' 2>/dev/null | grep -q .; then \
