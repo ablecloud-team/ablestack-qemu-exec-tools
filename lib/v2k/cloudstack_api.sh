@@ -144,9 +144,56 @@ v2k_cloud_command_params_json() {
     '. + {command:$command, apiKey:$api_key, response:"json"}'
 }
 
+v2k_cloud_response_error_summary() {
+  local body_file="$1" header_file="$2"
+  local json_summary="" header_desc=""
+
+  if [[ -s "${body_file}" ]]; then
+    json_summary="$(jq -r '
+      to_entries[0].value as $v
+      | [
+          (if ($v.errorcode // null) != null then "errorcode=" + ($v.errorcode | tostring) else empty end),
+          (if ($v.cserrorcode // null) != null then "cserrorcode=" + ($v.cserrorcode | tostring) else empty end),
+          (if (($v.errortext // "") | tostring | length) > 0 then "errortext=" + ($v.errortext | tostring) else empty end)
+        ]
+      | join(" ")
+    ' "${body_file}" 2>/dev/null || true)"
+  fi
+
+  if [[ -s "${header_file}" ]]; then
+    header_desc="$(awk -F': *' 'tolower($1) == "x-description" {print substr($0, index($0, $2))}' "${header_file}" | tail -n 1 | tr -d '\r' || true)"
+  fi
+
+  if [[ -n "${json_summary}" && -n "${header_desc}" && "${json_summary}" != *"${header_desc}"* ]]; then
+    printf '%s x-description=%s' "${json_summary}" "${header_desc}"
+  elif [[ -n "${json_summary}" ]]; then
+    printf '%s' "${json_summary}"
+  elif [[ -n "${header_desc}" ]]; then
+    printf 'x-description=%s' "${header_desc}"
+  elif [[ -s "${body_file}" ]]; then
+    head -c 512 "${body_file}" | tr '\n' ' '
+  fi
+}
+
+v2k_cloud_api_report_failure() {
+  local command="$1" method="$2" query_len="$3" http_status="$4" body_file="$5" header_file="$6" curl_err_file="$7"
+  local summary curl_err
+
+  echo "Cloud API request failed: command=${command} method=${method} http_status=${http_status:-000} query_length=${query_len}" >&2
+  summary="$(v2k_cloud_response_error_summary "${body_file}" "${header_file}")"
+  if [[ -n "${summary}" ]]; then
+    echo "Cloud API error: ${summary}" >&2
+  fi
+  if [[ -s "${curl_err_file}" ]]; then
+    curl_err="$(tr '\n' ' ' <"${curl_err_file}")"
+    [[ -n "${curl_err}" ]] && echo "Cloud API curl error: ${curl_err}" >&2
+  fi
+}
+
 v2k_cloud_api_get() {
   local endpoint="$1" api_key="$2" secret_key="$3" command="$4" params_json="${5:-}"
   local connect_timeout max_time body_params query url method query_len
+  local body_file header_file curl_err_file http_status curl_rc
   [[ -n "${params_json}" ]] || params_json="{}"
   endpoint="$(v2k_cloud_normalize_endpoint "${endpoint}")"
   v2k_cloud_require_credentials "${endpoint}" "${api_key}" "${secret_key}"
@@ -159,26 +206,44 @@ v2k_cloud_api_get() {
   method="$(v2k_cloud_api_method "${command}" "${query_len}")"
   url="${endpoint}?${query}"
 
+  body_file="$(mktemp "${TMPDIR:-/tmp}/v2k-cloud-body.XXXXXX")"
+  header_file="$(mktemp "${TMPDIR:-/tmp}/v2k-cloud-headers.XXXXXX")"
+  curl_err_file="$(mktemp "${TMPDIR:-/tmp}/v2k-cloud-curl.XXXXXX")"
+
   if [[ "${method}" == "POST" ]]; then
-    if ! curl --globoff --silent --show-error --fail \
+    http_status="$(curl --globoff --silent --show-error \
       --request POST \
       --header "Content-Type: application/x-www-form-urlencoded" \
       --data-binary "${query}" \
       --connect-timeout "${connect_timeout}" \
       --max-time "${max_time}" \
-      "${endpoint}"; then
-      echo "Cloud API request failed: command=${command} method=POST query_length=${query_len}" >&2
+      --dump-header "${header_file}" \
+      --output "${body_file}" \
+      --write-out "%{http_code}" \
+      "${endpoint}" 2>"${curl_err_file}")"
+    curl_rc=$?
+    if (( curl_rc != 0 )) || ! [[ "${http_status}" =~ ^[0-9]{3}$ ]] || (( http_status >= 400 )); then
+      v2k_cloud_api_report_failure "${command}" "POST" "${query_len}" "${http_status}" "${body_file}" "${header_file}" "${curl_err_file}"
+      rm -f "${body_file}" "${header_file}" "${curl_err_file}"
       return 1
     fi
   else
-    if ! curl --globoff --silent --show-error --fail \
+    http_status="$(curl --globoff --silent --show-error \
       --connect-timeout "${connect_timeout}" \
       --max-time "${max_time}" \
-      "${url}"; then
-      echo "Cloud API request failed: command=${command} method=GET query_length=${query_len}" >&2
+      --dump-header "${header_file}" \
+      --output "${body_file}" \
+      --write-out "%{http_code}" \
+      "${url}" 2>"${curl_err_file}")"
+    curl_rc=$?
+    if (( curl_rc != 0 )) || ! [[ "${http_status}" =~ ^[0-9]{3}$ ]] || (( http_status >= 400 )); then
+      v2k_cloud_api_report_failure "${command}" "GET" "${query_len}" "${http_status}" "${body_file}" "${header_file}" "${curl_err_file}"
+      rm -f "${body_file}" "${header_file}" "${curl_err_file}"
       return 1
     fi
   fi
+  cat "${body_file}"
+  rm -f "${body_file}" "${header_file}" "${curl_err_file}"
 }
 
 v2k_cloud_response_body() {
