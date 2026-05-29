@@ -43,6 +43,10 @@ from urllib.parse import urlparse
 from typing import Any, Dict, List, Tuple, Optional
 
 from pyVim.connect import SmartConnect, Disconnect
+try:
+    from pyVim.connect import SmartConnectNoSSL
+except ImportError:  # pyVmomi versions can differ across compatibility profiles.
+    SmartConnectNoSSL = None
 from pyVmomi import vim
 
 
@@ -82,6 +86,18 @@ def _parse_vcenter_target(raw: str) -> Tuple[str, int, str]:
     return (s, 443, "/sdk")
 
 
+def _disable_default_ssl_verification() -> None:
+    """
+    Older pyVmomi releases do not accept sslContext and eventually fall back to
+    Python's default HTTPS context.  On Python 3 that verifies certificates by
+    default, so make VCENTER_INSECURE=1 effective for those old code paths too.
+    """
+    try:
+        ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[attr-defined]  # noqa: S501
+    except Exception:
+        pass
+
+
 def _connect() -> Any:
     raw = os.environ.get("VCENTER_HOST", "")
     user = os.environ.get("VCENTER_USER", "")
@@ -95,11 +111,37 @@ def _connect() -> Any:
     if not host:
         raise SystemExit(f"Invalid VCENTER_HOST: {raw}")
 
-    ctx = None
-    if insecure:
-        ctx = ssl._create_unverified_context()  # noqa: S501
     # NOTE: SmartConnect default path is "/sdk" but we allow override if VCENTER_HOST includes custom path.
-    return SmartConnect(host=host, port=port, user=user, pwd=pw, sslContext=ctx, path=path)
+    # Older pyVmomi releases used for ESXi/vCenter 5.5 do not accept sslContext.
+    if insecure:
+        _disable_default_ssl_verification()
+        ctx = ssl._create_unverified_context()  # noqa: S501
+        try:
+            return SmartConnect(host=host, port=port, user=user, pwd=pw, sslContext=ctx, path=path)
+        except TypeError as exc:
+            msg = str(exc)
+            if "sslContext" not in msg and "path" not in msg:
+                raise
+            if SmartConnectNoSSL is not None:
+                try:
+                    return SmartConnectNoSSL(host=host, port=port, user=user, pwd=pw, path=path)
+                except TypeError as no_ssl_exc:
+                    if "path" not in str(no_ssl_exc):
+                        raise
+                    return SmartConnectNoSSL(host=host, port=port, user=user, pwd=pw)
+            try:
+                return SmartConnect(host=host, port=port, user=user, pwd=pw, path=path)
+            except TypeError as path_exc:
+                if "path" not in str(path_exc):
+                    raise
+                return SmartConnect(host=host, port=port, user=user, pwd=pw)
+
+    try:
+        return SmartConnect(host=host, port=port, user=user, pwd=pw, path=path)
+    except TypeError as exc:
+        if "path" not in str(exc):
+            raise
+        return SmartConnect(host=host, port=port, user=user, pwd=pw)
 
 
 def _find_vm(content: Any, name: str) -> vim.VirtualMachine:
@@ -287,13 +329,23 @@ def main() -> None:
         effective_change_id = (args.change_id or "").strip()
         if effective_change_id in ("", "null", "*"):
             vmdk_path = _disk_backing_vmdk_path(disk)
+            change_id_source = "snapshot"
             cur = _disk_backing_change_id(disk) or ""
+            if not cur:
+                try:
+                    _, current_disk = _disk_key_for_scsi(vm, args.disk_id)
+                    cur = _disk_backing_change_id(current_disk) or ""
+                    if cur:
+                        change_id_source = "current"
+                except Exception as exc:
+                    sys.stderr.write(f"WARN: failed to read current backing changeId for {args.disk_id}: {exc}\n")
             result = {
                 "disk_id": args.disk_id,
                 "snapshot": args.snapshot,
                 "start_change_id": effective_change_id,
                 "change_id": effective_change_id,
                 "new_change_id": cur,
+                "change_id_source": change_id_source,
                 "vmdk_path": vmdk_path,
                 "areas": [],
             }
@@ -307,8 +359,18 @@ def main() -> None:
 
         # Prefer DiskChangeInfo.changeId; fallback to disk.backing.changeId
         new_change_id = str(areas_change_id or "") if areas_change_id else ""
+        change_id_source = "query"
         if not new_change_id:
             new_change_id = _disk_backing_change_id(disk) or ""
+            change_id_source = "snapshot"
+        if not new_change_id:
+            try:
+                _, current_disk = _disk_key_for_scsi(vm, args.disk_id)
+                new_change_id = _disk_backing_change_id(current_disk) or ""
+                if new_change_id:
+                    change_id_source = "current"
+            except Exception as exc:
+                sys.stderr.write(f"WARN: failed to read current backing changeId for {args.disk_id}: {exc}\n")
 
         # Debug logging
         sys.stderr.write(f"DEBUG: Queried {len(areas)} changed areas for disk {args.disk_id}, change_id={effective_change_id}\n")
@@ -317,6 +379,7 @@ def main() -> None:
             "disk_id": args.disk_id,
             "change_id": effective_change_id,
             "new_change_id": new_change_id,
+            "change_id_source": change_id_source,
             "vmdk_path": vmdk_path,
             "areas": areas
         }))

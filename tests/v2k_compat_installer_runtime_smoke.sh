@@ -149,6 +149,17 @@ EOF
   assert_file_contains "${call_log}" "vm.info -json demo-vm"
   assert_file_contains "${call_log}" "device.info -json -vm demo-vm"
   assert_file_contains "${call_log}" "host.info -json -host host-11"
+  if [[ "${expected_profile}" == "esxi55" ]]; then
+    jq -s -e '
+      any(.[]; .phase == "init"
+        and .event == "phase_start"
+        and .detail.compat_selected_profile == "esxi55")
+    ' "${workdir}/events.log" >/dev/null || {
+      echo "[ERR] init event did not record final esxi55 compat profile" >&2
+      cat "${workdir}/events.log" >&2
+      exit 1
+    }
+  fi
 
   echo "[OK] version=${version} profile=${expected_profile} compat_mode=${compat_mode} host_fixture=${host_fixture}"
 }
@@ -201,6 +212,127 @@ EOF
   echo "[OK] wizard explicit esxi55 compat profile uses profile-local govc"
 }
 
+run_vddk_env_isolation_case() {
+  # shellcheck source=/dev/null
+  source "${ROOT_DIR}/lib/v2k/compat.sh"
+
+  local workdir="${WORK_ROOT}/vddk_env_isolation"
+  local vddk="${workdir}/vddk"
+  mkdir -p "${vddk}/lib64" "${workdir}/keep1" "${workdir}/keep2"
+
+  export VDDK_LIBDIR="${vddk}"
+  export V2K_WORKDIR="${workdir}"
+  export LD_LIBRARY_PATH="${vddk}/lib64:${workdir}/keep1:${vddk}:${workdir}/keep2"
+
+  local child_ld prefix cfg
+  child_ld="$(v2k_compat_child_ld_library_path)"
+  [[ "${child_ld}" == "${workdir}/keep1:${workdir}/keep2" ]] || {
+    echo "[ERR] VDDK library paths leaked into child LD_LIBRARY_PATH: ${child_ld}" >&2
+    exit 1
+  }
+
+  prefix="$(v2k_compat_vddk_child_env_prefix)"
+  [[ "${prefix}" == "env LD_LIBRARY_PATH=\"${workdir}/keep1:${workdir}/keep2\"" ]] || {
+    echo "[ERR] Unexpected child env prefix: ${prefix}" >&2
+    exit 1
+  }
+
+  cfg="$(v2k_compat_vddk_config_file)"
+  [[ "${cfg}" == "${workdir}/vddk.conf" && -f "${cfg}" ]] || {
+    echo "[ERR] VDDK config file was not created in workdir: ${cfg}" >&2
+    exit 1
+  }
+
+  unset LD_LIBRARY_PATH
+  prefix="$(v2k_compat_vddk_child_env_prefix)"
+  [[ "${prefix}" == "env -u LD_LIBRARY_PATH" ]] || {
+    echo "[ERR] Expected LD_LIBRARY_PATH unset prefix, got: ${prefix}" >&2
+    exit 1
+  }
+
+  echo "[OK] VDDK LD_LIBRARY_PATH isolation helper passed"
+}
+
+run_cloud_deploy_params_case() {
+  # shellcheck source=/dev/null
+  source "${ROOT_DIR}/lib/v2k/cloudstack_api.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT_DIR}/lib/v2k/target_cloud.sh"
+
+  local workdir="${WORK_ROOT}/cloud_deploy_params"
+  local manifest="${workdir}/manifest.json"
+  local manifest_ceil="${workdir}/manifest.ceil.json"
+  local params params_ceil body headers summary
+  mkdir -p "${workdir}"
+
+  cat > "${manifest}" <<'EOF'
+{
+  "source": {
+    "vm": {
+      "cpu": 2,
+      "memory_mb": 4096,
+      "firmware": "bios",
+      "secure_boot": false
+    }
+  },
+  "target": {
+    "cloud": {
+      "cpu_speed": "1000"
+    }
+  },
+  "disks": [
+    {
+      "size_bytes": 32212254720,
+      "controller": {
+        "type": "ParaVirtualSCSIController"
+      }
+    }
+  ]
+}
+EOF
+
+  params="$(v2k_cloud_target_source_deploy_params_json "${manifest}")"
+  jq -e '
+    .["details[0].cpuNumber"] == "2"
+    and .["details[0].cpuSpeed"] == "1000"
+    and .["details[0].memory"] == "4096"
+    and .["details[0].rootdisksize"] == "30"
+    and .["details[0].rootDiskController"] == "scsi"
+    and .boottype == "BIOS"
+    and .bootmode == "LEGACY"
+  ' <<<"${params}" >/dev/null || {
+    echo "[ERR] Cloud deploy params did not include expected rootdisksize/details" >&2
+    printf '%s\n' "${params}" >&2
+    exit 1
+  }
+
+  jq '.disks[0].size_bytes = 32212254721' "${manifest}" > "${manifest_ceil}"
+  params_ceil="$(v2k_cloud_target_source_deploy_params_json "${manifest_ceil}")"
+  jq -e '.["details[0].rootdisksize"] == "31"' <<<"${params_ceil}" >/dev/null || {
+    echo "[ERR] Cloud deploy rootdisksize was not rounded up to GiB" >&2
+    printf '%s\n' "${params_ceil}" >&2
+    exit 1
+  }
+
+  body="${workdir}/cloud-error-body.json"
+  headers="${workdir}/cloud-error-headers.txt"
+  cat > "${body}" <<'EOF'
+{"deployvirtualmachineforvolumeresponse":{"uuidList":[],"errorcode":431,"cserrorcode":4350,"errortext":"This disk offering requires a custom size specified"}}
+EOF
+  cat > "${headers}" <<'EOF'
+HTTP/1.1 431 Request Header Fields Too Large
+Content-Type: application/json;charset=utf-8
+X-Description: This disk offering requires a custom size specified
+EOF
+  summary="$(v2k_cloud_response_error_summary "${body}" "${headers}")"
+  [[ "${summary}" == *"errorcode=431"* && "${summary}" == *"cserrorcode=4350"* && "${summary}" == *"errortext=This disk offering requires a custom size specified"* ]] || {
+    echo "[ERR] Cloud API error summary did not include expected errortext: ${summary}" >&2
+    exit 1
+  }
+
+  echo "[OK] Cloud deploy params rootdisksize and API error summary helpers passed"
+}
+
 main() {
   require_cmds
   trap cleanup_repo_runtime_layout EXIT
@@ -222,6 +354,8 @@ main() {
   run_case "8.0.1" "vsphere80" "explicit" "host.info.json" ""
   run_case "8.0.1" "vsphere80" "implicit" "host.info.json" ""
   run_wizard_case
+  run_vddk_env_isolation_case
+  run_cloud_deploy_params_case
 
   echo "[OK] installer-runtime smoke test passed"
 }

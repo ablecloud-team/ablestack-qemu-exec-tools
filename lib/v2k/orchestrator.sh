@@ -579,7 +579,7 @@ v2k_cmd_run_foreground() {
       if ! v2k_cmd_sync incr "${sync_defaults[@]}" "${incr_extra[@]}"; then
         incr_failed=1
         if declare -F v2k_event >/dev/null 2>&1; then
-          v2k_event WARN "orchestrator" "" "incr_failed_continue_to_cutover" \
+          v2k_event ERROR "orchestrator" "" "incr_failed_stop_before_cutover" \
             "{\"iter\":${iter}}"
         fi
         break
@@ -617,9 +617,13 @@ v2k_cmd_run_foreground() {
     done
  
     if [[ "${incr_failed}" -eq 1 ]]; then
+      if [[ "${V2K_ALLOW_CUTOVER_AFTER_INCR_FAIL:-0}" != "1" ]]; then
+        echo "[run] incremental sync failed; stopping before cutover to protect target consistency." >&2
+        return 44
+      fi
       if declare -F v2k_event >/dev/null 2>&1; then
-        v2k_event INFO "orchestrator" "" "incr_aborted_proceed_cutover" \
-          "{\"iter\":${iter}}"
+        v2k_event WARN "orchestrator" "" "incr_aborted_proceed_cutover" \
+          "{\"iter\":${iter},\"override\":\"V2K_ALLOW_CUTOVER_AFTER_INCR_FAIL\"}"
       fi
     fi
 

@@ -1497,10 +1497,33 @@ EOF
     # ------------------------------------------------------------------
     # Verify that initramfs was actually updated and virtio drivers exist
     # ------------------------------------------------------------------
-    local vout vrc
+    local vout vrc module_summary
     v2k_linux_bootstrap_run_event "verify_initramfs_virtio" vout vrc -- \
       chroot "${rootmnt}" /bin/bash -lc \
         "lsinitrd /boot/initramfs-${kver}.img | grep -E 'virtio_(pci|blk|scsi)|scsi_mod'"
+    module_summary="$(jq -nc \
+      --arg output "${vout}" \
+      --argjson modules '["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]' \
+      '
+        reduce $modules[] as $module (
+          {present:[],missing:[]};
+          if ($output | contains($module)) then
+            .present += [$module]
+          else
+            .missing += [$module]
+          end
+        )
+      ')"
+    v2k_event INFO "linux_bootstrap" "" "initramfs_virtio_modules" \
+      "$(jq -nc --arg kver "${kver}" --argjson modules "${module_summary}" \
+        '{kver:$kver,present:$modules.present,missing:$modules.missing}')"
+    if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+      local present_modules missing_modules
+      present_modules="$(printf '%s' "${module_summary}" | jq -r '.present | if length > 0 then join(", ") else "none" end')"
+      missing_modules="$(printf '%s' "${module_summary}" | jq -r '.missing | if length > 0 then join(", ") else "none" end')"
+      echo "[v2k] Initramfs virtio modules present: ${present_modules}"
+      echo "[v2k] Initramfs virtio modules missing: ${missing_modules}"
+    fi
     if [[ "${vrc}" -ne 0 ]]; then
       v2k_event ERROR "linux_bootstrap" "" "initramfs_verify_failed" \
         "{\"kver\":\"${kver}\",\"note\":\"virtio drivers not found in initramfs\"}"
@@ -2038,10 +2061,6 @@ EOF
     fi
   fi
 
-  # Log init start with target overrides for observability
-  v2k_event INFO "init" "" "phase_start" \
-    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_provider\":\"${target_provider}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
-
   local inv_json
   inv_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter}")"
   local inv_esxi_version
@@ -2053,6 +2072,10 @@ EOF
       v2k_compat_resolve_profile "auto" "${V2K_WORKDIR:-}" "" 0
     fi
   fi
+
+  # Log after inventory-driven profile resolution so observability matches the manifest.
+  v2k_event INFO "init" "" "phase_start" \
+    "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_provider\":\"${target_provider}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
 
   # Build manifest using inventory json + target settings (from env)
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
@@ -2287,8 +2310,7 @@ v2k_cmd_sync() {
   v2k_maybe_force_cleanup
 
   v2k_event INFO "sync.${which}" "" "policy_evaluation" \
-    "{\"safe_mode\":${V2K_SAFE_MODE:-0},"\
-    "\"guestFamily\":\"$(jq -r '.source.vm.guestFamily // empty' "${V2K_MANIFEST}")\"}"
+    "{\"safe_mode\":${V2K_SAFE_MODE:-0},\"guestFamily\":\"$(jq -r '.source.vm.guestFamily // empty' "${V2K_MANIFEST}")\"}"
 
   # Policy: skip incr sync for linuxGuest or safe-mode
   if [[ "${which}" == "incr" ]] && v2k_should_skip_incr_phase; then

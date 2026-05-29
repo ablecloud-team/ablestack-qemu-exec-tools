@@ -303,7 +303,7 @@ v2k-rpm:
 	  (echo "[ERR] compat profile missing in RPM: $$RPM_FILE" >&2; exit 2); \
 	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/compat/esxi55/profile.json$$" || \
 	  (echo "[ERR] esxi55 compat profile missing in RPM: $$RPM_FILE" >&2; exit 2); \
-	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/VMware-vix-disklib-6[.]0[.]2-3566099[.]x86_64[.]tar[.]gz$$" || \
+	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/VMware-vix-disklib-6[.]5[.]0-4604867[.]x86_64[.]tar[.]gz$$" || \
 	  (echo "[ERR] esxi55 VDDK runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \
 	rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/runtime-assets/assets/compat/esxi55/nbdkit-vddk-legacy-1[.]14[.]2-rocky9-x86_64[.]tar[.]gz$$" || \
 	  (echo "[ERR] esxi55 legacy nbdkit runtime asset missing in RPM: $$RPM_FILE" >&2; exit 2); \

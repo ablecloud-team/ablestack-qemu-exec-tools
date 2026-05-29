@@ -775,7 +775,8 @@ v2k_manifest_status_summary() {
 
 v2k_manifest_fetch_and_save_base_change_ids() {
   local manifest="$1" py_script="$2"
-  local count i disk_id vm_name snap_name json_out new_id
+  local count i disk_id vm_name snap_name json_out new_id source rc err_file err detail
+  local missing=0
 
   # Python 스크립트 실행을 위한 환경변수 설정 (govc 환경변수 사용)
   export VCENTER_HOST="${GOVC_URL:?missing GOVC_URL}"
@@ -793,12 +794,41 @@ v2k_manifest_fetch_and_save_base_change_ids() {
     disk_id="$(jq -r ".disks[$i].disk_id" "${manifest}")"
     
     # --change-id "*"를 넘겨 현재 시점의 Change ID(new_change_id)만 받아온다.
-    json_out="$(v2k_python "${py_script}" --vm "${vm_name}" --snapshot "${snap_name}" --disk-id "${disk_id}" --change-id "*" 2>/dev/null || true)"
-    new_id="$(echo "${json_out}" | jq -r '.new_change_id // empty')"
+    err_file="$(mktemp)"
+    if json_out="$(v2k_python "${py_script}" --vm "${vm_name}" --snapshot "${snap_name}" --disk-id "${disk_id}" --change-id "*" 2>"${err_file}")"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    err="$(cat "${err_file}" 2>/dev/null || true)"
+    rm -f "${err_file}"
+    new_id="$(echo "${json_out}" | jq -r '.new_change_id // empty' 2>/dev/null || true)"
+    source="$(echo "${json_out}" | jq -r '.change_id_source // empty' 2>/dev/null || true)"
 
-    if [[ -n "${new_id}" && "${new_id}" != "null" ]]; then
+    if [[ "${rc}" -eq 0 && -n "${new_id}" && "${new_id}" != "null" ]]; then
       # 조회한 ID를 last_change_id로 저장 (다음 incr의 기준선으로 사용)
       v2k_manifest_set_disk_last_change_id "${manifest}" "${i}" "${new_id}"
+      if declare -F v2k_event >/dev/null 2>&1; then
+        detail="$(jq -n --arg disk_id "${disk_id}" --arg source "${source:-unknown}" \
+          '{disk_id:$disk_id,source:$source}')"
+        v2k_event INFO "sync.base" "${disk_id}" "cbt_base_change_id_saved" "${detail}"
+      fi
+    else
+      missing=1
+      if declare -F v2k_event >/dev/null 2>&1; then
+        detail="$(jq -n --arg disk_id "${disk_id}" --argjson code "${rc:-0}" --arg stderr "${err}" \
+          '{disk_id:$disk_id,code:$code,stderr:$stderr,action:"stop_before_incremental"}')"
+        v2k_event ERROR "sync.base" "${disk_id}" "cbt_base_change_id_missing" "${detail}"
+      fi
+      if declare -F v2k_manifest_append_sync_issue >/dev/null 2>&1; then
+        detail="$(jq -n --arg disk_id "${disk_id}" --arg stderr "${err}" \
+          '{disk_id:$disk_id,action:"stop_before_incremental",stderr:$stderr}')"
+        v2k_manifest_append_sync_issue "base" 44 "cbt_base_change_id_missing" "${detail}" || true
+      fi
     fi
   done
+
+  if [[ "${missing}" -ne 0 ]]; then
+    return 44
+  fi
 }
