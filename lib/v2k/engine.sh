@@ -89,7 +89,8 @@ v2k_nbd_is_connected() {
   # Kernel exposes pid when the device is connected.
   local dev="$1"
   local bn sys_pid
-  bn="$(basename "${dev}")"
+  [[ -n "${dev}" ]] || return 1
+  bn="${dev##*/}"
   sys_pid="/sys/block/${bn}/pid"
   [[ -r "${sys_pid}" ]] || return 1
   # pid file contains a number when connected; empty/0 when disconnected (depends on kernel)
@@ -607,7 +608,8 @@ v2k_linux_bootstrap_lvm_pv_candidates() {
   # Echo PV partition paths on this nbd device (e.g. /dev/nbd8p3)
   local nbd_dev="$1"
   local bn
-  bn="$(basename "${nbd_dev}")"
+  [[ -n "${nbd_dev}" ]] || return 1
+  bn="${nbd_dev##*/}"
   # Prefer partitions only; raw disk PV is uncommon but keep as fallback.
   # Only partitions that are LVM PVs (FSTYPE=LVM2_member)
   lsblk -rn -o NAME,FSTYPE "/dev/${bn}" 2>/dev/null \
@@ -622,7 +624,7 @@ v2k_linux_bootstrap_lvm_try_activate_by_pv() {
   [[ -b "${pv}" ]] || return 1
 
   local bn cfg
-  bn="$(basename "${nbd_dev}")"
+  bn="${nbd_dev##*/}"
   cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
 
   udevadm settle >/dev/null 2>&1 || true
@@ -656,7 +658,7 @@ v2k_linux_bootstrap_lvm_try_activate_vg_name() {
   [[ -n "${vg}" ]] || return 1
 
   local bn cfg
-  bn="$(basename "${nbd_dev}")"
+  bn="${nbd_dev##*/}"
   cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
 
   local out rc
@@ -684,7 +686,8 @@ v2k_linux_bootstrap_lvm_find_vgs_on_nbd() {
   v2k_has_lvm_tools || return 1
 
   local bn cfg
-  bn="$(basename "${nbd_dev}")"
+  [[ -n "${nbd_dev}" ]] || return 1
+  bn="${nbd_dev##*/}"
   cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
 
   # PV -> VG mapping from this device only
@@ -700,7 +703,7 @@ v2k_linux_bootstrap_lvm_activate_vg() {
   [[ -n "${vg}" ]] || return 1
 
   local bn cfg
-  bn="$(basename "${nbd_dev}")"
+  bn="${nbd_dev##*/}"
   cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
 
   # [CRITICAL ADDITION] VG Name Collision Locking
@@ -767,7 +770,8 @@ v2k_linux_bootstrap_try_mount_lvm() {
   v2k_has_lvm_tools || return 1
 
   local bn cfg
-  bn="$(basename "${nbd_dev}")"
+  [[ -n "${nbd_dev}" ]] || return 1
+  bn="${nbd_dev##*/}"
   # [Isolation] global_filter ensures no PVID collisions during this serialized session
   cfg="devices { global_filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] }"
 
@@ -892,7 +896,8 @@ v2k_linux_bootstrap_lvm_deactivate() {
   local nbd_dev="$1"
   v2k_has_lvm_tools || return 0
   local bn cfg
-  bn="$(basename "${nbd_dev}")"
+  [[ -n "${nbd_dev}" ]] || return 0
+  bn="${nbd_dev##*/}"
   cfg="devices { filter=[ \"a|^/dev/${bn}p[0-9]+$|\", \"a|^/dev/${bn}$|\", \"r|.*|\" ] }"
   lvm vgchange --config "${cfg}" -an >/dev/null 2>&1 || true
 }
@@ -1046,7 +1051,7 @@ v2k_linux_bootstrap_one() {
     # [STEP 2] Deactivate LVM & Targeted DM Cleanup
     if [[ -n "${nbd_dev:-}" ]]; then
       local bn cfg lvm_out lvm_rc
-      bn="$(basename "${nbd_dev}")"
+      bn="${nbd_dev##*/}"
       # Target ONLY this NBD for deactivation
       cfg="devices { global_filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] filter=[ \"a|^/dev/${bn}|\", \"r|.*|\" ] }"
 
@@ -1070,7 +1075,7 @@ v2k_linux_bootstrap_one() {
     # [STEP 3] Remove Reservation Lock
     if [[ -n "${nbd_dev:-}" ]]; then
         local base lock_dir
-        base="$(basename "${nbd_dev}")"
+        base="${nbd_dev##*/}"
         lock_dir="/var/lock/ablestack-v2k/reservations/${base}.lock.d"
         rm -rf "${lock_dir}" >/dev/null 2>&1 || true
     fi
@@ -1078,7 +1083,7 @@ v2k_linux_bootstrap_one() {
     # [STEP 4] Disconnect NBD & WAIT for Removal
     if [[ -n "${nbd_dev:-}" ]]; then
       local bn pid sys_pid attempt=0 max_attempts=5
-      bn="$(basename "${nbd_dev}")"
+      bn="${nbd_dev##*/}"
       sys_pid="/sys/block/${bn}/pid"
 
       while [[ "${attempt}" -lt "${max_attempts}" ]]; do
@@ -1269,7 +1274,7 @@ local qout qrc
   # 2. Force-remove Device Mapper holders created by accidental host-side activation.
   # This avoids conflicts such as duplicate /dev/mapper/rl-root names.
   local bn_fix
-  bn_fix="$(basename "${nbd_dev}")"
+  bn_fix="${nbd_dev##*/}"
   for holder in /sys/block/${bn_fix}/holders/*; do
       if [[ -e "${holder}" ]]; then
           local dm_name
@@ -1497,30 +1502,36 @@ EOF
     # ------------------------------------------------------------------
     # Verify that initramfs was actually updated and virtio drivers exist
     # ------------------------------------------------------------------
-    local vout vrc module_summary
+    local vout vrc module_summary module_event_json
     v2k_linux_bootstrap_run_event "verify_initramfs_virtio" vout vrc -- \
       chroot "${rootmnt}" /bin/bash -lc \
         "lsinitrd /boot/initramfs-${kver}.img | grep -E 'virtio_(pci|blk|scsi)|scsi_mod'"
-    module_summary="$(jq -nc \
-      --arg output "${vout}" \
-      --argjson modules '["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]' \
-      '
-        reduce $modules[] as $module (
-          {present:[],missing:[]};
-          if ($output | contains($module)) then
-            .present += [$module]
-          else
-            .missing += [$module]
-          end
-        )
-      ')"
+    if ! module_summary="$(jq -nc \
+        --arg output "${vout}" \
+        --argjson modules '["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]' \
+        '
+          reduce $modules[] as $mod (
+            {present:[],missing:[]};
+            if ($output | contains($mod)) then
+              .present += [$mod]
+            else
+              .missing += [$mod]
+            end
+          )
+        ' 2>/dev/null)"; then
+      module_summary='{"present":[],"missing":[],"error":"summary_failed"}'
+      v2k_event WARN "linux_bootstrap" "" "initramfs_virtio_summary_failed" \
+        "{\"kver\":\"${kver}\",\"note\":\"module summary generation failed; verify result still controls success\"}"
+    fi
+    module_event_json="$(jq -nc --arg kver "${kver}" --argjson modules "${module_summary}" \
+      '{kver:$kver,present:($modules.present // []),missing:($modules.missing // []),summary_error:($modules.error // null)}' \
+      2>/dev/null || printf '%s' "{\"kver\":\"${kver}\",\"present\":[],\"missing\":[],\"summary_error\":\"event_failed\"}")"
     v2k_event INFO "linux_bootstrap" "" "initramfs_virtio_modules" \
-      "$(jq -nc --arg kver "${kver}" --argjson modules "${module_summary}" \
-        '{kver:$kver,present:$modules.present,missing:$modules.missing}')"
+      "${module_event_json}"
     if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
       local present_modules missing_modules
-      present_modules="$(printf '%s' "${module_summary}" | jq -r '.present | if length > 0 then join(", ") else "none" end')"
-      missing_modules="$(printf '%s' "${module_summary}" | jq -r '.missing | if length > 0 then join(", ") else "none" end')"
+      present_modules="$(printf '%s' "${module_summary}" | jq -r '.present | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
+      missing_modules="$(printf '%s' "${module_summary}" | jq -r '.missing | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
       echo "[v2k] Initramfs virtio modules present: ${present_modules}"
       echo "[v2k] Initramfs virtio modules missing: ${missing_modules}"
     fi
