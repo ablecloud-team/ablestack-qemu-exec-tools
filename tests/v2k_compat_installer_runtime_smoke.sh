@@ -295,6 +295,8 @@ EOF
   jq -e '
     .["details[0].cpuNumber"] == "2"
     and .["details[0].cpuSpeed"] == "1000"
+    and .["details[0].io.policy"] == "io_uring"
+    and .["details[0].iothreads"] == "true"
     and .["details[0].memory"] == "4096"
     and .["details[0].rootdisksize"] == "30"
     and .["details[0].rootDiskController"] == "scsi"

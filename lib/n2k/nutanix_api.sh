@@ -399,6 +399,39 @@ n2k_nutanix_inventory_from_raw() {
           and (((.device_properties.device_type // .deviceProperties.deviceType // .device_type // .deviceType // "DISK") | tostring | ascii_upcase) != "CDROM")
         ));
 
+    def address_bus($a):
+      ($a.busType // $a.bus_type // $a.adapter_type // $a.device_bus // "" | tostring | ascii_downcase);
+
+    def address_unit($a; $fallback):
+      (($a.index // $a.deviceIndex // $a.device_index // $a.deviceIndex // $fallback) | tonumber? // $fallback);
+
+    def controller_rank($type):
+      ($type | tostring | ascii_downcase) as $t
+      | if $t == "scsi" then 0
+        elif $t == "virtio" then 1
+        elif $t == "sata" then 2
+        elif $t == "ide" then 3
+        elif $t == "pci" then 4
+        else 9 end;
+
+    def boot_disk_address($r):
+      ($r.bootConfig.bootDevice.diskAddress
+       // $r.bootConfig.boot_device.disk_address
+       // $r.boot_config.bootDevice.diskAddress
+       // $r.boot_config.boot_device.disk_address
+       // $r.resources.boot_config.boot_device.disk_address
+       // $r.status.resources.boot_config.boot_device.disk_address
+       // {});
+
+    def boot_disk_match($disk; $boot):
+      if (($boot | type) != "object") or (($boot | length) == 0) then false
+      else
+        (address_bus($boot)) as $boot_bus
+        | (address_unit($boot; -1)) as $boot_unit
+        | (($disk.controller.type // "" | tostring | ascii_downcase) == $boot_bus
+           and (($disk.controller.unit // -2) == $boot_unit))
+      end;
+
     def nic_items($r):
       ($r.nics
        // $r.nic_list
@@ -521,9 +554,11 @@ n2k_nutanix_inventory_from_raw() {
 
     def normalize_disk($d; $idx):
       ($d.diskAddress // $d.disk_address // $d.device_properties.disk_address // $d.deviceProperties.diskAddress // {}) as $a
+      | first_nonempty([$d.name, $d.label, $a.disk_label]) as $disk_label
       | {
           disk_id: disk_id($d; $idx),
-          label: first_nonempty([$d.name, $d.label, $a.disk_label, ("Disk " + (($idx + 1) | tostring))]),
+          label: $disk_label,
+          source_ordinal: $idx,
           device_key: first_nonempty([$d.extId, $d.ext_id, $d.uuid, $d.device_uuid, $d.vdiskUuid, $d.vdisk_uuid, $a.device_uuid, $a.vmdisk_uuid, ($idx | tostring)]),
           controller: {
             type: first_nonempty([$a.busType, $a.bus_type, $a.adapter_type, $a.device_bus, $d.busType, $d.bus_type, "scsi"]),
@@ -539,6 +574,24 @@ n2k_nutanix_inventory_from_raw() {
           },
           size_bytes: disk_size($d)
         };
+
+    def ordered_disks($r):
+      (boot_disk_address($r)) as $boot_addr
+      | (disk_items($r) | to_entries | map(normalize_disk(.value; .key)))
+      | sort_by([
+          (if boot_disk_match(.; $boot_addr) then 0 else 1 end),
+          controller_rank(.controller.type // ""),
+          (.controller.bus // 0),
+          (.controller.unit // 0),
+          (.source_ordinal // 0)
+        ])
+      | to_entries
+      | map(
+          . as $entry
+          | .value
+          | .label = (if ((.label // "") | tostring | length) > 0 then .label else ("Disk " + (($entry.key + 1) | tostring)) end)
+          | .role = (if $entry.key == 0 then "root" else "data" end)
+        );
 
     def normalize_nic($n; $idx):
       {
@@ -575,7 +628,7 @@ n2k_nutanix_inventory_from_raw() {
           guestId: first_nonempty([$r.guestCustomization.guestOs, $r.guest_customization.guest_os, $r.guestTools.guestOs, $r.guest_tools.guest_os]),
           guestFamily: first_nonempty([$r.guestFamily, $r.guest_family])
         },
-        disks: (disk_items($r) | to_entries | map(normalize_disk(.value; .key)))
+        disks: ordered_disks($r)
       }
   '
 }
