@@ -235,6 +235,8 @@ n2k_cloud_target_source_deploy_params_json() {
     (.source.vm // {}) as $vm
     | (($vm.cpu // 0) | tonumber? // 0) as $cpu
     | (($vm.memory_mb // 0) | tonumber? // 0) as $memory_mb
+    | (((.disks[0].size_bytes // .disks[0].disk_size_bytes // .disks[0].capacity_bytes // .disks[0].size // 0) | tonumber? // 0)) as $root_size_bytes
+    | (if $root_size_bytes > 0 then ((($root_size_bytes + 1073741823) / 1073741824) | floor) else 0 end) as $root_size_gib
     | ((.target.cloud.cpu_speed // "1000") | tostring) as $cpu_speed
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
@@ -245,6 +247,7 @@ n2k_cloud_target_source_deploy_params_json() {
       + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
       + {"details[0].cpuSpeed": $cpu_speed}
       + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
+      + (if $root_size_gib > 0 then {"details[0].rootdisksize": ($root_size_gib | tostring)} else {} end)
       + (if ($source_mac | length) > 0 then {macaddress:$source_mac} else {} end)
       + (if ($root_controller | length) > 0 then {"details[0].rootDiskController": $root_controller} else {} end)
       + (if ($data_controller | length) > 0 then {"details[0].dataDiskController": $data_controller} else {} end)
