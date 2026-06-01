@@ -394,11 +394,28 @@ v2k_vmware_inventory_json() {
           })
       );
 
+    def controller_rank($type; $ctrl_label):
+      (($ctrl_label // "") | tostring | ascii_downcase) as $lbl
+      | (($type // "") | tostring) as $typ
+      | if ($lbl | test("^scsi controller")) or ($typ | test("SCSIController$|LsiLogic|ParaVirtualSCSI|BusLogic")) then 0
+        elif ($lbl | test("^sata controller")) or ($typ | test("SATA"; "i")) then 1
+        elif ($lbl | test("^nvme controller")) or ($typ | test("NVME|NVMe|Nvme")) then 2
+        else 9 end;
+
+    def boot_disk_device_keys:
+      (BOOT.bootOrder // BOOT.boot_order // [])
+      | map((.deviceKey // .device_key // .key // empty) | tostring);
+
+    def boot_rank($disk; $boot_keys):
+      ([$boot_keys | to_entries[]? | select(.value == (($disk.device_key // "") | tostring)) | .key] | .[0] // 9999);
+
     def disks($ctls):
       (DEVICES
-        | map(select(.type=="VirtualDisk"))
+        | to_entries
+        | map(select(.value.type=="VirtualDisk"))
         | map(
-            . as $d
+            . as $entry
+            | .value as $d
             | ($ctls | map(select(.key==$d.controllerKey)) | .[0]) as $c
             | {
                 disk_id: (
@@ -413,6 +430,7 @@ v2k_vmware_inventory_json() {
                   end
                 ),
                 label: ($d.deviceInfo?.label // $d.label // "VirtualDisk"),
+                source_ordinal: $entry.key,
                 device_key: ($d.key|tostring),
                 controller: (
                   if $c!=null then
@@ -425,6 +443,16 @@ v2k_vmware_inventory_json() {
                 size_bytes: ($d.capacityInBytes // 0)
               }
           )
+        | boot_disk_device_keys as $boot_keys
+        | sort_by([
+            boot_rank(.; $boot_keys),
+            controller_rank(.controller.type // ""; .controller.label // ""),
+            (.controller.bus // 0),
+            (.controller.unit // 0),
+            (.source_ordinal // 0)
+          ])
+        | to_entries
+        | map(.value + {role:(if .key == 0 then "root" else "data" end)})
       );
 
     {

@@ -246,6 +246,8 @@ n2k_cloud_target_source_deploy_params_json() {
     | {}
       + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
       + {"details[0].cpuSpeed": $cpu_speed}
+      + {"details[0].io.policy": "io_uring"}
+      + {"details[0].iothreads": "true"}
       + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
       + (if $root_size_gib > 0 then {"details[0].rootdisksize": ($root_size_gib | tostring)} else {} end)
       + (if ($source_mac | length) > 0 then {macaddress:$source_mac} else {} end)
