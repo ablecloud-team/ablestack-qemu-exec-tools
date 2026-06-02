@@ -20,3 +20,7 @@ jobs:
         run: |
           echo "Running CI build (basic validation)"
           make all
+
+      - name: ISO package manager selection smoke
+        run: |
+          tests/iso_pkg_manager_selection_smoke.sh
