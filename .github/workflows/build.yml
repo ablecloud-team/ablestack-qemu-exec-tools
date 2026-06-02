@@ -1340,6 +1340,10 @@ jobs:
 
           has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+          is_ablestack_host() {
+              [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* ]]
+          }
+
           resolve_first_cmd() {
               local cmd=
               for cmd in "$@"; do
@@ -1352,6 +1356,10 @@ jobs:
           }
 
           rpm_pkg_manager_cmd() {
+              if is_ablestack_host && has_cmd aspm; then
+                  command -v aspm
+                  return 0
+              fi
               resolve_first_cmd dnf aspm || {
                   echo "[ERROR] Neither dnf nor ABLESTACK aspm was found." >&2
                   return 127
@@ -1365,6 +1373,10 @@ jobs:
           }
 
           rpm_query_cmd() {
+              if is_ablestack_host && has_cmd aspkg; then
+                  command -v aspkg
+                  return 0
+              fi
               resolve_first_cmd rpm aspkg || {
                   echo "[ERROR] Neither rpm nor ABLESTACK aspkg was found." >&2
                   return 127
@@ -1644,8 +1656,8 @@ jobs:
         run: |
           set -e
           bash -n release/install-linux.sh
-          grep -q 'resolve_first_cmd dnf aspm' release/install-linux.sh
-          grep -q 'resolve_first_cmd rpm aspkg' release/install-linux.sh
+          grep -q 'is_ablestack_host && has_cmd aspm' release/install-linux.sh
+          grep -q 'is_ablestack_host && has_cmd aspkg' release/install-linux.sh
 
       - name: Create uninstall-linux.sh
         run: |
@@ -1672,6 +1684,10 @@ jobs:
 
           has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+          is_ablestack_host() {
+            [[ "${PRETTY_NAME:-}" == *"ABLESTACK"* ]]
+          }
+
           resolve_first_cmd() {
             local cmd=
             for cmd in "$@"; do
@@ -1684,6 +1700,10 @@ jobs:
           }
 
           rpm_pkg_manager_cmd() {
+            if is_ablestack_host && has_cmd aspm; then
+              command -v aspm
+              return 0
+            fi
             resolve_first_cmd dnf aspm || {
               echo "[ERROR] Neither dnf nor ABLESTACK aspm was found." >&2
               return 127
@@ -1697,6 +1717,10 @@ jobs:
           }
 
           rpm_query_cmd() {
+            if is_ablestack_host && has_cmd aspkg; then
+              command -v aspkg
+              return 0
+            fi
             resolve_first_cmd rpm aspkg || {
               echo "[ERROR] Neither rpm nor ABLESTACK aspkg was found." >&2
               return 127
@@ -1777,8 +1801,8 @@ jobs:
         run: |
           set -e
           bash -n release/uninstall-linux.sh
-          grep -q 'resolve_first_cmd dnf aspm' release/uninstall-linux.sh
-          grep -q 'resolve_first_cmd rpm aspkg' release/uninstall-linux.sh
+          grep -q 'is_ablestack_host && has_cmd aspm' release/uninstall-linux.sh
+          grep -q 'is_ablestack_host && has_cmd aspkg' release/uninstall-linux.sh
 
       - name: Generate release notes (changelog)
         run: |
