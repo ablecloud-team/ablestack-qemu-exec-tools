@@ -264,6 +264,13 @@ _ablestack_v2k()
       ;;
 
     cutover)
+      case "${prev}" in
+        --bootstrap-fallback)
+          COMPREPLY=( $(compgen -W "sata off" -- "${cur}") )
+          return 0
+          ;;
+      esac
+
       local -a cutover_opts=(
         --shutdown --shutdown-force --shutdown-timeout
         --define-only --apply --start
@@ -272,6 +279,7 @@ _ablestack_v2k()
         --winpe-bootstrap --no-winpe-bootstrap
         --winpe-iso --virtio-iso --winpe-timeout
         --linux-bootstrap --no-linux-bootstrap
+        --bootstrap-fallback --no-bootstrap-fallback
         --safe-mode
         --force-cleanup
         --target-provider
