@@ -22,6 +22,7 @@
 import argparse
 import json
 import os
+import subprocess
 from typing import Dict, List, Tuple
 
 
@@ -44,19 +45,44 @@ def coalesce(areas: List[Tuple[int, int]], gap: int) -> List[Tuple[int, int]]:
     return merged
 
 
-def copy_region(src_fd, dst_fd, offset: int, length: int, chunk: int) -> None:
+def discard_range(target: str, offset: int, length: int) -> bool:
+    if length <= 0:
+        return True
+    try:
+        result = subprocess.run(
+            ["blkdiscard", "-o", str(offset), "-l", str(length), target],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def copy_region(src_fd, dst_fd, target: str, offset: int, length: int, chunk: int, sparse_zero: bool) -> Tuple[int, int]:
     remaining = length
     pos = offset
+    discarded = 0
+    discard_failed = 0
     while remaining > 0:
         n = chunk if remaining > chunk else remaining
         src_fd.seek(pos)
         buf = src_fd.read(n)
         if len(buf) != n:
             raise RuntimeError(f"short read at {pos}: expected {n}, got {len(buf)}")
+        if sparse_zero and not any(buf):
+            if discard_range(target, pos, n):
+                discarded += 1
+                remaining -= n
+                pos += n
+                continue
+            discard_failed += 1
         dst_fd.seek(pos)
         dst_fd.write(buf)
         remaining -= n
         pos += n
+    return discarded, discard_failed
 
 
 def main() -> None:
@@ -66,6 +92,8 @@ def main() -> None:
     ap.add_argument("--areas-json", required=True)
     ap.add_argument("--coalesce-gap", type=int, default=1024 * 1024)
     ap.add_argument("--chunk", type=int, default=4 * 1024 * 1024)
+    ap.add_argument("--target-kind", default="")
+    ap.add_argument("--sparse-zero", choices=("on", "off"), default="off")
     args = ap.parse_args()
 
     areas_obj: Dict = json.loads(args.areas_json)
@@ -77,9 +105,15 @@ def main() -> None:
     if not os.path.exists(args.target):
         raise SystemExit(f"target not found: {args.target}")
 
+    sparse_zero = args.sparse_zero == "on" and args.target_kind == "rbd"
+    total_discarded = 0
+    total_discard_failed = 0
+
     with open(args.source, "rb", buffering=0) as src_fd, open(args.target, "r+b", buffering=0) as dst_fd:
         for off, ln in merged:
-            copy_region(src_fd, dst_fd, off, ln, args.chunk)
+            discarded, discard_failed = copy_region(src_fd, dst_fd, args.target, off, ln, args.chunk, sparse_zero)
+            total_discarded += discarded
+            total_discard_failed += discard_failed
 
         # Ensure data reaches the underlying block device before disconnect
         try:
@@ -87,6 +121,17 @@ def main() -> None:
             os.fsync(dst_fd.fileno())
         except Exception:
             pass
+    if sparse_zero:
+        print(
+            json.dumps(
+                {
+                    "event": "sparse_zero_summary",
+                    "discarded_chunks": total_discarded,
+                    "discard_fallback_chunks": total_discard_failed,
+                },
+                separators=(",", ":"),
+            )
+        )
 
 if __name__ == "__main__":
     main()

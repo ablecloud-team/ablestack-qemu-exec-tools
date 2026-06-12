@@ -277,6 +277,40 @@ v2k_rbd_precheck() {
   fi
 }
 
+v2k_rbd_exists() {
+  local rbd_uri="$1"
+  local spec="${rbd_uri#rbd:}"
+  command -v rbd >/dev/null 2>&1 || return 1
+  rbd info "${spec}" >/dev/null 2>&1
+}
+
+v2k_rbd_sparse_enabled() {
+  case "${V2K_RBD_SPARSE:-1}" in
+    0|false|FALSE|no|NO|off|OFF) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+v2k_rbd_sparse_size() {
+  printf '%s' "${V2K_RBD_SPARSE_SIZE:-4M}"
+}
+
+v2k_rbd_sparsify() {
+  local rbd_uri="$1"
+  local needed="${2:-0}"
+  local mode="${V2K_RBD_SPARSIFY_AFTER:-auto}"
+  local spec="${rbd_uri#rbd:}"
+
+  case "${mode}" in
+    0|false|FALSE|no|NO|off|OFF) return 0 ;;
+    auto|AUTO) [[ "${needed}" == "1" ]] || return 0 ;;
+  esac
+  command -v rbd >/dev/null 2>&1 || return 0
+  rbd sparsify "${spec}" --sparse-size "$(v2k_rbd_sparse_size)" >/dev/null 2>&1 || {
+    v2k_log "WARN: rbd sparsify failed for ${spec}"
+    return 0
+  }
+}
 
 # Ensure RBD image exists and is at least size_bytes.
 # Requires: rbd CLI available and ceph access configured on host.
