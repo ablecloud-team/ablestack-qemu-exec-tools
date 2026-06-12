@@ -86,9 +86,14 @@ _v2k_rbd_dev_path_from_uri() {
 
 _v2k_target_disk_xml() {
   local manifest="$1" idx="$2"
-  local path bus dev st
+  local path bus dev st fallback_bus
   path="$(jq -r ".disks[$idx].transfer.target_path" "${manifest}")"
-  bus="$(_v2k_disk_bus_from_controller_type "$(jq -r ".disks[$idx].controller.type // empty" "${manifest}")")"
+  fallback_bus="$(jq -r '.runtime.bootstrap_fallback.bus // empty' "${manifest}" 2>/dev/null || true)"
+  if [[ "${fallback_bus}" == "sata" ]]; then
+    bus="sata"
+  else
+    bus="$(_v2k_disk_bus_from_controller_type "$(jq -r ".disks[$idx].controller.type // empty" "${manifest}")")"
+  fi
   dev="sd$(_v2k_letter "$idx")"
   st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
 
@@ -98,6 +103,11 @@ _v2k_target_disk_xml() {
     if [[ -z "${block_path}" ]]; then
       block_path="$(_v2k_rbd_dev_path_from_uri "${path}")"
     fi
+    local address_xml=""
+    if [[ "${bus}" != "sata" ]]; then
+      address_xml="      <alias name='scsi0-0-0-${idx}'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='${idx}'/>"
+    fi
     serial="$(printf ''%s'' "${path#rbd:}" | tr -cd ''[:alnum:]'' | cut -c1-20)"
     [[ -n "${serial}" ]] || serial="rbd${idx}"
     cat <<EOF
@@ -106,8 +116,7 @@ _v2k_target_disk_xml() {
       <source dev='$(_v2k_escape_xml "${block_path}")' index='${idx}'/>
       <target dev='${dev}' bus='${bus}'/>
       <serial>${serial}</serial>
-      <alias name='scsi0-0-0-${idx}'/>
-      <address type='drive' controller='0' bus='0' target='0' unit='${idx}'/>
+${address_xml}
     </disk>
 EOF
     return 0
@@ -252,7 +261,14 @@ v2k_target_generate_libvirt_xml() {
   fi
 
   local disks_xml=""
-  local count
+  local fallback_bus controller_xml
+  fallback_bus="$(jq -r '.runtime.bootstrap_fallback.bus // empty' "${manifest}" 2>/dev/null || true)"
+  if [[ "${fallback_bus}" == "sata" ]]; then
+    controller_xml="<controller type='sata' index='0'/>"
+  else
+    controller_xml="<controller type='scsi' index='0' model='virtio-scsi'/>"
+  fi
+  local count i
   count="$(jq -r '.disks | length' "${manifest}")"
 
   for ((i=0;i<count;i++)); do
@@ -287,7 +303,7 @@ $(_v2k_target_disk_xml "${manifest}" "$i")"
     <topology sockets='1' cores='${vcpu}' threads='1'/>
   </cpu>
   <devices>
-    <controller type='scsi' index='0' model='virtio-scsi'/>
+    ${controller_xml}
     ${disks_xml}
     ${iface_xml}
     ${tpm_xml}

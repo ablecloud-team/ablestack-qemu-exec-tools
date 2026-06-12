@@ -412,6 +412,8 @@ Options:
   --winpe-timeout <SEC>                     Default: 600
   --linux-bootstrap                         Default: auto for Linux guests
   --no-linux-bootstrap
+  --bootstrap-fallback sata|off             Default: sata
+  --no-bootstrap-fallback                   Same as --bootstrap-fallback off
   --safe-mode                               Default: off
   --force-cleanup                           Default: off
 

@@ -292,14 +292,14 @@ jobs:
           if [[ "${ROCKY_MINOR}" == "9.6" ]]; then
             REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
           elif [[ "${ROCKY_MINOR}" == "9.7" ]]; then
-            REPO_ROOT="https://dl.rockylinux.org/pub/rocky/${ROCKY_MINOR}"
+            REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
           else
             echo "[ERR] Unsupported Rocky minor for V2K build: ${ROCKY_MINOR}" >&2
             exit 2
           fi
 
           # Keep V2K build inputs pinned to the intended Rocky minor.
-          # 9.6 uses vault; 9.7 uses the normal public tree.
+          # 9.6 and 9.7 use vault because fixed minor trees may be removed from pub.
           cat > "/etc/yum.repos.d/${REPO_PREFIX}.repo" <<EOF
           [${REPO_PREFIX}-baseos]
           name=Rocky Linux ${ROCKY_MINOR} - BaseOS
@@ -338,7 +338,7 @@ jobs:
           if [[ "${ROCKY_MINOR}" == "9.6" ]]; then
             REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
           elif [[ "${ROCKY_MINOR}" == "9.7" ]]; then
-            REPO_ROOT="https://dl.rockylinux.org/pub/rocky/${ROCKY_MINOR}"
+            REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
           else
             echo "[ERR] Unsupported Rocky minor for V2K build: ${ROCKY_MINOR}" >&2
             exit 2
@@ -577,7 +577,7 @@ jobs:
           if [[ "${ROCKY_MINOR}" == "9.6" ]]; then
             REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
           elif [[ "${ROCKY_MINOR}" == "9.7" ]]; then
-            REPO_ROOT="https://dl.rockylinux.org/pub/rocky/${ROCKY_MINOR}"
+            REPO_ROOT="https://dl.rockylinux.org/vault/rocky/${ROCKY_MINOR}"
           else
             echo "[ERR] Unsupported Rocky minor for N2K build: ${ROCKY_MINOR}" >&2
             exit 2

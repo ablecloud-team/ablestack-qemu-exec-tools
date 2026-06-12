@@ -223,8 +223,10 @@ v2k_cloud_target_source_deploy_params_json() {
     | ((.target.cloud.cpu_speed // "1000") | tostring) as $cpu_speed
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
-    | (controller(.disks[0].controller.type // "")) as $root_controller
-    | (controller((.disks[1:] // [] | map(.controller.type // "") | map(select((. | tostring | length) > 0)) | first) // "")) as $data_controller
+    | ((.runtime.bootstrap_fallback.bus // "") | tostring | ascii_downcase) as $fallback_bus
+    | ((.disks // []) | length) as $disk_count
+    | (if $fallback_bus == "sata" then "sata" else controller(.disks[0].controller.type // "") end) as $root_controller
+    | (if $fallback_bus == "sata" and $disk_count > 1 then "sata" else controller((.disks[1:] // [] | map(.controller.type // "") | map(select((. | tostring | length) > 0)) | first) // "") end) as $data_controller
     | {}
       + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
       + {"details[0].cpuSpeed": $cpu_speed}

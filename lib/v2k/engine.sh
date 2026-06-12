@@ -2540,6 +2540,65 @@ v2k_cloud_windows_winpe_bootstrap() {
   v2k_windows_winpe_bootstrap_libvirt "${tmp_manifest}" "${tmp_vm}" "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}" 1
 }
 
+v2k_bootstrap_fallback_enabled() {
+  local policy="${1:-sata}"
+  case "${policy}" in
+    sata|auto|"") return 0 ;;
+    off|none|false|0) return 1 ;;
+    *)
+      echo "Invalid bootstrap fallback policy: ${policy}" >&2
+      return 2
+      ;;
+  esac
+}
+
+v2k_select_bootstrap_fallback() {
+  local manifest="$1" phase="$2" code="$3" reason="$4" policy="${5:-sata}"
+  local bus="sata"
+
+  if ! v2k_bootstrap_fallback_enabled "${policy}"; then
+    return 1
+  fi
+
+  v2k_manifest_runtime_set "${manifest}" ".bootstrap_fallback" \
+    "$(jq -nc \
+      --arg bus "${bus}" \
+      --arg phase "${phase}" \
+      --arg reason "${reason}" \
+      --argjson code "${code}" \
+      '{enabled:true,bus:$bus,phase:$phase,code:$code,reason:$reason}')" || true
+  v2k_event WARN "cutover" "" "bootstrap_fallback_selected" \
+    "$(jq -nc \
+      --arg bus "${bus}" \
+      --arg phase "${phase}" \
+      --arg reason "${reason}" \
+      --argjson code "${code}" \
+      '{bus:$bus,phase:$phase,code:$code,reason:$reason}')" || true
+  if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+    echo "[v2k] ${reason}. Falling back to SATA disk controller."
+  fi
+  return 0
+}
+
+v2k_libvirt_redefine_with_bootstrap_fallback() {
+  local manifest="$1" vcpu="$2" memory="$3" bridge="$4" vlan="$5" network="$6"
+  local vm xml_path
+  vm="$(jq -r '.target.libvirt.name' "${manifest}")"
+  v2k_target_undefine_libvirt "${vm}" || true
+  if [[ -n "${bridge}" ]]; then
+    xml_path="$(v2k_target_generate_libvirt_xml "${manifest}" \
+      --vcpu "${vcpu}" --memory "${memory}" \
+      --bridge "${bridge}" $( [[ -n "${vlan}" ]] && echo --vlan "${vlan}" ) \
+    )"
+  else
+    xml_path="$(v2k_target_generate_libvirt_xml "${manifest}" \
+      --vcpu "${vcpu}" --memory "${memory}" \
+      --network "${network}" \
+    )"
+  fi
+  v2k_target_define_libvirt "${xml_path}"
+}
+
 v2k_cmd_cutover() {
   v2k_require_manifest
   v2k_load_runtime_flags_from_manifest
@@ -2561,6 +2620,7 @@ v2k_cmd_cutover() {
   local vcpu_set=0 memory_set=0
   local network="default" bridge="" vlan=""
   local force_cleanup=0
+  local bootstrap_fallback="${V2K_BOOTSTRAP_FALLBACK:-sata}"
 
   #Linux bootstrap (host-chroot initramfs rebuild)
   local linux_bootstrap=-1
@@ -2598,6 +2658,18 @@ v2k_cmd_cutover() {
         ;;
       --no-linux-bootstrap)
         linux_bootstrap=0
+        shift 1
+        ;;
+      --bootstrap-fallback)
+        bootstrap_fallback="${2:-}"
+        case "${bootstrap_fallback}" in
+          sata|auto|off|none|false|0) ;;
+          *) echo "Invalid --bootstrap-fallback: ${bootstrap_fallback}" >&2; exit 2 ;;
+        esac
+        shift 2
+        ;;
+      --no-bootstrap-fallback)
+        bootstrap_fallback="off"
         shift 1
         ;;
       --target-provider) target_provider="${2:-}"; target_provider_arg_set=1; shift 2;;
@@ -2794,19 +2866,21 @@ v2k_cmd_cutover() {
       if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
         echo "[v2k] Cloud Linux bootstrap(initramfs) requested (guestFamily=linuxGuest)"
       fi
-      v2k_linux_bootstrap_initramfs "${V2K_MANIFEST}"
-      local rc=$?
-      if [[ "${rc}" -ne 0 ]]; then
+      if v2k_linux_bootstrap_initramfs "${V2K_MANIFEST}"; then
+        v2k_event INFO "cutover" "" "cloud_linux_bootstrap_done" "{}"
+        if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+          echo "[v2k] Cloud Linux bootstrap(initramfs) done (guestFamily=linuxGuest)"
+        fi
+      else
+        local rc=$?
         v2k_event ERROR "cutover" "" "cloud_linux_bootstrap_failed" "{\"code\":${rc}}"
         if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
           echo "[v2k] Cloud Linux bootstrap(initramfs) failed (guestFamily=linuxGuest)"
         fi
-        echo "Cloud Linux bootstrap (initramfs rebuild) failed. code=${rc}" >&2
-        exit 74
-      fi
-      v2k_event INFO "cutover" "" "cloud_linux_bootstrap_done" "{}"
-      if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
-        echo "[v2k] Cloud Linux bootstrap(initramfs) done (guestFamily=linuxGuest)"
+        if ! v2k_select_bootstrap_fallback "${V2K_MANIFEST}" "linux_bootstrap" "${rc}" "Cloud Linux bootstrap(initramfs) failed" "${bootstrap_fallback}"; then
+          echo "Cloud Linux bootstrap (initramfs rebuild) failed. code=${rc}" >&2
+          exit 74
+        fi
       fi
     else
       v2k_event INFO "cutover" "" "cloud_linux_bootstrap_skipped" "{\"reason\":\"cli_or_policy\"}"
@@ -2817,16 +2891,18 @@ v2k_cmd_cutover() {
     if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
       echo "[v2k] Cloud Windows WinPE bootstrap requested (guestFamily=windowsGuest)"
     fi
-    v2k_cloud_windows_winpe_bootstrap "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}"
-    local rc=$?
-    if [[ "${rc}" -ne 0 ]]; then
+    if v2k_cloud_windows_winpe_bootstrap "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}"; then
+      v2k_event INFO "cutover" "" "cloud_winpe_bootstrap_done" "{}"
+      if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+        echo "[v2k] Cloud Windows WinPE bootstrap done (guestFamily=windowsGuest)"
+      fi
+    else
+      local rc=$?
       v2k_event ERROR "cutover" "" "cloud_winpe_bootstrap_failed" "{\"code\":${rc}}"
-      echo "Cloud Windows WinPE bootstrap failed. code=${rc}" >&2
-      exit "${rc}"
-    fi
-    v2k_event INFO "cutover" "" "cloud_winpe_bootstrap_done" "{}"
-    if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
-      echo "[v2k] Cloud Windows WinPE bootstrap done (guestFamily=windowsGuest)"
+      if ! v2k_select_bootstrap_fallback "${V2K_MANIFEST}" "winpe_bootstrap" "${rc}" "Cloud Windows WinPE bootstrap failed" "${bootstrap_fallback}"; then
+        echo "Cloud Windows WinPE bootstrap failed. code=${rc}" >&2
+        exit "${rc}"
+      fi
     fi
   fi
 
@@ -2876,19 +2952,21 @@ v2k_cmd_cutover() {
       if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
         echo "[v2k] Linux bootstrap(initramfs) requested (guestFamily=linuxGuest)"
       fi
-      v2k_linux_bootstrap_initramfs "${V2K_MANIFEST}"
-      local rc=$?
-      if [[ "${rc}" -ne 0 ]]; then
+      if v2k_linux_bootstrap_initramfs "${V2K_MANIFEST}"; then
+        v2k_event INFO "cutover" "" "linux_bootstrap_done" "{}"
+        if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+          echo "[v2k] Linux bootstrap(initramfs) done (guestFamily=linuxGuest)"
+        fi
+      else
+        local rc=$?
         v2k_event ERROR "cutover" "" "linux_bootstrap_failed" "{\"code\":${rc}}"
         if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
           echo "[v2k] Linux bootstrap(initramfs) failed (guestFamily=linuxGuest)"
         fi
-        echo "Linux bootstrap (initramfs rebuild) failed. code=${rc}" >&2
-        exit 74
-      fi
-      v2k_event INFO "cutover" "" "linux_bootstrap_done" "{}"
-      if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
-        echo "[v2k] Linux bootstrap(initramfs) done (guestFamily=linuxGuest)"
+        if ! v2k_select_bootstrap_fallback "${V2K_MANIFEST}" "linux_bootstrap" "${rc}" "Linux bootstrap(initramfs) failed" "${bootstrap_fallback}"; then
+          echo "Linux bootstrap (initramfs rebuild) failed. code=${rc}" >&2
+          exit 74
+        fi
       fi
     else
       v2k_event INFO "cutover" "" "linux_bootstrap_skipped" "{\"reason\":\"cli_or_policy\"}"
@@ -2941,7 +3019,21 @@ v2k_cmd_cutover() {
   if [[ "${winpe_bootstrap}" -eq 1 ]]; then
     local vm
     vm="$(jq -r '.target.libvirt.name' "${V2K_MANIFEST}")"
-    v2k_windows_winpe_bootstrap_libvirt "${V2K_MANIFEST}" "${vm}" "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}" 0
+    if v2k_windows_winpe_bootstrap_libvirt "${V2K_MANIFEST}" "${vm}" "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}" 0; then
+      :
+    else
+      local rc=$?
+      v2k_event ERROR "cutover" "" "libvirt_winpe_bootstrap_failed" "{\"code\":${rc}}"
+      if v2k_select_bootstrap_fallback "${V2K_MANIFEST}" "winpe_bootstrap" "${rc}" "Windows WinPE bootstrap failed" "${bootstrap_fallback}"; then
+        if ! v2k_libvirt_redefine_with_bootstrap_fallback "${V2K_MANIFEST}" "${vcpu}" "${memory}" "${bridge}" "${vlan}" "${network}"; then
+          echo "libvirt redefine with SATA fallback failed." >&2
+          exit 65
+        fi
+      else
+        echo "Windows WinPE bootstrap failed. code=${rc}" >&2
+        exit "${rc}"
+      fi
+    fi
   fi
 
   # WinPE may trigger host-side auto-unmap on guest shutdown. Re-prepare persistent RBD maps before the final boot.
