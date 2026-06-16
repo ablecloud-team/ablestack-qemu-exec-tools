@@ -208,21 +208,16 @@ hangctl_detect_probe_maybe_act_one_vm() {
   local stuck_sec="${duration_sec}"
 
   # --- [단계 3] 마이그레이션/백업 작업 인식 및 계측 결정 ---
-  local is_migration=0
-  [[ "${domstate_full}" == *"migration"* ]] && is_migration=1
-  
-  # libvirt가 자체적으로 감지한 에러 상태 확인
   local is_disk_error=0
   [[ "${domstate_full}" == *"disk error"* ]] && is_disk_error=1
 
-  # [규칙] 백업/스냅샷 작업 여부 확인 (domjobinfo 이용)
-  local job_out job_type
-  job_out=$(virsh -c qemu:///system domjobinfo "${vm}" 2>/dev/null || true)
-  job_type=$(echo "${job_out}" | grep "Job type:" | awk '{print $3}' || echo "None")
-  
+  local job_out job_err job_rc job_type job_operation
+  job_out=""; job_err=""; job_rc=0
+  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" job_out job_err job_rc -- -c qemu:///system domjobinfo "${vm}" || true
+
+  local is_migration=0
   local is_backup=0
-  # Job type이 None이거나 Completed가 아니면 작업 중으로 간주
-  [[ "${job_type}" != "None" && "${job_type}" != "Completed" && -n "${job_type}" ]] && is_backup=1
+  hangctl_classify_domjobinfo "${domstate_full}" "${job_out}" job_type job_operation is_migration is_backup
 
   local current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
   if [[ "${is_migration}" -eq 1 || "${is_backup}" -eq 1 ]]; then
@@ -239,21 +234,24 @@ hangctl_detect_probe_maybe_act_one_vm() {
     decision="suspect"
   fi
 
+  local job_operation_url="${job_operation// /%20}"
   hangctl_log_event "detect" "vm.status_check" "ok" "${vm}" "" "" \
-    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window} job_type=${job_type} io_stall=${io_stall}"
+    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window} job_type=${job_type} operation_url=${job_operation_url} is_migration=${is_migration} is_backup=${is_backup} io_stall=${io_stall}"
 
-  # 의심 상황이 아니면 다음 VM으로 넘어감
-  if [[ "${decision}" != "suspect" ]]; then
-    return 0
-  fi
-
-  # --- [단계 5] 추가 검증(마이그레이션 좀비체크) ---
+  local migration_status=""
+  local migration_detail=""
   if [[ "${is_migration}" -eq 1 ]]; then
-    if ! hangctl_probe_migration_zombie_check "${vm}"; then
-      hangctl_log_event "detect" "vm.migration_check" "ok" "${vm}" "" "" \
-        "status=progressing note=protecting_active_migration stuck_sec=${stuck_sec}"
+    hangctl_probe_migration_progress_evaluate "${vm}" "${job_out}" "${duration_sec}" migration_status migration_detail || true
+    hangctl_log_event "detect" "vm.migration_check" "ok" "${vm}" "" "" \
+      "${migration_detail} stuck_sec=${stuck_sec} job_type=${job_type} operation_url=${job_operation_url}"
+    if [[ "${migration_status}" != "zombie_no_progress" ]]; then
       return 0
     fi
+  fi
+
+  # Non-migration or confirmed zombie migration continues through normal suspect handling.
+  if [[ "${decision}" != "suspect" ]]; then
+    return 0
   fi
 
   # --- [단계 6] 최종 결정 로직 ---
