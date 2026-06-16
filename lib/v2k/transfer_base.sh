@@ -226,10 +226,27 @@ v2k_transfer_base_one() {
     nbdcopy_path="$(command -v nbdcopy 2>/dev/null || true)"
     local child_env_prefix
     child_env_prefix="$(v2k_compat_vddk_child_env_prefix)"
+    local convert_sparse_args=""
+    if [[ "${st}" == "rbd" ]] && v2k_rbd_sparse_enabled; then
+      if command -v rbd >/dev/null 2>&1; then
+        local rbd_preexisting=0
+        v2k_rbd_exists "${target_path}" && rbd_preexisting=1
+        v2k_rbd_ensure_image "${target_path}" "${size_bytes}"
+        if [[ "${rbd_preexisting}" -eq 0 ]]; then
+          convert_sparse_args="-n -S \"$(v2k_rbd_sparse_size)\""
+        else
+          convert_sparse_args="-S \"$(v2k_rbd_sparse_size)\""
+        fi
+      else
+        convert_sparse_args="-S \"$(v2k_rbd_sparse_size)\""
+      fi
+      v2k_event INFO "sync.base" "${disk_id}" "rbd_sparse_enabled" \
+        "{\"target\":\"${target_path}\",\"sparse_size\":\"$(v2k_rbd_sparse_size)\"}"
+    fi
 
     case "${base_method}" in
       convert|qemu-img)
-        run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
+        run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none ${convert_sparse_args} -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
         ;;
       nbdcopy)
         if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
@@ -241,7 +258,7 @@ v2k_transfer_base_one() {
         fi
         ;;
       *)
-        run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
+        run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none ${convert_sparse_args} -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
         ;;
     esac
 
@@ -271,8 +288,12 @@ v2k_transfer_base_one() {
       vm="moref=${vm_moref}" \
       snapshot="${snap_moref}" \
       transports=nbd:nbdssl \
-      file="${vmdk_path}" \
-      --run "${run_str}" >>"${nbdlog}" 2>&1
+	      file="${vmdk_path}" \
+	      --run "${run_str}" >>"${nbdlog}" 2>&1
+
+    if [[ "${st}" == "rbd" ]] && v2k_rbd_sparse_enabled; then
+      v2k_rbd_sparsify "${target_path}"
+    fi
 
     v2k_manifest_mark_base_done "${manifest}" "${idx}"
     v2k_event INFO "sync.base" "${disk_id}" "disk_done" "{\"target\":\"${target_path}\"}"

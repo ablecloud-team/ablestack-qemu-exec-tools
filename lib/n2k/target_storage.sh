@@ -61,6 +61,91 @@ n2k_storage_require_command() {
   }
 }
 
+n2k_storage_rbd_sparse_enabled() {
+  case "${N2K_RBD_SPARSE:-1}" in
+    0|false|FALSE|no|NO|off|OFF) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+n2k_storage_rbd_sparse_size() {
+  printf '%s' "${N2K_RBD_SPARSE_SIZE:-4M}"
+}
+
+n2k_storage_source_virtual_size_bytes() {
+  local path="$1" size
+  if [[ -b "${path}" ]]; then
+    blockdev --getsize64 "${path}"
+    return
+  fi
+  if command -v qemu-img >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    size="$(qemu-img info --output=json "${path}" 2>/dev/null | jq -r '."virtual-size" // .virtual_size // empty' 2>/dev/null || true)"
+    if [[ "${size}" =~ ^[0-9]+$ && "${size}" -gt 0 ]]; then
+      printf '%s' "${size}"
+      return
+    fi
+  fi
+  n2k_storage_file_size_bytes "${path}"
+}
+
+n2k_storage_rbd_current_size_bytes() {
+  local target_path="$1" spec size
+  spec="$(n2k_storage_rbd_image_name "${target_path}")"
+  command -v rbd >/dev/null 2>&1 || return 1
+  if ! rbd info "${spec}" >/dev/null 2>&1; then
+    return 1
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    size="$(rbd info --format json "${spec}" 2>/dev/null | jq -r '.size // .size_bytes // empty' 2>/dev/null || true)"
+    if [[ "${size}" =~ ^[0-9]+$ && "${size}" -gt 0 ]]; then
+      printf '%s' "${size}"
+      return 0
+    fi
+  fi
+  rbd info "${spec}" 2>/dev/null | awk '/^ *size / {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}'
+}
+
+n2k_storage_rbd_exists() {
+  local target_path="$1" spec
+  spec="$(n2k_storage_rbd_image_name "${target_path}")"
+  command -v rbd >/dev/null 2>&1 || return 1
+  rbd info "${spec}" >/dev/null 2>&1
+}
+
+n2k_storage_rbd_ensure_image() {
+  local target_path="$1" size_bytes="$2" spec cur size_mb
+  spec="$(n2k_storage_rbd_image_name "${target_path}")"
+  [[ "${size_bytes}" =~ ^[0-9]+$ && "${size_bytes}" -gt 0 ]] || {
+    echo "RBD ensure requires a positive size for ${target_path}: ${size_bytes}" >&2
+    return 2
+  }
+  command -v rbd >/dev/null 2>&1 || return 1
+
+  size_mb="$(( (size_bytes + 1024*1024 - 1) / (1024*1024) ))"
+  [[ "${size_mb}" -gt 0 ]] || size_mb=1
+
+  if ! rbd info "${spec}" >/dev/null 2>&1; then
+    rbd create "${spec}" --size "${size_mb}"
+    return
+  fi
+
+  cur="$(n2k_storage_rbd_current_size_bytes "${target_path}" || true)"
+  if [[ "${cur}" =~ ^[0-9]+$ && "${cur}" -lt "${size_bytes}" ]]; then
+    rbd resize "${spec}" --size "${size_mb}"
+  fi
+}
+
+n2k_storage_rbd_sparsify() {
+  local target_path="$1" needed="${2:-0}" mode="${N2K_RBD_SPARSIFY_AFTER:-auto}" spec
+  case "${mode}" in
+    0|false|FALSE|no|NO|off|OFF) return 0 ;;
+    auto|AUTO) [[ "${needed}" == "1" ]] || return 0 ;;
+  esac
+  command -v rbd >/dev/null 2>&1 || return 0
+  spec="$(n2k_storage_rbd_image_name "${target_path}")"
+  rbd sparsify "${spec}" --sparse-size "$(n2k_storage_rbd_sparse_size)" >/dev/null 2>&1 || true
+}
+
 n2k_storage_detect_image_format() {
   local path="$1" fmt
   if [[ -b "${path}" ]]; then
@@ -111,7 +196,26 @@ n2k_storage_copy_base() {
         echo "RBD target path must start with rbd: ${target_path}" >&2
         return 2
       }
-      qemu-img convert -p -O raw "${source_path}" "${target_path}"
+      if n2k_storage_rbd_sparse_enabled; then
+        local source_size sparse_size rbd_preexisting=0
+        source_size="$(n2k_storage_source_virtual_size_bytes "${source_path}")"
+        sparse_size="$(n2k_storage_rbd_sparse_size)"
+        if command -v rbd >/dev/null 2>&1; then
+          n2k_storage_rbd_exists "${target_path}" && rbd_preexisting=1
+        fi
+        if command -v rbd >/dev/null 2>&1 && n2k_storage_rbd_ensure_image "${target_path}" "${source_size}"; then
+          if [[ "${rbd_preexisting}" -eq 0 ]]; then
+            qemu-img convert -p -n -S "${sparse_size}" -O raw "${source_path}" "${target_path}"
+          else
+            qemu-img convert -p -S "${sparse_size}" -O raw "${source_path}" "${target_path}"
+          fi
+        else
+          qemu-img convert -p -S "${sparse_size}" -O raw "${source_path}" "${target_path}"
+        fi
+        n2k_storage_rbd_sparsify "${target_path}" 0
+      else
+        qemu-img convert -p -O raw "${source_path}" "${target_path}"
+      fi
       ;;
     *)
       echo "Unsupported target storage: ${target_storage}" >&2
@@ -501,9 +605,28 @@ n2k_storage_unmap_rbd() {
   fi
 }
 
+n2k_storage_discard_rbd_region() {
+  local target_path="$1" mapped_device="$2" offset="$3" length="$4"
+  n2k_storage_rbd_sparse_enabled || return 1
+
+  if command -v qemu-io >/dev/null 2>&1; then
+    if qemu-io -f raw -c "discard ${offset} ${length}" "${target_path}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if [[ -b "${mapped_device}" ]] && command -v blkdiscard >/dev/null 2>&1; then
+    if blkdiscard -o "${offset}" -l "${length}" "${mapped_device}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 n2k_storage_patch_rbd() {
   local source_path="$1" target_path="$2" regions="$3"
-  local mapped_device offset length region_type map_mode
+  local mapped_device offset length region_type map_mode discard_fallbacks=0 discards=0
 
   map_mode="${N2K_RBD_PATCH_MAP_MODE:-auto}"
   mapped_device="$(n2k_storage_map_rbd "${target_path}" "${map_mode}")"
@@ -511,8 +634,21 @@ n2k_storage_patch_rbd() {
 
   while IFS=$'\t' read -r offset length region_type; do
     [[ -n "${offset}" && -n "${length}" ]] || continue
+    case "${region_type:-regular}" in
+      zero|zeros|zeroed|hole)
+        if n2k_storage_discard_rbd_region "${target_path}" "${mapped_device}" "${offset}" "${length}"; then
+          discards=$((discards + 1))
+          continue
+        fi
+        discard_fallbacks=$((discard_fallbacks + 1))
+        ;;
+    esac
     n2k_storage_apply_patch_region_to_device "${source_path}" "${mapped_device}" "${offset}" "${length}" "${region_type:-regular}"
   done < <(jq -r '.[] | [(.offset | tostring), (.length | tostring), (.type // "regular")] | @tsv' <<<"${regions}")
+
+  if [[ "${discards}" -gt 0 || "${discard_fallbacks}" -gt 0 ]]; then
+    echo "RBD sparse patch summary: discards=${discards} zero_write_fallbacks=${discard_fallbacks}" >&2
+  fi
 
   n2k_storage_unmap_rbd "${mapped_device}"
   trap - RETURN

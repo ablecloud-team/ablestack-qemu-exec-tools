@@ -2741,8 +2741,8 @@ v2k_cmd_cutover() {
       "{\"guestFamily\":\"${guest_family}\",\"guestId\":\"${guest_id}\"}"
   fi
 
-  # If WinPE is skipped, auto-start unless define-only or caller explicitly controlled start.
-  if [[ "${winpe_bootstrap}" -eq 0 && "${define_only}" -eq 0 && "${start_cli_set}" -eq 0 ]]; then
+  # If WinPE is skipped, auto-start only for the default cutover policy.
+  if [[ "${winpe_bootstrap}" -eq 0 && "${define_only}" -eq 0 && "${apply_define}" -eq 0 && "${start_cli_set}" -eq 0 ]]; then
     start_vm=1
     v2k_event INFO "cutover" "" "auto_start_enabled" "{}"
   fi

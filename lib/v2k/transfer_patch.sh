@@ -362,6 +362,13 @@ v2k_transfer_patch_one() {
       sleep 1
     fi
 
+    local sparse_zero="off"
+    if [[ "${kind}" == "rbd" ]] && v2k_rbd_sparse_enabled; then
+      sparse_zero="on"
+      v2k_event INFO "sync.${which}" "${disk_id}" "rbd_sparse_patch_enabled" \
+        "{\"target\":\"${target_path}\",\"method\":\"blkdiscard\",\"chunk\":${chunk}}"
+    fi
+
     if [[ "${areas_count}" -gt 0 ]]; then
       v2k_python "${V2K_PY_DIR}/patch_apply.py" \
         --source "${src_dev}" \
@@ -369,6 +376,8 @@ v2k_transfer_patch_one() {
         --areas-json "${areas_json}" \
         --coalesce-gap "${coalesce_gap}" \
         --chunk "${chunk}" \
+        --target-kind "${kind}" \
+        --sparse-zero "${sparse_zero}" \
         || { cleanup_patch; exit 41; }
     fi
 
