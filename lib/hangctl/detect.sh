@@ -122,28 +122,233 @@ hangctl_probe_qga_ping_optional() {
   return 0
 }
 
+# migration job and progress helpers
+hangctl__domjob_field() {
+  # usage: hangctl__domjob_field <domjobinfo_text> <field_name>
+  local text="${1-}"
+  local field="${2-}"
+  awk -F: -v key="${field}" '
+    BEGIN { key_l=tolower(key) }
+    {
+      name=tolower($1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+      if (name == key_l) {
+        $1=""
+        sub(/^:[[:space:]]*/, "", $0)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+        print $0
+        exit
+      }
+    }
+  ' <<< "${text}"
+}
+
+hangctl_classify_domjobinfo() {
+  # usage: hangctl_classify_domjobinfo <domstate_full> <domjobinfo_text> <job_type_var> <operation_var> <is_migration_var> <is_backup_var>
+  local domstate_full="${1-}"
+  local job_out="${2-}"
+  local -n _job_type="${3}"
+  local -n _operation="${4}"
+  local -n _is_migration="${5}"
+  local -n _is_backup="${6}"
+
+  _job_type="$(hangctl__domjob_field "${job_out}" "Job type" | awk '{print $1}' | head -n 1)"
+  _operation="$(hangctl__domjob_field "${job_out}" "Operation" | head -n 1)"
+  [[ -z "${_job_type}" ]] && _job_type="None"
+
+  local dom_lc op_lc job_lc
+  dom_lc="$(printf '%s' "${domstate_full}" | tr '[:upper:]' '[:lower:]')"
+  op_lc="$(printf '%s' "${_operation}" | tr '[:upper:]' '[:lower:]')"
+  job_lc="$(printf '%s' "${job_out}" | tr '[:upper:]' '[:lower:]')"
+
+  _is_migration=0
+  if [[ "${dom_lc}" == *"migration"* || "${op_lc}" == *"migration"* ]]; then
+    _is_migration=1
+  elif [[ "${job_lc}" == *"memory processed"* || "${job_lc}" == *"memory remaining"* || "${job_lc}" == *"memory total"* ]]; then
+    _is_migration=1
+  fi
+
+  local job_type_lc
+  job_type_lc="$(printf '%s' "${_job_type}" | tr '[:upper:]' '[:lower:]')"
+  _is_backup=0
+  if [[ "${_is_migration}" -eq 0 && -n "${_job_type}" && "${job_type_lc}" != "none" && "${job_type_lc}" != "completed" ]]; then
+    _is_backup=1
+  fi
+}
+
+hangctl_parse_size_to_bytes() {
+  # usage: hangctl_parse_size_to_bytes <value> <unit>
+  local value="${1-}"
+  local unit="${2-}"
+
+  awk -v value="${value}" -v unit="${unit}" '
+    BEGIN {
+      gsub(/,/, "", value)
+      if (value !~ /^[0-9]+([.][0-9]+)?$/) exit 1
+      u=tolower(unit)
+      gsub(/[^a-z0-9]/, "", u)
+      mult=1
+      if (u == "" || u == "b" || u == "byte" || u == "bytes") mult=1
+      else if (u == "k" || u == "kb" || u == "kib") mult=1024
+      else if (u == "m" || u == "mb" || u == "mib") mult=1024*1024
+      else if (u == "g" || u == "gb" || u == "gib") mult=1024*1024*1024
+      else if (u == "t" || u == "tb" || u == "tib") mult=1024*1024*1024*1024
+      else exit 1
+      printf "%.0f", value * mult
+    }
+  '
+}
+
+hangctl__domjob_size_bytes() {
+  # usage: hangctl__domjob_size_bytes <domjobinfo_text> <field_name>
+  local text="${1-}"
+  local field="${2-}"
+  local raw value unit bytes
+  raw="$(hangctl__domjob_field "${text}" "${field}" | head -n 1)"
+  [[ -n "${raw}" ]] || return 1
+  value="$(awk '{print $1}' <<< "${raw}")"
+  unit="$(awk '{print $2}' <<< "${raw}")"
+  bytes="$(hangctl_parse_size_to_bytes "${value}" "${unit}" 2>/dev/null)" || return 1
+  [[ "${bytes}" =~ ^[0-9]+$ ]] || return 1
+  echo -n "${bytes}"
+}
+
+hangctl_extract_migration_progress_metric() {
+  # usage: hangctl_extract_migration_progress_metric <domjobinfo_text> <kind_var> <bytes_var> <direction_var>
+  local job_out="${1-}"
+  local -n _kind="${2}"
+  local -n _bytes="${3}"
+  local -n _direction="${4}"
+
+  _kind=""
+  _bytes=""
+  _direction="increase"
+
+  if _bytes="$(hangctl__domjob_size_bytes "${job_out}" "Data processed" 2>/dev/null)"; then
+    _kind="data_processed"
+    _direction="increase"
+    return 0
+  fi
+  if _bytes="$(hangctl__domjob_size_bytes "${job_out}" "Memory processed" 2>/dev/null)"; then
+    _kind="memory_processed"
+    _direction="increase"
+    return 0
+  fi
+  if _bytes="$(hangctl__domjob_size_bytes "${job_out}" "Memory remaining" 2>/dev/null)"; then
+    _kind="memory_remaining"
+    _direction="change"
+    return 0
+  fi
+
+  return 1
+}
+
+hangctl_probe_migration_progress_evaluate() {
+  # usage: hangctl_probe_migration_progress_evaluate <vm> <domjobinfo_text> <duration_sec> <out_status_var> <out_detail_var>
+  local vm="${1-}"
+  local job_out="${2-}"
+  local duration_sec="${3-0}"
+  local -n _status="${4}"
+  local -n _detail="${5}"
+
+  _status="not_migration"
+  _detail="status=not_migration"
+
+  local kind bytes direction
+  if ! hangctl_extract_migration_progress_metric "${job_out}" kind bytes direction; then
+    local now_unknown
+    now_unknown="$(date +%s)"
+    hangctl_state_set_migration_kv_all "${vm}" \
+      "migration_last_seen_ts=${now_unknown}" \
+      "migration_metric_kind=unknown" || true
+    _status="protect_unknown_progress"
+    _detail="status=protect_unknown_progress reason=metric_parse_failed note=protecting_active_migration"
+    return 0
+  fi
+
+  local now prev_bytes prev_kind last_progress_ts progress_window confirm_window
+  now="$(date +%s)"
+  prev_bytes="$(hangctl_state_get_migration_kv "${vm}" "migration_metric_bytes" 2>/dev/null || true)"
+  prev_kind="$(hangctl_state_get_migration_kv "${vm}" "migration_metric_kind" 2>/dev/null || true)"
+  last_progress_ts="$(hangctl_state_get_migration_kv "${vm}" "migration_last_progress_ts" 2>/dev/null || true)"
+  progress_window="${HANGCTL_MIGRATION_PROGRESS_CHECK_SEC:-300}"
+  confirm_window="${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC:-3600}"
+
+  [[ "${duration_sec}" =~ ^[0-9]+$ ]] || duration_sec=0
+  [[ "${progress_window}" =~ ^[0-9]+$ ]] || progress_window=300
+  [[ "${confirm_window}" =~ ^[0-9]+$ ]] || confirm_window=3600
+  [[ "${prev_bytes}" =~ ^[0-9]+$ ]] || prev_bytes=""
+  [[ "${last_progress_ts}" =~ ^[0-9]+$ ]] || last_progress_ts=""
+
+  local progressed=0 delta=0 reason=""
+  if [[ -z "${prev_bytes}" || -z "${prev_kind}" || "${prev_kind}" != "${kind}" ]]; then
+    progressed=1
+    reason="first_observation"
+  elif [[ "${direction}" == "increase" ]]; then
+    if (( bytes > prev_bytes )); then
+      progressed=1
+      delta=$(( bytes - prev_bytes ))
+    elif (( bytes < prev_bytes )); then
+      progressed=1
+      reason="metric_reset"
+    fi
+  else
+    if (( bytes != prev_bytes )); then
+      progressed=1
+      if (( bytes > prev_bytes )); then
+        delta=$(( bytes - prev_bytes ))
+      else
+        delta=$(( prev_bytes - bytes ))
+      fi
+    fi
+  fi
+
+  if [[ "${progressed}" -eq 1 ]]; then
+    hangctl_state_set_migration_kv_all "${vm}" \
+      "migration_metric_bytes=${bytes}" \
+      "migration_metric_kind=${kind}" \
+      "migration_last_progress_ts=${now}" \
+      "migration_last_seen_ts=${now}" || true
+    _status="progressing"
+    _detail="status=progressing metric_kind=${kind} metric_bytes=${bytes} delta_bytes=${delta} last_progress_age_sec=0 note=protecting_active_migration"
+    [[ -n "${reason}" ]] && _detail="${_detail} reason=${reason}"
+    return 0
+  fi
+
+  if [[ -z "${last_progress_ts}" ]]; then
+    last_progress_ts="${now}"
+    hangctl_state_set_migration_kv_all "${vm}" "migration_last_progress_ts=${now}" || true
+  fi
+
+  local age=$(( now - last_progress_ts ))
+  (( age < 0 )) && age=0
+  hangctl_state_set_migration_kv_all "${vm}" \
+    "migration_metric_bytes=${bytes}" \
+    "migration_metric_kind=${kind}" \
+    "migration_last_seen_ts=${now}" || true
+
+  if (( age >= progress_window && duration_sec >= confirm_window )); then
+    _status="zombie_no_progress"
+    _detail="status=zombie_no_progress metric_kind=${kind} metric_bytes=${bytes} last_progress_age_sec=${age} progress_window_sec=${progress_window} confirm_window_sec=${confirm_window}"
+    return 0
+  fi
+
+  _status="no_progress_within_grace"
+  _detail="status=no_progress_within_grace metric_kind=${kind} metric_bytes=${bytes} last_progress_age_sec=${age} progress_window_sec=${progress_window} confirm_window_sec=${confirm_window} note=protecting_active_migration"
+  return 0
+}
+
 # migration zombie check
 hangctl_probe_migration_zombie_check() {
   # usage: hangctl_probe_migration_zombie_check <vm>
+  # Backward-compatible wrapper. Return 0 only when a migration zombie is confirmed.
   local vm="${1-}"
   local out err rc=0
-  
-  # 1. ÎßàÏù¥Í∑∏Î†à?¥ÏÖò ?ëÏóÖ ?ïÎ≥¥ Ï°∞Ìöå
+  local status detail
+
   hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" out err rc -- -c qemu:///system domjobinfo "${vm}" || true
-  
-  # 'Data processed' ?êÎäî 'Memory remaining' ?òÏπò Ï∂îÏ∂ú (?Ä???∏Ïä§??Í∏∞Ï?)
-  local current_data
-  current_data="$(echo "${out}" | grep -iE "Data processed|Memory processed" | awk '{print $3}' | tr -d ',' || echo "0")"
-  
-  # 2. ÏßÑÏ≤ô??ÎπÑÍµê (?¥Ï†Ñ ?§Ï∫î ?ÄÎπ??∞Ïù¥???†ÏûÖ??
-  local diff
-  diff="$(hangctl_state_get_migration_progress "${vm}" "${current_data}")"
-  
-  # ?∞Ïù¥??Î≥Ä?îÍ? 0?¥Í≥†, ?¥Î? ?§Ï†ï??ÎßàÏù¥Í∑∏Î†à?¥ÏÖò ?ÑÍ≥ÑÏπòÎ? ?òÏóà?§Î©¥ Ï¢ÄÎπÑÎ°ú ?êÎã®
-  if [[ "${diff}" -eq 0 ]]; then
-    return 0 # ÏßÑÏ≤ô ?ÜÏùå (?ÑÌóò)
-  fi
-  return 1 # ÏßÑÌñâ Ï§?(?ïÏÉÅ)
+  hangctl_probe_migration_progress_evaluate "${vm}" "${out}" "${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC:-3600}" status detail || true
+  [[ "${status}" == "zombie_no_progress" ]]
 }
 
 # detect.sh ??Ï∂îÍ?

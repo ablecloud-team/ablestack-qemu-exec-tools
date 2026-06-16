@@ -123,21 +123,59 @@ hangctl_state_get_duration_sec() {
   echo -n "${duration}"
 }
 
+
+hangctl_state__migration_path() {
+  local vm="${1-}"
+  echo -n "$(hangctl_state__path "${vm}").migrate"
+}
+
+hangctl_state_get_migration_kv() {
+  # usage: hangctl_state_get_migration_kv <vm> <key>
+  local vm="${1-}"
+  local key="${2-}"
+  local path
+  path="$(hangctl_state__migration_path "${vm}")"
+
+  [[ -f "${path}" ]] || return 1
+
+  # Backward compatibility for the old one-number cache file.
+  if [[ "${key}" == "migration_metric_bytes" ]] && grep -Eq '^[0-9]+$' "${path}" 2>/dev/null; then
+    head -n 1 "${path}"
+    return 0
+  fi
+
+  hangctl_state__read_kv "${path}" "${key}"
+}
+
+hangctl_state_set_migration_kv_all() {
+  # usage: hangctl_state_set_migration_kv_all <vm> <key=value>...
+  local vm="${1-}"
+  shift || true
+  local path
+  path="$(hangctl_state__migration_path "${vm}")"
+
+  hangctl_state__write_kv_all "${path}" "$@" || true
+}
+
+hangctl_state_reset_migration() {
+  local vm="${1-}"
+  rm -f "$(hangctl_state__migration_path "${vm}")" 2>/dev/null || true
+}
+
 # Migration 진행 ?�황 추적???�해 별도 ?�일???�적??바이????기록
 hangctl_state_get_migration_progress() {
   # usage: hangctl_state_get_migration_progress <vm> <current_bytes>
+  # Compatibility wrapper for older callers. New code should use the
+  # migration key-value helpers above.
   local vm="${1-}"
   local current="${2-0}"
-  local path
-  path="$(hangctl_state__path "${vm}").migrate"
 
   local prev
-  prev="$(cat "${path}" 2>/dev/null || echo "0")"
-  
-  # ?�재 ?�치�??�일???�??
-  echo "${current}" > "${path}"
-  
-  # ?�전 ?�치?� 비교?�여 증분 반환
+  prev="$(hangctl_state_get_migration_kv "${vm}" "migration_metric_bytes" 2>/dev/null || echo "0")"
+  [[ "${prev}" =~ ^[0-9]+$ ]] || prev=0
+  [[ "${current}" =~ ^[0-9]+$ ]] || current=0
+
+  hangctl_state_set_migration_kv_all "${vm}" "migration_metric_bytes=${current}" || true
   echo $(( current - prev ))
 }
 
@@ -146,9 +184,8 @@ hangctl_state_reset_vm() {
   local vm="${1-}"
   local path
   path="$(hangctl_state__path "${vm}")"
-  local migrate_path="${path}.migrate"
-
-  rm -f "${path}" "${migrate_path}" 2>/dev/null || true
+  rm -f "${path}" 2>/dev/null || true
+  hangctl_state_reset_migration "${vm}"
   hangctl_log_event "state" "state.reset" "ok" "${vm}" "" "" "reason=vm_not_running"
 }
 
