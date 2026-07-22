@@ -28,3 +28,15 @@ ablestack_vm_hangctl --help
 ablestack_vm_hangctl scan --dry-run
 ablestack_vm_hangctl scan --config /etc/ablestack/ablestack-vm-hangctl.conf
 ```
+
+## 운영 안전 설계 문서
+
+- VM live migration 보호 설계:
+  `docs/hangctl/ablestack_vm_hangctl_migration_protection_design.md`
+- HA 환경의 libvirtd 자동 재시작 보호 설계:
+  `docs/hangctl/ablestack_vm_hangctl_libvirtd_ha_guard_design.md`
+
+HA/Pacemaker 환경에서는 libvirtd health 실패가 곧바로 host-wide
+`systemctl restart libvirtd.service`로 이어지면 CCVM failover, fencing,
+`mold-agent.service`와 충돌할 수 있다. 따라서 libvirtd restart 경로는
+cluster guard, restart backoff, 명시적 operator opt-in을 전제로 설계한다.

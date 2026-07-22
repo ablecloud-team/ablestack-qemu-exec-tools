@@ -41,6 +41,14 @@ but has made no progress for the configured grace period.
   health-check behavior.
 - Do not require new binary dependencies.
 
+Follow-up note:
+
+- This document covers VM-level migration protection after VM scanning starts.
+  The HA/libvirtd guard design is tracked separately in
+  `docs/hangctl/ablestack_vm_hangctl_libvirtd_ha_guard_design.md`, because a
+  libvirtd health-gate failure can exit the scan before per-VM migration logic
+  is reached.
+
 ## Proposed Decision Flow
 
 For each VM scan:
