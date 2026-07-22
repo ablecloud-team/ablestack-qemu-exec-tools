@@ -34,6 +34,17 @@ Commit 05에서 circuit breaker / 대상 VM 수집 이벤트들을 추가합니�
 - `scan.libvirtd.health`
 - `scan.scan.targets`
 
+HA/libvirtd guard 설계에서 다음 details 필드를 확장할 수 있습니다.
+
+- `scan.libvirtd.health`
+  - `class`: `ok`, `service_inactive`, `socket_missing`, `api_timeout`,
+    `command_fail`, `unknown`
+  - `fail_count`: consecutive health failure count
+- `scan.libvirtd.restart.skip`
+  - `reason`: `disabled`, `dry_run`, `cooldown`, `backoff`,
+    `health_class`, `cluster_busy`, `cluster_settle`, `cluster_unknown`
+  - `guard_reason`: cluster guard가 skip을 결정한 세부 이유
+
 Commit 06에서 domstate 기반 전체(stuck) 계산 이벤트들을 추가합니다.
 
 - `detect.vm.domstate`

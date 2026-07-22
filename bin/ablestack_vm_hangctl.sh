@@ -47,6 +47,7 @@ _load_libs() {
   [[ -f "${LIBDIR}/hangctl/config.sh"  ]] || _die_load "missing: ${LIBDIR}/hangctl/config.sh"
   [[ -f "${LIBDIR}/hangctl/logging.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/logging.sh"
   [[ -f "${LIBDIR}/hangctl/libvirt_wrap.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/libvirt_wrap.sh"
+  [[ -f "${LIBDIR}/hangctl/cluster_guard.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/cluster_guard.sh"
   [[ -f "${LIBDIR}/hangctl/storage_guard.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/storage_guard.sh"
   [[ -f "${LIBDIR}/hangctl/state_cache.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/state_cache.sh"
   [[ -f "${LIBDIR}/hangctl/detect.sh" ]] || _die_load "missing: ${LIBDIR}/hangctl/detect.sh"
@@ -61,6 +62,8 @@ _load_libs() {
   source "${LIBDIR}/hangctl/logging.sh"
   # shellcheck source=/dev/null
   source "${LIBDIR}/hangctl/libvirt_wrap.sh"
+  # shellcheck source=/dev/null
+  source "${LIBDIR}/hangctl/cluster_guard.sh"
   # shellcheck source=/dev/null
   source "${LIBDIR}/hangctl/storage_guard.sh"
   # shellcheck source=/dev/null
@@ -350,11 +353,7 @@ cmd_scan() {
     esac
   done
 
-  hangctl_config_init_defaults
-  # config load first (base)
-  hangctl_config_load_file "${HANGCTL_CONFIG_PATH}"
-  # CLI overrides last (highest precedence)
-  hangctl_config_apply_cli "${cfg}" "${pol}" "${dry}"
+  hangctl_config_load_effective "${cfg}" "${pol}" "${dry}"
   # Logging config (rotate) is applied in hangctl_log_rotate_if_needed called by scan lifecycle events, so no need to handle here separately.
   hangctl_log_rotate_if_needed
 
@@ -505,9 +504,7 @@ cmd_check()  {
     exit "${EXIT_USAGE}"
   fi
 
-  hangctl_config_init_defaults
-  hangctl_config_load_file "${HANGCTL_CONFIG_PATH}"
-  hangctl_config_apply_cli "${cfg}" "${pol}" "${dry}"
+  hangctl_config_load_effective "${cfg}" "${pol}" "${dry}"
   hangctl_ensure_runtime_dirs
   hangctl_lock_acquire_or_exit
 
@@ -550,9 +547,7 @@ cmd_act()    {
     exit "${EXIT_USAGE}"
   fi
 
-  hangctl_config_init_defaults
-  hangctl_config_load_file "${HANGCTL_CONFIG_PATH}"
-  hangctl_config_apply_cli "${cfg}" "${pol}" "${dry}"
+  hangctl_config_load_effective "${cfg}" "${pol}" "${dry}"
   hangctl_ensure_runtime_dirs
   hangctl_lock_acquire_or_exit
 
@@ -587,9 +582,7 @@ cmd_health() {
     esac
   done
 
-  hangctl_config_init_defaults
-  hangctl_config_load_file "${HANGCTL_CONFIG_PATH}"
-  hangctl_config_apply_cli "${cfg}" "" "${dry}"
+  hangctl_config_load_effective "${cfg}" "" "${dry}"
   hangctl_ensure_runtime_dirs
   hangctl_lock_acquire_or_exit
 
@@ -600,24 +593,22 @@ cmd_health() {
     "config=${HANGCTL_CONFIG_PATH}"
 
   # health command: check only (no restart)
-  local out err rc
-  out=""; err=""; rc=0
-  hangctl_libvirtd_health_check_raw "${HANGCTL_LIBVIRTD_HEALTH_TIMEOUT_SEC}" out err rc
-  local result
-  result="$(hangctl__result_from_rc "${rc}")"
+  local result class detail rc
+  result=""; class=""; detail=""; rc=0
+  hangctl_libvirtd_health_check_classified "${HANGCTL_LIBVIRTD_HEALTH_TIMEOUT_SEC}" result class detail rc
   local fc
   if [[ "${result}" == "ok" ]]; then
     hangctl_libvirtd_failcount_set 0
     fc="0"
     hangctl_log_event "health" "libvirtd.health" "ok" "" "" 0 \
-      "timeout_sec=${HANGCTL_LIBVIRTD_HEALTH_TIMEOUT_SEC} fail_count=${fc}"
+      "timeout_sec=${HANGCTL_LIBVIRTD_HEALTH_TIMEOUT_SEC} fail_count=${fc} class=${class}"
     hangctl_log_event "health" "health.end" "ok" "" "" 0 "result=ok"
     echo "libvirtd.health: ok"
     return 0
   fi
   fc="$(hangctl_libvirtd_failcount_inc)"
   hangctl_log_event "health" "libvirtd.health" "${result}" "" "" "${rc}" \
-    "timeout_sec=${HANGCTL_LIBVIRTD_HEALTH_TIMEOUT_SEC} fail_count=${fc}"
+    "timeout_sec=${HANGCTL_LIBVIRTD_HEALTH_TIMEOUT_SEC} fail_count=${fc} class=${class} ${detail}"
   hangctl_log_event "health" "health.end" "fail" "" "" "${rc}" "result=${result}"
   echo "libvirtd.health: ${result}"
   exit "${EXIT_RUNTIME}"
