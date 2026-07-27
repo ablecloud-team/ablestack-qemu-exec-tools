@@ -1,0 +1,201 @@
+#!/bin/bash
+#
+# Read-only, bounded guest network snapshot for Cloud QGA collection.
+
+set -euo pipefail
+export LC_ALL=C
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+SCHEMA=""
+SECTIONS=""
+MAX_OUTPUT_BYTES=1048576
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --schema)
+            [ "$#" -ge 2 ] || exit 2
+            SCHEMA="$2"
+            shift 2
+            ;;
+        --sections)
+            [ "$#" -ge 2 ] || exit 2
+            SECTIONS="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unsupported option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+[ "$SCHEMA" = "1" ] || {
+    echo "Unsupported schema: $SCHEMA" >&2
+    exit 2
+}
+[ -n "$SECTIONS" ] || SECTIONS="addresses,routes,dns"
+case ",$SECTIONS," in
+    *",addresses,"*|*",routes,"*|*",dns,"*) ;;
+    *) echo "No supported section requested" >&2; exit 2 ;;
+esac
+if printf '%s' "$SECTIONS" | tr ',' '\n' |
+        grep -Ev '^(addresses|routes|dns)$' >/dev/null; then
+    echo "Unsupported section list: $SECTIONS" >&2
+    exit 2
+fi
+
+command -v jq >/dev/null 2>&1 || {
+    echo "jq is required" >&2
+    exit 3
+}
+
+OS_ID="unknown"
+OS_ID_LIKE=""
+OS_VERSION="unknown"
+if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_ID_LIKE="${ID_LIKE:-}"
+    OS_VERSION="${VERSION_ID:-unknown}"
+fi
+
+PACKAGE_VERSION="unknown"
+if command -v rpm >/dev/null 2>&1; then
+    PACKAGE_VERSION="$(rpm -q --qf '%{VERSION}-%{RELEASE}' ablestack-qemu-exec-tools 2>/dev/null || true)"
+elif command -v dpkg-query >/dev/null 2>&1; then
+    PACKAGE_VERSION="$(dpkg-query -W -f='${Version}' ablestack-qemu-exec-tools 2>/dev/null || true)"
+fi
+[ -n "$PACKAGE_VERSION" ] || PACKAGE_VERSION="source"
+
+interfaces='[]'
+routes='[]'
+dns='{"servers":[],"searchDomains":[],"source":null}'
+sections='{}'
+overall_ready=true
+
+requested() {
+    case ",$SECTIONS," in
+        *",$1,"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+section_error() {
+    local name="$1"
+    local source="$2"
+    local code="$3"
+    sections="$(jq -cn --argjson value "$sections" --arg n "$name" --arg s "$source" --arg c "$code" \
+        '$value + {($n): {status:"UNAVAILABLE", source:$s, errorCode:$c}}')"
+    overall_ready=false
+}
+
+if requested addresses; then
+    if command -v ip >/dev/null 2>&1; then
+        if raw_addresses="$(ip -j address show 2>/dev/null)"; then
+            interfaces="$(printf '%s' "$raw_addresses" | jq -c '
+              map({
+                name: .ifname,
+                index: .ifindex,
+                mtu: .mtu,
+                hardwareAddress: (.address // null),
+                operationalState: (.operstate // null),
+                addresses: [
+                  (.addr_info // [])[] |
+                  {
+                    address: .local,
+                    prefix: .prefixlen,
+                    family: (if .family == "inet6" then "IPv6" else "IPv4" end),
+                    scope: (.scope // null),
+                    primary: (((.secondary // false) | not) and ((.temporary // false) | not)),
+                    secondary: (.secondary // false),
+                    temporary: (.temporary // false)
+                  }
+                ]
+              })')"
+            sections="$(jq -cn --argjson value "$sections" \
+                '$value + {addresses:{status:"OK",source:"linux-ip-json",errorCode:null}}')"
+        else
+            section_error addresses linux-ip-json EXEC_EXIT_NONZERO
+        fi
+    else
+        section_error addresses linux-ip-json EXECUTABLE_NOT_FOUND
+    fi
+fi
+
+if requested routes; then
+    if command -v ip >/dev/null 2>&1; then
+        raw_v4="$(ip -j -4 route show table all 2>/dev/null || printf '[]')"
+        raw_v6="$(ip -j -6 route show table all 2>/dev/null || printf '[]')"
+        if jq -e . >/dev/null 2>&1 <<<"$raw_v4" && jq -e . >/dev/null 2>&1 <<<"$raw_v6"; then
+            routes="$(jq -cn --argjson v4 "$raw_v4" --argjson v6 "$raw_v6" '
+              [
+                ($v4[] | . + {family:"IPv4"}),
+                ($v6[] | . + {family:"IPv6"})
+              ] | map({
+                family,
+                destination: (.dst // "default"),
+                gateway: (.gateway // null),
+                device: (.dev // null),
+                source: (.prefsrc // null),
+                metric: (.metric // null),
+                table: (.table // "main"),
+                protocol: (.protocol // null),
+                scope: (.scope // null),
+                type: (.type // "unicast")
+              })')"
+            sections="$(jq -cn --argjson value "$sections" \
+                '$value + {routes:{status:"OK",source:"linux-ip-json",errorCode:null}}')"
+        else
+            section_error routes linux-ip-json INVALID_JSON
+        fi
+    else
+        section_error routes linux-ip-json EXECUTABLE_NOT_FOUND
+    fi
+fi
+
+if requested dns; then
+    dns_source="/etc/resolv.conf"
+    if [ -r /etc/resolv.conf ]; then
+        dns_servers="$(awk '$1=="nameserver" && NF>1 {print $2}' /etc/resolv.conf |
+            jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
+        dns_search="$(awk '$1=="search" || $1=="domain" {for(i=2;i<=NF;i++) print $i}' /etc/resolv.conf |
+            jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
+        dns="$(jq -cn --argjson servers "$dns_servers" --argjson search "$dns_search" \
+            --arg source "$dns_source" \
+            '{servers:$servers,searchDomains:$search,source:$source}')"
+        sections="$(jq -cn --argjson value "$sections" \
+            '$value + {dns:{status:"OK",source:"resolv-conf",errorCode:null}}')"
+    else
+        section_error dns resolv-conf FILE_NOT_READABLE
+    fi
+fi
+
+profile_status="READY"
+$overall_ready || profile_status="PARTIAL"
+payload="$(jq -cn \
+    --arg version "$PACKAGE_VERSION" \
+    --arg profileStatus "$profile_status" \
+    --arg osId "$OS_ID" \
+    --arg osIdLike "$OS_ID_LIKE" \
+    --arg osVersion "$OS_VERSION" \
+    --argjson sections "$sections" \
+    --argjson interfaces "$interfaces" \
+    --argjson routes "$routes" \
+    --argjson dns "$dns" \
+    '{
+      schemaVersion:1,
+      tool:{name:"ablestack-qemu-exec-tools",version:$version},
+      profile:{name:"cloud-network-observability",version:1,status:$profileStatus},
+      os:{id:$osId,idLike:($osIdLike|split(" ")|map(select(length>0))),version:$osVersion},
+      sections:$sections,
+      interfaces:$interfaces,
+      routes:$routes,
+      dns:$dns
+    }')"
+
+if [ "${#payload}" -gt "$MAX_OUTPUT_BYTES" ]; then
+    echo "Snapshot exceeds output limit" >&2
+    exit 6
+fi
+printf '%s\n' "$payload"
