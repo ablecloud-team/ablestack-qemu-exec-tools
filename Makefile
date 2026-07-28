@@ -448,7 +448,8 @@ windows:
 	powershell -ExecutionPolicy Bypass -File windows/msi/build-msi.ps1 \
 		-Version $(VERSION) -Release $(RELEASE) -GitHash $(GIT_HASH)
 	mkdir -p build/msi
-	cp windows/msi/out/* build/msi/ || echo "[WARN] No MSI files copied"
+	cp windows/msi/out/*.msi build/msi/
+	test -n "$$(find build/msi -maxdepth 1 -type f -name '*.msi' -print -quit)"
 	@echo "Windows MSI built under build/msi/"
 
 
