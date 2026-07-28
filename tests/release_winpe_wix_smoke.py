@@ -63,6 +63,22 @@ for required in (
     if required not in workflow:
         fail(f"build.yml is missing release guard: {required}")
 
+release_job = workflow.split("\n  release:\n", 1)[1]
+for dependency in (
+    "build-rpm",
+    "build-hangctl-rpm",
+    "build-ftctl-rpm",
+    "build-deb",
+    "build-windows",
+    "build-v2k-rpm",
+    "build-n2k-rpm",
+):
+    result_guard = f"needs['{dependency}'].result == 'success'"
+    if result_guard not in release_job:
+        fail(f"release job is missing dependency result guard: {result_guard}")
+if "always() &&" not in release_job:
+    fail("release job does not bypass the skipped build-winpe ancestor")
+
 winpe_workflow = read_utf8(".github/workflows/build-winpe-core.yml")
 for required in (
     "[System.IO.File]::WriteAllText(",
