@@ -108,6 +108,8 @@ tag_workflow = read_utf8(".github/workflows/build-winpe-release.yml")
 for required in (
     "tags:",
     '- "v*"',
+    "contents: write",
+    "actions: read",
     "source_ref: ${{ github.sha }}",
     "needs: [build]",
     "uses: ./.github/workflows/build.yml",
