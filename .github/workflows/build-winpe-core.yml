@@ -331,7 +331,14 @@ jobs:
           $sum = Join-Path $env:OUTDIR "SHA256SUMS"
 
           $hash = (Get-FileHash -Algorithm SHA256 $iso).Hash.ToLower()
-          "$hash  $file" | Out-File -Encoding ascii -Force $sum
+          # Keep this checksum file portable for Linux release assembly and
+          # `sha256sum -c`: PowerShell's default Windows newline leaves a
+          # trailing CR in the parsed filename.
+          [System.IO.File]::WriteAllText(
+            $sum,
+            "$hash  $file`n",
+            [System.Text.Encoding]::ASCII
+          )
           Get-Content $sum
 
       - name: Upload artifact (ISO + SHA256SUMS)

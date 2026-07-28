@@ -63,4 +63,15 @@ for required in (
     if required not in workflow:
         fail(f"build.yml is missing release guard: {required}")
 
+winpe_workflow = read_utf8(".github/workflows/build-winpe-core.yml")
+for required in (
+    "[System.IO.File]::WriteAllText(",
+    '"$hash  $file`n"',
+    "[System.Text.Encoding]::ASCII",
+):
+    if required not in winpe_workflow:
+        fail(f"build-winpe-core.yml is missing portable checksum output: {required}")
+if 'Out-File -Encoding ascii -Force $sum' in winpe_workflow:
+    fail("build-winpe-core.yml still writes SHA256SUMS with a Windows newline")
+
 print("[OK] release WinPE generation and MSI failure guards")
