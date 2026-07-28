@@ -68,7 +68,7 @@ jq -e '
   and .["details[0].rootdisksize"] == "30"
   and .["details[0].rootDiskController"] == "scsi"
   and .["details[0].dataDiskController"] == "scsi"
-  and .macaddress == "52:54:00:12:34:56"
+  and (has("macaddress") | not)
 ' <<<"${params}" >/dev/null || {
   echo "[ERR] n2k Cloud deploy params did not include expected rootdisksize/details" >&2
   printf '%s\n' "${params}" >&2
@@ -97,7 +97,7 @@ jq -e '.["details[0].rootdisksize"] == "20"' <<<"${params_capacity}" >/dev/null 
   echo "[ERR] deployVirtualMachineForVolume should prefer POST" >&2
   exit 1
 }
-N2K_CLOUD_POST_THRESHOLD=10
+export N2K_CLOUD_POST_THRESHOLD=10
 [[ "$(n2k_cloud_api_method listApis 100)" == "POST" ]] || {
   echo "[ERR] long Cloud API queries should use POST in auto mode" >&2
   exit 1

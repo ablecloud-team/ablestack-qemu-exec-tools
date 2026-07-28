@@ -221,6 +221,7 @@ manifest는 실행 상태의 단일 기준이다. `v2k` manifest와 비슷한 �
   },
   "target": {
     "type": "kvm",
+    "provider": "libvirt",
     "format": "qcow2",
     "dst_root": "/var/lib/libvirt/images/app-01",
     "storage": {
@@ -247,6 +248,22 @@ manifest는 실행 상태의 단일 기준이다. `v2k` manifest와 비슷한 �
 | `source.api.family` | 사용 API 계열 |
 | `source.api.namespaces` | namespace별 사용 가능 여부 |
 | `source.vm` | VM 이름, UUID, CPU, memory, firmware, NIC, guest OS 정보 |
+
+### target 주요 필드
+
+| 필드 | 설명 |
+| --- | --- |
+| `target.provider` | `libvirt` 또는 `ablestack-cloud` |
+| `target.storage` | 대상 storage 유형, 형식, 경로 map |
+| `target.cloud.network_ids` | 소스 NIC 순서대로 지정한 고유 Cloud network ID 배열 |
+| `target.cloud.nic_mappings` | source NIC key/network/MAC과 Cloud network ID 및 default 여부를 고정한 배열 |
+| `runtime.cloud.nic_verification` | 정지 상태 Cloud VM에서 확인한 실제 NIC 비교 결과 |
+
+Cloud provider에서는 `network_ids`만으로 NIC 의미를 추론하지 않는다.
+`source.vm.nics`와 정확히 같은 개수의 네트워크를 요구하고, 초기화 시
+`target.cloud.nic_mappings`를 생성한다. 배포 요청은 mapping별
+`iptonetworklist[n].networkid/mac`을 사용하며, 검증 결과가 일치해야 다음
+cutover 단계와 VM 시작을 허용한다.
 
 ### disk 주요 필드
 

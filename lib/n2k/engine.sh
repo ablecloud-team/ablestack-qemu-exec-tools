@@ -292,6 +292,10 @@ n2k_cmd_init() {
     cloud_config_json="$(jq -c --argjson pool "${storage_pool_config}" '. + {storage_pool:$pool}' <<<"${cloud_config_json}")"
   fi
   n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}"
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    n2k_cloud_target_ensure_manifest_nic_mappings "${N2K_MANIFEST}" || \
+      n2k_die "Failed to create ordered source NIC to Cloud network mappings"
+  fi
   n2k_event INFO "init" "" "manifest_created" "{\"manifest\":\"${N2K_MANIFEST}\"}"
   if [[ -n "${inventory_json}" ]]; then
     n2k_event INFO "init" "" "inventory_loaded" "${inventory_json}"
@@ -951,7 +955,7 @@ n2k_cmd_run() {
   fi
 
   local vm="" pc="" dst="" mode="auto" cred_file=""
-  local username="" password="" insecure="1" inventory_source="api"
+  local username="" password="" insecure="1" inventory_source="api" inventory_json_arg=""
   local target_format="qcow2" target_storage="file" target_map_json="" rbd_access_mode="librbd"
   local rbd_access_mode_arg_set=0
   local target_provider="libvirt" target_provider_arg_set=0
@@ -986,6 +990,7 @@ n2k_cmd_run() {
       --username) username="${2:-}"; shift 2 ;;
       --password) password="${2:-}"; shift 2 ;;
       --insecure) insecure="${2:-}"; shift 2 ;;
+      --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
@@ -1135,6 +1140,7 @@ n2k_cmd_run() {
     [[ -n "${vm}" ]] || n2k_die "run --split ${split} requires --vm when no manifest exists"
     [[ -n "${pc}" ]] || n2k_die "run --split ${split} requires --pc when no manifest exists"
     local -a init_args=(--vm "${vm}" --pc "${pc}" --mode "${mode}" --inventory-source "${inventory_source}" --target-format "${target_format}" --target-storage "${target_storage}" --rbd-access-mode "${rbd_access_mode}")
+    [[ -n "${inventory_json_arg}" ]] && init_args+=(--inventory-json "${inventory_json_arg}")
     [[ "${target_provider_arg_set}" -eq 1 ]] && init_args+=(--target-provider "${target_provider}")
     [[ -n "${dst}" ]] && init_args+=(--dst "${dst}")
     [[ -n "${target_map_json}" ]] && init_args+=(--target-map-json "${target_map_json}")

@@ -98,13 +98,24 @@
 | ID | 이름 | 입력 | 기대 결과 | 상태 |
 | --- | --- | --- | --- | --- |
 | `N2K-UNIT-API-001` | VM inventory parsing | v4 VM fixture | CPU, memory, firmware 파싱 | planned |
-| `N2K-UNIT-API-002` | NIC parsing | NIC fixture | MAC 목록 정렬 | planned |
+| `N2K-UNIT-API-002` | NIC parsing | 2-NIC fixture | source order로 key, ext_id, MAC, network 정규화 | passed |
 | `N2K-UNIT-API-003` | disk parsing | disk fixture | disk_id, size, bus/unit 생성 | planned |
 | `N2K-UNIT-API-004` | recovery point parsing | RP fixture | VM RP와 disk RP 식별 | planned |
 | `N2K-UNIT-API-005` | changed regions parsing | changed regions fixture | offset/length list 생성 | ready |
 | `N2K-UNIT-API-006` | empty changed regions | empty fixture | no-op sync로 판정 | planned |
 | `N2K-UNIT-API-007` | PE redirect parsing | discover cluster fixture | PE endpoint와 token 정보 추출 | planned |
 | `N2K-UNIT-API-008` | legacy response parsing | legacy fixture | 지원 가능 여부와 제한 사항 추출 | ready |
+
+### Cloud NIC mapping
+
+| ID | 이름 | 입력 | 기대 결과 | 상태 |
+| --- | --- | --- | --- | --- |
+| `N2K-UNIT-CLOUD-NIC-001` | ordered mapping | 2 NIC, 2 network | `target.cloud.nic_mappings`에 source/network/MAC 고정 | passed |
+| `N2K-UNIT-CLOUD-NIC-002` | deploy params | 2 mappings | `iptonetworklist[n].networkid/mac`, legacy 파라미터 없음 | passed |
+| `N2K-UNIT-CLOUD-NIC-003` | Wizard selection | 2 NIC, 2 choices | NIC별 고유 네트워크 선택 | passed |
+| `N2K-UNIT-CLOUD-NIC-004` | post-deploy verify | matching/mismatching VM NIC | network/MAC/default 일치만 승인 | passed |
+| `N2K-UNIT-CLOUD-NIC-005` | invalid mapping | count mismatch, duplicate, multicast MAC | import 전에 실패 | passed |
+| `N2K-E2E-CLOUD-NIC-001` | real multi-NIC cutover | 2-NIC Nutanix VM | stopped VM 검증 후에만 attach/start | planned |
 
 ### transfer와 patch
 

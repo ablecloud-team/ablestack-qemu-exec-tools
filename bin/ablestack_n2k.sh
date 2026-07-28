@@ -130,8 +130,8 @@ Options:
                           Cloud service offering ID
   --cloud-cpu-speed <mhz>
                           Cloud CPU speed detail; default 1000
-  --cloud-network-id <id> Cloud network ID; repeatable
-  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-network-id <id> One unique Cloud network per source NIC, in NIC order
+  --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
                           Optional override; default uses N2K writeback offering
@@ -196,8 +196,8 @@ Options:
                           Cloud service offering ID
   --cloud-cpu-speed <mhz>
                           Cloud CPU speed detail; default 1000
-  --cloud-network-id <id> Cloud network ID; repeatable
-  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-network-id <id> One unique Cloud network per source NIC, in NIC order
+  --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
                           Optional override; default uses N2K writeback offering
@@ -260,8 +260,8 @@ Options:
                           Cloud service offering ID
   --cloud-cpu-speed <mhz>
                           Cloud CPU speed detail; default 1000
-  --cloud-network-id <id> Cloud network ID; repeatable
-  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-network-id <id> One unique Cloud network per source NIC, in NIC order
+  --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
                           Optional override; default uses N2K writeback offering
@@ -272,6 +272,7 @@ Options:
   --cloud-name <name>     Optional Cloud VM host name
   --cloud-display-name <name>
                           Optional Cloud VM display name
+  --inventory-json <json> Reuse normalized inventory without an API re-fetch
   --inventory-source <s>  none|fixture|api; default api
   --split <mode>          full|phase1|phase2
   --source-api <api>      v3; run data path currently uses v3 snapshot/NFS
@@ -378,8 +379,8 @@ Cloud options:
   --cloud-zone-id <id>    Cloud zone ID; prompt/list when omitted
   --cloud-service-offering-id <id>
                           Cloud service offering ID; prompt/list when omitted
-  --cloud-network-id <id> Cloud network ID; repeatable
-  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-network-id <id> One unique Cloud network per source NIC, in NIC order
+  --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID; prompt/list when omitted
   --cloud-disk-offering-id <id>
                           Optional override; default uses N2K writeback offering
@@ -445,8 +446,8 @@ Options:
                           Cloud service offering ID
   --cloud-cpu-speed <mhz>
                           Cloud CPU speed detail; default 1000
-  --cloud-network-id <id> Cloud network ID; repeatable
-  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-network-id <id> One unique Cloud network per source NIC, in NIC order
+  --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
                           Optional override; default uses N2K writeback offering
@@ -597,8 +598,8 @@ Options:
                           Cloud service offering ID
   --cloud-cpu-speed <mhz>
                           Cloud CPU speed detail; default 1000
-  --cloud-network-id <id> Cloud network ID; repeatable
-  --cloud-network-ids <s> Comma-separated Cloud network IDs
+  --cloud-network-id <id> One unique Cloud network per source NIC, in NIC order
+  --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
                           Optional override; default uses N2K writeback offering
