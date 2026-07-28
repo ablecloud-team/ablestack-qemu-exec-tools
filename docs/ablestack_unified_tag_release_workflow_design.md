@@ -34,6 +34,8 @@ Manual runs build their own `winpe-iso-validation` artifact and default to
 
 - The tag workflow passes the exact tag commit SHA to both reusable workflows.
 - Every checkout uses the resolved `source_ref`.
+- The top-level workflow grants `contents: write` for the one-time Release
+  creation and `actions: read` for same-run artifact consumption.
 - Missing WinPE ISO, missing `SHA256SUMS`, checksum mismatch, missing MSI, or
   any failed direct build dependency prevents publication.
 - The release staging job requires exactly 12 assets: WinPE ISO,
