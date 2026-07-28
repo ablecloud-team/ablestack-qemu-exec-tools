@@ -140,12 +140,23 @@ unset V2K_CLOUD_NIC_VERIFY_ATTEMPTS V2K_CLOUD_NIC_VERIFY_INTERVAL
 
 inventory_json="$(jq -c '{vm:{nics:.source.vm.nics}}' "${manifest}")"
 choices=$'network-a\tNetwork A\tL2\nnetwork-b\tNetwork B\tL2'
-v2k_interactive_select_tsv() {
-  awk -F '\t' 'NF && $1 != "" {print $1; exit}' <<<"$2"
-}
-selected_networks="$(v2k_interactive_select_cloud_networks_for_nics \
-  "${inventory_json}" "${choices}" 0)"
+selected_networks="$(
+  # shellcheck disable=SC2317
+  v2k_interactive_has_tty() { return 0; }
+  v2k_interactive_select_cloud_networks_for_nics \
+    "${inventory_json}" "${choices}" 0 <<<"1"
+)"
 [[ "${selected_networks}" == "network-a,network-b" ]]
+
+if (
+  # shellcheck disable=SC2317
+  v2k_interactive_select_tsv() { return 2; }
+  v2k_interactive_select_cloud_networks_for_nics \
+    "${inventory_json}" "${choices}" 0 >/dev/null 2>&1
+); then
+  echo "[ERR] Cloud network selection failure was ignored" >&2
+  exit 1
+fi
 
 mismatch_manifest="${WORK_DIR}/mismatch.json"
 jq '.target.cloud.network_ids = ["network-a"]' "${manifest}" > "${mismatch_manifest}"
