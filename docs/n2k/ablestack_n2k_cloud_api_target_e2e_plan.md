@@ -85,8 +85,12 @@ not yet pass, stop and record the case as `BLOCKED` before modifying the engine.
 
 ### Networks
 
-The network is selected by `--cloud-network-id` or `--cloud-network-ids` and is
-passed to `deployVirtualMachineForVolume` as `networkids`.
+One unique network is selected per source NIC by repeating
+`--cloud-network-id` in source NIC order or by supplying the same ordered list
+through `--cloud-network-ids`. n2k freezes the association in
+`target.cloud.nic_mappings` and passes each pair to
+`deployVirtualMachineForVolume` as `iptonetworklist[n].networkid` and
+`iptonetworklist[n].mac`.
 
 | Name | ID | Type |
 | --- | --- | --- |
@@ -97,11 +101,23 @@ passed to `deployVirtualMachineForVolume` as `networkids`.
 | `foms-network` | `ff527c13-8d5b-44c8-9579-504ecada482c` | Isolated |
 
 Recommended first pass: use `L2-Network` unless the test explicitly needs an
-isolated network. The current Cloud target implementation selects the Cloud
-network but does not yet force the original Nutanix NIC MAC address or IP
-address. For this test pass, success means the VM is attached to the selected
-Cloud network and boots. If exact MAC/IP preservation becomes mandatory, stop
-and create a separate design before changing code.
+isolated network. For a multi-NIC test, provision at least as many unique target
+networks as source NICs. Success requires every target NIC to match the selected
+network and the normalized Nutanix source MAC before the VM is started. Source
+IP preservation remains out of scope and must not be inferred from MAC
+preservation.
+
+Before disk import, verify:
+
+- source NIC count equals selected Cloud network count
+- source MAC addresses are valid, unique unicast addresses
+- selected network IDs are unique and belong to the selected zone
+- `target.cloud.nic_mappings[0].default` is `true`
+
+After stopped-VM deployment, query `listVirtualMachines(id=<vm_id>)` and verify
+network ID, MAC, and default NIC. A mismatch must leave the VM stopped and
+record `stage=nic-verification`, the VM/root volume/job IDs, and the comparison
+result in `runtime.cloud`.
 
 ### Primary storage
 

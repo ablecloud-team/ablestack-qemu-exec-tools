@@ -2090,6 +2090,9 @@ EOF
 
   # Build manifest using inventory json + target settings (from env)
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    v2k_cloud_target_ensure_manifest_nic_mappings "${V2K_MANIFEST}" || exit $?
+  fi
   v2k_manifest_set_compat_requested_profile "${V2K_MANIFEST}" "${V2K_COMPAT_PROFILE:-auto}"
   v2k_manifest_set_compat_selected_profile "${V2K_MANIFEST}" "${V2K_COMPAT_SELECTED_PROFILE:-}"
   v2k_manifest_set_compat_detected_vcenter_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_VCENTER_VERSION:-}"

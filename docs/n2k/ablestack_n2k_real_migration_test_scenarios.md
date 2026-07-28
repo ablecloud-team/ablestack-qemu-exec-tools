@@ -759,6 +759,34 @@ rm -f /run/n2k-nutanix.env
 - 운영망 연결 시 gateway, DNS, east-west 통신 확인
 - 필요한 network mapping 요구사항이 문서화됨
 
+### N2K-MIG-CLOUD-NET-001: Cloud 다중 NIC와 MAC 보존
+
+목적:
+
+- Nutanix 소스 NIC별 MAC과 운영 네트워크 대응이 ABLESTACK Cloud VM에
+  동일하게 적용되고, 잘못된 배포가 VM 시작 전에 차단되는지 검증한다.
+
+절차:
+
+1. 유효하고 고유한 MAC을 가진 2-NIC 이상의 소스 VM을 선택한다.
+2. Wizard에서 소스 NIC마다 서로 다른 Cloud 네트워크를 선택한다.
+3. manifest의 `target.cloud.nic_mappings`에서 source key/network/MAC,
+   Cloud network ID 및 첫 mapping의 `default=true`를 확인한다.
+4. `deployVirtualMachineForVolume` 완료 직후 VM이 정지 상태인지 확인한다.
+5. `listVirtualMachines` 응답의 NIC별 network ID와 MAC을 mapping과 비교한다.
+6. 검증 성공 후에만 ROOT 변환, 데이터 디스크 attach 및 VM start가 수행되는지
+   확인한다.
+7. target MAC 불일치와 default NIC 불일치를 각각 주입해 실패 경로를 확인한다.
+
+합격 기준:
+
+- NIC 수와 선택 네트워크 수가 같고 선택 네트워크가 중복되지 않음
+- 모든 대상 NIC의 network ID와 MAC이 manifest mapping과 일치함
+- 첫 mapping이 Cloud 기본 NIC로 배포됨
+- 불일치 시 `runtime.cloud.stage=nic-verification`, `started=false`이며
+  VM/root volume/job ID와 비교 결과가 보존됨
+- 소스 IP 보존은 합격 기준에 포함하지 않음
+
 ### N2K-MIG-RESUME-001: 중단 후 재개
 
 목적:

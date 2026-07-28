@@ -29,6 +29,100 @@ n2k_cloud_target_disk_offering_name() {
   esac
 }
 
+n2k_cloud_target_build_nic_mappings_json() {
+  local source_nics_json="${1:-[]}" network_ids_json="${2:-[]}"
+
+  jq -nc \
+    --argjson nics "${source_nics_json}" \
+    --argjson networks "${network_ids_json}" \
+    '
+      def normalized_mac:
+        (. // "" | tostring | ascii_downcase);
+      def valid_unicast_mac:
+        test("^[0-9a-f][02468ace](:[0-9a-f]{2}){5}$");
+      def first_nonempty($values):
+        ($values
+         | map((. // "") | tostring)
+         | map(select(length > 0))
+         | first) // "";
+      def source_network:
+        first_nonempty([
+          .network,
+          .subnet_name,
+          .subnet,
+          .backing.device_name,
+          .backing.network_name
+        ]);
+
+      if ($nics | type) != "array" then
+        error("source.vm.nics must be an array")
+      elif ($networks | type) != "array" then
+        error("target.cloud.network_ids must be an array")
+      elif ($nics | length) == 0 then
+        error("Cloud target requires at least one source NIC")
+      elif ($nics | length) != ($networks | length) then
+        error("source NIC count must match Cloud network count")
+      elif ($networks | any((. // "" | tostring | length) == 0)) then
+        error("Cloud network IDs must not be empty")
+      elif (($networks | map(tostring) | unique | length) != ($networks | length)) then
+        error("Cloud network IDs must be unique per VM")
+      else
+        [
+          $nics
+          | to_entries[]
+          | . as $entry
+          | ($entry.value.mac // $entry.value.macAddress //
+             $entry.value.mac_address // "" | normalized_mac) as $mac
+          | if ($mac | valid_unicast_mac | not) then
+              error("source NIC has an invalid or non-unicast MAC address")
+            else
+              {
+                source_index: $entry.key,
+                source_key: first_nonempty([
+                  $entry.value.ext_id,
+                  $entry.value.key,
+                  ("nic-" + ($entry.key | tostring))
+                ]),
+                source_label: first_nonempty([
+                  $entry.value.label,
+                  $entry.value.network,
+                  ("NIC " + (($entry.key + 1) | tostring))
+                ]),
+                source_network: ($entry.value | source_network | tostring),
+                mac: $mac,
+                network_id: ($networks[$entry.key] | tostring),
+                default: ($entry.key == 0)
+              }
+            end
+        ]
+        | if ((map(.mac) | unique | length) != length) then
+            error("source NIC MAC addresses must be unique")
+          else
+            .
+          end
+      end
+    '
+}
+
+n2k_cloud_target_ensure_manifest_nic_mappings() {
+  local manifest="$1"
+  local source_nics_json network_ids_json mappings tmp
+
+  source_nics_json="$(jq -c '.source.vm.nics // []' "${manifest}")"
+  network_ids_json="$(jq -c '.target.cloud.network_ids // []' "${manifest}")"
+  if ! mappings="$(n2k_cloud_target_build_nic_mappings_json \
+      "${source_nics_json}" "${network_ids_json}")"; then
+    echo "Unable to map source NICs to Cloud networks. Provide one ordered Cloud network ID per source NIC." >&2
+    return 2
+  fi
+
+  tmp="$(mktemp)"
+  jq --argjson mappings "${mappings}" '
+    .target.cloud = (.target.cloud // {})
+    | .target.cloud.nic_mappings = $mappings
+  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
 n2k_cloud_target_config_json() {
   local endpoint="${1:-}" zone_id="${2:-}" service_offering_id="${3:-}" network_ids_csv="${4:-}"
   local storage_id="${5:-}" disk_offering_id="${6:-}" host_id="${7:-}" account="${8:-}" domain_id="${9:-}"
@@ -99,6 +193,10 @@ n2k_cloud_target_apply_manifest_config() {
       .target.provider = (if ($provider | length) > 0 then $provider else (.target.provider // "libvirt") end)
       | .target.cloud = ((.target.cloud // {}) + ($cloud | nonempty))
     ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+  if [[ "$(jq -r '.target.provider // "libvirt"' "${manifest}")" == "ablestack-cloud" ]] &&
+      (( $(jq -r '(.target.cloud.network_ids // []) | length' "${manifest}") > 0 )); then
+    n2k_cloud_target_ensure_manifest_nic_mappings "${manifest}"
+  fi
 }
 
 n2k_cloud_target_resolve_runtime_json() {
@@ -130,6 +228,7 @@ n2k_cloud_target_required_config_json() {
       zone_id: (.target.cloud.zone_id // ""),
       service_offering_id: (.target.cloud.service_offering_id // ""),
       network_ids: (.target.cloud.network_ids // []),
+      nic_mappings: (.target.cloud.nic_mappings // []),
       storage_id: (.target.cloud.storage_id // ""),
       disk_offering_id: (.target.cloud.disk_offering_id // ""),
       host_id: (.target.cloud.host_id // ""),
@@ -145,27 +244,39 @@ n2k_cloud_target_required_config_json() {
 
 n2k_cloud_target_validate_config() {
   local manifest="$1" runtime_json="$2"
-  local cfg endpoint api_key secret_key network_count
+  local cfg endpoint api_key secret_key network_count mapping_count
   cfg="$(n2k_cloud_target_required_config_json "${manifest}")"
   endpoint="$(jq -r '.endpoint // ""' <<<"${runtime_json}")"
   api_key="$(jq -r '.api_key // ""' <<<"${runtime_json}")"
   secret_key="$(jq -r '.secret_key // ""' <<<"${runtime_json}")"
   network_count="$(jq -r '(.network_ids // []) | length' <<<"${cfg}")"
+  mapping_count="$(jq -r '(.nic_mappings // []) | length' <<<"${cfg}")"
 
   n2k_cloud_require_credentials "${endpoint}" "${api_key}" "${secret_key}"
   jq -e '
     (.zone_id | length) > 0
     and (.service_offering_id | length) > 0
     and ((.network_ids // []) | length) > 0
+    and ((.nic_mappings // []) | length) == ((.network_ids // []) | length)
+    and all((.nic_mappings // [])[];
+      ((.source_key // "") | tostring | length) > 0
+      and ((.network_id // "") | tostring | length) > 0
+      and ((.mac // "") | tostring | ascii_downcase |
+        test("^[0-9a-f][02468ace](:[0-9a-f]{2}){5}$"))
+    )
     and (.storage_id | length) > 0
     and ((.cpu_speed // "1000") | tostring | test("^[0-9]+$"))
     and (((.cpu_speed // "1000") | tonumber) > 0)
   ' <<<"${cfg}" >/dev/null || {
-    echo "Cloud target requires zone_id, service_offering_id, network_ids, storage_id, and a positive numeric cpu_speed." >&2
+    echo "Cloud target requires zone_id, service_offering_id, one valid NIC mapping per network_id, storage_id, and a positive numeric cpu_speed." >&2
     return 2
   }
   [[ "${network_count}" -gt 0 ]] || {
     echo "Cloud target requires at least one network id." >&2
+    return 2
+  }
+  [[ "${mapping_count}" -eq "${network_count}" ]] || {
+    echo "Cloud target requires one source NIC mapping per network id." >&2
     return 2
   }
 }
@@ -225,13 +336,6 @@ n2k_cloud_target_source_deploy_params_json() {
         elif ($s | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
         else "" end;
 
-    def source_mac($vm):
-      (($vm.nics // [])
-       | map(.mac // .macAddress // .mac_address // "")
-       | map((. // "") | tostring | ascii_downcase)
-       | map(select(test("^([0-9a-f]{2}:){5}[0-9a-f]{2}$")))
-       | first) // "";
-
     (.source.vm // {}) as $vm
     | (($vm.cpu // 0) | tonumber? // 0) as $cpu
     | (($vm.memory_mb // 0) | tonumber? // 0) as $memory_mb
@@ -240,7 +344,6 @@ n2k_cloud_target_source_deploy_params_json() {
     | ((.target.cloud.cpu_speed // "1000") | tostring) as $cpu_speed
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
-    | (source_mac($vm)) as $source_mac
     | (controller(.disks[0].controller.type // "")) as $root_controller
     | (controller((.disks[1:] // [] | map(.controller.type // "") | map(select((. | tostring | length) > 0)) | first) // "")) as $data_controller
     | {}
@@ -250,7 +353,6 @@ n2k_cloud_target_source_deploy_params_json() {
       + {"details[0].iothreads": "true"}
       + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
       + (if $root_size_gib > 0 then {"details[0].rootdisksize": ($root_size_gib | tostring)} else {} end)
-      + (if ($source_mac | length) > 0 then {macaddress:$source_mac} else {} end)
       + (if ($root_controller | length) > 0 then {"details[0].rootDiskController": $root_controller} else {} end)
       + (if ($data_controller | length) > 0 then {"details[0].dataDiskController": $data_controller} else {} end)
       + (
@@ -263,6 +365,63 @@ n2k_cloud_target_source_deploy_params_json() {
           end
         )
   ' "${manifest}"
+}
+
+n2k_cloud_target_nic_request_params_json() {
+  local cfg="$1"
+  jq -c '
+    reduce ((.nic_mappings // []) | to_entries[]) as $entry ({};
+      . + {
+        ("iptonetworklist[" + ($entry.key | tostring) + "].networkid"):
+          ($entry.value.network_id | tostring),
+        ("iptonetworklist[" + ($entry.key | tostring) + "].mac"):
+          ($entry.value.mac | tostring | ascii_downcase)
+      }
+    )
+  ' <<<"${cfg}"
+}
+
+n2k_cloud_target_deploy_params_json() {
+  local cfg="$1" root_volume_id="$2" start_vm="$3" source_params="${4:-}"
+  local owner_params nic_params
+
+  [[ -n "${source_params}" ]] || source_params="{}"
+  owner_params="$(n2k_cloud_target_optional_owner_params "${cfg}")"
+  nic_params="$(n2k_cloud_target_nic_request_params_json "${cfg}")"
+  jq -nc \
+    --arg volumeid "${root_volume_id}" \
+    --argjson cfg "${cfg}" \
+    --argjson owner "${owner_params}" \
+    --argjson source_params "${source_params}" \
+    --argjson nic_params "${nic_params}" \
+    --arg startvm "${start_vm}" \
+    '
+      {
+        zoneid: $cfg.zone_id,
+        serviceofferingid: $cfg.service_offering_id,
+        volumeid: $volumeid,
+        name: $cfg.name,
+        displayname: $cfg.display_name,
+        startvm: $startvm,
+        hypervisor: "KVM"
+      }
+      + (
+          if ($nic_params | length) > 0 then
+            $nic_params
+          else
+            {networkids: (($cfg.network_ids // []) | join(","))}
+          end
+        )
+      + $owner
+      + (
+          if ($nic_params | length) > 0 then
+            ($source_params | del(.macaddress))
+          else
+            $source_params
+          end
+        )
+      + (if (($cfg.host_id // "") | length) > 0 then {hostid:$cfg.host_id} else {} end)
+    '
 }
 
 n2k_cloud_target_validate_import_visible() {
@@ -575,30 +734,10 @@ n2k_cloud_target_import_volume() {
 
 n2k_cloud_target_deploy_vm_for_volume() {
   local endpoint="$1" api_key="$2" secret_key="$3" cfg="$4" root_volume_id="$5" start_vm="$6" source_params="${7:-}"
-  local owner_params params response job_id job vm_id
+  local params response job_id job vm_id
   [[ -n "${source_params}" ]] || source_params="{}"
-  owner_params="$(n2k_cloud_target_optional_owner_params "${cfg}")"
-  params="$(jq -nc \
-    --arg volumeid "${root_volume_id}" \
-    --argjson cfg "${cfg}" \
-    --argjson owner "${owner_params}" \
-    --argjson source_params "${source_params}" \
-    --arg startvm "${start_vm}" \
-    '
-      {
-        zoneid: $cfg.zone_id,
-        serviceofferingid: $cfg.service_offering_id,
-        volumeid: $volumeid,
-        networkids: (($cfg.network_ids // []) | join(",")),
-        name: $cfg.name,
-        displayname: $cfg.display_name,
-        startvm: $startvm,
-        hypervisor: "KVM"
-      }
-      + $owner
-      + $source_params
-      + (if (($cfg.host_id // "") | length) > 0 then {hostid:$cfg.host_id} else {} end)
-    ')"
+  params="$(n2k_cloud_target_deploy_params_json \
+    "${cfg}" "${root_volume_id}" "${start_vm}" "${source_params}")"
   [[ -n "${root_volume_id}" ]] || {
     echo "Cloud deployVirtualMachineForVolume requires a root volume id." >&2
     return 2
@@ -622,6 +761,91 @@ n2k_cloud_target_deploy_vm_for_volume() {
     return 1
   }
   jq -nc --arg id "${vm_id}" --arg job_id "${job_id}" --argjson job "${job}" '{id:$id,job_id:$job_id,job:$job}'
+}
+
+n2k_cloud_target_vm_json() {
+  local endpoint="$1" api_key="$2" secret_key="$3" vm_id="$4"
+  local response
+  [[ -n "${vm_id}" ]] || {
+    echo "Cloud listVirtualMachines requires a VM id." >&2
+    return 2
+  }
+  response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" \
+    "listVirtualMachines" \
+    "$(jq -nc --arg id "${vm_id}" '{id:$id,listall:true}')")" || return $?
+  printf '%s' "${response}" |
+    jq -c '(.listvirtualmachinesresponse.virtualmachine // [])[0] // {}'
+}
+
+n2k_cloud_target_verify_vm_nics_json() {
+  local cfg="$1" vm_json="$2"
+  jq -nc \
+    --argjson expected "$(jq -c '.nic_mappings // []' <<<"${cfg}")" \
+    --argjson vm "${vm_json}" \
+    '
+      ($vm.nic // []) as $actual
+      | [
+          $expected[] as $wanted
+          | {
+              source_key: $wanted.source_key,
+              network_id: $wanted.network_id,
+              expected_mac: ($wanted.mac | ascii_downcase),
+              actual: (
+                [
+                  $actual[]
+                  | select(
+                      ((.networkid // "") | tostring) ==
+                        (($wanted.network_id // "") | tostring)
+                    )
+                ][0] // null
+              )
+            }
+          | . + {
+              matched: (
+                .actual != null
+                and ((.actual.macaddress // "") | tostring | ascii_downcase) ==
+                  .expected_mac
+                and (
+                  ($wanted.default // false) != true
+                  or ((.actual.isdefault // false) | tostring | ascii_downcase) ==
+                    "true"
+                )
+              )
+            }
+        ] as $checks
+      | {
+          matched: (($checks | length) > 0 and all($checks[]; .matched)),
+          checks: $checks,
+          actual_nics: $actual
+        }
+    '
+}
+
+n2k_cloud_target_wait_for_vm_nic_match() {
+  local endpoint="$1" api_key="$2" secret_key="$3" cfg="$4" vm_id="$5"
+  local attempts="${N2K_CLOUD_NIC_VERIFY_ATTEMPTS:-5}"
+  local interval="${N2K_CLOUD_NIC_VERIFY_INTERVAL:-2}"
+  local attempt vm_json verification="{}"
+
+  [[ "${attempts}" =~ ^[0-9]+$ && "${attempts}" -gt 0 ]] || attempts=5
+  [[ "${interval}" =~ ^[0-9]+$ ]] || interval=2
+  for ((attempt=1; attempt<=attempts; attempt++)); do
+    vm_json="$(n2k_cloud_target_vm_json \
+      "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")" || return $?
+    verification="$(n2k_cloud_target_verify_vm_nics_json "${cfg}" "${vm_json}")"
+    if jq -e '.matched == true' <<<"${verification}" >/dev/null; then
+      printf '%s' "${verification}"
+      return 0
+    fi
+    if [[ "${attempt}" -lt "${attempts}" && "${interval}" -gt 0 ]]; then
+      sleep "${interval}"
+    fi
+  done
+
+  echo "Cloud VM NIC network/MAC verification failed; VM ${vm_id} remains stopped." >&2
+  printf '%s\n' "${verification}" >&2
+  printf '%s' "${verification}"
+  return 1
 }
 
 n2k_cloud_target_volume_json() {
@@ -761,7 +985,7 @@ n2k_cloud_target_preflight_json() {
   local api command response available_json="{}" ok=true
   n2k_cloud_require_credentials "${endpoint}" "${api_key}" "${secret_key}"
   response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listApis")"
-  for api in listStoragePools listDiskOfferings createDiskOffering listVolumesForImport importVolume deployVirtualMachineForVolume updateVolume attachVolume startVirtualMachine queryAsyncJobResult; do
+  for api in listStoragePools listDiskOfferings createDiskOffering listVolumesForImport importVolume deployVirtualMachineForVolume listVirtualMachines updateVolume attachVolume startVirtualMachine queryAsyncJobResult; do
     if printf '%s' "${response}" | jq -e --arg api "${api}" '(.listapisresponse.api // []) | map(.name) | index($api) != null' >/dev/null; then
       command=true
     else
@@ -779,12 +1003,14 @@ n2k_cloud_target_cutover() {
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
   local disk_offering_id owner_params root_import root_volume_id deploy vm_id data_volumes_json jobs_json
   local import_result attach_result start_result result_json disk_name source_deploy_params root_volume_result root_volume_json root_volume_update_job root_volume_converted
+  local nic_verification
   local pool_json pool_path import_volume_id disk_offering_json
 
   runtime="$(n2k_cloud_target_resolve_runtime_json "${manifest}" "${endpoint_arg}" "${api_key_arg}" "${secret_key_arg}" "${cred_file}")"
   endpoint="$(jq -r '.endpoint // ""' <<<"${runtime}")"
   api_key="$(jq -r '.api_key // ""' <<<"${runtime}")"
   secret_key="$(jq -r '.secret_key // ""' <<<"${runtime}")"
+  n2k_cloud_target_ensure_manifest_nic_mappings "${manifest}" || return $?
   cfg="$(n2k_cloud_target_required_config_json "${manifest}")"
   n2k_cloud_target_validate_config "${manifest}" "${runtime}" || return $?
 
@@ -831,15 +1057,20 @@ n2k_cloud_target_cutover() {
       --arg provider "ablestack-cloud" \
       --arg endpoint "${endpoint}" \
       --argjson deployment_properties "${source_deploy_params}" \
+      --argjson nic_mappings "$(jq -c '.nic_mappings // []' <<<"${cfg}")" \
       --argjson define_only "$(if [[ "${define_only}" -eq 1 ]]; then printf true; else printf false; fi)" \
-      '{provider:$provider,endpoint:$endpoint,validated:true,applied:false,started:false,define_only:$define_only,deployment_properties:$deployment_properties}')"
+      '{provider:$provider,endpoint:$endpoint,validated:true,applied:false,started:false,define_only:$define_only,deployment_properties:$deployment_properties,nic_mappings:$nic_mappings}')"
     n2k_cloud_target_record_result "${manifest}" "${result_json}"
     printf '%s' "${result_json}"
     return 0
   fi
 
   if [[ "${N2K_DRY_RUN:-0}" -eq 1 ]]; then
-    result_json="$(jq -nc --arg provider "ablestack-cloud" --argjson deployment_properties "${source_deploy_params}" '{provider:$provider,validated:true,applied:false,started:false,dry_run:true,deployment_properties:$deployment_properties}')"
+    result_json="$(jq -nc \
+      --arg provider "ablestack-cloud" \
+      --argjson deployment_properties "${source_deploy_params}" \
+      --argjson nic_mappings "$(jq -c '.nic_mappings // []' <<<"${cfg}")" \
+      '{provider:$provider,validated:true,applied:false,started:false,dry_run:true,deployment_properties:$deployment_properties,nic_mappings:$nic_mappings}')"
     n2k_cloud_target_record_result "${manifest}" "${result_json}"
     printf '%s' "${result_json}"
     return 0
@@ -881,6 +1112,32 @@ n2k_cloud_target_cutover() {
     echo "Cloud deployVirtualMachineForVolume did not return a VM id." >&2
     return 1
   }
+  if ! nic_verification="$(n2k_cloud_target_wait_for_vm_nic_match \
+      "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${vm_id}")"; then
+    result_json="$(jq -nc \
+      --arg provider "ablestack-cloud" \
+      --arg endpoint "${endpoint}" \
+      --arg vm_id "${vm_id}" \
+      --arg root_volume_id "${root_volume_id}" \
+      --arg root_import_job_id "$(jq -r '.job_id // empty' <<<"${root_import}")" \
+      --arg deploy_job_id "$(jq -r '.job_id // empty' <<<"${deploy}")" \
+      --argjson nic_verification "${nic_verification:-{}}" \
+      '{
+        provider:$provider,
+        endpoint:$endpoint,
+        validated:false,
+        applied:true,
+        started:false,
+        stage:"nic-verification",
+        vm_id:$vm_id,
+        root_volume_id:$root_volume_id,
+        root_import_job_id:$root_import_job_id,
+        deploy_job_id:$deploy_job_id,
+        nic_verification:$nic_verification
+      }')"
+    n2k_cloud_target_record_result "${manifest}" "${result_json}"
+    return 1
+  fi
   root_volume_result="$(n2k_cloud_target_ensure_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}" "${import_path}")" || return $?
   root_volume_json="$(jq -c '.volume' <<<"${root_volume_result}")"
   root_volume_update_job="$(jq -r '.update.job_id // empty' <<<"${root_volume_result}")"
@@ -934,9 +1191,10 @@ n2k_cloud_target_cutover() {
     --argjson data_volumes "${data_volumes_json}" \
     --argjson jobs "${jobs_json}" \
     --argjson deployment_properties "${source_deploy_params}" \
+    --argjson nic_verification "${nic_verification}" \
     --argjson disk_offering "${disk_offering_json}" \
     --argjson started "$(if [[ "${start_vm}" -eq 1 ]]; then printf true; else printf false; fi)" \
-    '{provider:$provider,endpoint:$endpoint,validated:true,applied:true,started:$started,vm_id:$vm_id,root_volume_id:$root_volume_id,root_volume:$root_volume,root_volume_converted:$root_volume_converted,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties}
+    '{provider:$provider,endpoint:$endpoint,validated:true,applied:true,started:$started,vm_id:$vm_id,root_volume_id:$root_volume_id,root_volume:$root_volume,root_volume_converted:$root_volume_converted,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties,nic_verification:$nic_verification}
      + (if ($disk_offering | length) > 0 then {disk_offering:$disk_offering} else {} end)
      + (if ($root_volume_update_job_id | length) > 0 then {root_volume_update_job_id:$root_volume_update_job_id} else {} end)')"
   n2k_cloud_target_record_result "${manifest}" "${result_json}"

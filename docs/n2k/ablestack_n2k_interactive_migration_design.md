@@ -67,8 +67,8 @@ or fully preseeded:
 --cloud-cred-file <file>
 --cloud-zone-id <uuid>
 --cloud-service-offering-id <uuid>
---cloud-network-id <uuid>
---cloud-network-ids <csv>
+--cloud-network-id <uuid>     # repeat once per source NIC, in source NIC order
+--cloud-network-ids <csv>     # ordered unique IDs; one per source NIC
 --cloud-storage-id <uuid>
 --cloud-disk-offering-id <uuid>  # optional override; omitted means auto n2k writeback offering
 --cloud-host-id <uuid>
@@ -113,15 +113,20 @@ not support block/LVM import yet.
 3. If `--vm` was not supplied, list Nutanix VMs through v4, v3, then v2 fallback
    and let the operator select a VM by number.
 4. Select a target profile. The default is `cloud-rbd`.
-5. For Cloud profiles, resolve Cloud credentials from CLI options, environment,
+5. Load the selected source VM inventory before Cloud network selection.
+6. For Cloud profiles, resolve Cloud credentials from CLI options, environment,
    or credential file.
-6. For missing Cloud IDs, query Cloud API resources and prompt only when there
-   is more than one valid choice. A single resource is selected automatically.
-7. Derive VM name, target disk paths, CPU speed, shutdown policy, network mode,
-   and cutover action from defaults.
-8. Show a summary that contains no secrets.
-9. Ask for final confirmation unless `--yes` or `--print-command` is used.
-10. Execute `n2k_cmd_run` with the generated arguments, or print the generated
+7. For missing Cloud IDs, query Cloud API resources. Network discovery is
+   restricted to the selected zone.
+8. Select one unique Cloud network for every source NIC and show the source
+   label/network/MAC in each prompt. A single remaining candidate is selected
+   automatically.
+9. Validate and preview the ordered source NIC to Cloud network mapping.
+10. Derive VM name, target disk paths, CPU speed, shutdown policy, network mode,
+    and cutover action from defaults.
+11. Show a summary that contains no secrets and includes every NIC mapping.
+12. Ask for final confirmation unless `--yes` or `--print-command` is used.
+13. Execute `n2k_cmd_run` with the generated arguments, or print the generated
     command with secret values redacted.
 
 Free-form prompts show an example value or a short input hint. Resource prompts
@@ -201,6 +206,19 @@ override it. When an API list has exactly one item, that item is selected
 without prompting. When multiple items exist, the operator chooses by number.
 When running with `--yes` and a required multi-choice value is missing, the
 wizard fails instead of guessing.
+
+For Cloud networks, those rules apply once per source NIC. Explicit
+`--cloud-network-id` values and `--cloud-network-ids` CSV values are interpreted
+in source NIC order. The network count must match the source NIC count, and
+network IDs must be unique because Cloud's per-NIC request map is keyed by
+network ID. The resulting association is persisted in
+`target.cloud.nic_mappings` and reused during cutover.
+
+The normalized inventory used for Wizard prompts is passed unchanged to
+`run/init` as an inventory fixture. The engine must not re-fetch and reorder
+NICs between operator selection and manifest creation. Canonical
+`{vm,disks}` inventory JSON is therefore accepted idempotently by the Nutanix
+normalizer.
 
 The wizard does not ask for a disk offering by default. For Cloud targets, n2k
 uses or creates the reserved writeback disk offering for the selected storage

@@ -23,11 +23,29 @@
     "vm": {
       "name": "vmA",
       "moref": "vm-123",
-      "uuid": "00000000-0000-0000-0000-000000000000"
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "nics": [
+        {
+          "key": 4000,
+          "label": "Network adapter 1",
+          "mac": "52:54:00:12:34:56",
+          "network": "VM Network",
+          "connected": true,
+          "start_connected": true,
+          "backing": {
+            "device_name": "VM Network",
+            "portgroup_key": "",
+            "switch_uuid": "",
+            "opaque_network_id": "",
+            "opaque_network_type": ""
+          }
+        }
+      ]
     }
   },
   "target": {
     "type": "kvm",
+    "provider": "ablestack-cloud",
     "format": "qcow2",
     "dst_root": "/var/lib/libvirt/images/vmA",
     "storage": {
@@ -39,6 +57,26 @@
       "name": "vmA",
       "uefi": true,
       "tpm": false
+    },
+    "cloud": {
+      "zone_id": "zone-uuid",
+      "service_offering_id": "service-offering-uuid",
+      "network_ids": ["network-uuid"],
+      "nic_mappings": [
+        {
+          "source_index": 0,
+          "source_key": "4000",
+          "source_label": "Network adapter 1",
+          "source_network": "VM Network",
+          "mac": "52:54:00:12:34:56",
+          "network_id": "network-uuid",
+          "default": true
+        }
+      ],
+      "storage_id": "primary-storage-uuid",
+      "name": "vmA",
+      "display_name": "vmA",
+      "cpu_speed": "1000"
     }
   },
   "disks": [

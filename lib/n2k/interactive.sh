@@ -139,6 +139,59 @@ n2k_interactive_select_tsv() {
   done
 }
 
+n2k_interactive_filter_tsv_excluding() {
+  local choices="$1" excluded_csv="${2:-}"
+  awk -F '\t' -v excluded="${excluded_csv}" '
+    BEGIN {
+      count = split(excluded, values, ",")
+      for (i = 1; i <= count; i++) {
+        if (values[i] != "") {
+          excluded_ids[values[i]] = 1
+        }
+      }
+    }
+    !excluded_ids[$1] { print }
+  ' <<<"${choices}"
+}
+
+n2k_interactive_select_cloud_networks_for_nics() {
+  local inventory_json="$1" choices="$2" yes="${3:-0}"
+  local selected_csv="" available source_label source_mac source_network selected
+  local nic_count
+
+  nic_count="$(jq -r '(.vm.nics // []) | length' <<<"${inventory_json}")"
+  [[ "${nic_count}" -gt 0 ]] || {
+    echo "Cloud migration requires at least one source NIC in Nutanix inventory." >&2
+    return 2
+  }
+
+  while IFS=$'\t' read -r source_label source_mac source_network; do
+    available="$(n2k_interactive_filter_tsv_excluding "${choices}" "${selected_csv}")"
+    [[ -n "${available}" ]] || {
+      echo "Not enough unique Cloud networks for all source NICs." >&2
+      return 2
+    }
+    [[ -n "${source_network}" ]] || source_network="unknown Nutanix network"
+    selected="$(n2k_interactive_select_tsv \
+      "Cloud network for ${source_label} / ${source_mac} / ${source_network}" \
+      "${available}" "" "${yes}" 1)"
+    selected_csv="${selected_csv:+${selected_csv},}${selected}"
+  done < <(
+    jq -r '
+      (.vm.nics // [])
+      | to_entries[]
+      | [
+          (.value.label // .value.network // ("NIC " + ((.key + 1) | tostring))),
+          (.value.mac // .value.macAddress // .value.mac_address // ""),
+          (.value.network // .value.subnet_name // .value.subnet // "")
+        ]
+      | @tsv
+    ' <<<"${inventory_json}"
+  )
+
+  printf '%s' "${selected_csv}"
+}
+
 n2k_interactive_nutanix_vm_choices() {
   local pc="$1" username="$2" password="$3" insecure="$4"
   local list_json http_code api_error
@@ -189,8 +242,8 @@ n2k_interactive_normalize_vm_choices() {
 }
 
 n2k_interactive_cloud_choices() {
-  local endpoint="$1" api_key="$2" secret_key="$3" kind="$4"
-  local response
+  local endpoint="$1" api_key="$2" secret_key="$3" kind="$4" scope_id="${5:-}"
+  local response params
   case "${kind}" in
     zones)
       response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listZones" '{"available":true}')"
@@ -201,7 +254,9 @@ n2k_interactive_cloud_choices() {
       printf '%s' "${response}" | jq -r '(.listserviceofferingsresponse.serviceoffering // [])[] | [.id, (.name // .displaytext // .id), (((.cpunumber // "") | tostring) + " cpu, " + ((.memory // "") | tostring) + " MB")] | @tsv'
       ;;
     networks)
-      response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listNetworks" '{"listall":true}')"
+      params="$(jq -nc --arg zoneid "${scope_id}" \
+        '{listall:true} + (if ($zoneid | length) > 0 then {zoneid:$zoneid} else {} end)')"
+      response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listNetworks" "${params}")"
       printf '%s' "${response}" | jq -r '(.listnetworksresponse.network // [])[] | [.id, (.name // .displaytext // .id), (((.type // "") | tostring) + " " + ((.broadcasturi // "") | tostring))] | @tsv'
       ;;
     storage-pools)
@@ -503,7 +558,7 @@ n2k_cmd_wizard() {
   local shutdown="guest" cutover_policy="start"
   local libvirt_network_mode="" libvirt_bridge="" libvirt_network=""
   local yes=0 print_command=0
-  local target_name inventory_raw="" inventory_json="" vm_choices cloud_choices
+  local target_name inventory_raw="" inventory_json="" vm_choices cloud_choices cloud_nic_mappings_json
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -676,6 +731,19 @@ n2k_cmd_wizard() {
   n2k_interactive_prepare_new_workdir "${vm}" "${split}"
 
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    if [[ "${existing_manifest}" -eq 1 && -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]]; then
+      inventory_json="$(jq -c '{vm:(.source.vm // {}),disks:(.disks // [])}' "${N2K_MANIFEST}")"
+    fi
+    if [[ -z "${inventory_json}" ]] ||
+        [[ "$(jq -r '(.vm.nics // []) | length' <<<"${inventory_json}")" -eq 0 ]]; then
+      inventory_raw="$(n2k_nutanix_fetch_vm_inventory \
+        "${pc}" "${vm}" "${username}" "${password}" "${insecure}")" || \
+        n2k_die "source inventory is required for disk and NIC target mapping"
+      inventory_json="$(n2k_nutanix_inventory_from_raw "${inventory_raw}" "${vm}")"
+    fi
+  fi
+
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     if [[ -n "${cloud_cred_file}" ]]; then
       n2k_cloud_load_cred_file "${cloud_cred_file}"
     fi
@@ -709,9 +777,14 @@ n2k_cmd_wizard() {
       cloud_service_offering_id="$(n2k_interactive_select_tsv "Cloud service offering" "${cloud_choices}" "" "${yes}" 1)"
     }
     [[ -n "${cloud_network_ids}" ]] || {
-      cloud_choices="$(n2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" networks)"
-      cloud_network_ids="$(n2k_interactive_select_tsv "Cloud network" "${cloud_choices}" "" "${yes}" 1)"
+      cloud_choices="$(n2k_interactive_cloud_choices \
+        "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" networks "${cloud_zone_id}")"
+      cloud_network_ids="$(n2k_interactive_select_cloud_networks_for_nics \
+        "${inventory_json}" "${cloud_choices}" "${yes}")"
     }
+    cloud_nic_mappings_json="$(n2k_cloud_target_build_nic_mappings_json \
+      "$(jq -c '.vm.nics // []' <<<"${inventory_json}")" \
+      "$(n2k_cloud_json_array_from_csv "${cloud_network_ids}")")" || return $?
     [[ -n "${cloud_storage_id}" ]] || {
       cloud_choices="$(n2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" storage-pools)"
       cloud_storage_id="$(n2k_interactive_select_tsv "Cloud storage pool" "${cloud_choices}" "" "${yes}" 1)"
@@ -745,8 +818,11 @@ n2k_cmd_wizard() {
   fi
 
   if [[ -z "${target_map_json}" && ( "${target_storage}" == "rbd" || "${target_provider}" == "ablestack-cloud" ) ]]; then
-    if inventory_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}" 2>/dev/null)"; then
+    if [[ -z "${inventory_json}" ]] &&
+        inventory_raw="$(n2k_nutanix_fetch_vm_inventory "${pc}" "${vm}" "${username}" "${password}" "${insecure}" 2>/dev/null)"; then
       inventory_json="$(n2k_nutanix_inventory_from_raw "${inventory_raw}" "${vm}")"
+    fi
+    if [[ -n "${inventory_json}" ]]; then
       target_map_json="$(n2k_interactive_build_target_map_json "${inventory_json}" "${target_storage}" "${target_format}" "${rbd_pool}" "${file_root}" "${target_name}")"
     elif [[ "${target_storage}" == "file" && "${target_provider}" == "ablestack-cloud" ]]; then
       n2k_die "Cloud FileSystem profile requires source inventory to generate root-level qcow2 target paths"
@@ -762,9 +838,19 @@ n2k_cmd_wizard() {
     "${split}" "${shutdown}" "${cutover_policy}" "${dst}" "${cloud_endpoint}" "${cloud_zone_id}" \
     "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_host_id}" \
     "${cloud_name}" "${target_map_json:-}"
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    printf '  Cloud NIC mappings:\n' >&2
+    jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' \
+      <<<"${cloud_nic_mappings_json}" >&2
+  fi
 
   local -a run_args=(--foreground --vm "${vm}" --pc "${pc}" --username "${username}" --password "${password}" --insecure "${insecure}")
-  run_args+=(--inventory-source api --source-api "${source_api}" --split "${split}" --shutdown "${shutdown}")
+  if [[ -n "${inventory_json}" ]]; then
+    run_args+=(--inventory-source fixture --inventory-json "${inventory_json}")
+  else
+    run_args+=(--inventory-source api)
+  fi
+  run_args+=(--source-api "${source_api}" --split "${split}" --shutdown "${shutdown}")
   [[ "${force_v3}" == "true" ]] && run_args+=(--force-v3)
   run_args+=(--target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
   run_args+=(--rbd-access-mode "${rbd_access_mode}")

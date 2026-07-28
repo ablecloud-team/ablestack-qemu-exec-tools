@@ -69,6 +69,60 @@ v2k_interactive_select_tsv() {
   done
 }
 
+v2k_interactive_filter_tsv_excluding() {
+  local choices="$1" excluded_csv="${2:-}"
+  awk -F '\t' -v excluded="${excluded_csv}" '
+    BEGIN {
+      count = split(excluded, values, ",")
+      for (i = 1; i <= count; i++) {
+        if (values[i] != "") {
+          excluded_ids[values[i]] = 1
+        }
+      }
+    }
+    !excluded_ids[$1] { print }
+  ' <<<"${choices}"
+}
+
+v2k_interactive_select_cloud_networks_for_nics() {
+  local inventory_json="$1" choices="$2" yes="${3:-0}"
+  local selected_csv="" available source_label source_mac source_network selected
+  local nic_count
+
+  nic_count="$(jq -r '(.vm.nics // []) | length' <<<"${inventory_json}")"
+  [[ "${nic_count}" -gt 0 ]] || {
+    echo "Cloud migration requires at least one source NIC in VMware inventory." >&2
+    return 2
+  }
+
+  while IFS=$'\t' read -r source_label source_mac source_network; do
+    available="$(v2k_interactive_filter_tsv_excluding "${choices}" "${selected_csv}")"
+    [[ -n "${available}" ]] || {
+      echo "Not enough unique Cloud networks for all source NICs." >&2
+      return 2
+    }
+    [[ -n "${source_network}" ]] || source_network="unknown VMware network"
+    selected="$(v2k_interactive_select_tsv \
+      "Cloud network for ${source_label} / ${source_mac} / ${source_network}" \
+      "${available}" "" "${yes}" 1)"
+    selected_csv="${selected_csv:+${selected_csv},}${selected}"
+  done < <(
+    jq -r '
+      (.vm.nics // [])
+      | to_entries[]
+      | [
+          (.value.label // .value.type // ("Network adapter " + ((.key + 1) | tostring))),
+          (.value.mac // .value.macAddress // .value.mac_address // ""),
+          (.value.network // .value.backing.device_name //
+           .value.backing.opaque_network_id // "")
+        ]
+      | @tsv
+    ' <<<"${inventory_json}"
+  )
+
+  printf '%s' "${selected_csv}"
+}
+
 v2k_interactive_target_profile_choices() { cat <<'EOF'
 cloud-rbd	ABLESTACK Cloud / RBD	default Cloud target
 cloud-filesystem	ABLESTACK Cloud / FileSystem qcow2	file primary storage
@@ -78,11 +132,11 @@ EOF
 }
 
 v2k_interactive_cloud_choices() {
-  local endpoint="$1" api_key="$2" secret_key="$3" kind="$4" response
+  local endpoint="$1" api_key="$2" secret_key="$3" kind="$4" scope_id="${5:-}" response params
   case "${kind}" in
     zones) response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" listZones '{"available":true}')"; printf '%s' "${response}" | jq -r '(.listzonesresponse.zone // [])[] | [.id, (.name // .id), (.allocationstate // "")] | @tsv' ;;
     service-offerings) response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" listServiceOfferings '{"issystem":false}')"; printf '%s' "${response}" | jq -r '(.listserviceofferingsresponse.serviceoffering // [])[] | [.id, (.name // .displaytext // .id), (((.cpunumber // "") | tostring) + " cpu, " + ((.memory // "") | tostring) + " MB")] | @tsv' ;;
-    networks) response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" listNetworks '{"listall":true}')"; printf '%s' "${response}" | jq -r '(.listnetworksresponse.network // [])[] | [.id, (.name // .displaytext // .id), (((.type // "") | tostring) + " " + ((.broadcasturi // "") | tostring))] | @tsv' ;;
+    networks) params="$(jq -nc --arg zoneid "${scope_id}" '{listall:true} + (if ($zoneid | length) > 0 then {zoneid:$zoneid} else {} end)')"; response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" listNetworks "${params}")"; printf '%s' "${response}" | jq -r '(.listnetworksresponse.network // [])[] | [.id, (.name // .displaytext // .id), (((.type // "") | tostring) + " " + ((.broadcasturi // "") | tostring))] | @tsv' ;;
     storage-pools) response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" listStoragePools '{"listall":true}')"; printf '%s' "${response}" | jq -r '(.liststoragepoolsresponse.storagepool // [])[] | [.id, (.name // .path // .id), (((.type // "") | tostring) + " " + ((.path // "") | tostring) + " " + ((.clustername // "") | tostring))] | @tsv' ;;
     hosts) response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" listHosts '{"type":"Routing","state":"Up","listall":true}')"; printf '%s' "${response}" | jq -r '(.listhostsresponse.host // [])[] | [.id, (.name // .id), (((.state // "") | tostring) + " " + ((.clustername // "") | tostring))] | @tsv' ;;
     *) echo "Unsupported Cloud choice kind: ${kind}" >&2; return 2 ;;
@@ -116,7 +170,7 @@ v2k_cmd_wizard() {
   local vm="" vcenter_host="" username="" password="" cred_file="" vddk_cred_file="" insecure="1" compat_profile="${V2K_COMPAT_PROFILE:-auto}"
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json="" rbd_pool="${V2K_WIZARD_RBD_POOL:-rbd}" file_root="${V2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file="" cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id="" cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
-  local split="${V2K_WIZARD_DEFAULT_SPLIT:-phase1}" shutdown="guest" cutover_policy="start" yes=0 print_command=0 target_name inventory_json cloud_choices cloud_storage_json cloud_storage_path cloud_storage_scope
+  local split="${V2K_WIZARD_DEFAULT_SPLIT:-phase1}" shutdown="guest" cutover_policy="start" yes=0 print_command=0 target_name inventory_json cloud_choices cloud_storage_json cloud_storage_path cloud_storage_scope cloud_nic_mappings_json
   while [[ $# -gt 0 ]]; do case "$1" in
     --vm) vm="${2:-}"; shift 2;; --vcenter) vcenter_host="${2:-}"; shift 2;; --username) username="${2:-}"; shift 2;; --password) password="${2:-}"; shift 2;; --cred-file) cred_file="${2:-}"; shift 2;; --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;; --compat-profile) compat_profile="${2:-}"; shift 2;; --insecure) insecure="${2:-}"; shift 2;;
     --target-profile|--profile) target_profile="${2:-}"; shift 2;; --target-provider) target_provider="${2:-}"; shift 2;; --target-storage) target_storage="${2:-}"; shift 2;; --target-format) target_format="${2:-}"; shift 2;; --dst) dst="${2:-}"; shift 2;; --target-map-json) target_map_json="${2:-}"; shift 2;; --rbd-pool) rbd_pool="${2:-}"; shift 2;; --file-root) file_root="${2:-}"; shift 2;;
@@ -146,6 +200,10 @@ v2k_cmd_wizard() {
   case "${target_profile}" in cloud-rbd) target_provider="${target_provider:-ablestack-cloud}"; target_storage="${target_storage:-rbd}"; target_format="${target_format:-raw}";; cloud-filesystem|cloud-qcow2) target_profile="cloud-filesystem"; target_provider="${target_provider:-ablestack-cloud}"; target_storage="${target_storage:-file}"; target_format="${target_format:-qcow2}";; libvirt-rbd) target_provider="${target_provider:-libvirt}"; target_storage="${target_storage:-rbd}"; target_format="${target_format:-raw}";; libvirt-qcow2) target_provider="${target_provider:-libvirt}"; target_storage="${target_storage:-file}"; target_format="${target_format:-qcow2}";; *) echo "Invalid --target-profile: ${target_profile}" >&2; return 2;; esac
   target_name="${cloud_name:-v2k-$(v2k_interactive_safe_name "${vm}")-$(date +%Y%m%d%H%M%S)}"; cloud_name="${cloud_name:-${target_name}}"; cloud_display_name="${cloud_display_name:-${cloud_name}}"
   if [[ -z "${V2K_WORKDIR:-}" && "${split}" != "phase2" ]]; then V2K_WORKDIR="$(v2k_interactive_default_workdir "${vm}")"; export V2K_WORKDIR; V2K_MANIFEST="${V2K_WORKDIR}/manifest.json"; export V2K_MANIFEST; fi
+  inventory_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter_host}")" || {
+    echo "source inventory is required for disk and NIC target mapping" >&2
+    return 2
+  }
 
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     [[ -z "${cloud_cred_file}" ]] || v2k_cloud_load_cred_file "${cloud_cred_file}"
@@ -153,14 +211,21 @@ v2k_cmd_wizard() {
     [[ -n "${cloud_endpoint}" ]] || { echo "--cloud-endpoint is required" >&2; return 2; }; [[ -n "${cloud_api_key}" ]] || { echo "--cloud-api-key/env/cred-file is required" >&2; return 2; }; [[ -n "${cloud_secret_key}" ]] || { echo "--cloud-secret-key/env/cred-file is required" >&2; return 2; }
     [[ -n "${cloud_zone_id}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" zones)"; cloud_zone_id="$(v2k_interactive_select_tsv "Cloud zone" "${cloud_choices}" "" "${yes}" 1)"; }
     [[ -n "${cloud_service_offering_id}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" service-offerings)"; cloud_service_offering_id="$(v2k_interactive_select_tsv "Cloud service offering" "${cloud_choices}" "" "${yes}" 1)"; }
-    [[ -n "${cloud_network_ids}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" networks)"; cloud_network_ids="$(v2k_interactive_select_tsv "Cloud network" "${cloud_choices}" "" "${yes}" 1)"; }
+    [[ -n "${cloud_network_ids}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" networks "${cloud_zone_id}")"; cloud_network_ids="$(v2k_interactive_select_cloud_networks_for_nics "${inventory_json}" "${cloud_choices}" "${yes}")"; }
+    cloud_nic_mappings_json="$(v2k_cloud_target_build_nic_mappings_json \
+      "$(jq -c '.vm.nics // []' <<<"${inventory_json}")" \
+      "$(v2k_cloud_json_array_from_csv "${cloud_network_ids}")")" || return $?
     [[ -n "${cloud_storage_id}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" storage-pools)"; cloud_storage_id="$(v2k_interactive_select_tsv "Cloud storage pool" "${cloud_choices}" "" "${yes}" 1)"; }
     if [[ "${target_storage}" == "file" ]]; then cloud_storage_json="$(v2k_cloud_target_storage_pool_json "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_storage_id}")"; cloud_storage_path="$(v2k_cloud_target_file_storage_path_from_pool "${cloud_storage_json}")"; file_root="${cloud_storage_path}"; cloud_storage_scope="$(jq -r '(.scope // "") | tostring' <<<"${cloud_storage_json}")"; if [[ "${cloud_storage_scope}" == "HOST" && -z "${cloud_host_id}" ]]; then cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" hosts)"; cloud_host_id="$(v2k_interactive_select_tsv "Cloud host" "${cloud_choices}" "" "${yes}" 1)"; fi; fi
   fi
   if [[ -z "${dst}" ]]; then case "${target_storage}" in rbd) dst="rbd:${rbd_pool}/${target_name}";; file) if [[ "${target_provider}" == "ablestack-cloud" ]]; then dst="${file_root%/}"; else dst="${file_root%/}/${target_name}"; fi;; esac; fi
-  if [[ -z "${target_map_json}" && ( "${target_storage}" == "rbd" || "${target_provider}" == "ablestack-cloud" ) ]]; then inventory_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter_host}")" || { echo "source inventory is required to generate target disk paths" >&2; return 2; }; target_map_json="$(v2k_interactive_build_target_map_json "${inventory_json}" "${target_storage}" "${target_format}" "${rbd_pool}" "${file_root}" "${target_name}")"; fi
+  if [[ -z "${target_map_json}" && ( "${target_storage}" == "rbd" || "${target_provider}" == "ablestack-cloud" ) ]]; then target_map_json="$(v2k_interactive_build_target_map_json "${inventory_json}" "${target_storage}" "${target_format}" "${rbd_pool}" "${file_root}" "${target_name}")"; fi
 
   printf '\nMigration summary:\n  Source VM: %s\n  vCenter: %s\n  Target profile: %s\n  Target provider: %s\n  Target storage: %s/%s\n  Split: %s\n  Workdir: %s\n  Destination: %s\n' "${vm}" "${vcenter_host}" "${target_profile}" "${target_provider}" "${target_storage}" "${target_format}" "${split}" "${V2K_WORKDIR:-}" "${dst}" >&2
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    printf '  Cloud NIC mappings:\n' >&2
+    jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' <<<"${cloud_nic_mappings_json}" >&2
+  fi
   local -a run_args=(run --foreground --vm "${vm}" --vcenter "${vcenter_host}" --split "${split}" --shutdown "${shutdown}" --compat-profile "${compat_profile}" --target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
   [[ -n "${cred_file}" ]] && run_args+=(--cred-file "${cred_file}"); [[ -n "${vddk_cred_file}" ]] && run_args+=(--vddk-cred-file "${vddk_cred_file}"); [[ -z "${cred_file}" ]] && run_args+=(--username "${username}" --password "${password}" --insecure "${insecure}"); [[ -n "${target_map_json}" && "${target_map_json}" != "{}" ]] && run_args+=(--target-map-json "${target_map_json}")
   case "${cutover_policy}" in define-only) run_args+=(--kvm-vm-policy define-only);; apply) run_args+=(--cutover-args "--apply");; start) run_args+=(--kvm-vm-policy define-and-start);; esac
