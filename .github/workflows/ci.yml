@@ -24,3 +24,7 @@ jobs:
       - name: ISO package manager selection smoke
         run: |
           tests/iso_pkg_manager_selection_smoke.sh
+
+      - name: Release WinPE and MSI workflow smoke
+        run: |
+          python3 tests/release_winpe_wix_smoke.py

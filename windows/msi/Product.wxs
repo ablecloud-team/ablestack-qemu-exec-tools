@@ -12,7 +12,7 @@
     <MediaTemplate />
     <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
 
-    <!-- ë²„ì „/ë¦´ë¦¬ì¦?ê¹ƒí•´?œë? MSI Propertyë¡??€??-->
+    <!-- Persist build identity as MSI properties. -->
     <Property Id="PRODUCT_VERSION" Value="$(var.ProductVersion)" />
     <Property Id="PRODUCT_RELEASE" Value="$(var.ProductRelease)" />
     <Property Id="PRODUCT_GITHASH" Value="$(var.GitHash)" />
@@ -41,7 +41,7 @@
     </Feature>
 
     <!-- ========== Reboot policy (Manual / Auto) ========== -->
-    <!-- ê¸°ë³¸: Manual ???¬ë????µì œ(3010 ë°˜í™˜). Auto ?”ì²­ ??ê°•ì œ ?¬ë???-->
+    <!-- Manual mode suppresses restart requests and preserves exit code 3010. -->
     <Property Id="REBOOTMODE" Value="Manual" />
     <SetProperty Id="SetRebootManual"
                 Value="ReallySuppress"
@@ -49,36 +49,36 @@
                 Sequence="execute"
                 Condition="REBOOTMODE=&quot;Manual&quot;" />
 
-    <!-- Auto: ?¤ì¹˜ ì¢…ë£Œ ì§í›„ ?ë™ ?¬ë???-->
+    <!-- Auto mode forces a restart immediately after installation. -->
     <SetProperty Id="SetRebootAuto"
                 Value="Force"
                 Before="InstallValidate"
                 Sequence="execute"
                 Condition="REBOOTMODE=&quot;Auto&quot;" />
 
-    <!-- ?¤ì¹˜/?œê±° ?ì—???¬ë????„ìš” ?Œëž˜ê·??¤ì • -->
+    <!-- Schedule a reboot after installation or removal when required. -->
     <InstallExecuteSequence>
       <ScheduleReboot Before="InstallFinalize"
                       Condition="(NOT Installed) OR (REMOVE=&quot;ALL&quot;)" />
     </InstallExecuteSequence>
 
     <!-- ========== Scheduled Tasks via schtasks.exe + WixQuietExec ========== -->
-    <!-- ?‘ì—… ?´ë¦„ -->
+    <!-- Scheduled task names -->
     <Property Id="TASK_NAME_BOOT"  Value="AbleStack-CloudInit-PhaseRunner-Boot"/>
     <Property Id="TASK_NAME_LOGON" Value="AbleStack-CloudInit-PhaseRunner-Logon"/>
 
-    <!-- ===== Propertiesë¥??¤ì •?˜ëŠ” CustomAction??===== -->
-    <!-- Boot ?¸ë¦¬ê±?-->
+    <!-- Custom actions that populate the command properties -->
+    <!-- Boot trigger -->
     <CustomAction Id="SetCreateBootTask"
       Property="CreateBootTask"
       Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_BOOT]&quot; /SC ONSTART /RU SYSTEM /RL HIGHEST /TR &quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File \&quot;[INSTALLDIR]phase-runner.ps1\&quot; -SysprepAfterPhase2&quot; /F" />
 
-    <!-- Logon ?¸ë¦¬ê±?-->
+    <!-- Logon trigger -->
     <CustomAction Id="SetCreateLogonTask"
       Property="CreateLogonTask"
       Value="&quot;[System64Folder]schtasks.exe&quot; /Create /TN &quot;[TASK_NAME_LOGON]&quot; /SC ONLOGON /RU SYSTEM /RL HIGHEST /TR &quot;%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File \&quot;[INSTALLDIR]phase-runner.ps1\&quot; -SysprepAfterPhase2&quot; /F" />
 
-    <!-- ?? œ -->
+    <!-- Removal commands -->
     <CustomAction Id="SetDeleteBootTask"
       Property="DeleteBootTask"
       Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_BOOT]&quot; /F" />
@@ -87,10 +87,8 @@
       Property="DeleteLogonTask"
       Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;[TASK_NAME_LOGON]&quot; /F" />
 
-
-
-    <!-- ===== ?¤ì œ ?¤í–‰?˜ëŠ” QuietExec CustomAction??(ê¸°ì¡´ê³??™ì¼) ===== -->
-    <!-- ?´ë? ?¬ìš© ì¤‘ì¸ WixQuietExec ê¸°ë°˜ CA ?•ì˜ë¥?? ì??©ë‹ˆ?? -->
+    <!-- QuietExec custom actions that execute the populated commands -->
+    <!-- Reuse the existing WixQuietExec-based custom action definitions. -->
     <CustomAction Id="CreateBootTask"
       BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
       DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
@@ -107,16 +105,15 @@
       BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
       DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
-
-    <!-- ===== ?¤í–‰ ?œì„œ (ê¸°ì¡´ ?ë¦„ ? ì?; ?„ìš” ???„ëž˜ì²˜ëŸ¼ ëª…ì‹œ) ===== -->
+    <!-- Execution sequence -->
     <InstallExecuteSequence>
-      <!-- ?¤ì¹˜/?…ê·¸?ˆì´??-->
+      <!-- Install or upgrade -->
       <Custom Action="SetCreateBootTask"   After="InstallFiles"       Condition="NOT REMOVE" />
       <Custom Action="CreateBootTask"      After="SetCreateBootTask"  Condition="NOT REMOVE" />
       <Custom Action="SetCreateLogonTask"  After="CreateBootTask"     Condition="NOT REMOVE" />
       <Custom Action="CreateLogonTask"     After="SetCreateLogonTask" Condition="NOT REMOVE" />
 
-      <!-- ?œê±° -->
+      <!-- Uninstall -->
       <Custom Action="SetDeleteLogonTask"  Before="RemoveFiles"       Condition="REMOVE" />
       <Custom Action="DeleteLogonTask"     After="SetDeleteLogonTask" Condition="REMOVE" />
       <Custom Action="SetDeleteBootTask"   After="DeleteLogonTask"    Condition="REMOVE" />
@@ -166,7 +163,7 @@
       </RegistryKey>
     </Component>
 
-    <!-- Write Installation Information to registry -->
+    <!-- Write installation information to the registry -->
     <Component Id="RegInstallInfo" Directory="INSTALLDIR" Guid="{A8B6D7B3-9D23-4D5C-9A53-7F9B8B6A1F10}">
       <RegistryKey Root="HKLM" Key="SOFTWARE\AbleStack\QemuExecTools">
         <RegistryValue Name="Version" Type="string" Value="[PRODUCT_VERSION]" KeyPath="yes" />
