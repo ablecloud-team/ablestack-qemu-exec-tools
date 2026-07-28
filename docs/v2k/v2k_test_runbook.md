@@ -84,6 +84,33 @@ Before accepting a Linux cutover:
 - do not accept a target disk that required `xfs_repair -L` as proof of a
   correct migration; re-run into a new target after fixing the transfer path
 
+## Cloud Multi-NIC Validation
+
+Run the fixture smoke checks:
+
+```bash
+tests/v2k_inventory_disk_order_smoke.sh
+tests/v2k_cloud_nic_mapping_smoke.sh
+```
+
+For a real two-NIC VMware VM:
+
+1. Confirm inventory contains both NIC keys, labels, VMware networks, and MACs.
+2. Select two unique Cloud networks in wizard mode.
+3. Confirm `target.cloud.nic_mappings` contains two ordered mappings.
+4. Run Cloud cutover with the VM initially deployed stopped.
+5. Compare `runtime.cloud.nic_verification.actual_nics` with the source MACs and
+   selected network IDs.
+6. Confirm the first mapping is the default NIC and the VM starts only after
+   verification succeeds.
+
+Negative cases must fail before VM start:
+
+- fewer or more Cloud networks than source NICs
+- duplicate Cloud network IDs
+- duplicate, invalid, or multicast source MAC
+- Cloud-side MAC replacement caused by a conflict
+
 ## Useful Commands
 
 ```bash
@@ -101,3 +128,4 @@ jq '.phases, .runtime, .source.compat' <workdir>/manifest.json
   logical capacity
 - `last_change_id` and `last_coverage.new_change_id` agree
 - split/full `run` tests complete with the expected phase markers
+- Cloud multi-NIC mappings preserve every selected network/MAC pair

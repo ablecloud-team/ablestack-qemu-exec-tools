@@ -173,6 +173,17 @@ The design adds a target provider layer:
       "zone_id": "d5551005-3372-43e5-8a2b-5742057bbabd",
       "service_offering_id": "",
       "network_ids": [],
+      "nic_mappings": [
+        {
+          "source_index": 0,
+          "source_key": "nic-ext-id",
+          "source_label": "Primary subnet",
+          "source_network": "Nutanix-Primary",
+          "mac": "52:54:00:12:34:56",
+          "network_id": "cloud-network-uuid",
+          "default": true
+        }
+      ],
       "storage_id": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
       "disk_offering_id": "",
       "resolved_disk_offering": {
@@ -209,7 +220,8 @@ Add target provider options to `preflight`, `plan`, `init`, `run`, and `cutover`
 --cloud-zone-id <uuid>             Target zone
 --cloud-service-offering-id <uuid> Target compute offering
 --cloud-cpu-speed <mhz>            Dynamic offering CPU speed detail, default 1000
---cloud-network-id <uuid>          Repeatable network ID option
+--cloud-network-id <uuid>          One unique network per source NIC, in source NIC order
+--cloud-network-ids <csv>          Ordered unique IDs; count must match source NIC count
 --cloud-storage-id <uuid>          Target primary storage pool
 --cloud-disk-offering-id <uuid>    Optional override for the auto-managed n2k disk offering
 --cloud-host-id <uuid>             Optional host placement
@@ -331,27 +343,33 @@ Cloud API cutover replaces libvirt XML generation.
    - wait for async job
    - record volume ID
 7. Deploy VM:
-   - deployVirtualMachineForVolume(zoneid, serviceofferingid, volumeid, name, displayname, networkids, hostid, startvm=false)
+   - build ordered `target.cloud.nic_mappings` from source NICs and selected Cloud networks
+   - deployVirtualMachineForVolume(zoneid, serviceofferingid, volumeid, name, displayname, iptonetworklist[n].networkid, iptonetworklist[n].mac, hostid, startvm=false)
    - wait for async job
    - record VM ID
-8. Ensure the imported root volume is a Cloud ROOT volume:
+8. Verify the stopped VM NICs:
+   - call listVirtualMachines(id)
+   - verify every selected network ID and normalized source MAC
+   - verify mapping index 0 is the default NIC
+   - on mismatch, record the VM/root volume/job IDs and keep the VM stopped
+9. Ensure the imported root volume is a Cloud ROOT volume:
    - listVolumes(id=<root_volume_id>)
    - if the attached volume is still DATADISK, call updateVolume(id, type=ROOT, path=<import_path>)
    - wait for async job and verify the final type is ROOT
-9. Import every data disk:
+10. Import every data disk:
    - importVolume(...)
    - wait for async job
    - record volume ID
-10. Attach every data disk:
+11. Attach every data disk:
    - attachVolume(id, virtualmachineid, deviceid)
    - wait for async job
-11. Start VM when requested:
+12. Start VM when requested:
    - startVirtualMachine(id)
    - wait for async job
-12. Verify:
+13. Verify:
    - listVirtualMachines(id)
    - expected state is Running when start was requested
-13. Mark cutover phase done.
+14. Mark cutover phase done.
 ```
 
 Root disk deployment uses `deployVirtualMachineForVolume`, not the normal `deployVirtualMachine`. The imported root volume is initially a `DATADISK` from `importVolume`. On the current ABLESTACK Cloud build, `deployVirtualMachineForVolume` attaches the imported volume and assigns `deviceId=0` plus the dummy template ID, but may leave `volume_type=DATADISK`. n2k therefore verifies the attached volume with `listVolumes(id=<root_volume_id>)` and, when needed, calls the exposed `updateVolume(id=<root_volume_id>, type=ROOT, path=<import_path>)` API before data-disk attach or VM start. Passing the original import path is required because the current Cloud `updateVolume` implementation can clear the volume path when it is omitted; without the path the KVM agent receives a ROOT volume with `path=null` and fails before libvirt domain creation. If the final volume type is still not `ROOT`, or the root path is empty after conversion, the flow must fail before start.
@@ -417,13 +435,29 @@ CloudStack `attachVolume` supports `deviceid`. n2k should pass it for determinis
 
 libvirt mode currently has bridge/network options. Cloud mode must use Cloud network IDs.
 
-Initial design:
+The initial implementation accepted one or more network IDs, passed them as
+`networkids`, and supplied only the first valid source MAC as the singular
+`macaddress` parameter. That lost the relationship between a specific source
+NIC, its MAC, and the selected Cloud network. The wizard also selected only one
+network regardless of source NIC count.
 
-- Require at least one `--cloud-network-id`.
-- Pass all selected IDs as `networkids`.
-- Preserve source MAC only after validating Cloud API accepts `macaddress` for the selected network type.
-- For L2 networks, use network ID selection and keep IP preservation out of the first implementation.
-- For isolated networks, support static IP later through `iptonetworklist`.
+Current design:
+
+- Require exactly one unique Cloud network ID per source NIC.
+- Preserve source NIC array order and freeze the association in
+  `target.cloud.nic_mappings`.
+- Normalize MAC addresses to lowercase and reject missing, malformed,
+  multicast, or duplicate source MAC addresses before import/deploy.
+- Send only `iptonetworklist[n].networkid` and
+  `iptonetworklist[n].mac`; do not mix `networkids` or singular
+  `macaddress` with the per-NIC map.
+- Treat mapping index 0 as the expected default NIC.
+- Deploy with `startvm=false`, verify network/MAC/default NIC through
+  `listVirtualMachines`, and only then continue with root conversion, data
+  disk attachment, and optional start.
+- Keep source IP preservation out of this implementation. A later IP policy
+  can add `ip`/`ipv6` to the same `iptonetworklist` entries after network-type
+  behavior is validated.
 
 This avoids assuming that libvirt `bridge0` maps directly to a Cloud network.
 
@@ -460,10 +494,9 @@ first observed data-disk controller because the deploy API exposes a VM-level
 `dataDiskController` detail rather than a per-volume controller field for this
 flow.
 
-TPM, IO threads, IO driver policy, NIC queue tuning, exact source MAC/IP
-preservation, and per-data-disk controller overrides remain deferred until the
-source inventory and the target Cloud API behavior are validated for those
-specific properties.
+TPM, NIC queue tuning, exact source IP preservation, and per-data-disk
+controller overrides remain deferred. Exact source MAC preservation is now
+implemented through the ordered per-NIC Cloud mapping.
 
 If the Cloud API rejects one of the derived properties, n2k should record the
 Cloud job/API error in the manifest and stop before considering the migration
@@ -501,6 +534,7 @@ Rollback behavior:
 | --- | --- |
 | Before import | Leave target disk image in n2k storage cleanup list |
 | Root import succeeds, VM not created | `unmanageVolume`, then optional target image cleanup |
+| VM created, NIC verification fails | Record VM/root volume/job IDs, keep VM stopped, and require operator inspection |
 | VM created, data attach fails | Stop/destroy VM only with `--force-cleanup` or explicit cleanup command |
 | Data volume imported but not attached | `unmanageVolume` |
 | VM started but verification fails | Do not destroy automatically; report manual inspection requirement |
@@ -515,6 +549,7 @@ Cloud target preflight should verify:
 - API key and secret authenticate with `HmacSHA256`.
 - API user is admin or has enough permissions.
 - Required APIs exist.
+- `listVirtualMachines` is available for stopped-VM NIC verification.
 - Zone, service offering, network, storage pool, and disk offering resolve.
 - Storage pool type is supported by `importVolume`.
 - RBD target path uses a Cloud import-compatible image name.
@@ -603,6 +638,23 @@ Steps:
 4. Execute Cloud cutover.
 5. Verify VM boot and source snapshot cleanup behavior.
 
+### T6: Multi-NIC network and MAC preservation
+
+Goal: verify deterministic source NIC to Cloud network mapping.
+
+Steps:
+
+1. Select a source VM with at least two NICs and valid unique unicast MACs.
+2. Select one unique Cloud network per source NIC in Wizard order.
+3. Verify `target.cloud.nic_mappings` contains the source key, source network,
+   MAC, Cloud network ID, and default flag for every NIC.
+4. Confirm deploy uses `iptonetworklist[n].networkid` and
+   `iptonetworklist[n].mac`, without `networkids` or singular `macaddress`.
+5. Confirm `listVirtualMachines` reports matching network IDs and MACs before
+   data disks are attached or the VM is started.
+6. Repeat with count mismatch, duplicate network, duplicate MAC, multicast
+   MAC, wrong target MAC, and wrong default NIC; every case must stop safely.
+
 ## Implementation order
 
 1. Add `cloudstack_api.sh` with SHA256 signing and async job polling.
@@ -614,7 +666,7 @@ Steps:
 7. Add data disk import and attach.
 8. Add `run` integration and phase1/phase2 cutover forwarding.
 9. Update help and bash completion.
-10. Build RPM and run T0-T5 tests.
+10. Build RPM and run T0-T6 tests.
 
 ## Open decisions
 

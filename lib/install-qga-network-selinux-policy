@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+
+POLICY_NAME="ablestack_qga_observer"
+SOURCE="/usr/share/ablestack-qemu-exec-tools/selinux/${POLICY_NAME}.te"
+WORKDIR=""
+
+cleanup() {
+    [ -z "$WORKDIR" ] || rm -rf -- "$WORKDIR"
+}
+trap cleanup EXIT
+
+if ! command -v getenforce >/dev/null 2>&1 ||
+        [ "$(getenforce 2>/dev/null || true)" = "Disabled" ]; then
+    exit 0
+fi
+[ -r "$SOURCE" ] || {
+    echo "[ERROR] SELinux policy source is missing: $SOURCE" >&2
+    exit 5
+}
+for tool in checkmodule semodule_package semodule; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "[ERROR] SELinux policy tool is missing: $tool" >&2
+        exit 5
+    }
+done
+
+WORKDIR="$(mktemp -d /tmp/ablestack-qga-observer.XXXXXX)"
+checkmodule -M -m -o "$WORKDIR/${POLICY_NAME}.mod" "$SOURCE"
+semodule_package -o "$WORKDIR/${POLICY_NAME}.pp" -m "$WORKDIR/${POLICY_NAME}.mod"
+semodule -i "$WORKDIR/${POLICY_NAME}.pp"
+semodule -l | awk '{print $1}' | grep -qx "$POLICY_NAME"

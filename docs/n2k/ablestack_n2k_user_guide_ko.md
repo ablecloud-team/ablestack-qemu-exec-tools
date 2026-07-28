@@ -251,7 +251,10 @@ Interactive migration summary
   Cloud VM name:    migrated-rhel-prod
   Cloud zone:       <ZONE_ID>
   Cloud offering:   <SERVICE_OFFERING_ID>
-  Cloud networks:   <NETWORK_ID>
+  Cloud networks:   <NETWORK_ID_1>,<NETWORK_ID_2>
+  Cloud NIC mappings:
+    Primary / 52:54:00:12:34:56 -> <NETWORK_ID_1> (default)
+    Backup / 52:54:00:65:43:20 -> <NETWORK_ID_2>
   Cloud storage:    <STORAGE_ID>
   Target map:       generated for 3 disk(s)
 ```
@@ -265,7 +268,8 @@ Interactive migration summary
 | `Destination root` | RBD pool/image prefix 또는 Cloud storage path가 맞는지 확인한다. |
 | `Split` | 운영 이관은 보통 `phase1` 후 나중에 `phase2`로 이어진다. |
 | `Cloud VM name` | Cloud에서 생성될 VM 이름이다. 기존 VM과 충돌하지 않아야 한다. |
-| `Cloud networks` | 대상 VM이 연결될 네트워크다. 운영 VLAN/bridge와 맞는지 확인한다. |
+| `Cloud networks` | 소스 NIC 순서에 대응하는 대상 네트워크 목록이다. NIC 수와 같고 중복이 없어야 한다. |
+| `Cloud NIC mappings` | 소스 네트워크/MAC과 Cloud 네트워크의 대응 및 기본 NIC를 확인한다. |
 | `Cloud storage` | 볼륨이 import될 primary storage다. RBD, SharedMountPoint 등 타입을 확인한다. |
 
 문제가 없으면 `yes`를 입력한다.
@@ -618,7 +622,8 @@ ablestack_n2k wizard \
   --split phase1 \
   --cloud-zone-id <ZONE_ID> \
   --cloud-service-offering-id <SERVICE_OFFERING_ID> \
-  --cloud-network-id <NETWORK_ID> \
+  --cloud-network-id <NETWORK_ID_1> \
+  --cloud-network-id <NETWORK_ID_2> \
   --cloud-storage-id <STORAGE_ID> \
   --cred-file /root/nutanix.env \
   --cloud-cred-file /root/ablestack-cloud.env
@@ -633,7 +638,7 @@ ablestack_n2k wizard \
 | 대상 프로파일 | `--target-profile` |
 | Cloud zone | `--cloud-zone-id` |
 | Cloud compute offering | `--cloud-service-offering-id` |
-| Cloud network | `--cloud-network-id` 또는 `--cloud-network-ids` |
+| Cloud network | 소스 NIC 순서대로 반복한 `--cloud-network-id` 또는 같은 순서의 `--cloud-network-ids` |
 | Cloud storage | `--cloud-storage-id` |
 | Cloud VM 이름 | `--cloud-name` |
 
@@ -967,7 +972,20 @@ block/LVM은 대상 디스크를 명시적으로 지정해야 한다. 실수로 
 
 ## 네트워크 선택
 
-Cloud 대상은 `--cloud-network-id` 또는 `--cloud-network-ids`로 Cloud 네트워크를 선택한다. Wizard에서는 Cloud API에서 조회한 네트워크 목록을 보여주고 번호로 선택할 수 있다.
+Cloud 대상은 소스 NIC마다 하나의 고유한 Cloud 네트워크를 선택한다. Wizard는
+먼저 Nutanix NIC 인벤토리를 읽고, 선택한 Zone의 Cloud 네트워크만 조회한 뒤
+`소스 네트워크 / MAC -> Cloud 네트워크` 순서로 NIC마다 번호 선택을 제공한다.
+
+명령줄에서는 소스 NIC 순서대로 `--cloud-network-id`를 반복하거나 같은 순서의
+CSV를 `--cloud-network-ids`로 지정한다. NIC 수와 네트워크 수가 다르거나,
+네트워크 ID 또는 소스 MAC이 중복되거나, MAC이 유효한 unicast 주소가 아니면
+디스크 import 전에 중단한다.
+
+선택 결과는 manifest의 `target.cloud.nic_mappings`에 고정된다. Cloud VM은
+정지 상태로 배포되며, n2k는 실제 네트워크 ID, MAC, 기본 NIC를 확인한 후에만
+ROOT 볼륨 변환, 데이터 디스크 연결 및 VM 시작을 계속한다. 검증에 실패하면
+VM을 시작하지 않고 VM ID, ROOT 볼륨 ID, 작업 ID와 비교 결과를
+`runtime.cloud`에 기록한다. 소스 IP 주소 보존은 이번 동작에 포함되지 않는다.
 
 libvirt 대상은 두 가지 방식 중 하나를 선택한다.
 

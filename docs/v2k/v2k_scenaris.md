@@ -95,3 +95,27 @@ Typical cutover:
 ```bash
 ablestack_v2k --workdir <workdir> cutover --shutdown guest --define-only
 ```
+
+## 6. ABLESTACK Cloud Multi-NIC Migration
+
+For a VMware VM with two NICs, provide target Cloud networks in source NIC
+order. Wizard shows the source label, MAC, and VMware network for each choice.
+
+```bash
+ablestack_v2k wizard \
+  --vm <VM> \
+  --vcenter <VCENTER> \
+  --cred-file <govc.env> \
+  --cloud-cred-file <cloud.env> \
+  --target-profile cloud-rbd \
+  --cloud-network-ids <DEFAULT_NETWORK_ID>,<SECOND_NETWORK_ID>
+```
+
+Before phase2/cutover, inspect:
+
+```bash
+jq '.source.vm.nics, .target.cloud.nic_mappings' <workdir>/manifest.json
+```
+
+Cloud cutover deploys the VM stopped, verifies all NIC network/MAC pairs, and
+only then continues with data-volume attachment and the configured start policy.

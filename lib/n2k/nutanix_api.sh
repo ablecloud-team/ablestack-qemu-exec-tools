@@ -601,8 +601,16 @@ n2k_nutanix_inventory_from_raw() {
         network: first_nonempty([$n.subnet.name, $n.subnet_reference.name, $n.subnetName, $n.subnet_name, $n.networkName, $n.network_name, $n.networkInfo.subnet.name, $n.networkInfo.subnet.extId, $n.network_info.subnet.ext_id])
       };
 
-    (vm_root) as $r
-    | {
+    if (
+      (.vm | type) == "object"
+      and (.disks | type) == "array"
+      and ((.vm.nics // []) | type) == "array"
+      and all(.disks[]; has("disk_id") and has("controller"))
+    ) then
+      .
+    else
+      (vm_root) as $r
+      | {
         vm: {
           name: first_nonempty([$r.name, $r.spec.name, $r.status.name, $r.vm.name, $vm_arg]),
           ext_id: first_nonempty([$r.extId, $r.ext_id, $r.metadata.uuid, $r.uuid, $r.vm.ext_id]),
@@ -630,5 +638,6 @@ n2k_nutanix_inventory_from_raw() {
         },
         disks: ordered_disks($r)
       }
+    end
   '
 }

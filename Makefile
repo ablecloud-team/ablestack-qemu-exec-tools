@@ -43,6 +43,7 @@ COMPLETIONS_FILE = $(COMPLETIONS_SRC)/$(V2K_NAME)
 DEB_PKG = $(NAME)_$(VERSION)-$(RELEASE)
 DEB_BUILD_DIR = $(DEB_PKG)
 DEB_DOC_DIR = $(DEB_BUILD_DIR)/usr/share/doc/$(NAME)
+DEB_SHARE_DIR = $(DEB_BUILD_DIR)/usr/share/$(NAME)
 DEB_BIN_DIR = $(DEB_BUILD_DIR)/usr/bin
 DEB_LIB_DIR = $(DEB_BUILD_DIR)/usr/libexec/$(NAME)
 DEB_DEBIAN_DIR = $(DEB_BUILD_DIR)/DEBIAN
@@ -66,6 +67,8 @@ install:
 	@if [ -f install.sh ]; then install -m 0755 install.sh $(BIN_DIR)/install_ablestack_qemu_exec_tools; fi
 	install -d $(LIB_TARGET)
 	cp -a lib/* $(LIB_TARGET)/
+	chmod 0755 $(LIB_TARGET)/guest-network-snapshot
+	chmod 0755 $(LIB_TARGET)/install-qga-network-selinux-policy
 	@if [ -f completions/ablestack_v2k ] || [ -f completions/ablestack_vm_ftctl ]; then \
 		install -d $(COMPLETIONS_TARGET); \
 	fi
@@ -158,6 +161,11 @@ rpm:
 		--exclude=./release \
 		--exclude=./repo \
 		--exclude=./dist \
+		--exclude=./.git \
+		--exclude=./assets \
+		--exclude=./windows \
+		--exclude=./output \
+		--exclude=./tmp \
 		. ; \
 	mv -f "$$TMP_TGZ" "rpmbuild/SOURCES/ablestack-qemu-exec-tools-$(VERSION).tar.gz"
 
@@ -396,7 +404,7 @@ n2k-deb:
 deb:
 	@echo "Building DEB..."
 	rm -rf $(DEB_BUILD_DIR)
-	mkdir -p $(DEB_DEBIAN_DIR) $(DEB_BIN_DIR) $(DEB_LIB_DIR) $(DEB_DOC_DIR)
+	mkdir -p $(DEB_DEBIAN_DIR) $(DEB_BIN_DIR) $(DEB_LIB_DIR) $(DEB_DOC_DIR) $(DEB_SHARE_DIR)/selinux
 
 	# bin
 	install -m 0755 bin/vm_exec.sh $(DEB_BIN_DIR)/vm_exec
@@ -406,6 +414,10 @@ deb:
 
 	# lib
 	cp -a lib/* $(DEB_LIB_DIR)/ 2>/dev/null || :
+	chmod 0755 $(DEB_LIB_DIR)/guest-network-snapshot
+	chmod 0755 $(DEB_LIB_DIR)/install-qga-network-selinux-policy
+	install -m 0644 selinux/ablestack_qga_observer.te \
+		$(DEB_SHARE_DIR)/selinux/ablestack_qga_observer.te
 
 	# docs and examples
 	cp -a README.md $(DEB_DOC_DIR)/

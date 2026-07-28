@@ -82,6 +82,9 @@ sudo agent_policy_fix
 
 - RHEL/Rocky 계열: 서비스 정책 생성 및 적용
 - Ubuntu/Debian: qemu-guest-agent 자동 설치 및 설정
+- QGA 전체 RPC 허용 목적과 Cloud 네트워크 관측용 Helper/SELinux/readiness의
+  후속 설계는
+  `docs/cloud_guest_network_observability_integration_design.md` 참고
 
 ---
 

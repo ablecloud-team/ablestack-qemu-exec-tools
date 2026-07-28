@@ -11,6 +11,31 @@
   3. RHEL/Rocky/Alma 계열에서 `/etc/sysconfig/qemu-ga`의 정책 옵션(`allow-rpcs`)을 자동 조정
   4. Ubuntu/Debian 계열에서는 모든 정책을 기본 허용으로 유지
 
+## Cloud 게스트 네트워크 관측 연계 설계
+
+현재 버전의 `agent_policy_fix`는 QGA 패키지/서비스와 전체 RPC 허용 설정을
+준비하지만, 다음 항목까지 성공했다고 보장하지는 않습니다.
+
+- SELinux/AppArmor가 `/usr/sbin/ip` 등 실제 조회 명령 실행을 허용하는지
+- IP 주·보조 역할, IPv4/IPv6 route, DNS를 모두 읽을 수 있는지
+- `ablestack-qemu-exec-tools` 전용 네트워크 Helper가 설치되어 있는지
+
+QGA 전체 RPC 허용 정책은 파일 관련 command를 포함한 향후 게스트 Agent 활용을 위해
+유지합니다. 네트워크 관측 기능은 전체 RPC 정책 위에서 별도의 readiness profile로
+검증하도록 설계합니다.
+
+CLI 사용법과 상세 구현 계약은
+`cloud_guest_network_observability_integration_design.md`를 기준으로 합니다.
+
+```text
+agent_policy_fix --policy full --check --json
+agent_policy_fix --policy full --apply --json
+agent_policy_fix --check-profile cloud-network-observability --json
+```
+
+위 option과 전용 Helper/SELinux 정책은 구현 및 패키징되었으며, 실제 게스트에서
+route와 DNS를 수집하려면 해당 패키지를 게스트 운영체제 내부에 설치해야 합니다.
+
 ---
 
 ## 지원 환경

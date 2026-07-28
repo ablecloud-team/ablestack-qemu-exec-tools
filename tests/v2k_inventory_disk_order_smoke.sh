@@ -89,8 +89,22 @@ write_vm_info() {
           "device": [
             {
               "key": 4000,
-              "deviceInfo": {"label": "Network adapter 1"},
-              "macAddress": "52:54:00:12:34:56"
+              "deviceInfo": {"label": "Network adapter 1", "summary": "VM Network"},
+              "macAddress": "52:54:00:12:34:56",
+              "backing": {"deviceName": "VM Network"},
+              "connectable": {"connected": true, "startConnected": true}
+            },
+            {
+              "key": 4001,
+              "deviceInfo": {"label": "Network adapter 2", "summary": "Backup Network"},
+              "macAddress": "52:54:00:65:43:20",
+              "backing": {
+                "port": {
+                  "portgroupKey": "dvportgroup-22",
+                  "switchUuid": "dvs-uuid-22"
+                }
+              },
+              "connectable": {"connected": true, "startConnected": false}
             }
           ]
         }
@@ -118,8 +132,22 @@ JSON
           "device": [
             {
               "key": 4000,
-              "deviceInfo": {"label": "Network adapter 1"},
-              "macAddress": "52:54:00:12:34:56"
+              "deviceInfo": {"label": "Network adapter 1", "summary": "VM Network"},
+              "macAddress": "52:54:00:12:34:56",
+              "backing": {"deviceName": "VM Network"},
+              "connectable": {"connected": true, "startConnected": true}
+            },
+            {
+              "key": 4001,
+              "deviceInfo": {"label": "Network adapter 2", "summary": "Backup Network"},
+              "macAddress": "52:54:00:65:43:20",
+              "backing": {
+                "port": {
+                  "portgroupKey": "dvportgroup-22",
+                  "switchUuid": "dvs-uuid-22"
+                }
+              },
+              "connectable": {"connected": true, "startConnected": false}
             }
           ]
         }
@@ -185,6 +213,17 @@ jq -e '
   and .disks[1].disk_id == "scsi0:1"
   and .disks[1].device_key == "2001"
   and .disks[1].role == "data"
+  and (.vm.nics | length) == 2
+  and .vm.nics[0].key == 4000
+  and .vm.nics[0].label == "Network adapter 1"
+  and .vm.nics[0].mac == "52:54:00:12:34:56"
+  and .vm.nics[0].network == "VM Network"
+  and .vm.nics[0].connected == true
+  and .vm.nics[0].start_connected == true
+  and .vm.nics[1].key == 4001
+  and .vm.nics[1].mac == "52:54:00:65:43:20"
+  and .vm.nics[1].backing.portgroup_key == "dvportgroup-22"
+  and .vm.nics[1].backing.switch_uuid == "dvs-uuid-22"
 ' <<<"${inventory_fallback}" >/dev/null || {
   echo "[ERR] VMware disk inventory was not ordered by controller address fallback" >&2
   printf '%s\n' "${inventory_fallback}" >&2

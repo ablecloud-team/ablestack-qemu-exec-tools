@@ -18,6 +18,18 @@ source "${ROOT_DIR}/lib/n2k/nutanix_api.sh"
 inventory_fallback="$(n2k_nutanix_inventory_from_raw '{
   "name": "out-of-order",
   "powerState": "OFF",
+  "nics": [
+    {
+      "extId": "nic-0",
+      "macAddress": "52:54:00:12:34:56",
+      "subnetName": "Primary"
+    },
+    {
+      "extId": "nic-1",
+      "macAddress": "52:54:00:65:43:20",
+      "subnetName": "Backup"
+    }
+  ],
   "disks": [
     {
       "extId": "unit-1",
@@ -41,9 +53,46 @@ jq -e '
   and .disks[1].controller.unit == 1
   and .disks[1].label == "Disk 2"
   and .disks[1].role == "data"
+  and .vm.nics == [
+    {
+      key: "0",
+      ext_id: "nic-0",
+      mac: "52:54:00:12:34:56",
+      network: "Primary"
+    },
+    {
+      key: "1",
+      ext_id: "nic-1",
+      mac: "52:54:00:65:43:20",
+      network: "Backup"
+    }
+  ]
 ' <<<"${inventory_fallback}" >/dev/null || {
   echo "[ERR] Nutanix disk inventory was not ordered by controller unit fallback" >&2
   printf '%s\n' "${inventory_fallback}" >&2
+  exit 1
+}
+
+inventory_roundtrip="$(n2k_nutanix_inventory_from_raw \
+  "${inventory_fallback}" "out-of-order")"
+jq -e '
+  .vm.nics == [
+    {
+      key: "0",
+      ext_id: "nic-0",
+      mac: "52:54:00:12:34:56",
+      network: "Primary"
+    },
+    {
+      key: "1",
+      ext_id: "nic-1",
+      mac: "52:54:00:65:43:20",
+      network: "Backup"
+    }
+  ]
+' <<<"${inventory_roundtrip}" >/dev/null || {
+  echo "[ERR] Normalized Nutanix inventory was not reusable as a run fixture" >&2
+  printf '%s\n' "${inventory_roundtrip}" >&2
   exit 1
 }
 
