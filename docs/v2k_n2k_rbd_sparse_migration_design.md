@@ -67,6 +67,8 @@ correct, but can allocate RBD objects for ranges that should remain sparse.
 ## Design Goals
 
 - Preserve target disk logical size and data correctness.
+- Require complete source change-map coverage before applying any sparse
+  incremental/final patch.
 - Enable sparse handling by default for RBD targets.
 - Keep the change scoped to RBD target paths.
 - Keep file, qcow2, and generic block target behavior unchanged unless
@@ -130,11 +132,13 @@ If sparse mode is disabled, retain the current command.
 
 Extend `lib/v2k/patch_apply.py` with optional zero-chunk detection:
 
-1. Read the source chunk as today.
-2. If the chunk is all zero and RBD sparse patch mode is enabled, perform a
+1. Verify that VMware CBT collection covered byte zero through the full source
+   disk. Incomplete coverage must abort before target mapping or patch apply.
+2. Read the source chunk as today.
+3. If the chunk is all zero and RBD sparse patch mode is enabled, perform a
    discard or zero-unmap operation for that range.
-3. If discard fails, write the zero chunk as fallback.
-4. If the chunk is not all zero, write normally.
+4. If discard fails, write the zero chunk as fallback.
+5. If the chunk is not all zero, write normally.
 
 Because `patch_apply.py` currently receives only block device paths, the first
 implementation should support mapped-device discard with `blkdiscard` for RBD
@@ -206,6 +210,7 @@ Use `rbd sparsify` with `N2K_RBD_SPARSIFY_AFTER` using the same semantics as v2k
 
 Add structured events or clear log lines for RBD sparse behavior:
 
+- CBT coverage start/end, source disk capacity, page count, and completion state
 - base sparse enabled or disabled
 - sparse size selected
 - discard method selected
@@ -247,6 +252,9 @@ Use a synthetic source image with sparse and zero-filled ranges:
 
 ## Risks and Fallbacks
 
+- VMware CBT responses can describe only a subset of the disk. The caller must
+  paginate using `DiskChangeInfo.startOffset + length`; a single successful API
+  response is not proof of full coverage.
 - `qemu-img -S` behavior depends on qemu and librbd capabilities.
 - `blkdiscard` may not be supported by every RBD mapping mode.
 - `qemu-io` discard support can differ across qemu builds.
@@ -255,6 +263,11 @@ Use a synthetic source image with sparse and zero-filled ranges:
 For these reasons, sparse handling should be best-effort with safe fallback to
 the current full zero write behavior. Correctness must take priority over
 allocation efficiency.
+
+Sparse/discard fallback applies only after complete change-map coverage is
+proven. It must never turn an incomplete CBT query into a successful sync, and
+the CBT `changeId` must advance only after the verified patch and target flush
+complete.
 
 ## Implementation Order
 
