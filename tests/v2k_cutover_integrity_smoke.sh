@@ -40,6 +40,76 @@ v2k_linux_bootstrap_run_event "test_failure" captured_output captured_rc -- \
   exit 1
 }
 
+nbd_command_log="${WORK_DIR}/qemu-nbd.args"
+mock_nbd_size=107374182400
+# shellcheck disable=SC2317
+qemu-nbd() {
+  printf '%s\n' "$*" >> "${nbd_command_log}"
+}
+# shellcheck disable=SC2317
+blockdev() {
+  [[ "${1:-}" == "--getsize64" ]] || return 2
+  printf '%s\n' "${mock_nbd_size}"
+}
+
+v2k_linux_bootstrap_connect_nbd "/dev/rbd3" "raw" "/dev/nbd8"
+grep -Fx -- \
+  "--connect=/dev/nbd8 --format=raw --cache=none /dev/rbd3" \
+  "${nbd_command_log}" >/dev/null || {
+    echo "[ERR] raw bootstrap did not pass the explicit qemu-nbd format" >&2
+    cat "${nbd_command_log}" >&2
+    exit 1
+  }
+
+v2k_linux_bootstrap_connect_nbd "${WORK_DIR}/root.qcow2" "qcow2" "/dev/nbd9"
+grep -Fx -- \
+  "--connect=/dev/nbd9 --format=qcow2 --cache=none ${WORK_DIR}/root.qcow2" \
+  "${nbd_command_log}" >/dev/null || {
+    echo "[ERR] qcow2 bootstrap did not pass the explicit qemu-nbd format" >&2
+    cat "${nbd_command_log}" >&2
+    exit 1
+  }
+
+if v2k_linux_bootstrap_connect_nbd "/dev/rbd3" "auto" "/dev/nbd10"; then
+  echo "[ERR] unsupported bootstrap image format was accepted" >&2
+  exit 1
+fi
+
+unset -f qemu-nbd blockdev
+
+format_manifest="${WORK_DIR}/format-manifest.json"
+cat > "${format_manifest}" <<'JSON'
+{
+  "target": {
+    "format": "raw",
+    "storage": {"type": "rbd"}
+  }
+}
+JSON
+
+bootstrap_call=""
+v2k_require_linux_bootstrap_deps() {
+  return 0
+}
+v2k_linux_bootstrap_prepare_root_input() {
+  printf -v "$2" '%s' "/dev/rbd3"
+  printf -v "$3" '%s' ""
+}
+v2k_linux_bootstrap_one() {
+  bootstrap_call="$1|$2"
+}
+
+v2k_linux_bootstrap_initramfs "${format_manifest}"
+[[ "${bootstrap_call}" == "/dev/rbd3|raw" ]] || {
+  echo "[ERR] manifest target format was not propagated to Linux bootstrap: ${bootstrap_call}" >&2
+  exit 1
+}
+
+unset -f \
+  v2k_require_linux_bootstrap_deps \
+  v2k_linux_bootstrap_prepare_root_input \
+  v2k_linux_bootstrap_one
+
 set +e
 v2k_linux_bootstrap_mount_robust \
   "/dev/v2k-device-does-not-exist" "${WORK_DIR}/mnt" "ro"
