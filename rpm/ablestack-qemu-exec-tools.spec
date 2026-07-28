@@ -28,7 +28,7 @@ Requires:       bash
 Requires:       jq
 Requires:       libvirt-client
 Requires:       cloud-init
-#Requires:       qemu-guest-agent   # 필요 시 추가
+Requires:       iproute
 
 %description
 ablestack-qemu-exec-tools is a Bash-based tool that enables remote execution 
@@ -48,6 +48,14 @@ install -m 0755 install.sh %{buildroot}/usr/bin/install_ablestack_qemu_exec_tool
 # Libraries
 mkdir -p %{buildroot}/usr/libexec/%{name}
 cp -a lib/* %{buildroot}/usr/libexec/%{name}/ 2>/dev/null || :
+chmod 0755 %{buildroot}/usr/libexec/%{name}/guest-network-snapshot
+chmod 0755 %{buildroot}/usr/libexec/%{name}/install-qga-network-selinux-policy
+
+# Reviewable SELinux source.  The policy is compiled for the target guest
+# policy version during package installation.
+mkdir -p %{buildroot}/usr/share/%{name}/selinux
+install -m 0644 selinux/ablestack_qga_observer.te \
+    %{buildroot}/usr/share/%{name}/selinux/ablestack_qga_observer.te
 
 # Docs
 mkdir -p %{buildroot}/usr/share/doc/%{name}
@@ -69,6 +77,7 @@ cp -a rpm/dhcp.py.fixed %{buildroot}/usr/share/ablestack-qemu-exec-tools/ 2>/dev
 /usr/bin/install_ablestack_qemu_exec_tools
 /usr/libexec/%{name}/*
 /usr/share/ablestack-qemu-exec-tools/dhcp.py.fixed
+/usr/share/ablestack-qemu-exec-tools/selinux/ablestack_qga_observer.te
 
 %changelog
 * Wed Jul 10 2025 ABLECLOUD <dev@ablecloud.io> %{version}-%{release}
@@ -96,8 +105,12 @@ fi
 echo "[INFO] ablestack-qemu-exec-tools post install start (guest VM)"
 
 # agent_policy_fix / cloud_init_auto 실행
+if [ -x /usr/libexec/ablestack-qemu-exec-tools/install-qga-network-selinux-policy ]; then
+    /usr/libexec/ablestack-qemu-exec-tools/install-qga-network-selinux-policy || \
+        echo "[WARN] qemu-ga network SELinux policy install failed"
+fi
 if [ -x /usr/bin/agent_policy_fix ]; then
-    /usr/bin/agent_policy_fix || echo "[WARN] agent_policy_fix failed"
+    /usr/bin/agent_policy_fix --policy full --apply || echo "[WARN] agent_policy_fix failed"
 fi
 if [ -x /usr/bin/cloud_init_auto ]; then
     /usr/bin/cloud_init_auto || echo "[WARN] cloud_init_auto failed"

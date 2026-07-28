@@ -1,160 +1,147 @@
 #!/bin/bash
 #
-# agent_policy_fix.sh - 게스트 qemu-guest-agent 정책 자동화(RHEL/Ubuntu 계열)
+# agent_policy_fix.sh - Configure and verify the guest qemu-ga policy.
 #
-# Copyright 2025 ABLECLOUD
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-LIBDIR="/usr/libexec/ablestack-qemu-exec-tools"
-source "$LIBDIR/cloud_init_common.sh"
+# shellcheck disable=SC1091,SC2034
+set -euo pipefail
 
-set -e
-
-# 1. 리눅스 배포판 감지
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    DIST=$ID
-else
-    msg "[ERROR] 지원되지 않는 리눅스 배포판입니다." "[ERROR] Unsupported Linux distribution."
-    exit 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALLED_LIBDIR="/usr/libexec/ablestack-qemu-exec-tools"
+SOURCE_LIBDIR=""
+if cd "$SCRIPT_DIR/../lib" 2>/dev/null; then
+    SOURCE_LIBDIR="$(pwd)"
+    cd - >/dev/null
 fi
-
-# 2. qemu-guest-agent 설치 확인
-QGA_PKG="qemu-guest-agent"
-QGA_SERVICE="qemu-guest-agent"
-
-check_service_and_start() {
-    # 서비스 활성 상태 확인 및 필요 시 enable/start
-    if ! systemctl is-active --quiet "$QGA_SERVICE"; then
-        msg "[WARN] $QGA_SERVICE 서비스가 활성 상태가 아닙니다. enable 및 start를 시도합니다." "[WARN] $QGA_SERVICE service is not active. Attempting to enable and start."
-        sudo systemctl enable "$QGA_SERVICE"
-        sudo systemctl start "$QGA_SERVICE"
-
-        # 재확인
-        if systemctl is-active --quiet "$QGA_SERVICE"; then
-            msg "[SUCCESS] $QGA_SERVICE 서비스가 활성화되었습니다." "[SUCCESS] $QGA_SERVICE service has been activated."
-        else
-            msg "[ERROR] $QGA_SERVICE 서비스 활성화에 실패했습니다. 로그를 확인하세요." "[ERROR] Failed to activate $QGA_SERVICE service. Please check the logs."
-            exit 3
-        fi
-    else
-        msg "[INFO] $QGA_SERVICE 서비스는 이미 활성(실행) 상태입니다." "[INFO] $QGA_SERVICE service is already active (running)."
-    fi
-}
-
-if [[ "$DIST" =~ ^(rhel|centos|rocky|almalinux|ol)$ ]]; then
-    msg "[INFO] Rocky/RHEL 계열이 감지되었습니다." "[INFO] Detected Rocky/RHEL family."
-
-    # 2-1. qemu-guest-agent 설치 확인 및 자동 설치 (RHEL 계열)
-    if ! rpm -q "$QGA_PKG" >/dev/null 2>&1; then
-        msg "[WARN] $QGA_PKG가 설치되어 있지 않습니다. 자동 설치를 진행합니다." "[WARN] $QGA_PKG is not installed. Proceeding with automatic installation."
-        sudo dnf install -y "$QGA_PKG"
-        if [ $? -ne 0 ]; then
-            msg "[ERROR] $QGA_PKG 설치에 실패했습니다. 네트워크 또는 yum/dnf 설정을 확인하세요." "[ERROR] Failed to install $QGA_PKG. Please check your network or yum/dnf configuration."
-            exit 2
-        fi
-        msg "[SUCCESS] $QGA_PKG 패키지 설치가 완료되었습니다." "[SUCCESS] $QGA_PKG package installation completed."
-    else
-        msg "[INFO] $QGA_PKG가 이미 설치되어 있습니다." "[INFO] $QGA_PKG is already installed."
-    fi
-
-    # 서비스 시작/활성 상태 확인 및 자동 처리
-    check_service_and_start
-elif [[ "$DIST" =~ ^(ubuntu|debian)$ ]]; then
-    msg "[INFO] Ubuntu/Debian 계열이 감지되었습니다." "[INFO] Detected Ubuntu/Debian family."
-
-    # 2-2. qemu-guest-agent 설치 확인 및 자동 설치 (Ubuntu 계열)
-    if ! dpkg -l | grep -qw "$QGA_PKG"; then
-        msg "[WARN] $QGA_PKG가 설치되어 있지 않습니다. 자동 설치를 진행합니다." "[WARN] $QGA_PKG is not installed. Proceeding with automatic installation."
-        sudo apt-get update
-        sudo apt-get install -y "$QGA_PKG"
-        if [ $? -ne 0 ]; then
-            msg "[ERROR] $QGA_PKG 설치에 실패했습니다. 네트워크 또는 apt 설정을 확인하세요." "[ERROR] Failed to install $QGA_PKG. Please check your network or apt configuration."
-            exit 2
-        fi
-        msg "[SUCCESS] $QGA_PKG 패키지 설치가 완료되었습니다." "[SUCCESS] $QGA_PKG package installation completed."
-    else
-        msg "[INFO] $QGA_PKG가 이미 설치되어 있습니다." "[INFO] $QGA_PKG is already installed."
-    fi
-
-    # 서비스 시작/활성 상태 확인 및 자동 처리
-    check_service_and_start
-
-    # Ubuntu 정책 자동화 안내
-    msg "[NOTICE] Ubuntu 계열은 qemu-guest-agent의 모든 RPC 명령이 기본적으로 허용되어 있습니다." \
-        "[NOTICE] In Ubuntu family, all RPC commands of qemu-guest-agent are allowed by default."
-    msg "         별도의 정책 설정이나 추가 자동화 작업이 필요하지 않습니다." \
-        "         No additional policy settings or automation tasks are required."
-    exit 0
+if [ -r "$INSTALLED_LIBDIR/agent_policy/os_detect.sh" ]; then
+    LIBDIR="$INSTALLED_LIBDIR"
+elif [ -n "$SOURCE_LIBDIR" ] && [ -r "$SOURCE_LIBDIR/agent_policy/os_detect.sh" ]; then
+    LIBDIR="$SOURCE_LIBDIR"
 else
-    msg "[INFO] 현재 자동화는 Rocky/RHEL/Ubuntu 계열만 지원합니다." \
-        "[INFO] Currently, automation only supports Rocky/RHEL/Ubuntu families."
-    exit 0
-fi
-
-# 3. 설정 파일 존재 확인
-CONF_FILE="/etc/sysconfig/qemu-ga"
-if [ ! -f "$CONF_FILE" ]; then
-    msg "[ERROR] 설정 파일 $CONF_FILE 가 존재하지 않습니다." "[ERROR] Configuration file $CONF_FILE does not exist."
+    echo "[ERROR] ablestack-qemu-exec-tools libraries were not found." >&2
     exit 3
 fi
 
-# 4. allow-rpcs, block-rpcs, guest-exec/guest-exec-status 처리
-ALLOW_CMDS=""
-BLOCK_CMDS=""
+# shellcheck source=../lib/agent_policy/os_detect.sh
+source "$LIBDIR/agent_policy/os_detect.sh"
+# shellcheck source=../lib/agent_policy/qga_config.sh
+source "$LIBDIR/agent_policy/qga_config.sh"
+# shellcheck source=../lib/agent_policy/profile_check.sh
+source "$LIBDIR/agent_policy/profile_check.sh"
 
-# 기존 FILTER_RPC_ARGS 라인 파싱
-ALLOW_CMDS_RAW=$(grep -E '^FILTER_RPC_ARGS=.*--allow-rpcs=' "$CONF_FILE" | sed -n 's/.*--allow-rpcs=\([^"]*\).*/\1/p' | tr -d "'\"")
-BLOCK_CMDS_RAW=$(grep -E '^#.*--block-rpcs=' "$CONF_FILE" | \
-    sed -n 's/.*--block-rpcs=\([^"]*\).*/\1/p' | \
-    tr -d "'\"" | \
-    grep -v '^\s*$' | \
-    grep -v '^?$')
+ACTION="apply"
+POLICY="full"
+PROFILE=""
+JSON_OUTPUT=false
 
-# allow-rpcs, block-rpcs 값을 콤마로 분리해서 배열화
-IFS=',' read -ra ALLOW_ARR <<< "$ALLOW_CMDS_RAW"
-IFS=',' read -ra BLOCK_ARR <<< "$BLOCK_CMDS_RAW"
+usage() {
+    cat <<'EOF'
+Usage:
+  agent_policy_fix [--policy full] (--check|--apply) [--json]
+  agent_policy_fix --check-profile cloud-network-observability [--json]
 
-# 중복 없이 allow-rpcs 배열에 block-rpcs 값을 전체 병합
-for cmd in "${BLOCK_ARR[@]}"; do
-    skip=0
-    for allow in "${ALLOW_ARR[@]}"; do
-        [[ "$cmd" == "$allow" ]] && skip=1 && break
-    done
-    [[ $skip -eq 0 && -n "$cmd" ]] && ALLOW_ARR+=("$cmd")
+With no options, the command applies the full qemu-ga RPC policy.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --policy)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            POLICY="$2"
+            shift 2
+            ;;
+        --check)
+            ACTION="check"
+            shift
+            ;;
+        --apply)
+            ACTION="apply"
+            shift
+            ;;
+        --check-profile)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            ACTION="profile"
+            PROFILE="$2"
+            shift 2
+            ;;
+        --json)
+            JSON_OUTPUT=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "[ERROR] Unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
 done
 
-# 배열을 콤마 구분 문자열로 재조합
-ALLOW_CMDS_FINAL=$(IFS=','; echo "${ALLOW_ARR[*]}" | sed 's/,,*/,/g;s/^,//;s/,$//')
+[ "$POLICY" = "full" ] || {
+    echo "[ERROR] Only the full qemu-ga policy is supported." >&2
+    exit 2
+}
 
-NEW_LINE="FILTER_RPC_ARGS=\"--allow-rpcs=$ALLOW_CMDS_FINAL\""
+detect_guest_os || exit 2
+ensure_qga_installed_and_active "$ACTION"
 
-# 5. 실제 파일 내용 수정 (백업 후 교체)
-sudo cp "$CONF_FILE" "${CONF_FILE}.bak.$(date +%Y%m%d%H%M%S)"
-sudo sed -i 's|^FILTER_RPC_ARGS=.*|'"$NEW_LINE"'|' "$CONF_FILE"
+changed=false
+restart_performed=false
+policy_mode="UNKNOWN"
+active_hash=""
+desired_hash=""
 
-msg "[INFO] $CONF_FILE 의 FILTER_RPC_ARGS를 다음과 같이 수정했습니다:" "[INFO] Modified FILTER_RPC_ARGS in $CONF_FILE as follows:"
-msg "      $NEW_LINE" "      $NEW_LINE"
-
-# 6. qemu-guest-agent 서비스 재시작
-msg "[INFO] qemu-guest-agent 서비스를 재시작합니다." "[INFO] Restarting qemu-guest-agent service."
-sudo systemctl restart "$QGA_SERVICE"
-
-# 7. 서비스 상태 확인
-if systemctl is-active --quiet "$QGA_SERVICE"; then
-    msg "[SUCCESS] qemu-guest-agent 서비스가 정상적으로 재시작되었습니다." "[SUCCESS] qemu-guest-agent service has been restarted successfully."
-else
-    msg "[ERROR] qemu-guest-agent 서비스가 비활성 상태입니다. 로그를 확인하세요." "[ERROR] qemu-guest-agent service is not active. Please check the logs."
-    exit 4
+if [ "$ACTION" = "profile" ]; then
+    [ "$PROFILE" = "cloud-network-observability" ] || {
+        echo "[ERROR] Unsupported profile: $PROFILE" >&2
+        exit 2
+    }
+    profile_rc=0
+    check_cloud_network_profile || profile_rc=$?
+    emit_policy_json "$JSON_OUTPUT" "FULL" false false "$profile_rc"
+    exit "$profile_rc"
 fi
+
+locate_qga_config
+read_qga_policy
+build_full_qga_policy
+
+active_hash="$(hash_text "$ACTIVE_POLICY_LINE")"
+desired_hash="$(hash_text "$DESIRED_POLICY_LINE")"
+if [ "$ACTIVE_POLICY_LINE" = "$DESIRED_POLICY_LINE" ]; then
+    policy_mode="FULL"
+elif [ "$ACTION" = "apply" ]; then
+    apply_qga_policy
+    changed=true
+    restart_performed=true
+    policy_mode="FULL"
+else
+    policy_mode="CUSTOM"
+fi
+
+if [ "$ACTION" = "check" ] && [ "$policy_mode" != "FULL" ]; then
+    emit_policy_json "$JSON_OUTPUT" "$policy_mode" "$changed" "$restart_performed" 5
+    exit 5
+fi
+
+emit_policy_json "$JSON_OUTPUT" "$policy_mode" "$changed" "$restart_performed" 0

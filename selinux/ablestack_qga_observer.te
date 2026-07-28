@@ -1,0 +1,19 @@
+module ablestack_qga_observer 1.0;
+
+require {
+    type virt_qemu_ga_t;
+    type ifconfig_exec_t;
+    class file { execute execute_no_trans getattr map open read };
+}
+
+# qemu-ga already has permission to execute ordinary bin_t utilities.  iproute
+# is labelled ifconfig_exec_t on RHEL-compatible guests, so permit only the
+# execute transition that is required by the read-only snapshot helper.
+allow virt_qemu_ga_t ifconfig_exec_t:file {
+    execute
+    execute_no_trans
+    getattr
+    map
+    open
+    read
+};
