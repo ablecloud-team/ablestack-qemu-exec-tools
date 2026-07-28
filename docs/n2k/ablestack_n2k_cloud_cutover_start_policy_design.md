@@ -9,7 +9,7 @@ Cloud-managed N2K migrations use the same engine as the CLI wizard, but the Clou
 
 This means a user can already request a stopped target VM from direct CLI or wizard mode, but the Cloud UI/API path could not express that preference.
 
-The release workflow also had inconsistent checkout behavior during tag-triggered release builds. The release job checked out `workflow_run.head_sha`, while build jobs used the default checkout ref. If the default branch differs from the tag commit, generated artifacts can be built from a different commit than the release metadata.
+The release workflow also had inconsistent checkout behavior during tag-triggered release builds. The release job checked out the completed workflow SHA, while build jobs could use the default checkout ref. If the default branch differs from the tag commit, generated artifacts can be built from a different commit than the release metadata.
 
 ## Design
 
@@ -26,10 +26,18 @@ CLI and wizard behavior remains unchanged. Existing wizard users can keep using 
 
 All build jobs and the release job must check out the same source ref:
 
-- `workflow_run`: use `github.event.workflow_run.head_sha`.
-- `workflow_dispatch`: use `github.ref`.
+- Tag release: the top-level tag workflow passes `github.sha` as `source_ref`
+  to both the WinPE builder and the reusable integrated build.
+- Manual validation: use the explicit `source_ref` input when provided,
+  otherwise use `github.ref`.
 
 The final GitHub Release must also publish with `target_commitish` equal to the resolved checked-out commit.
+
+WinPE generation, package/ISO assembly, and GitHub Release publication now
+belong to one tag-triggered workflow run. The WinPE stage uploads a workflow
+artifact, the integrated build consumes that artifact within the same run, and
+the final job creates the Release once with the complete asset set. No
+intermediate or partial GitHub Release is created.
 
 ## Compatibility
 
