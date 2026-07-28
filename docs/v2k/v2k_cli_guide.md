@@ -24,6 +24,7 @@ ablestack_v2k [global options] <command> [command options]
 | Command | Description |
 | --- | --- |
 | `run` / `auto` | Orchestrated end-to-end migration pipeline |
+| `wizard` / `migrate` / `interactive` | Guided migration with target profiles and per-NIC Cloud network mapping |
 | `init` | Create workdir and manifest |
 | `cbt` | Query or enable CBT |
 | `snapshot` | Create base/incr/final snapshots |
@@ -84,6 +85,41 @@ ablestack_v2k run \
   --compat-profile auto \
   --target-format qcow2 \
   --target-storage file
+```
+
+### ABLESTACK Cloud NIC Mapping
+
+Cloud target commands accept `--cloud-network-id <id>` repeatedly or
+`--cloud-network-ids <id,id,...>`.
+
+- Provide exactly one network ID per source VMware NIC.
+- Network IDs are ordered against source NICs sorted by VMware device key.
+- The first source NIC/network pair becomes the default Cloud NIC.
+- Network IDs must be unique for the target VM.
+- Every source NIC must have a valid, unique unicast MAC address.
+
+Wizard mode lists each source NIC as `label / MAC / VMware network` and prompts
+for one target Cloud network per NIC. It stores the resolved mapping in
+`target.cloud.nic_mappings`.
+
+Cloud deployment uses `iptonetworklist[n].networkid/mac`, then verifies the
+actual NIC network/MAC pairs before attaching remaining data volumes or starting
+the VM. If Cloud replaces a conflicting MAC, cutover fails and leaves the VM
+stopped.
+
+Two-NIC non-interactive example:
+
+```bash
+ablestack_v2k wizard --yes \
+  --vm my-vm \
+  --vcenter vc.example.local \
+  --cred-file ./govc.env \
+  --cloud-cred-file ./cloud.env \
+  --target-profile cloud-rbd \
+  --cloud-zone-id <zone> \
+  --cloud-service-offering-id <offering> \
+  --cloud-network-ids <default-network>,<second-network> \
+  --cloud-storage-id <storage>
 ```
 
 Quoted extra-argument examples:
@@ -232,6 +268,9 @@ Notes:
 
 - Current libvirt XML generation uses source inventory values for CPU/memory and the source MAC plus auto-detected host bridge.
 - `--vcpu`, `--memory`, `--network`, `--bridge`, and `--vlan` are accepted by `cutover`, but they are not currently reflected in the generated XML.
+- For an ABLESTACK Cloud target, `cutover` reuses the frozen
+  `target.cloud.nic_mappings`; changing `--cloud-network-ids` rebuilds and
+  revalidates the ordered mapping.
 
 Example with workdir:
 

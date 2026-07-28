@@ -194,8 +194,8 @@ ABLESTACK Cloud target options:
   --cloud-cred-file <file>
   --cloud-zone-id <id>
   --cloud-service-offering-id <id>
-  --cloud-network-id <id>                   Repeatable
-  --cloud-network-ids <id,id,...>
+  --cloud-network-id <id>                   Repeat once per source NIC, in NIC order
+  --cloud-network-ids <id,id,...>           One unique network ID per source NIC
   --cloud-storage-id <id>
   --cloud-disk-offering-id <id>
   --cloud-host-id <id>
@@ -263,8 +263,8 @@ ABLESTACK Cloud options:
   --cloud-cred-file <file>
   --cloud-zone-id <id>
   --cloud-service-offering-id <id>
-  --cloud-network-id <id>                   Repeatable
-  --cloud-network-ids <id,id,...>
+  --cloud-network-id <id>                   Repeat once per source NIC, in NIC order
+  --cloud-network-ids <id,id,...>           One unique network ID per source NIC
   --cloud-storage-id <id>
   --cloud-disk-offering-id <id>
   --cloud-host-id <id>
@@ -303,8 +303,8 @@ ABLESTACK Cloud target options:
   --cloud-endpoint <url>                    Stored as non-secret manifest metadata
   --cloud-zone-id <id>
   --cloud-service-offering-id <id>
-  --cloud-network-id <id>                   Repeatable
-  --cloud-network-ids <id,id,...>
+  --cloud-network-id <id>                   Repeat once per source NIC, in NIC order
+  --cloud-network-ids <id,id,...>           One unique network ID per source NIC
   --cloud-storage-id <id>
   --cloud-disk-offering-id <id>
   --cloud-host-id <id>
@@ -426,8 +426,8 @@ ABLESTACK Cloud target options:
   --cloud-cred-file <file>
   --cloud-zone-id <id>
   --cloud-service-offering-id <id>
-  --cloud-network-id <id>                   Repeatable
-  --cloud-network-ids <id,id,...>
+  --cloud-network-id <id>                   Repeat once per source NIC, in NIC order
+  --cloud-network-ids <id,id,...>           One unique network ID per source NIC
   --cloud-storage-id <id>
   --cloud-disk-offering-id <id>
   --cloud-host-id <id>

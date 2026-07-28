@@ -361,7 +361,23 @@ v2k_vmware_inventory_json() {
         | map({
             key: (.key // 0),
             type: (.type? // (.deviceInfo?.label // "nic")),
-            mac: (.macAddress // "")
+            label: (.deviceInfo?.label // "Network adapter"),
+            mac: (.macAddress // "" | ascii_downcase),
+            network: (
+              .backing?.deviceName //
+              .backing?.opaqueNetworkId //
+              .deviceInfo?.summary //
+              ""
+            ),
+            connected: (.connectable?.connected // false),
+            start_connected: (.connectable?.startConnected // false),
+            backing: {
+              device_name: (.backing?.deviceName // ""),
+              portgroup_key: (.backing?.port?.portgroupKey // ""),
+              switch_uuid: (.backing?.port?.switchUuid // ""),
+              opaque_network_id: (.backing?.opaqueNetworkId // ""),
+              opaque_network_type: (.backing?.opaqueNetworkType // "")
+            }
           })
         | sort_by(.key)
       );

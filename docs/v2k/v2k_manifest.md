@@ -35,6 +35,8 @@ It records:
 | `source.vddk` | VDDK connection metadata |
 | `source.compat` | selected compatibility profile and tool paths |
 | `target.storage` | file/block/rbd target settings |
+| `target.cloud.network_ids` | ordered Cloud network IDs, one per source NIC |
+| `target.cloud.nic_mappings` | frozen source NIC key/MAC to Cloud network mapping |
 | `disks[]` | per-disk transfer state |
 | `phases` | phase completion markers |
 | `runtime` | resume, split-run, and sync-issue metadata |
@@ -94,6 +96,58 @@ Example:
   }
 }
 ```
+
+## Cloud NIC Mapping
+
+For `target.provider=ablestack-cloud`, `init` derives one mapping per source NIC.
+Source NICs are sorted by VMware device key and target network IDs use the CLI or
+wizard selection order.
+
+```json
+{
+  "source": {
+    "vm": {
+      "nics": [
+        {
+          "key": 4000,
+          "label": "Network adapter 1",
+          "mac": "52:54:00:12:34:56",
+          "network": "VM Network",
+          "connected": true,
+          "start_connected": true
+        }
+      ]
+    }
+  },
+  "target": {
+    "provider": "ablestack-cloud",
+    "cloud": {
+      "network_ids": ["network-a"],
+      "nic_mappings": [
+        {
+          "source_index": 0,
+          "source_key": "4000",
+          "source_label": "Network adapter 1",
+          "source_network": "VM Network",
+          "mac": "52:54:00:12:34:56",
+          "network_id": "network-a",
+          "default": true
+        }
+      ]
+    }
+  }
+}
+```
+
+Mapping validation fails before Cloud import/deploy when:
+
+- source NIC and target network counts differ
+- a network ID is empty or duplicated
+- a source MAC is missing, duplicated, invalid, or multicast
+
+After deployment, `runtime.cloud.nic_verification` records the expected mapping,
+actual Cloud NICs, and match result. Cutover does not start a VM whose
+network/MAC verification failed.
 
 ## RBD Runtime State
 

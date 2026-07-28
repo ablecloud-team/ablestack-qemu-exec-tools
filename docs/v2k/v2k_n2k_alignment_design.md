@@ -27,6 +27,7 @@ The compatibility goal is conservative:
 - Automatic writeback disk offering resolution/creation.
 - Manifest-based target provider and Cloud runtime result recording.
 - More explicit resume/status state around split `phase1` and `phase2`.
+- Source NIC MAC carry-over for the default Cloud network.
 
 `ablestack_v2k` already has VMware-specific strengths that should remain intact:
 
@@ -37,6 +38,14 @@ The compatibility goal is conservative:
 
 The missing pieces are mostly target orchestration and UX, not VMware data-plane
 replacement.
+
+The original alignment left two NIC-related gaps:
+
+- Wizard network selection returned only one Cloud network even when the source
+  VM had multiple NICs.
+- v2k inventory preserved source MAC addresses, but the Cloud deployment request
+  did not pass them. Copying the n2k `macaddress` behavior would preserve only
+  the first/default NIC and is not sufficient for multi-NIC migration.
 
 ## Target Architecture
 
@@ -58,6 +67,43 @@ Provider values:
 - `libvirt`: default and current behavior.
 - `ablestack-cloud`: ABLESTACK Cloud API cutover.
 
+For a Cloud target, the manifest also freezes the ordered source-NIC-to-network
+mapping:
+
+```json
+{
+  "target": {
+    "cloud": {
+      "network_ids": ["network-a", "network-b"],
+      "nic_mappings": [
+        {
+          "source_index": 0,
+          "source_key": "4000",
+          "source_label": "Network adapter 1",
+          "source_network": "VM Network",
+          "mac": "52:54:00:12:34:56",
+          "network_id": "network-a",
+          "default": true
+        },
+        {
+          "source_index": 1,
+          "source_key": "4001",
+          "source_label": "Network adapter 2",
+          "source_network": "Backup Network",
+          "mac": "52:54:00:65:43:20",
+          "network_id": "network-b",
+          "default": false
+        }
+      ]
+    }
+  }
+}
+```
+
+Source NICs are ordered by VMware device key. `network_ids` must contain exactly
+one unique Cloud network ID per source NIC in that order. The first mapping is
+the Cloud default NIC.
+
 ### Cloud Target Flow
 
 For `target.provider == "ablestack-cloud"`:
@@ -70,12 +116,19 @@ For `target.provider == "ablestack-cloud"`:
    - Shared storage: `V2K Migration Writeback`
    - Host-local storage: `V2K Migration Writeback Local`
    - Required: `customized=true`, `cachemode=writeback`, active, no tags
-5. Import disk 0 as the root volume.
-6. Deploy the VM from the imported root volume.
-7. Ensure/convert the root volume type to `ROOT` if Cloud returns it as data.
-8. Import and attach remaining disks as data volumes.
-9. Optionally start the VM.
-10. Record Cloud VM/volume/job IDs in `runtime.cloud`.
+5. Validate source NIC count, unique target networks, and valid unique unicast
+   source MAC addresses.
+6. Import disk 0 as the root volume.
+7. Deploy the stopped VM from the imported root volume using
+   `iptonetworklist[n].networkid` and `iptonetworklist[n].mac`. Do not combine
+   `iptonetworklist` with `networkids`.
+8. Read the deployed VM NICs with `listVirtualMachines` and verify every target
+   network/MAC pair plus the default NIC before continuing. A mismatch leaves
+   the VM stopped.
+9. Ensure/convert the root volume type to `ROOT` if Cloud returns it as data.
+10. Import and attach remaining disks as data volumes.
+11. Optionally start the VM.
+12. Record Cloud VM/volume/job IDs and NIC verification in `runtime.cloud`.
 
 The Cloud path initially supports the target storage types that Cloud import can
 consume from migrated artifacts:
@@ -112,6 +165,9 @@ Wizard responsibilities:
   - `libvirt-qcow2`
 - Prompt/list Cloud zone, service offering, network, storage pool, and host when
   needed.
+- Read source NIC label, MAC, VMware network/backing, and connection state.
+- Prompt for one unique Cloud network per source NIC and show the ordered
+  mapping in the final summary.
 - Derive workdir, target VM name, `dst`, and target map where possible.
 - Show a summary and optionally print the generated `run --foreground` command
   with secrets redacted.
@@ -128,15 +184,20 @@ n2k:
 
 ## Implementation Plan
 
-1. Add v2k Cloud API and target helper libraries.
-2. Extend v2k manifest schema with provider/Cloud fields.
-3. Extend `init`, `run`, and `cutover` to parse and forward provider/Cloud
-   options.
-4. Add wizard entrypoint and help text.
-5. Add focused smoke checks:
+1. Keep the existing v2k Cloud API and provider dispatch.
+2. Enrich VMware NIC inventory with label, backing network, portgroup/switch
+   identifiers, and connection state.
+3. Derive and persist ordered `target.cloud.nic_mappings` during `init`.
+4. Extend the wizard to select one Cloud network for each source NIC.
+5. Generate per-NIC `iptonetworklist` Cloud parameters and verify deployed NICs
+   before root conversion, data-volume attachment, or VM start.
+6. Add focused smoke checks:
    - `bash -n` for changed shell files.
    - Help output for `wizard`, `run`, `init`, and `cutover`.
-   - Manifest JSON generation path with dry/fixture-style inputs where possible.
+   - Two-NIC inventory metadata extraction.
+   - Ordered manifest mapping and per-NIC Cloud request generation.
+   - NIC/network count mismatch, duplicate networks, invalid/non-unicast MAC,
+     and post-deploy mismatch failures.
 
 ## Non-goals For This Pass
 
@@ -145,3 +206,6 @@ n2k:
 - Cloud LVM/block target support.
 - Persisting API keys/secrets in manifest or docs.
 - Full fleet wizard support.
+- Automatically matching VMware portgroup names to Cloud network names.
+- Silently generating or accepting a replacement MAC when Cloud reports a
+  conflict.
