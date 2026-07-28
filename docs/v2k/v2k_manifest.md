@@ -95,6 +95,62 @@ Example:
 }
 ```
 
+## CBT Coverage State
+
+After a successful incremental or final patch, each disk records the coverage
+that authorized its `last_change_id` advancement:
+
+```json
+{
+  "disks": [
+    {
+      "cbt": {
+        "base_change_id": "...",
+        "last_change_id": "...",
+        "last_coverage": {
+          "phase": "final",
+          "mode": "delta",
+          "complete": true,
+          "start_offset": 0,
+          "end_offset": 3298534883328,
+          "disk_capacity": 3298534883328,
+          "pages": 3,
+          "areas": 1735,
+          "bytes": 5796528128,
+          "start_change_id": "...",
+          "new_change_id": "...",
+          "ts": "..."
+        }
+      }
+    }
+  ]
+}
+```
+
+`last_change_id` and `last_coverage` are committed atomically after patch
+application and target flush. Missing or incomplete coverage must not advance
+the change ID.
+
+## Bootstrap Fallback State
+
+The canonical fallback path is:
+
+```json
+{
+  "runtime": {
+    "bootstrap_fallback": {
+      "enabled": true,
+      "bus": "sata",
+      "phase": "linux_bootstrap",
+      "code": 80,
+      "reason": "Cloud Linux bootstrap(initramfs) failed"
+    }
+  }
+}
+```
+
+Cloud and libvirt target generation must read this same runtime path.
+
 ## RBD Runtime State
 
 For `target.storage.type=rbd`, mapped host block devices are recorded under:

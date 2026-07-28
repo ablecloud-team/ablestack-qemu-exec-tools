@@ -645,24 +645,41 @@ v2k_manifest_set_disk_last_change_id() {
   mv "${tmp}" "${manifest}"
 }
 
-# After a successful incremental/final patch, advance CBT changeIds.
+# After a successful incremental/final patch, atomically advance CBT changeIds
+# and persist the coverage record that authorized the advancement.
 # - If base_change_id is empty or "*", set it to prev_last_change_id (the baseline for deltas).
 # - Always set last_change_id to new_last_change_id.
+# - Never publish a new changeId separately from its verified coverage metadata.
 v2k_manifest_advance_cbt_change_ids() {
   local manifest="$1" idx="$2" prev_last_change_id="$3" new_last_change_id="$4"
-  local base
-  base="$(v2k_manifest_get_disk_base_change_id "${manifest}" "${idx}")"
+  local coverage_json="${5:-null}"
+  local tmp
 
   if [[ -z "${new_last_change_id}" || "${new_last_change_id}" == "null" ]]; then
     return 0
   fi
 
-  if [[ -z "${base}" || "${base}" == "null" || "${base}" == "*" ]]; then
-    if [[ -n "${prev_last_change_id}" && "${prev_last_change_id}" != "null" && "${prev_last_change_id}" != "*" ]]; then
-      v2k_manifest_set_disk_base_change_id "${manifest}" "${idx}" "${prev_last_change_id}"
-    fi
-  fi
-  v2k_manifest_set_disk_last_change_id "${manifest}" "${idx}" "${new_last_change_id}"
+  tmp="$(mktemp)"
+  jq \
+    --argjson idx "${idx}" \
+    --arg prev "${prev_last_change_id}" \
+    --arg new "${new_last_change_id}" \
+    --argjson coverage "${coverage_json}" '
+      .disks[$idx].cbt = (.disks[$idx].cbt // {})
+      | if (
+          ((.disks[$idx].cbt.base_change_id // "") == "")
+          or ((.disks[$idx].cbt.base_change_id // "") == "null")
+          or ((.disks[$idx].cbt.base_change_id // "") == "*")
+        ) and ($prev != "") and ($prev != "null") and ($prev != "*")
+        then .disks[$idx].cbt.base_change_id = $prev
+        else .
+        end
+      | .disks[$idx].cbt.last_change_id = $new
+      | if $coverage == null
+        then .
+        else .disks[$idx].cbt.last_coverage = $coverage
+        end
+    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 
 # Ensure CBT changeId fields are normalized for all CBT-enabled disks.

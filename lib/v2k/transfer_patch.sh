@@ -48,6 +48,29 @@ v2k_require_patch_deps() {
   v2k_has_govc_bin
 }
 
+v2k_validate_cbt_coverage() {
+  # Usage: v2k_validate_cbt_coverage <areas-json> <expected-size-bytes>
+  # A changeId may advance only when the helper proves contiguous coverage
+  # from byte zero through the complete source disk.
+  local areas_json="$1" expected_size="${2:-0}"
+  jq -e --argjson expected_size "${expected_size}" '
+    (.coverage // null) as $coverage
+    | ($coverage != null)
+      and (($coverage.complete // false) == true)
+      and (($coverage.start_offset | tonumber) == 0)
+      and (($coverage.end_offset | tonumber) > 0)
+      and (($coverage.end_offset | tonumber) == ($coverage.disk_capacity | tonumber))
+      and (
+        ($expected_size <= 0)
+        or (($coverage.disk_capacity | tonumber) == $expected_size)
+      )
+      and (
+        (($coverage.mode // "") == "baseline" and ($coverage.pages | tonumber) == 0)
+        or (($coverage.mode // "") == "delta" and ($coverage.pages | tonumber) > 0)
+      )
+  ' <<<"${areas_json}" >/dev/null 2>&1
+}
+
 v2k_load_vddk_cred_from_manifest() {
   local manifest="$1"
   local cred
@@ -156,7 +179,7 @@ v2k_transfer_patch_one() {
     fi
 
     # ---- resources we must cleanup even on failure ----
-    local src_dev="" dst_dev="" sock="" pidfile="" nbdlog="" target_cleanup_cmd=""
+    local src_dev="" dst_dev="" sock="" pidfile="" nbdlog="" target_cleanup_cmd="" areas_error_file=""
 
     cleanup() {
       set +e
@@ -189,6 +212,9 @@ v2k_transfer_patch_one() {
 
       [[ -n "${sock}" ]] && rm -f "${sock}" >/dev/null 2>&1 || true
       [[ -n "${pidfile}" ]] && rm -f "${pidfile}" >/dev/null 2>&1 || true
+      if [[ -n "${areas_error_file}" ]]; then
+        rm -f "${areas_error_file}" >/dev/null 2>&1 || true
+      fi
 
       [[ -n "${src_dev}" ]] && v2k_nbd_free "${src_dev}" >/dev/null 2>&1 || true
       if [[ -n "${target_cleanup_cmd}" ]]; then
@@ -256,13 +282,30 @@ v2k_transfer_patch_one() {
     local last_change_id
     last_change_id="$(jq -r ".disks[$idx].cbt.last_change_id // empty" "${manifest}" 2>/dev/null || true)"
 
-    local areas_json
-
-    areas_json="$(v2k_python "${V2K_PY_DIR}/vmware_changed_areas.py" \
+    local areas_json areas_error_text areas_query_rc
+    areas_error_file="$(mktemp)"
+    if areas_json="$(v2k_python "${V2K_PY_DIR}/vmware_changed_areas.py" \
         --vm "$(jq -r '.source.vm.name' "${manifest}")" \
         --snapshot "${snap_name}" \
         --disk-id "${disk_id}" \
-        --change-id "${last_change_id}")"
+        --change-id "${last_change_id}" 2>"${areas_error_file}")"; then
+      areas_query_rc=0
+    else
+      areas_query_rc=$?
+      areas_error_text="$(tr '\n' ' ' < "${areas_error_file}" | sed -E 's/[[:space:]]+/ /g' | head -c 1500)"
+      rm -f "${areas_error_file}"
+      v2k_event ERROR "sync.${which}" "${disk_id}" "cbt_query_failed" \
+        "$(jq -nc \
+          --argjson code "${areas_query_rc}" \
+          --arg error "${areas_error_text}" \
+          '{code:$code,error:$error}')"
+      echo "VMware CBT query failed for disk=${disk_id}: ${areas_error_text}" >&2
+      exit 44
+    fi
+    if [[ -s "${areas_error_file}" ]]; then
+      cat "${areas_error_file}" >&2
+    fi
+    rm -f "${areas_error_file}"
 
     # IMPORTANT: snapshot view must read from snapshot disk backing (delta chain top).
     local snap_vmdk_path
@@ -272,27 +315,63 @@ v2k_transfer_patch_one() {
       exit 41
     fi
 
-    local areas_count bytes_total new_change_id
+    local areas_count bytes_total new_change_id coverage_json coverage_record coverage_event
     areas_count="$(echo "${areas_json}" | jq -r '.areas|length')"
     bytes_total="$(echo "${areas_json}" | jq -r '[.areas[].length] | add // 0')"
     new_change_id="$(echo "${areas_json}" | jq -r '.new_change_id // empty')"
+    coverage_json="$(echo "${areas_json}" | jq -c '.coverage // null')"
 
-    # Debug logging
-    echo "DEBUG: areas_json for disk ${disk_id}: ${areas_json}" >&2
+    if ! v2k_validate_cbt_coverage "${areas_json}" "${size_bytes}"; then
+      coverage_event="$(jq -nc \
+        --arg disk_id "${disk_id}" \
+        --argjson expected_size "${size_bytes}" \
+        --argjson coverage "${coverage_json}" \
+        '{disk_id:$disk_id,expected_size:$expected_size,coverage:$coverage}')"
+      v2k_event ERROR "sync.${which}" "${disk_id}" "cbt_coverage_incomplete" "${coverage_event}"
+      echo "Incomplete VMware CBT coverage for disk=${disk_id}; refusing to apply changes or advance changeId." >&2
+      exit 44
+    fi
+
+    coverage_record="$(jq -c \
+      --arg phase "${which}" \
+      --arg start_change_id "${last_change_id}" \
+      --arg new_change_id "${new_change_id}" \
+      --arg ts "$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')" \
+      --argjson areas "${areas_count}" \
+      --argjson bytes "${bytes_total}" \
+      '.coverage + {
+        phase:$phase,
+        start_change_id:$start_change_id,
+        new_change_id:$new_change_id,
+        areas:$areas,
+        bytes:$bytes,
+        ts:$ts
+      }' <<<"${areas_json}")"
+
+    echo "DEBUG: CBT coverage for disk ${disk_id}: ${coverage_record}" >&2
 
     # No changed areas is a valid no-op incremental/final sync.
     if [[ "${areas_count}" -eq 0 ]]; then
-      v2k_event INFO "sync.${which}" "${disk_id}" "no_changes" "{}"
+      v2k_event INFO "sync.${which}" "${disk_id}" "no_changes" \
+        "$(jq -nc --argjson coverage "${coverage_json}" '{coverage:$coverage}')"
       if [[ -n "${new_change_id}" && "${new_change_id}" != "null" ]]; then
-        v2k_manifest_advance_cbt_change_ids "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}"
+        v2k_manifest_advance_cbt_change_ids \
+          "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}" "${coverage_record}"
       fi
       v2k_manifest_inc_incr_seq "${manifest}" "${idx}"
-      v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" "{\"bytes_written\":0,\"areas\":0}"
+      v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" \
+        "$(jq -nc --argjson coverage "${coverage_json}" \
+          '{bytes_written:0,areas:0,coverage:$coverage}')"
       cleanup_patch
       return 0
     fi
 
-    v2k_event INFO "sync.${which}" "${disk_id}" "changed_areas_fetched" "{\"areas\":${areas_count},\"bytes\":${bytes_total}}"
+    v2k_event INFO "sync.${which}" "${disk_id}" "changed_areas_fetched" \
+      "$(jq -nc \
+        --argjson areas "${areas_count}" \
+        --argjson bytes "${bytes_total}" \
+        --argjson coverage "${coverage_json}" \
+        '{areas:$areas,bytes:$bytes,coverage:$coverage}')"
 
     # Start nbdkit (read-only) for snapshot view (do NOT swallow failures)
     # IMPORTANT: run in background and wait for pidfile/socket readiness.
@@ -390,7 +469,8 @@ v2k_transfer_patch_one() {
     # - base_change_id will be fixed to the previous last_change_id on the first successful patch.
     # - last_change_id advances to new_change_id.
     if [[ -n "${new_change_id}" && "${new_change_id}" != "null" ]]; then
-      v2k_manifest_advance_cbt_change_ids "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}"
+      v2k_manifest_advance_cbt_change_ids \
+        "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}" "${coverage_record}"
     fi
 
     # NOTE(v1): we only report new_change_id (manifest persistence can be added when manifest.sh exposes setter)
@@ -398,7 +478,12 @@ v2k_transfer_patch_one() {
     v2k_manifest_set_disk_metric_incr "${manifest}" "${idx}" "${bytes_total}" "${areas_count}"
     v2k_manifest_inc_incr_seq "${manifest}" "${idx}"
 
-    v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" "{\"bytes_written\":${bytes_total},\"areas\":${areas_count}}"
+    v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" \
+      "$(jq -nc \
+        --argjson bytes_written "${bytes_total}" \
+        --argjson areas "${areas_count}" \
+        --argjson coverage "${coverage_json}" \
+        '{bytes_written:$bytes_written,areas:$areas,coverage:$coverage}')"
 
     cleanup_patch
   )

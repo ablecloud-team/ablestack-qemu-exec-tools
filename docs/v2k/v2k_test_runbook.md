@@ -58,6 +58,32 @@ Recommended sequence for one test VM:
 
 Use separate workdirs and destination paths for phase-run and full-run tests.
 
+For each incremental and final phase, verify every disk event reports complete
+coverage:
+
+```bash
+jq -s '
+  map(select(
+    (.phase == "sync.incr" or .phase == "sync.final")
+    and (.event == "changed_areas_fetched" or .event == "no_changes")
+  ))
+  | all(.detail.coverage.complete == true)
+' <workdir>/events.log
+```
+
+For a large or busy disk, confirm `detail.coverage.pages` can exceed one and
+that `end_offset == disk_capacity`.
+
+Before accepting a Linux cutover:
+
+- confirm no `cbt_query_failed` or `cbt_coverage_incomplete` event exists
+- confirm failed mount events contain a non-zero `detail.rc` and useful output
+- if SATA fallback was selected, confirm
+  `.runtime.bootstrap_fallback.bus == "sata"` and Cloud deployment properties
+  use `rootDiskController=sata`
+- do not accept a target disk that required `xfs_repair -L` as proof of a
+  correct migration; re-run into a new target after fixing the transfer path
+
 ## Useful Commands
 
 ```bash
@@ -71,4 +97,7 @@ jq '.phases, .runtime, .source.compat' <workdir>/manifest.json
 - installer validation passes for all required profiles
 - `init --compat-profile auto` selects the expected profile
 - `cbt enable`, `snapshot base`, and `sync base` succeed
+- every incremental/final disk has complete CBT coverage through its full
+  logical capacity
+- `last_change_id` and `last_coverage.new_change_id` agree
 - split/full `run` tests complete with the expected phase markers

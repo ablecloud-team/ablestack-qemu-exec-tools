@@ -508,25 +508,27 @@ v2k_linux_bootstrap_run_capture() {
   local __rc_var="$1"; shift
   [[ "$1" == "--" ]] && shift
 
-  # NOTE: set -u safety: always initialize locals.
-  local _out="" _rc=0
+  # Keep internal names distinct from caller-provided variable names. Bash
+  # uses dynamic scoping for local variables, so reusing "_out"/"_rc" here
+  # would shadow callers that request results with those common names.
+  local captured_output="" captured_rc=0
   local _errexit=0
   shopt -qo errexit && _errexit=1
   set +e
   if [[ $# -gt 0 ]]; then
-    _out="$("$@" 2>&1)"
-    _rc=$?
+    captured_output="$("$@" 2>&1)"
+    captured_rc=$?
   else
-    _out="(no command)"
-    _rc=127
+    captured_output="(no command)"
+    captured_rc=127
   fi
   (( _errexit )) && set -e || set +e
 
   # single-line compact for event log
-  _out="$(printf '%s' "${_out}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
+  captured_output="$(printf '%s' "${captured_output}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
 
-  printf -v "${__out_var}" '%s' "${_out}"
-  printf -v "${__rc_var}"  '%s' "${_rc}"
+  printf -v "${__out_var}" '%s' "${captured_output}"
+  printf -v "${__rc_var}"  '%s' "${captured_rc}"
 }
 
 v2k_linux_bootstrap_cmd_str() {
@@ -562,20 +564,20 @@ v2k_linux_bootstrap_run_event() {
   local cmdline
   cmdline="$(v2k_linux_bootstrap_cmd_str "$@")"
 
-  # NOTE: set -u safety: always initialize locals.
-  local _out="" _rc=0
-  v2k_linux_bootstrap_run_capture _out _rc -- "$@"
-  printf -v "${__out_var}" '%s' "${_out}"
-  printf -v "${__rc_var}"  '%s' "${_rc}"
+  # Keep these names distinct from both the caller and run_capture internals.
+  local event_output="" event_rc=0
+  v2k_linux_bootstrap_run_capture event_output event_rc -- "$@"
+  printf -v "${__out_var}" '%s' "${event_output}"
+  printf -v "${__rc_var}"  '%s' "${event_rc}"
 
   # Truncate output for event payload safety
   local out_short=""
-  out_short="$(printf '%s' "${_out}" | head -c 1500)"
+  out_short="$(printf '%s' "${event_output}" | head -c 1500)"
 
   v2k_event INFO "linux_bootstrap" "" "${ev}" \
     "$(v2k_linux_bootstrap_json \
       --arg cmd "${cmdline}" \
-      --argjson rc "${_rc}" \
+      --argjson rc "${event_rc}" \
       --arg out "${out_short}" \
       '{cmd:$cmd,rc:$rc,out:$out}')"
 }
@@ -2560,7 +2562,7 @@ v2k_select_bootstrap_fallback() {
     return 1
   fi
 
-  v2k_manifest_runtime_set "${manifest}" ".bootstrap_fallback" \
+  v2k_manifest_runtime_set "${manifest}" ".runtime.bootstrap_fallback" \
     "$(jq -nc \
       --arg bus "${bus}" \
       --arg phase "${phase}" \

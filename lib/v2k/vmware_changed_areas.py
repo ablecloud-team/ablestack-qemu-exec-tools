@@ -30,7 +30,17 @@
 #   VCENTER_INSECURE (1/0)
 #
 # Output(JSON):
-#   { "disk_id": "...", "areas":[{"offset":..,"length":..},...]}
+#   {
+#     "disk_id": "...",
+#     "coverage": {
+#       "complete": true,
+#       "start_offset": 0,
+#       "end_offset": 1073741824,
+#       "disk_capacity": 1073741824,
+#       "pages": 2
+#     },
+#     "areas":[{"offset":..,"length":..},...]
+#   }
 # ---------------------------------------------------------------------
 
 import argparse
@@ -260,7 +270,7 @@ def _query_changed_areas(
     snap: vim.vm.Snapshot,
     disk: vim.vm.device.VirtualDisk,
     change_id: str,
-) -> Tuple[List[Dict[str, int]], str]:
+) -> Tuple[List[Dict[str, int]], str, Dict[str, Any]]:
     """
     QueryChangedDiskAreas for a given snapshot and disk.
 
@@ -270,16 +280,96 @@ def _query_changed_areas(
         depending on CBT state. For incremental sync correctness you should persist and
         pass the previous changeId (per disk) from the last successful sync.
     """
-    try:
-        areas = vm.QueryChangedDiskAreas(snapshot=snap, deviceKey=disk.key, startOffset=0, changeId=change_id)
-    except Exception as e:
-        raise SystemExit(f"QueryChangedDiskAreas failed: {e}") from e
+    capacity = int(getattr(disk, "capacityInBytes", 0) or 0)
+    if capacity <= 0:
+        capacity_kb = int(getattr(disk, "capacityInKB", 0) or 0)
+        capacity = capacity_kb * 1024
+    if capacity <= 0:
+        raise SystemExit("QueryChangedDiskAreas cannot validate coverage: disk capacity is unavailable")
 
     out: List[Dict[str, int]] = []
-    for a in areas.changedArea:
-        out.append({"offset": int(a.start), "length": int(a.length)})
-    # Attach changeId if present (vim.vm.DiskChangeInfo.changeId)
-    return out, getattr(areas, "changeId", "") or ""
+    seen_extents = set()
+    next_offset = 0
+    page_count = 0
+    query_change_id = ""
+
+    while next_offset < capacity:
+        requested_offset = next_offset
+        try:
+            page = vm.QueryChangedDiskAreas(
+                snapshot=snap,
+                deviceKey=disk.key,
+                startOffset=requested_offset,
+                changeId=change_id,
+            )
+        except Exception as e:
+            raise SystemExit(
+                f"QueryChangedDiskAreas failed at offset {requested_offset}: {e}"
+            ) from e
+
+        page_start = int(getattr(page, "startOffset", -1))
+        page_length = int(getattr(page, "length", 0))
+        page_end = page_start + page_length
+        if page_start != requested_offset:
+            raise SystemExit(
+                "QueryChangedDiskAreas returned non-contiguous coverage: "
+                f"requested={requested_offset}, returned_start={page_start}"
+            )
+        if page_length <= 0 or page_end <= requested_offset:
+            raise SystemExit(
+                "QueryChangedDiskAreas made no coverage progress: "
+                f"start={page_start}, length={page_length}, capacity={capacity}"
+            )
+        if page_end > capacity:
+            raise SystemExit(
+                "QueryChangedDiskAreas coverage exceeds disk capacity: "
+                f"end={page_end}, capacity={capacity}"
+            )
+
+        page_count += 1
+        page_change_id = str(getattr(page, "changeId", "") or "")
+        if page_change_id:
+            if query_change_id and query_change_id != page_change_id:
+                raise SystemExit(
+                    "QueryChangedDiskAreas returned inconsistent changeId values "
+                    f"across pages: {query_change_id} != {page_change_id}"
+                )
+            query_change_id = page_change_id
+
+        for area in list(getattr(page, "changedArea", []) or []):
+            offset = int(area.start)
+            length = int(area.length)
+            end = offset + length
+            if length <= 0:
+                raise SystemExit(
+                    f"QueryChangedDiskAreas returned a non-positive extent at {offset}: {length}"
+                )
+            if offset < page_start or end > page_end or end > capacity:
+                raise SystemExit(
+                    "QueryChangedDiskAreas returned an extent outside its coverage page: "
+                    f"extent={offset}+{length}, page={page_start}+{page_length}, capacity={capacity}"
+                )
+            extent = (offset, length)
+            if extent not in seen_extents:
+                seen_extents.add(extent)
+                out.append({"offset": offset, "length": length})
+
+        next_offset = page_end
+
+    coverage: Dict[str, Any] = {
+        "mode": "delta",
+        "complete": next_offset == capacity,
+        "start_offset": 0,
+        "end_offset": next_offset,
+        "disk_capacity": capacity,
+        "pages": page_count,
+    }
+    if not coverage["complete"]:
+        raise SystemExit(
+            "QueryChangedDiskAreas coverage is incomplete: "
+            f"end={next_offset}, capacity={capacity}, pages={page_count}"
+        )
+    return out, query_change_id, coverage
 
  
 def _disk_backing_vmdk_path(disk: vim.vm.device.VirtualDisk) -> str:
@@ -331,6 +421,11 @@ def main() -> None:
             vmdk_path = _disk_backing_vmdk_path(disk)
             change_id_source = "snapshot"
             cur = _disk_backing_change_id(disk) or ""
+            capacity = int(getattr(disk, "capacityInBytes", 0) or 0)
+            if capacity <= 0:
+                capacity = int(getattr(disk, "capacityInKB", 0) or 0) * 1024
+            if capacity <= 0:
+                raise SystemExit("Cannot establish CBT baseline: disk capacity is unavailable")
             if not cur:
                 try:
                     _, current_disk = _disk_key_for_scsi(vm, args.disk_id)
@@ -347,12 +442,22 @@ def main() -> None:
                 "new_change_id": cur,
                 "change_id_source": change_id_source,
                 "vmdk_path": vmdk_path,
+                "coverage": {
+                    "mode": "baseline",
+                    "complete": True,
+                    "start_offset": 0,
+                    "end_offset": capacity,
+                    "disk_capacity": capacity,
+                    "pages": 0,
+                },
                 "areas": [],
             }
             print(json.dumps(result, ensure_ascii=False))
             return
 
-        areas, areas_change_id = _query_changed_areas(vm, snap, disk, effective_change_id)
+        areas, areas_change_id, coverage = _query_changed_areas(
+            vm, snap, disk, effective_change_id
+        )
 
         # Snapshot disk backing fileName (delta chain top like *_000002.vmdk)
         vmdk_path = _disk_backing_vmdk_path(disk)
@@ -373,7 +478,13 @@ def main() -> None:
                 sys.stderr.write(f"WARN: failed to read current backing changeId for {args.disk_id}: {exc}\n")
 
         # Debug logging
-        sys.stderr.write(f"DEBUG: Queried {len(areas)} changed areas for disk {args.disk_id}, change_id={effective_change_id}\n")
+        sys.stderr.write(
+            "DEBUG: Queried "
+            f"{len(areas)} changed areas across {coverage['pages']} pages "
+            f"for disk {args.disk_id}, coverage="
+            f"{coverage['end_offset']}/{coverage['disk_capacity']}, "
+            f"change_id={effective_change_id}\n"
+        )
 
         print(json.dumps({
             "disk_id": args.disk_id,
@@ -381,6 +492,7 @@ def main() -> None:
             "new_change_id": new_change_id,
             "change_id_source": change_id_source,
             "vmdk_path": vmdk_path,
+            "coverage": coverage,
             "areas": areas
         }))
     finally:
