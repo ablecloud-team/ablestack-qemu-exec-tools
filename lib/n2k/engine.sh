@@ -892,6 +892,8 @@ n2k_run_start_background() {
   [[ "${N2K_FORCE:-0}" -eq 1 ]] && worker_cmd+=(--force)
   worker_cmd+=(run --foreground "$@")
 
+  # The runner state only records log_file as metadata; it does not read it.
+  # shellcheck disable=SC2094
   (
     n2k_run_write_runner_state "running" "${BASHPID}" "${split}" "${log_file}" ""
     set +e
