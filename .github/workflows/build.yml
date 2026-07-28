@@ -781,7 +781,25 @@ jobs:
   release:
     needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    # build-v2k-rpm deliberately continues after the workflow_dispatch-only
+    # build-winpe job is skipped on the official workflow_run path. Use
+    # always() here to prevent that skipped ancestor from suppressing release,
+    # while still requiring every direct build dependency to succeed.
+    if: >-
+      ${{
+        always() &&
+        (
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+        ) &&
+        needs['build-rpm'].result == 'success' &&
+        needs['build-hangctl-rpm'].result == 'success' &&
+        needs['build-ftctl-rpm'].result == 'success' &&
+        needs['build-deb'].result == 'success' &&
+        needs['build-windows'].result == 'success' &&
+        needs['build-v2k-rpm'].result == 'success' &&
+        needs['build-n2k-rpm'].result == 'success'
+      }}
     steps:
       - name: Checkout workflow_run source
         if: ${{ github.event_name == 'workflow_run' }}
