@@ -1,8 +1,40 @@
 name: Build and Release ablestack-qemu-exec-tools
 
 on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: "Source commit or ref to build. Empty uses the caller ref."
+        required: false
+        default: ""
+        type: string
+      release_tag:
+        description: "Release tag used for generated artifact names."
+        required: false
+        default: ""
+        type: string
+      publish_release:
+        description: "Create the GitHub Release after every build succeeds."
+        required: false
+        default: false
+        type: boolean
+      use_prebuilt_winpe:
+        description: "Use a WinPE artifact produced earlier in the same workflow run."
+        required: false
+        default: false
+        type: boolean
+      winpe_artifact_name:
+        description: "WinPE workflow artifact name."
+        required: false
+        default: "winpe-iso-validation"
+        type: string
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: "Optional source commit or ref. Empty uses the selected workflow ref."
+        required: false
+        default: ""
+        type: string
       release_tag:
         description: "Optional release tag used for generated artifact names. Empty uses an n2k validation tag."
         required: false
@@ -13,33 +45,41 @@ on:
         required: false
         default: false
         type: boolean
-  workflow_run:
-    workflows: ["WinPE Release Build"]
-    types:
-      - completed
+      use_prebuilt_winpe:
+        description: "Use an existing WinPE artifact from this workflow run. Intended for reusable workflow callers."
+        required: false
+        default: false
+        type: boolean
+      winpe_artifact_name:
+        description: "WinPE workflow artifact name."
+        required: false
+        default: "winpe-iso-validation"
+        type: string
 
 permissions:
   contents: write
   actions: read
 
 env:
-  WORKFLOW_SOURCE_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+  WORKFLOW_SOURCE_REF: ${{ inputs.source_ref != '' && inputs.source_ref || github.ref }}
 
 # NOTE (WinPE ISO)
 # - Manual validation runs build a release-equivalent WinPE ISO in this workflow.
-# - Tag-triggered official releases receive WinPE from build-winpe-release.yml.
+# - Tag-triggered official releases receive the WinPE artifact generated earlier
+#   in the same top-level workflow run by build-winpe-release.yml.
 # - V2K RPM and release assembly fail closed when the required WinPE ISO is missing.
 jobs:
   # Build a release-equivalent WinPE ISO for manual validation runs.
-  # The tag-triggered official path keeps using build-winpe-release.yml.
+  # The tag-triggered official path reuses the caller-provided WinPE artifact.
   build-winpe:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ !inputs.use_prebuilt_winpe }}
     uses: ./.github/workflows/build-winpe-core.yml
     with:
+      source_ref: ${{ inputs.source_ref != '' && inputs.source_ref || github.ref }}
       architecture: "amd64"
       iso_base_name: "winpe-ablestack-v2k"
       iso_suffix: ${{ inputs.release_tag != '' && inputs.release_tag || format('validation-{0}', github.run_number) }}
-      artifact_name: "winpe-iso-validation"
+      artifact_name: ${{ inputs.winpe_artifact_name }}
       retention_days: "14"
       test_mode: false
 
@@ -283,7 +323,7 @@ jobs:
   # ======================================================================
   build-v2k-rpm:
     needs: [build-winpe]
-    if: ${{ always() && ((github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && needs.build-winpe.result == 'success')) }}
+    if: ${{ always() && (inputs.use_prebuilt_winpe || needs.build-winpe.result == 'success') }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -404,20 +444,10 @@ jobs:
 
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*","${EPEL_REPO_ID}" makecache
 
-      - name: Stage WinPE ISO into V2K RPM source
-        if: ${{ github.event_name == 'workflow_run' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: winpe-iso-release
-          path: winpe
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
-
       - name: Stage generated WinPE ISO into V2K RPM source
-        if: ${{ github.event_name == 'workflow_dispatch' }}
         uses: actions/download-artifact@v4
         with:
-          name: winpe-iso-validation
+          name: ${{ inputs.winpe_artifact_name }}
           path: winpe
 
       - name: Show staged WinPE ISO for V2K RPM
@@ -781,17 +811,13 @@ jobs:
   release:
     needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm]
     runs-on: ubuntu-latest
-    # build-v2k-rpm deliberately continues after the workflow_dispatch-only
-    # build-winpe job is skipped on the official workflow_run path. Use
-    # always() here to prevent that skipped ancestor from suppressing release,
-    # while still requiring every direct build dependency to succeed.
+    # The official path deliberately skips this reusable workflow's build-winpe
+    # job because the caller already produced it. Use always() to prevent that
+    # skipped ancestor from suppressing release, while still requiring every
+    # direct build dependency to succeed.
     if: >-
       ${{
         always() &&
-        (
-          github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-        ) &&
         needs['build-rpm'].result == 'success' &&
         needs['build-hangctl-rpm'].result == 'success' &&
         needs['build-ftctl-rpm'].result == 'success' &&
@@ -801,15 +827,7 @@ jobs:
         needs['build-n2k-rpm'].result == 'success'
       }}
     steps:
-      - name: Checkout workflow_run source
-        if: ${{ github.event_name == 'workflow_run' }}
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ env.WORKFLOW_SOURCE_REF }}
-
-      - name: Checkout workflow_dispatch source
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -819,30 +837,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EVENT_NAME="${{ github.event_name }}"
-          PUBLISH="false"
+          TAG="${{ inputs.release_tag }}"
+          PUBLISH="${{ inputs.publish_release }}"
 
-          if [[ "${EVENT_NAME}" == "workflow_run" ]]; then
-            TAG="${{ github.event.workflow_run.head_branch }}"
-            if [[ -z "$TAG" ]]; then
-              echo "[ERR] workflow_run.head_branch is empty (cannot determine tag)" >&2
-              exit 2
-            fi
-            if [[ "$TAG" != v* ]]; then
-              echo "[ERR] head_branch is not a v* tag: $TAG" >&2
-              exit 2
-            fi
-            PUBLISH="true"
-          else
-            TAG="${{ inputs.release_tag }}"
-            if [[ -z "$TAG" ]]; then
-              TAG="n2k-validation-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
-            fi
-            PUBLISH="${{ inputs.publish_release }}"
-            if [[ "${PUBLISH}" == "true" && "$TAG" != v* ]]; then
-              echo "[ERR] publish_release=true requires a v* release tag: $TAG" >&2
-              exit 2
-            fi
+          if [[ -z "$TAG" ]]; then
+            TAG="n2k-validation-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          fi
+          if [[ "${PUBLISH}" == "true" && "$TAG" != v* ]]; then
+            echo "[ERR] publish_release=true requires a v* release tag: $TAG" >&2
+            exit 2
           fi
 
           REF="$(git rev-parse HEAD)"
@@ -856,29 +859,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-
-      - name: Download WinPE ISO from GitHub Release assets
-        if: ${{ github.event_name == 'workflow_run' }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p release/winpe
-
-          echo "[INFO] Downloading WinPE ISO assets for tag: ${RELEASE_TAG}"
-          # Download the WinPE ISO artifact from the release when available
-          gh release download "${RELEASE_TAG}" \
-            -p "*winpe*.iso" \
-            -p "SHA256SUMS" \
-            -D release/winpe || true
-
-          if ls -1 release/winpe/*.iso >/dev/null 2>&1; then
-            echo "[OK] WinPE ISO staged:"
-            ls -lah release/winpe
-          else
-            echo "[WARN] WinPE ISO not found in release assets for ${RELEASE_TAG}. Continuing without it."
-          fi
 
       - name: Install packaging tools (genisoimage, 7zip)
         run: |
@@ -1085,9 +1065,6 @@ jobs:
           set -euo pipefail
           mkdir -p release/winpe
 
-          # The official workflow_run path downloads the release asset directly
-          # into release/winpe. A manual validation run receives the artifact
-          # generated by build-winpe under dist.
           WINPE_ISO="$(find release/winpe -maxdepth 1 -type f -iname '*winpe*.iso' 2>/dev/null | head -n 1 || true)"
           if [[ -z "$WINPE_ISO" ]]; then
             WINPE_ISO="$(find dist -type f -iname '*winpe*.iso' 2>/dev/null | head -n 1 || true)"
@@ -1101,13 +1078,25 @@ jobs:
 
           if [[ -n "$WINPE_ISO" && -f "$WINPE_ISO" ]]; then
             echo "[INFO] Found WinPE ISO: $WINPE_ISO"
+            WINPE_SUM="$(find "$(dirname "$WINPE_ISO")" -maxdepth 1 -type f -name 'SHA256SUMS' -print -quit)"
+            if [[ -z "$WINPE_SUM" || ! -f "$WINPE_SUM" ]]; then
+              echo "[ERR] SHA256SUMS was not found beside the WinPE ISO." >&2
+              exit 2
+            fi
             if [[ "$(dirname "$WINPE_ISO")" != "release/winpe" ]]; then
               cp -a "$WINPE_ISO" release/winpe/
             fi
+            if [[ "$(dirname "$WINPE_SUM")" != "release/winpe" ]]; then
+              cp -a "$WINPE_SUM" release/winpe/SHA256SUMS
+            fi
+            (
+              cd release/winpe
+              sha256sum -c SHA256SUMS
+            )
             echo "[OK] Staged WinPE ISO(s):"
-            ls -lah release/winpe/*.iso
+            ls -lah release/winpe/*.iso release/winpe/SHA256SUMS
           else
-            echo "[ERR] Required WinPE ISO was not found in release assets or workflow artifacts." >&2
+            echo "[ERR] Required WinPE ISO was not found in workflow artifacts." >&2
             exit 2
           fi
 
@@ -1989,7 +1978,7 @@ jobs:
           find build/iso -type f -name '*.iso' -ls
 
       - name: Upload release build validation artifacts
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ env.RELEASE_PUBLISH != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: release-validation-${{ github.run_number }}
@@ -2002,6 +1991,8 @@ jobs:
             release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.noarch.rpm
             release/n2k/n2k-rpm-rocky9.6/ablestack_n2k-*.noarch.rpm
             release/n2k/n2k-rpm-rocky9.7/ablestack_n2k-*.noarch.rpm
+            release/winpe/*.iso
+            release/winpe/SHA256SUMS
             release_notes.md
           retention-days: 14
 
@@ -2039,6 +2030,13 @@ jobs:
           for iso in build/iso/rocky/*.iso build/iso/ubuntu/*.iso build/iso/windows/*.iso; do
             copy_plain "${iso}"
           done
+          for winpe_asset in release/winpe/*.iso release/winpe/SHA256SUMS; do
+            if [[ ! -f "${winpe_asset}" ]]; then
+              echo "[ERR] Required WinPE release asset is missing: ${winpe_asset}" >&2
+              exit 2
+            fi
+            copy_plain "${winpe_asset}"
+          done
 
           for rpm in release/rpm/rpm-rocky9.6/ablestack-qemu-exec-tools-*.rpm; do
             copy_plain "${rpm}"
@@ -2068,6 +2066,13 @@ jobs:
             -print -quit)"
           if [[ -n "${unexpected_rpm}" ]]; then
             echo "[ERR] Dependency RPM would be published: ${unexpected_rpm}" >&2
+            exit 2
+          fi
+
+          asset_count="$(find "${OUT_DIR}" -maxdepth 1 -type f | wc -l)"
+          if [[ "${asset_count}" -ne 12 ]]; then
+            echo "[ERR] Expected exactly 12 GitHub Release assets, found ${asset_count}." >&2
+            find "${OUT_DIR}" -maxdepth 1 -type f -printf '%f\n' | sort >&2
             exit 2
           fi
 

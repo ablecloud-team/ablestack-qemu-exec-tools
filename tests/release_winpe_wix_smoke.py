@@ -50,18 +50,30 @@ if "windows/msi/out/*.msi" not in windows_target:
 
 workflow = read_utf8(".github/workflows/build.yml")
 for required in (
+    "workflow_call:",
+    "source_ref:",
+    "use_prebuilt_winpe:",
+    "winpe_artifact_name:",
     "build-winpe:",
     "uses: ./.github/workflows/build-winpe-core.yml",
-    'artifact_name: "winpe-iso-validation"',
+    "artifact_name: ${{ inputs.winpe_artifact_name }}",
     "needs: [build-winpe]",
+    "inputs.use_prebuilt_winpe || needs.build-winpe.result == 'success'",
     "Stage generated WinPE ISO into V2K RPM source",
     "if-no-files-found: error",
     "No MSI artifacts found in the msi-package workflow artifact.",
     "Stage required WinPE ISO into release tree",
-    "Required WinPE ISO was not found in release assets or workflow artifacts.",
+    "SHA256SUMS was not found beside the WinPE ISO.",
+    "sha256sum -c SHA256SUMS",
+    "Required WinPE ISO was not found in workflow artifacts.",
+    "Expected exactly 12 GitHub Release assets",
 ):
     if required not in workflow:
         fail(f"build.yml is missing release guard: {required}")
+if "workflow_run:" in workflow:
+    fail("build.yml still uses the obsolete cross-run release trigger")
+if "github.event.workflow_run" in workflow:
+    fail("build.yml still depends on workflow_run event metadata")
 
 release_job = workflow.split("\n  release:\n", 1)[1]
 for dependency in (
@@ -81,6 +93,8 @@ if "always() &&" not in release_job:
 
 winpe_workflow = read_utf8(".github/workflows/build-winpe-core.yml")
 for required in (
+    "source_ref:",
+    "ref: ${{ inputs.source_ref != '' && inputs.source_ref || github.ref }}",
     "[System.IO.File]::WriteAllText(",
     '"$hash  $file`n"',
     "[System.Text.Encoding]::ASCII",
@@ -89,5 +103,24 @@ for required in (
         fail(f"build-winpe-core.yml is missing portable checksum output: {required}")
 if 'Out-File -Encoding ascii -Force $sum' in winpe_workflow:
     fail("build-winpe-core.yml still writes SHA256SUMS with a Windows newline")
+
+tag_workflow = read_utf8(".github/workflows/build-winpe-release.yml")
+for required in (
+    "tags:",
+    '- "v*"',
+    "source_ref: ${{ github.sha }}",
+    "needs: [build]",
+    "uses: ./.github/workflows/build.yml",
+    "release_tag: ${{ github.ref_name }}",
+    "publish_release: true",
+    "use_prebuilt_winpe: true",
+    "winpe_artifact_name: ${{ needs.build.outputs.artifact_name }}",
+):
+    if required not in tag_workflow:
+        fail(f"build-winpe-release.yml is missing unified tag release wiring: {required}")
+if "\n  attach:\n" in tag_workflow:
+    fail("tag workflow still creates a partial WinPE-only GitHub Release")
+if "softprops/action-gh-release" in tag_workflow:
+    fail("tag workflow must delegate the single final publication to build.yml")
 
 print("[OK] release WinPE generation and MSI failure guards")

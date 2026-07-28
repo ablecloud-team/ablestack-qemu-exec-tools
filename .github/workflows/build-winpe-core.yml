@@ -3,6 +3,11 @@ name: WinPE Build Core
 on:
   workflow_call:
     inputs:
+      source_ref:
+        description: "Source commit or ref to package into WinPE. Empty uses the caller ref."
+        required: false
+        default: ""
+        type: string
       test_mode:
         description: "If true, put /ablestack/TEST_MODE into ISO (do not shutdown in WinPE)"
         required: false
@@ -66,6 +71,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref != '' && inputs.source_ref || github.ref }}
 
       - name: Prepare folders
         shell: pwsh
