@@ -745,6 +745,58 @@ v2k_manifest_mark_base_done() {
   mv "${tmp}" "${manifest}"
 }
 
+v2k_manifest_record_sync_failure() {
+  local manifest="$1"
+  local which="$2"
+  local idx="$3"
+  local code="$4"
+  local reason="$5"
+  local details_json="${6:-{}}"
+  local ts tmp
+
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if ! printf '%s' "${details_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    details_json='{}'
+  fi
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --arg which "${which}" \
+      --argjson idx "${idx}" \
+      --argjson code "${code}" \
+      --arg reason "${reason}" \
+      --arg ts "${ts}" \
+      --argjson details "${details_json}" \
+      '
+        .runtime = (.runtime // {})
+        | .runtime.sync_issues = (.runtime.sync_issues // [])
+        | .runtime.sync_issues += [{
+            which:$which,
+            disk_index:$idx,
+            code:$code,
+            reason:$reason,
+            ts:$ts,
+            details:$details
+          }]
+        | .runtime.last_error = {
+            code:$code,
+            reason:$reason,
+            ts:$ts
+          }
+        | .disks[$idx].transfer.base_done = false
+        | .disks[$idx].transfer.last_error = {
+            code:$code,
+            reason:$reason,
+            ts:$ts,
+            details:$details
+          }
+      ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
+}
+
 v2k_manifest_status_summary() {
   local manifest="$1" events="${2:-}"
   local msum

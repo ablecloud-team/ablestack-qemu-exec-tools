@@ -267,6 +267,22 @@ if ! v2k_linux_bootstrap_verify_initramfs_virtio \
   exit 1
 fi
 
+jq_bin="$(command -v jq)"
+# shellcheck disable=SC2317
+jq() {
+  if [[ "$*" == *'reduce $modules'* ]]; then
+    return 1
+  fi
+  "${jq_bin}" "$@"
+}
+if v2k_linux_bootstrap_verify_initramfs_virtio \
+    "${builtin_root}" "${builtin_kver}" \
+    "/boot/initramfs-${builtin_kver}.img" "verify_summary_failure"; then
+  echo "[ERR] initramfs module summary failure was accepted as success" >&2
+  exit 1
+fi
+unset -f jq
+
 repair_root="${WORK_DIR}/repair-root"
 repair_kver="5.14.0-427.el9.x86_64"
 mkdir -p \

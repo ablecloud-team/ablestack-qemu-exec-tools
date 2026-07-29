@@ -1701,7 +1701,7 @@ v2k_linux_bootstrap_verify_initramfs_virtio() {
   local command_event="$4"
   local verify_output="" verify_rc=0 module_summary="" module_event_json=""
   local effective_output="" module_root="" builtin_file="" module=""
-  local missing_count=4
+  local missing_count=4 summary_failed=0
 
   v2k_linux_bootstrap_run_event "${command_event}" verify_output verify_rc -- \
     chroot "${rootmnt}" /bin/bash -lc \
@@ -1731,7 +1731,8 @@ v2k_linux_bootstrap_verify_initramfs_virtio() {
           end
         )
       ' 2>/dev/null)"; then
-    module_summary='{"present":[],"missing":[],"error":"summary_failed"}'
+    summary_failed=1
+    module_summary='{"present":[],"missing":["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"],"error":"summary_failed"}'
     v2k_event WARN "linux_bootstrap" "" "initramfs_virtio_summary_failed" \
       "$(v2k_linux_bootstrap_json \
         --arg kver "${kver}" \
@@ -1763,7 +1764,7 @@ v2k_linux_bootstrap_verify_initramfs_virtio() {
     echo "[v2k] Initramfs virtio modules missing: ${missing_modules}"
   fi
 
-  [[ "${verify_rc}" -eq 0 && "${missing_count}" -eq 0 ]]
+  [[ "${summary_failed}" -eq 0 && "${verify_rc}" -eq 0 && "${missing_count}" -eq 0 ]]
 }
 
 v2k_linux_bootstrap_prepare_module_tree() {
