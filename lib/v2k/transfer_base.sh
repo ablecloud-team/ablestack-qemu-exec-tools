@@ -533,12 +533,15 @@ v2k_transfer_base_one() {
       fi
     fi
 
-    v2k_manifest_mark_base_done "${manifest}" "${idx}"
+    # base_bytes_written is the completed logical source-disk size. It is not
+    # the sparse/physical allocation consumed by the target backend.
+    v2k_manifest_mark_base_done "${manifest}" "${idx}" "${size_bytes}"
     v2k_event INFO "sync.base" "${disk_id}" "disk_done" \
       "$(jq -nc \
         --arg target "${target_path}" \
         --argjson attempts "${attempt}" \
-        '{target:$target,attempts:$attempts}')"
+        --argjson bytes_written "${size_bytes}" \
+        '{target:$target,attempts:$attempts,bytes_written:$bytes_written}')"
 
   )
 }

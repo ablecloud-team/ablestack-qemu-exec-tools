@@ -161,6 +161,16 @@ v2k_transfer_base_one \
   echo "[ERR] successful staged transfer did not mark base_done" >&2
   exit 1
 }
+jq -e '
+  .disks[0].metrics.base_bytes_written == 107374182400
+  and (.disks[0].transfer.last_synced_at | length) > 0
+  and .disks[0].transfer.last_sync.phase == "base"
+  and .disks[0].transfer.last_sync.bytes_written == 107374182400
+' "${manifest}" >/dev/null || {
+  echo "[ERR] successful staged transfer did not record base observability" >&2
+  cat "${manifest}" >&2
+  exit 1
+}
 [[ "$(grep -c '^publish|' "${operation_log}")" -eq 1 ]] || {
   echo "[ERR] staging image was not published exactly once" >&2
   cat "${operation_log}" >&2
@@ -178,6 +188,7 @@ v2k_transfer_base_one \
 }
 assert_contains "transfer_retry_scheduled" "${event_log}"
 assert_contains "rbd_staging_published" "${event_log}"
+assert_contains '"bytes_written":107374182400' "${event_log}"
 assert_contains "sleep|0" "${operation_log}"
 assert_contains "publish|rbd:pool/canonical.v2k-stage-retry_smoke_01-d0-" "${operation_log}"
 

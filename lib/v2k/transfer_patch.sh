@@ -358,11 +358,9 @@ v2k_transfer_patch_one() {
     if [[ "${areas_count}" -eq 0 ]]; then
       v2k_event INFO "sync.${which}" "${disk_id}" "no_changes" \
         "$(jq -nc --argjson coverage "${coverage_json}" '{coverage:$coverage}')"
-      if [[ -n "${new_change_id}" && "${new_change_id}" != "null" ]]; then
-        v2k_manifest_advance_cbt_change_ids \
-          "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}" "${coverage_record}"
-      fi
-      v2k_manifest_inc_incr_seq "${manifest}" "${idx}"
+      v2k_manifest_record_patch_success \
+        "${manifest}" "${idx}" "${which}" \
+        "${last_change_id}" "${new_change_id}" "${coverage_record}" 0 0
       v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" \
         "$(jq -nc --argjson coverage "${coverage_json}" \
           '{bytes_written:0,areas:0,coverage:$coverage}')"
@@ -494,18 +492,12 @@ v2k_transfer_patch_one() {
       [[ -b "${dst_dev}" ]] && blockdev --flushbufs "${dst_dev}" >/dev/null 2>&1 || true
     fi
 
-    # Advance CBT changeIds ONLY after successful apply/flush.
-    # - base_change_id will be fixed to the previous last_change_id on the first successful patch.
-    # - last_change_id advances to new_change_id.
-    if [[ -n "${new_change_id}" && "${new_change_id}" != "null" ]]; then
-      v2k_manifest_advance_cbt_change_ids \
-        "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}" "${coverage_record}"
-    fi
-
-    # NOTE(v1): we only report new_change_id (manifest persistence can be added when manifest.sh exposes setter)
-
-    v2k_manifest_set_disk_metric_incr "${manifest}" "${idx}" "${bytes_total}" "${areas_count}"
-    v2k_manifest_inc_incr_seq "${manifest}" "${idx}"
+    # Publish CBT state, counters, sequence and completion timestamp together,
+    # only after the target writes have completed and buffers were flushed.
+    v2k_manifest_record_patch_success \
+      "${manifest}" "${idx}" "${which}" \
+      "${last_change_id}" "${new_change_id}" "${coverage_record}" \
+      "${bytes_total}" "${areas_count}"
 
     v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" \
       "$(jq -nc \

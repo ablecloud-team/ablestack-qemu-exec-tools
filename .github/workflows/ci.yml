@@ -33,6 +33,10 @@ jobs:
         run: |
           tests/v2k_base_transfer_retry_smoke.sh
 
+      - name: V2K manifest observability smoke
+        run: |
+          tests/v2k_manifest_observability_smoke.sh
+
       - name: V2K cutover bootstrap integrity smoke
         run: |
           tests/v2k_cutover_integrity_smoke.sh
