@@ -1561,6 +1561,290 @@ v2k_linux_bootstrap_one() {
   return $?
 }
 
+v2k_linux_bootstrap_kernel_release_valid() {
+  local kver="${1:-}"
+  [[ -n "${kver}" && "${kver}" =~ ^[A-Za-z0-9._+~-]+$ ]]
+}
+
+v2k_linux_bootstrap_module_root() {
+  local rootmnt="$1"
+  local root_resolved="" candidate="" candidate_resolved=""
+
+  root_resolved="$(readlink -f -- "${rootmnt}" 2>/dev/null || true)"
+  [[ -n "${root_resolved}" ]] || return 1
+  for candidate in "${rootmnt}/usr/lib/modules" "${rootmnt}/lib/modules"; do
+    [[ -d "${candidate}" ]] || continue
+    candidate_resolved="$(readlink -f -- "${candidate}" 2>/dev/null || true)"
+    case "${candidate_resolved}" in
+      "${root_resolved}"/*)
+        printf '%s\n' "${candidate_resolved}"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+v2k_linux_bootstrap_kernel_has_evidence() {
+  local rootmnt="$1"
+  local kver="$2"
+  local module_root=""
+  module_root="$(v2k_linux_bootstrap_module_root "${rootmnt}" 2>/dev/null || true)"
+  [[ ( -n "${module_root}" && -d "${module_root}/${kver}" ) \
+    || -e "${rootmnt}/boot/vmlinuz-${kver}" \
+    || -e "${rootmnt}/boot/initramfs-${kver}.img" ]]
+}
+
+v2k_linux_bootstrap_default_kernel() {
+  local rootmnt="$1"
+  local default_path="" default_kver=""
+  local grubenv saved_entry bls_file linux_path
+
+  default_path="$(
+    chroot "${rootmnt}" /bin/bash -lc \
+      'command -v grubby >/dev/null 2>&1 && grubby --default-kernel' \
+      2>/dev/null || true
+  )"
+  default_path="${default_path%%$'\n'*}"
+  if [[ -n "${default_path}" ]]; then
+    default_kver="${default_path##*/}"
+    default_kver="${default_kver#vmlinuz-}"
+    if v2k_linux_bootstrap_kernel_release_valid "${default_kver}" \
+        && v2k_linux_bootstrap_kernel_has_evidence "${rootmnt}" "${default_kver}"; then
+      printf '%s\n' "${default_kver}"
+      return 0
+    fi
+  fi
+
+  while IFS= read -r grubenv; do
+    saved_entry="$(sed -n 's/^saved_entry=//p' "${grubenv}" 2>/dev/null | tail -n1 || true)"
+    saved_entry="${saved_entry%\"}"
+    saved_entry="${saved_entry#\"}"
+    [[ -n "${saved_entry}" ]] || continue
+    bls_file="${rootmnt}/boot/loader/entries/${saved_entry%.conf}.conf"
+    [[ -f "${bls_file}" ]] || continue
+    linux_path="$(awk '$1=="linux" || $1=="linuxefi" {print $2; exit}' "${bls_file}" 2>/dev/null || true)"
+    default_kver="${linux_path##*/}"
+    default_kver="${default_kver#vmlinuz-}"
+    if v2k_linux_bootstrap_kernel_release_valid "${default_kver}" \
+        && v2k_linux_bootstrap_kernel_has_evidence "${rootmnt}" "${default_kver}"; then
+      printf '%s\n' "${default_kver}"
+      return 0
+    fi
+  done < <(
+    find "${rootmnt}/boot" -type f -name grubenv -print 2>/dev/null \
+      | LC_ALL=C sort
+  )
+
+  return 1
+}
+
+v2k_linux_bootstrap_kernel_candidates() {
+  local rootmnt="$1"
+  local path name kver module_root=""
+  module_root="$(v2k_linux_bootstrap_module_root "${rootmnt}" 2>/dev/null || true)"
+
+  {
+    if [[ -n "${module_root}" ]]; then
+      find "${module_root}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null
+    fi
+    if [[ -d "${rootmnt}/boot" ]]; then
+      find "${rootmnt}/boot" -maxdepth 1 \
+        \( -type f -o -type l \) -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null \
+        | sed 's/^vmlinuz-//'
+    fi
+    if [[ -d "${rootmnt}/boot/loader/entries" ]]; then
+      while IFS= read -r path; do
+        name="$(awk '$1=="linux" || $1=="linuxefi" {print $2; exit}' "${path}" 2>/dev/null || true)"
+        kver="${name##*/}"
+        printf '%s\n' "${kver#vmlinuz-}"
+      done < <(
+        find "${rootmnt}/boot/loader/entries" -maxdepth 1 -type f -name '*.conf' -print 2>/dev/null \
+          | LC_ALL=C sort
+      )
+    fi
+  } | while IFS= read -r kver; do
+    if v2k_linux_bootstrap_kernel_release_valid "${kver}" \
+        && v2k_linux_bootstrap_kernel_has_evidence "${rootmnt}" "${kver}"; then
+      printf '%s\n' "${kver}"
+    fi
+  done | LC_ALL=C sort -Vu
+}
+
+v2k_linux_bootstrap_select_kernel() {
+  local rootmnt="$1"
+  local default_kver="" selected_kver=""
+
+  default_kver="$(v2k_linux_bootstrap_default_kernel "${rootmnt}" 2>/dev/null || true)"
+  if [[ -n "${default_kver}" ]]; then
+    printf '%s\t%s\n' "${default_kver}" "bootloader_default"
+    return 0
+  fi
+
+  selected_kver="$(
+    v2k_linux_bootstrap_kernel_candidates "${rootmnt}" \
+      | LC_ALL=C sort -V \
+      | tail -n1
+  )"
+  if [[ -n "${selected_kver}" ]]; then
+    printf '%s\t%s\n' "${selected_kver}" "highest_version"
+    return 0
+  fi
+
+  return 1
+}
+
+v2k_linux_bootstrap_verify_initramfs_virtio() {
+  local rootmnt="$1"
+  local kver="$2"
+  local image="$3"
+  local command_event="$4"
+  local verify_output="" verify_rc=0 module_summary="" module_event_json=""
+  local effective_output="" module_root="" builtin_file="" module=""
+  local missing_count=4
+
+  v2k_linux_bootstrap_run_event "${command_event}" verify_output verify_rc -- \
+    chroot "${rootmnt}" /bin/bash -lc \
+      "lsinitrd '${image}' | grep -E 'virtio_(pci|blk|scsi)|scsi_mod'"
+
+  effective_output="${verify_output}"
+  module_root="$(v2k_linux_bootstrap_module_root "${rootmnt}" 2>/dev/null || true)"
+  builtin_file="${module_root}/${kver}/modules.builtin"
+  if [[ -n "${module_root}" && -s "${builtin_file}" ]]; then
+    for module in virtio_pci virtio_scsi virtio_blk scsi_mod; do
+      if grep -Eq "/${module}\.ko(\.(gz|xz|zst))?$" "${builtin_file}" 2>/dev/null; then
+        effective_output+=$'\n'"${module} (built-in)"
+      fi
+    done
+  fi
+
+  if ! module_summary="$(jq -nc \
+      --arg output "${effective_output}" \
+      --argjson modules '["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]' \
+      '
+        reduce $modules[] as $mod (
+          {present:[],missing:[]};
+          if ($output | contains($mod)) then
+            .present += [$mod]
+          else
+            .missing += [$mod]
+          end
+        )
+      ' 2>/dev/null)"; then
+    module_summary='{"present":[],"missing":[],"error":"summary_failed"}'
+    v2k_event WARN "linux_bootstrap" "" "initramfs_virtio_summary_failed" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg image "${image}" \
+        '{kver:$kver,image:$image,note:"module summary generation failed; explicit verification controls success"}')"
+  fi
+  missing_count="$(printf '%s' "${module_summary}" | jq -r '.missing | length' 2>/dev/null || echo 4)"
+  module_event_json="$(jq -nc \
+    --arg kver "${kver}" \
+    --arg image "${image}" \
+    --arg command_event "${command_event}" \
+    --argjson modules "${module_summary}" \
+    '{
+      kver:$kver,
+      image:$image,
+      command_event:$command_event,
+      present:($modules.present // []),
+      missing:($modules.missing // []),
+      summary_error:($modules.error // null)
+    }' 2>/dev/null || printf '%s' \
+      "{\"kver\":\"${kver}\",\"image\":\"${image}\",\"present\":[],\"missing\":[],\"summary_error\":\"event_failed\"}")"
+  v2k_event INFO "linux_bootstrap" "" "initramfs_virtio_modules" "${module_event_json}"
+
+  if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+    local present_modules missing_modules
+    present_modules="$(printf '%s' "${module_summary}" | jq -r '.present | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
+    missing_modules="$(printf '%s' "${module_summary}" | jq -r '.missing | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
+    echo "[v2k] Initramfs virtio modules present: ${present_modules}"
+    echo "[v2k] Initramfs virtio modules missing: ${missing_modules}"
+  fi
+
+  [[ "${verify_rc}" -eq 0 && "${missing_count}" -eq 0 ]]
+}
+
+v2k_linux_bootstrap_prepare_module_tree() {
+  local rootmnt="$1"
+  local kver="$2"
+  local module_root="" module_dir=""
+  local depmod_output="" depmod_rc=0 validate_output="" validate_rc=0
+  local module_file=""
+
+  module_root="$(v2k_linux_bootstrap_module_root "${rootmnt}" 2>/dev/null || true)"
+  if [[ -z "${module_root}" ]]; then
+    v2k_event ERROR "linux_bootstrap" "" "kernel_module_root_missing" \
+      "$(v2k_linux_bootstrap_json \
+        --arg path "/usr/lib/modules" \
+        '{path:$path,note:"guest module root is missing or resolves outside the mounted guest"}')"
+    return 1
+  fi
+  module_dir="${module_root}/${kver}"
+  if [[ ! -d "${module_dir}" ]]; then
+    v2k_event ERROR "linux_bootstrap" "" "kernel_module_tree_missing" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg path "/lib/modules/${kver}" \
+        '{kver:$kver,path:$path}')"
+    return 1
+  fi
+
+  module_file="$(
+    find -L "${module_dir}" -type f \
+      \( -name '*.ko' -o -name '*.ko.*' \) -print -quit 2>/dev/null || true
+  )"
+  if [[ -z "${module_file}" && ! -s "${module_dir}/modules.builtin" ]]; then
+    v2k_event ERROR "linux_bootstrap" "" "kernel_module_payload_missing" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg path "/lib/modules/${kver}" \
+        '{kver:$kver,path:$path,note:"no loadable modules or modules.builtin metadata found"}')"
+    return 1
+  fi
+
+  if [[ ! -s "${module_dir}/modules.dep" ]]; then
+    v2k_event WARN "linux_bootstrap" "" "kernel_modules_dep_missing" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg path "/lib/modules/${kver}/modules.dep" \
+        '{kver:$kver,path:$path,action:"depmod"}')"
+    v2k_linux_bootstrap_run_event "cmd_depmod" depmod_output depmod_rc -- \
+      chroot "${rootmnt}" /bin/bash -lc "depmod -a '${kver}'"
+    if [[ "${depmod_rc}" -ne 0 || ! -s "${module_dir}/modules.dep" ]]; then
+      v2k_event ERROR "linux_bootstrap" "" "kernel_modules_dep_repair_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --argjson rc "${depmod_rc}" \
+          --arg output "${depmod_output}" \
+          '{kver:$kver,rc:$rc,output:$output}')"
+      return 1
+    fi
+    v2k_event INFO "linux_bootstrap" "" "kernel_modules_dep_repaired" \
+      "$(v2k_linux_bootstrap_json --arg kver "${kver}" '{kver:$kver}')"
+  fi
+
+  v2k_linux_bootstrap_run_event "cmd_kernel_modules_validate" validate_output validate_rc -- \
+    chroot "${rootmnt}" /bin/bash -lc \
+      "for mod in virtio_pci virtio_scsi virtio_blk scsi_mod; do
+         modinfo -k '${kver}' \"\${mod}\" >/dev/null 2>&1 \
+           || grep -Eq \"/\${mod}\\.ko(\\.(gz|xz|zst))?\$\" '/lib/modules/${kver}/modules.builtin' 2>/dev/null \
+           || exit 1
+       done"
+  if [[ "${validate_rc}" -ne 0 ]]; then
+    v2k_event ERROR "linux_bootstrap" "" "required_kernel_modules_missing" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --argjson rc "${validate_rc}" \
+        --arg output "${validate_output}" \
+        '{kver:$kver,rc:$rc,output:$output,required:["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]}')"
+    return 1
+  fi
+
+  return 0
+}
+
 v2k_linux_bootstrap_rebuild_initramfs() {
   local rootmnt="$1"
   local nbd_dev="$2"
@@ -1638,23 +1922,6 @@ EOF
       --arg bootloader_source "${bootloader_source}" \
       '{id:$id,like:$like,version_id:$version_id,pretty_name:$pretty_name,identity_source:$identity_source,bootloader:$bootloader,bootloader_source:$bootloader_source}')"
 
-  # ------------------------------------------------------------------
-  # Determine target kernel version (kver) deterministically
-  # Policy:
-  # - Use the kernel version(s) present under /lib/modules
-  # - If multiple exist, select the lexicographically last one
-  # ------------------------------------------------------------------
-  local kver
-  # Resolve the kernel version from the mounted guest filesystem on the host.
-  # Older guests can have a minimal or unusual chroot PATH, so avoid depending
-  # on guest utilities like sort before the bootstrap environment is repaired.
-  kver="$(find "${rootmnt}/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort | tail -n1 || true)"
-  if [[ -z "${kver}" ]]; then
-    v2k_event ERROR "linux_bootstrap" "" "kernel_version_not_found" \
-      "{\"note\":\"/lib/modules empty or missing\"}"
-    return 82
-  fi
-
   # Function for final sync barrier
   flush_buffers() {
       v2k_event INFO "linux_bootstrap" "" "syncing_disks" "{}"
@@ -1667,60 +1934,110 @@ EOF
   # Choose rebuild tool
   if chroot "${rootmnt}" /bin/bash -lc 'command -v dracut >/dev/null 2>&1'; then
     # RHEL/Rocky/Alma etc.
-    local dout drc
-    v2k_linux_bootstrap_run_event "cmd_dracut" dout drc -- \
-      chroot "${rootmnt}" /bin/bash -lc "dracut -f -v --kver ${kver} /boot/initramfs-${kver}.img"
-    if [[ "${drc}" -ne 0 ]]; then
-      v2k_event ERROR "linux_bootstrap" "" "dracut_failed" "{}"
+    local kernel_selection="" kver="" kver_source=""
+    local final_image="" temp_image=""
+    local dout="" drc=0 install_out="" install_rc=0
+    local candidates_json=""
+
+    kernel_selection="$(v2k_linux_bootstrap_select_kernel "${rootmnt}" 2>/dev/null || true)"
+    IFS=$'\t' read -r kver kver_source <<< "${kernel_selection}"
+    if [[ -z "${kver}" ]]; then
+      candidates_json="$(
+        v2k_linux_bootstrap_kernel_candidates "${rootmnt}" \
+          | jq -Rsc 'split("\n") | map(select(length > 0))' 2>/dev/null \
+          || echo '[]'
+      )"
+      v2k_event ERROR "linux_bootstrap" "" "kernel_version_not_found" \
+        "$(v2k_linux_bootstrap_json \
+          --argjson candidates "${candidates_json}" \
+          '{note:"no bootable kernel candidate found",candidates:$candidates}')"
+      return 82
+    fi
+    v2k_event INFO "linux_bootstrap" "" "kernel_version_selected" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg source "${kver_source}" \
+        '{kver:$kver,source:$source}')"
+
+    final_image="/boot/initramfs-${kver}.img"
+    if [[ -s "${rootmnt}${final_image}" ]]; then
+      if v2k_linux_bootstrap_verify_initramfs_virtio \
+          "${rootmnt}" "${kver}" "${final_image}" "verify_existing_initramfs_virtio"; then
+        v2k_event INFO "linux_bootstrap" "" "initramfs_existing_usable" \
+          "$(v2k_linux_bootstrap_json \
+            --arg kver "${kver}" \
+            --arg image "${final_image}" \
+            '{kver:$kver,image:$image,rebuild:false}')"
+        return 0
+      fi
+      v2k_event WARN "linux_bootstrap" "" "initramfs_existing_missing_virtio" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${final_image}" \
+          '{kver:$kver,image:$image,action:"rebuild"}')"
+    fi
+
+    if ! v2k_linux_bootstrap_prepare_module_tree "${rootmnt}" "${kver}"; then
+      v2k_event ERROR "linux_bootstrap" "" "kernel_module_tree_invalid" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          '{kver:$kver,note:"module tree cannot safely rebuild initramfs"}')"
       return 82
     fi
 
-    # [Added] Sync Barrier
+    temp_image="/boot/.initramfs-${kver}.v2k-$$-${RANDOM}.img"
+    rm -f -- "${rootmnt}${temp_image}"
+    v2k_linux_bootstrap_run_event "cmd_dracut" dout drc -- \
+      chroot "${rootmnt}" /bin/bash -lc \
+        "dracut -f -v --kver '${kver}' '${temp_image}'"
+    if [[ "${drc}" -ne 0 ]]; then
+      rm -f -- "${rootmnt}${temp_image}"
+      v2k_event ERROR "linux_bootstrap" "" "dracut_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${temp_image}" \
+          --argjson rc "${drc}" \
+          --arg output "${dout}" \
+          '{kver:$kver,image:$image,rc:$rc,output:$output}')"
+      return 82
+    fi
+
+    if ! v2k_linux_bootstrap_verify_initramfs_virtio \
+        "${rootmnt}" "${kver}" "${temp_image}" "verify_staged_initramfs_virtio"; then
+      rm -f -- "${rootmnt}${temp_image}"
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_verify_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${temp_image}" \
+          '{kver:$kver,image:$image,note:"all required virtio drivers were not found in staged initramfs"}')"
+      return 82
+    fi
+
+    # Flush the validated staged image before the atomic rename. The existing
+    # initramfs remains untouched until this point.
     flush_buffers
 
-    # ------------------------------------------------------------------
-    # Verify that initramfs was actually updated and virtio drivers exist
-    # ------------------------------------------------------------------
-    local vout vrc module_summary module_event_json
-    v2k_linux_bootstrap_run_event "verify_initramfs_virtio" vout vrc -- \
-      chroot "${rootmnt}" /bin/bash -lc \
-        "lsinitrd /boot/initramfs-${kver}.img | grep -E 'virtio_(pci|blk|scsi)|scsi_mod'"
-    if ! module_summary="$(jq -nc \
-        --arg output "${vout}" \
-        --argjson modules '["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]' \
-        '
-          reduce $modules[] as $mod (
-            {present:[],missing:[]};
-            if ($output | contains($mod)) then
-              .present += [$mod]
-            else
-              .missing += [$mod]
-            end
-          )
-        ' 2>/dev/null)"; then
-      module_summary='{"present":[],"missing":[],"error":"summary_failed"}'
-      v2k_event WARN "linux_bootstrap" "" "initramfs_virtio_summary_failed" \
-        "{\"kver\":\"${kver}\",\"note\":\"module summary generation failed; verify result still controls success\"}"
-    fi
-    module_event_json="$(jq -nc --arg kver "${kver}" --argjson modules "${module_summary}" \
-      '{kver:$kver,present:($modules.present // []),missing:($modules.missing // []),summary_error:($modules.error // null)}' \
-      2>/dev/null || printf '%s' "{\"kver\":\"${kver}\",\"present\":[],\"missing\":[],\"summary_error\":\"event_failed\"}")"
-    v2k_event INFO "linux_bootstrap" "" "initramfs_virtio_modules" \
-      "${module_event_json}"
-    if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
-      local present_modules missing_modules
-      present_modules="$(printf '%s' "${module_summary}" | jq -r '.present | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
-      missing_modules="$(printf '%s' "${module_summary}" | jq -r '.missing | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
-      echo "[v2k] Initramfs virtio modules present: ${present_modules}"
-      echo "[v2k] Initramfs virtio modules missing: ${missing_modules}"
-    fi
-    if [[ "${vrc}" -ne 0 ]]; then
-      v2k_event ERROR "linux_bootstrap" "" "initramfs_verify_failed" \
-        "{\"kver\":\"${kver}\",\"note\":\"virtio drivers not found in initramfs\"}"
+    v2k_linux_bootstrap_run_event "cmd_initramfs_install" install_out install_rc -- \
+      mv -f -- "${rootmnt}${temp_image}" "${rootmnt}${final_image}"
+    if [[ "${install_rc}" -ne 0 ]]; then
+      rm -f -- "${rootmnt}${temp_image}"
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_install_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${final_image}" \
+          --argjson rc "${install_rc}" \
+          --arg output "${install_out}" \
+          '{kver:$kver,image:$image,rc:$rc,output:$output}')"
       return 82
     fi
+    flush_buffers
 
-    v2k_event INFO "linux_bootstrap" "" "dracut_ok" "{}"
+    v2k_event INFO "linux_bootstrap" "" "dracut_ok" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg image "${final_image}" \
+        --arg source "${kver_source}" \
+        '{kver:$kver,image:$image,kernel_source:$source,atomic_install:true}')"
     return 0
   fi
 

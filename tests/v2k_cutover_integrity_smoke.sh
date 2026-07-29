@@ -155,20 +155,51 @@ if grep -F -- " /proc ${WORK_DIR}/mnt/proc" "${typed_mount_log}" >/dev/null; the
 fi
 
 bootstrap_root="${WORK_DIR}/bootstrap-root"
+bootstrap_kver="5.14.0-v2k-test"
 mkdir -p \
-  "${bootstrap_root}/lib/modules/5.14.0-v2k-test" \
+  "${bootstrap_root}/lib/modules/${bootstrap_kver}" \
   "${bootstrap_root}/etc" \
   "${bootstrap_root}/boot"
+printf '%s\n' "kernel" > "${bootstrap_root}/boot/vmlinuz-${bootstrap_kver}"
+printf '%s\n' "existing initramfs" > "${bootstrap_root}/boot/initramfs-${bootstrap_kver}.img"
 : > "${typed_mount_log}"
+chroot_command_log="${WORK_DIR}/chroot-command.log"
+mock_chroot_mode="existing_valid"
+mock_chroot_kver="${bootstrap_kver}"
 # shellcheck disable=SC2317
 cp() {
   return 0
 }
 # shellcheck disable=SC2317
 chroot() {
-  if [[ "$*" == *"lsinitrd"* ]]; then
-    printf '%s\n' "virtio_pci virtio_scsi virtio_blk scsi_mod"
-  fi
+  local mock_root="$1"
+  local mock_command="$*"
+  local mock_image=""
+  printf '%s\n' "${mock_command}" >> "${chroot_command_log}"
+  case "${mock_command}" in
+    *"grubby --default-kernel"*)
+      if [[ "${mock_chroot_mode}" != "no_default" ]]; then
+        printf '/boot/vmlinuz-%s\n' "${mock_chroot_kver}"
+      fi
+      ;;
+    *"lsinitrd"*)
+      if [[ "${mock_chroot_mode}" == "existing_valid" || "${mock_command}" == *".v2k-"* ]]; then
+        printf '%s\n' "virtio_pci virtio_scsi virtio_blk scsi_mod"
+      else
+        printf '%s\n' "virtio_pci"
+      fi
+      ;;
+    *"depmod -a"*)
+      printf '%s\n' "kernel/drivers/virtio/virtio_pci.ko.xz:" \
+        > "${mock_root}/lib/modules/${mock_chroot_kver}/modules.dep"
+      ;;
+    *"dracut -f"*)
+      mock_image="${mock_command##* }"
+      mock_image="${mock_image%\'}"
+      mock_image="${mock_image#\'}"
+      printf '%s\n' "staged initramfs" > "${mock_root}${mock_image}"
+      ;;
+  esac
   return 0
 }
 
@@ -189,6 +220,127 @@ grep -Fx -- \
     cat "${typed_mount_log}" >&2
     exit 1
   }
+
+if grep -F -- "dracut -f" "${chroot_command_log}" >/dev/null; then
+  echo "[ERR] already usable initramfs was rebuilt unnecessarily" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+fi
+
+version_root="${WORK_DIR}/version-root"
+mkdir -p \
+  "${version_root}/lib/modules/5.14.0-9.el9.x86_64" \
+  "${version_root}/lib/modules/5.14.0-10.el9.x86_64" \
+  "${version_root}/boot"
+printf '%s\n' "kernel" > "${version_root}/boot/vmlinuz-5.14.0-9.el9.x86_64"
+printf '%s\n' "kernel" > "${version_root}/boot/vmlinuz-5.14.0-10.el9.x86_64"
+mock_chroot_mode="no_default"
+version_selection="$(v2k_linux_bootstrap_select_kernel "${version_root}")"
+[[ "${version_selection}" == $'5.14.0-10.el9.x86_64\thighest_version' ]] || {
+  echo "[ERR] kernel fallback did not use version ordering: ${version_selection}" >&2
+  exit 1
+}
+
+escaped_root="${WORK_DIR}/escaped-root"
+mkdir -p "${escaped_root}/boot"
+ln -s /usr/lib "${escaped_root}/lib"
+if v2k_linux_bootstrap_module_root "${escaped_root}" >/dev/null 2>&1; then
+  echo "[ERR] guest module lookup escaped through an absolute /lib symlink" >&2
+  exit 1
+fi
+
+builtin_root="${WORK_DIR}/builtin-root"
+builtin_kver="5.14.0-builtins.el9.x86_64"
+mkdir -p "${builtin_root}/lib/modules/${builtin_kver}" "${builtin_root}/boot"
+printf '%s\n' \
+  "kernel/drivers/scsi/virtio_scsi.ko" \
+  "kernel/drivers/block/virtio_blk.ko" \
+  "kernel/drivers/scsi/scsi_mod.ko" \
+  > "${builtin_root}/lib/modules/${builtin_kver}/modules.builtin"
+printf '%s\n' "existing initramfs" > "${builtin_root}/boot/initramfs-${builtin_kver}.img"
+mock_chroot_mode="existing_builtins"
+mock_chroot_kver="${builtin_kver}"
+if ! v2k_linux_bootstrap_verify_initramfs_virtio \
+    "${builtin_root}" "${builtin_kver}" \
+    "/boot/initramfs-${builtin_kver}.img" "verify_builtin_initramfs"; then
+  echo "[ERR] built-in virtio drivers were treated as missing from initramfs" >&2
+  exit 1
+fi
+
+repair_root="${WORK_DIR}/repair-root"
+repair_kver="5.14.0-427.el9.x86_64"
+mkdir -p \
+  "${repair_root}/lib/modules/${repair_kver}/kernel/drivers/virtio" \
+  "${repair_root}/etc" \
+  "${repair_root}/boot"
+printf '%s\n' "kernel module" \
+  > "${repair_root}/lib/modules/${repair_kver}/kernel/drivers/virtio/virtio_pci.ko.xz"
+printf '%s\n' "kernel" > "${repair_root}/boot/vmlinuz-${repair_kver}"
+printf '%s\n' "original initramfs" > "${repair_root}/boot/initramfs-${repair_kver}.img"
+: > "${chroot_command_log}"
+mock_chroot_mode="repair"
+mock_chroot_kver="${repair_kver}"
+
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${repair_root}" "/dev/v2k-nbd-does-not-exist"
+
+[[ -s "${repair_root}/lib/modules/${repair_kver}/modules.dep" ]] || {
+  echo "[ERR] missing modules.dep was not repaired before dracut" >&2
+  exit 1
+}
+grep -Fx -- "staged initramfs" "${repair_root}/boot/initramfs-${repair_kver}.img" >/dev/null || {
+  echo "[ERR] validated staged initramfs was not installed" >&2
+  exit 1
+}
+grep -F -- "depmod -a '${repair_kver}'" "${chroot_command_log}" >/dev/null || {
+  echo "[ERR] depmod repair command was not executed" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+}
+grep -F -- "dracut -f -v --kver '${repair_kver}' '/boot/.initramfs-" \
+  "${chroot_command_log}" >/dev/null || {
+    echo "[ERR] dracut did not build into a staged initramfs path" >&2
+    cat "${chroot_command_log}" >&2
+    exit 1
+  }
+if grep -F -- \
+    "dracut -f -v --kver '${repair_kver}' '/boot/initramfs-${repair_kver}.img'" \
+    "${chroot_command_log}" >/dev/null; then
+  echo "[ERR] dracut overwrote the live initramfs directly" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+fi
+
+invalid_root="${WORK_DIR}/invalid-root"
+invalid_kver="5.14.0-500.el9.x86_64"
+mkdir -p \
+  "${invalid_root}/lib/modules/${invalid_kver}" \
+  "${invalid_root}/etc" \
+  "${invalid_root}/boot"
+printf '%s\n' "kernel" > "${invalid_root}/boot/vmlinuz-${invalid_kver}"
+printf '%s\n' "must remain unchanged" > "${invalid_root}/boot/initramfs-${invalid_kver}.img"
+: > "${chroot_command_log}"
+mock_chroot_mode="missing_payload"
+mock_chroot_kver="${invalid_kver}"
+
+set +e
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${invalid_root}" "/dev/v2k-nbd-does-not-exist"
+invalid_rc=$?
+set -e
+[[ "${invalid_rc}" -eq 82 ]] || {
+  echo "[ERR] incomplete module payload returned unexpected rc=${invalid_rc}" >&2
+  exit 1
+}
+grep -Fx -- "must remain unchanged" "${invalid_root}/boot/initramfs-${invalid_kver}.img" >/dev/null || {
+  echo "[ERR] invalid module tree damaged the existing initramfs" >&2
+  exit 1
+}
+if grep -F -- "dracut -f" "${chroot_command_log}" >/dev/null; then
+  echo "[ERR] dracut ran despite an incomplete kernel module payload" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+fi
 
 unset -f findmnt mount cp chroot
 
