@@ -1651,10 +1651,14 @@ jobs:
                           if [[ -f "${WINPE_META}" && -f "${WINPE_LINK}" ]]; then
                               WINPE_NAME="$(jq -r '.filename // empty' "${WINPE_META}")"
                               WINPE_EXPECTED="${WINPE_DST_DIR}/${WINPE_NAME}"
+                              WINPE_CHECKSUM_OK=0
+                              if (cd "${WINPE_DST_DIR}" && sha256sum -c SHA256SUMS); then
+                                  WINPE_CHECKSUM_OK=1
+                              fi
                               if [[ -z "${WINPE_NAME}" \
                                   || "$(readlink -e "${WINPE_LINK}" 2>/dev/null || true)" != "${WINPE_EXPECTED}" \
                                   || ! -f "${WINPE_EXPECTED}" \
-                                  || ! (cd "${WINPE_DST_DIR}" && sha256sum -c SHA256SUMS) ]]; then
+                                  || "${WINPE_CHECKSUM_OK}" -ne 1 ]]; then
                                   echo "[ERR] RPM-installed WinPE ISO metadata/link/checksum validation failed." >&2
                                   exit 2
                               fi
