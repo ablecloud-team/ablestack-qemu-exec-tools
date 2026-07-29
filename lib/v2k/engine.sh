@@ -258,6 +258,55 @@ v2k_linux_bootstrap_mount_robust() {
   return "${rc}"
 }
 
+v2k_linux_bootstrap_mount_typed_robust() {
+  # Mount a pseudo-filesystem with an explicit type. Paths such as /proc and
+  # /sys are not block devices and must never be passed to plain
+  # "mount <source> <target>".
+  #
+  # Usage:
+  #   v2k_linux_bootstrap_mount_typed_robust <type> <source> <target> [opts]
+  local fs_type="${1:-}" src="${2:-}" dst="${3:-}" opts="${4:-}"
+  [[ -n "${fs_type}" && -n "${src}" && -n "${dst}" ]] || return 2
+  [[ "${fs_type}" =~ ^[[:alnum:]_.-]+$ ]] || return 2
+  mkdir -p "${dst}" >/dev/null 2>&1 || true
+
+  if v2k_mountpoint_is_mounted "${dst}"; then
+    local current_type
+    current_type="$(findmnt -rn -o FSTYPE --target "${dst}" 2>/dev/null || true)"
+    if [[ "${current_type}" == "${fs_type}" ]]; then
+      v2k_event INFO "linux_bootstrap" "" "mount_typed_skip_already_mounted" \
+        "$(v2k_linux_bootstrap_json \
+          --arg type "${fs_type}" \
+          --arg src "${src}" \
+          --arg dst "${dst}" \
+          '{type:$type,src:$src,dst:$dst}')"
+      return 0
+    fi
+    v2k_linux_bootstrap_umount_robust "${dst}" --recursive >/dev/null 2>&1 || true
+  fi
+
+  local -a mount_cmd=(mount -t "${fs_type}")
+  if [[ -n "${opts}" ]]; then
+    mount_cmd+=(-o "${opts}")
+  fi
+  mount_cmd+=("${src}" "${dst}")
+
+  local mount_out="" mount_rc=0
+  v2k_linux_bootstrap_run_event "cmd_mount_${fs_type}" mount_out mount_rc -- \
+    "${mount_cmd[@]}"
+  if [[ "${mount_rc}" -ne 0 ]]; then
+    v2k_event ERROR "linux_bootstrap" "" "mount_typed_failed" \
+      "$(v2k_linux_bootstrap_json \
+        --arg type "${fs_type}" \
+        --arg src "${src}" \
+        --arg dst "${dst}" \
+        --argjson rc "${mount_rc}" \
+        --arg out "$(printf '%s' "${mount_out}" | head -c 1500)" \
+        '{type:$type,src:$src,dst:$dst,rc:$rc,out:$out}')"
+  fi
+  return "${mount_rc}"
+}
+
 v2k_is_linux_guest() {
   # Return 0(true) if the guest looks like Linux.
   #
@@ -492,8 +541,22 @@ v2k_linux_bootstrap_dbg_cmd() {
   # Run a command and return compact single-line output for event logging.
   # Never fail the caller.
   local out
-  out="$("$@" 2>&1 | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | head -c 2000 || true)"
+  out="$(
+    v2k_linux_bootstrap_close_child_lock_fds
+    "$@" 2>&1
+  )"
+  out="$(printf '%s' "${out}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | head -c 2000 || true)"
   printf '%s' "${out}"
+}
+
+v2k_linux_bootstrap_close_child_lock_fds() {
+  # Called only from command-substitution subshells. Keep serialization locks
+  # open in the parent shell, but do not leak them into lvm/qemu child tools.
+  local fd
+  for fd in "${V2K_BOOTSTRAP_LOCK_FD:-}" "${V2K_LVM_LOCK_FD:-}"; do
+    [[ "${fd}" =~ ^[0-9]+$ ]] || continue
+    eval "exec ${fd}>&-" 2>/dev/null || true
+  done
 }
 
 v2k_linux_bootstrap_run_capture() {
@@ -516,7 +579,10 @@ v2k_linux_bootstrap_run_capture() {
   shopt -qo errexit && _errexit=1
   set +e
   if [[ $# -gt 0 ]]; then
-    captured_output="$("$@" 2>&1)"
+    captured_output="$(
+      v2k_linux_bootstrap_close_child_lock_fds
+      "$@" 2>&1
+    )"
     captured_rc=$?
   else
     captured_output="(no command)"
@@ -692,6 +758,18 @@ v2k_linux_bootstrap_lvm_pv_candidates() {
   # Only partitions that are LVM PVs (FSTYPE=LVM2_member)
   lsblk -rn -o NAME,FSTYPE "/dev/${bn}" 2>/dev/null \
     | awk '$2=="LVM2_member"{print "/dev/"$1}'
+}
+
+v2k_linux_bootstrap_lvm_vg_names_from_report() {
+  # Parse only structured LVM JSON. If stderr or any other diagnostic text
+  # contaminates the payload, fail closed instead of treating its first word
+  # (for example "File") as a volume-group name.
+  jq -er '
+    [.report[]?.vg[]?.vg_name // empty]
+    | map(gsub("^\\s+|\\s+$"; ""))
+    | map(select(length > 0))
+    | unique[]
+  ' 2>/dev/null
 }
 
 v2k_linux_bootstrap_lvm_try_activate_by_pv() {
@@ -881,12 +959,12 @@ v2k_linux_bootstrap_try_mount_lvm() {
          lvm pvscan --config "${cfg}" --cache --activate ay
       
       # 2. Explicit VGS lookup.
-      # Query VGs directly without depending on a separate lsblk visibility check.
+      # Use the structured report so diagnostics can never be parsed as a VG.
       v2k_linux_bootstrap_run_event "cmd_vgs_direct" vgs_out vgs_rc -- \
-         lvm vgs --config "${cfg}" --noheadings -o vg_name
+         lvm vgs --config "${cfg}" --reportformat json -o vg_name
       
-      # Parse the result.
-      vgs="$(echo "${vgs_out}" | awk '{$1=$1}; $1!=""{print $1}' | sort -u)"
+      vgs="$(printf '%s' "${vgs_out}" \
+        | v2k_linux_bootstrap_lvm_vg_names_from_report || true)"
 
       if [[ -n "${vgs}" ]]; then
           # Exit the retry loop once at least one VG is visible.
@@ -909,8 +987,13 @@ v2k_linux_bootstrap_try_mount_lvm() {
       # [Step 3] Activate (Safe due to global serialization)
       for vg in ${vgs}; do
           [[ -n "${vg}" ]] || continue
-          
-          if lvm vgchange --config "${cfg}" -ay "${vg}"; then
+
+          # Output is populated indirectly by the event helper.
+          # shellcheck disable=SC2034
+          local activate_out="" activate_rc=0
+          v2k_linux_bootstrap_run_event "cmd_vgchange_direct" activate_out activate_rc -- \
+            lvm vgchange --config "${cfg}" -ay "${vg}"
+          if [[ "${activate_rc}" -eq 0 ]]; then
               activated=1
           fi
       done
@@ -1489,8 +1572,9 @@ v2k_linux_bootstrap_rebuild_initramfs() {
   # ------------------------------------------------------------
   mkdir -p "${rootmnt}/dev" "${rootmnt}/proc" "${rootmnt}/sys"
   
-  # 1. Mount tmpfs on chroot /dev
-  mount -t tmpfs tmpfs "${rootmnt}/dev" -o mode=0755,nosuid,noexec || return 85
+  # 1. Mount isolated pseudo-filesystems with explicit filesystem types.
+  v2k_linux_bootstrap_mount_typed_robust \
+    "tmpfs" "tmpfs" "${rootmnt}/dev" "mode=0755,nosuid,noexec" || return 85
 
   # 2. Copy essentials from host /dev
   local node
@@ -1505,8 +1589,10 @@ v2k_linux_bootstrap_rebuild_initramfs() {
     cp -a "${nbd_dev}"* "${rootmnt}/dev/" 2>/dev/null || true
   fi
 
-  v2k_linux_bootstrap_mount_robust "/proc" "${rootmnt}/proc" "" || return 85
-  v2k_linux_bootstrap_mount_robust "/sys"  "${rootmnt}/sys"  "" || return 85
+  v2k_linux_bootstrap_mount_typed_robust \
+    "proc" "proc" "${rootmnt}/proc" "" || return 85
+  v2k_linux_bootstrap_mount_typed_robust \
+    "sysfs" "sysfs" "${rootmnt}/sys" "" || return 85
 
   # Harden propagation (best-effort)
   mount --make-rslave "${rootmnt}/dev"  >/dev/null 2>&1 || true

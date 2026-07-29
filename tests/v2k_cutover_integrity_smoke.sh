@@ -110,6 +110,130 @@ unset -f \
   v2k_linux_bootstrap_prepare_root_input \
   v2k_linux_bootstrap_one
 
+typed_mount_log="${WORK_DIR}/typed-mount.args"
+# shellcheck disable=SC2317
+findmnt() {
+  return 1
+}
+# shellcheck disable=SC2317
+mount() {
+  printf '%s\n' "$*" >> "${typed_mount_log}"
+}
+
+v2k_linux_bootstrap_mount_typed_robust \
+  "tmpfs" "tmpfs" "${WORK_DIR}/mnt/dev" "mode=0755,nosuid,noexec"
+v2k_linux_bootstrap_mount_typed_robust \
+  "proc" "proc" "${WORK_DIR}/mnt/proc" ""
+v2k_linux_bootstrap_mount_typed_robust \
+  "sysfs" "sysfs" "${WORK_DIR}/mnt/sys" ""
+
+grep -Fx -- \
+  "-t tmpfs -o mode=0755,nosuid,noexec tmpfs ${WORK_DIR}/mnt/dev" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] chroot /dev was not mounted as tmpfs" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+grep -Fx -- \
+  "-t proc proc ${WORK_DIR}/mnt/proc" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] chroot /proc was not mounted as proc" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+grep -Fx -- \
+  "-t sysfs sysfs ${WORK_DIR}/mnt/sys" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] chroot /sys was not mounted as sysfs" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+if grep -F -- " /proc ${WORK_DIR}/mnt/proc" "${typed_mount_log}" >/dev/null; then
+  echo "[ERR] chroot /proc used the host path as a block-device source" >&2
+  cat "${typed_mount_log}" >&2
+  exit 1
+fi
+
+bootstrap_root="${WORK_DIR}/bootstrap-root"
+mkdir -p \
+  "${bootstrap_root}/lib/modules/5.14.0-v2k-test" \
+  "${bootstrap_root}/etc" \
+  "${bootstrap_root}/boot"
+: > "${typed_mount_log}"
+# shellcheck disable=SC2317
+cp() {
+  return 0
+}
+# shellcheck disable=SC2317
+chroot() {
+  if [[ "$*" == *"lsinitrd"* ]]; then
+    printf '%s\n' "virtio_pci virtio_scsi virtio_blk scsi_mod"
+  fi
+  return 0
+}
+
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${bootstrap_root}" "/dev/v2k-nbd-does-not-exist"
+
+grep -Fx -- \
+  "-t proc proc ${bootstrap_root}/proc" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] initramfs rebuild path did not mount proc explicitly" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+grep -Fx -- \
+  "-t sysfs sysfs ${bootstrap_root}/sys" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] initramfs rebuild path did not mount sysfs explicitly" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+
+unset -f findmnt mount cp chroot
+
+# Consumed dynamically by the sourced engine.
+# shellcheck disable=SC2034
+V2K_BOOTSTRAP_LOCK_FD=10
+lock_probe_output=""
+lock_probe_rc=0
+eval "exec 10>${WORK_DIR}/bootstrap.lock"
+v2k_linux_bootstrap_run_capture lock_probe_output lock_probe_rc -- \
+  bash -c 'if [[ -e /proc/self/fd/10 ]]; then echo leaked; exit 1; fi; echo clean'
+[[ "${lock_probe_rc}" -eq 0 && "${lock_probe_output}" == "clean" ]] || {
+  echo "[ERR] bootstrap lock FD leaked into a child command: rc=${lock_probe_rc} out=${lock_probe_output}" >&2
+  exit 1
+}
+[[ -e /proc/$$/fd/10 ]] || {
+  echo "[ERR] bootstrap lock FD was closed in the parent shell" >&2
+  exit 1
+}
+eval "exec 10>&-"
+# shellcheck disable=SC2034
+V2K_BOOTSTRAP_LOCK_FD=""
+
+lvm_report='{
+  "report": [
+    {
+      "vg": [
+        {"vg_name": " rl "},
+        {"vg_name": "data"},
+        {"vg_name": "rl"}
+      ]
+    }
+  ]
+}'
+lvm_vgs="$(printf '%s' "${lvm_report}" | v2k_linux_bootstrap_lvm_vg_names_from_report)"
+[[ "${lvm_vgs}" == $'data\nrl' ]] || {
+  echo "[ERR] structured LVM VG report was not normalized: ${lvm_vgs}" >&2
+  exit 1
+}
+if printf '%s' "File descriptor 10 leaked ${lvm_report}" \
+    | v2k_linux_bootstrap_lvm_vg_names_from_report >/dev/null 2>&1; then
+  echo "[ERR] contaminated LVM output was accepted as a structured report" >&2
+  exit 1
+fi
+
 set +e
 v2k_linux_bootstrap_mount_robust \
   "/dev/v2k-device-does-not-exist" "${WORK_DIR}/mnt" "ro"
