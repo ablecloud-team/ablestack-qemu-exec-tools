@@ -95,7 +95,8 @@ v2k_interactive_select_cloud_networks_for_nics() {
     return 2
   }
 
-  while IFS=$'\t' read -r source_label source_mac source_network; do
+  # Keep stdin attached to the caller's terminal for interactive selections.
+  while IFS=$'\t' read -r -u 3 source_label source_mac source_network; do
     available="$(v2k_interactive_filter_tsv_excluding "${choices}" "${selected_csv}")"
     [[ -n "${available}" ]] || {
       echo "Not enough unique Cloud networks for all source NICs." >&2
@@ -104,9 +105,9 @@ v2k_interactive_select_cloud_networks_for_nics() {
     [[ -n "${source_network}" ]] || source_network="unknown VMware network"
     selected="$(v2k_interactive_select_tsv \
       "Cloud network for ${source_label} / ${source_mac} / ${source_network}" \
-      "${available}" "" "${yes}" 1)"
+      "${available}" "" "${yes}" 1)" || return $?
     selected_csv="${selected_csv:+${selected_csv},}${selected}"
-  done < <(
+  done 3< <(
     jq -r '
       (.vm.nics // [])
       | to_entries[]
@@ -211,7 +212,7 @@ v2k_cmd_wizard() {
     [[ -n "${cloud_endpoint}" ]] || { echo "--cloud-endpoint is required" >&2; return 2; }; [[ -n "${cloud_api_key}" ]] || { echo "--cloud-api-key/env/cred-file is required" >&2; return 2; }; [[ -n "${cloud_secret_key}" ]] || { echo "--cloud-secret-key/env/cred-file is required" >&2; return 2; }
     [[ -n "${cloud_zone_id}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" zones)"; cloud_zone_id="$(v2k_interactive_select_tsv "Cloud zone" "${cloud_choices}" "" "${yes}" 1)"; }
     [[ -n "${cloud_service_offering_id}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" service-offerings)"; cloud_service_offering_id="$(v2k_interactive_select_tsv "Cloud service offering" "${cloud_choices}" "" "${yes}" 1)"; }
-    [[ -n "${cloud_network_ids}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" networks "${cloud_zone_id}")"; cloud_network_ids="$(v2k_interactive_select_cloud_networks_for_nics "${inventory_json}" "${cloud_choices}" "${yes}")"; }
+    [[ -n "${cloud_network_ids}" ]] || { cloud_choices="$(v2k_interactive_cloud_choices "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" networks "${cloud_zone_id}")"; cloud_network_ids="$(v2k_interactive_select_cloud_networks_for_nics "${inventory_json}" "${cloud_choices}" "${yes}")" || return $?; }
     cloud_nic_mappings_json="$(v2k_cloud_target_build_nic_mappings_json \
       "$(jq -c '.vm.nics // []' <<<"${inventory_json}")" \
       "$(v2k_cloud_json_array_from_csv "${cloud_network_ids}")")" || return $?
