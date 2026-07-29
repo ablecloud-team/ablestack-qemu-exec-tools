@@ -66,11 +66,90 @@ n2k_changed_regions_for_disk() {
     ' <<<"${changed_regions}"
 }
 
-n2k_validate_region_array() {
-  local regions="$1"
+n2k_changed_regions_has_disk() {
+  local changed_regions="$1" manifest="$2" idx="$3"
+  local disk_id disk_label device_key
+  disk_id="$(jq -r ".disks[${idx}].disk_id // empty" "${manifest}")"
+  disk_label="$(jq -r ".disks[${idx}].label // empty" "${manifest}")"
+  device_key="$(jq -r ".disks[${idx}].device_key // empty" "${manifest}")"
+
+  jq -e \
+    --arg disk_id "${disk_id}" \
+    --arg disk_label "${disk_label}" \
+    --arg device_key "${device_key}" \
+    --arg idx "${idx}" \
+    '
+      if (.disks? | type) == "object" then
+        (.disks | has($disk_id))
+        or (($device_key | length) > 0 and (.disks | has($device_key)))
+        or (($disk_label | length) > 0 and (.disks | has($disk_label)))
+        or (.disks | has($idx))
+      elif ((.disk_id? // .device_key? // .label? // "") as $one_id
+        | (($one_id == $disk_id) or ($one_id == $device_key) or
+           ($one_id == $disk_label) or ($one_id == $idx))) then
+        ((.regions? | type) == "array") or ((.changed_regions? | type) == "array")
+      elif (.region_list? | type) == "array" then
+        true
+      elif type == "object" then
+        has($disk_id)
+        or (($device_key | length) > 0 and has($device_key))
+        or (($disk_label | length) > 0 and has($disk_label))
+        or has($idx)
+      else
+        false
+      end
+    ' <<<"${changed_regions}" >/dev/null
+}
+
+n2k_changed_regions_require_complete_metadata() {
+  local changed_regions="$1"
+
+  if [[ "$(jq -r '.schema // ""' <<<"${changed_regions}")" != "ablestack-n2k/changed-regions-v1" ]]; then
+    return 0
+  fi
   jq -e '
+    (.ok // false) == true
+    and (.complete // false) == true
+    and ((.errors // []) | length) == 0
+    and ((.skipped // []) | length) == 0
+  ' <<<"${changed_regions}" >/dev/null
+}
+
+n2k_transfer_patch_record_failure() {
+  local manifest="$1" phase="$2" idx="$3" disk_id="$4" code="$5" reason="$6" details_json="${7:-}"
+  [[ -n "${details_json}" ]] || details_json='{}'
+  n2k_manifest_record_sync_failure \
+    "${manifest}" "${phase}" "${idx}" "${code}" "${reason}" "${details_json}" || true
+  n2k_event ERROR "sync.${phase}" "${disk_id}" "patch_failed" \
+    "$(jq -nc \
+      --argjson code "${code}" \
+      --arg reason "${reason}" \
+      --argjson details "${details_json}" \
+      '{code:$code,reason:$reason,details:$details}')"
+}
+
+n2k_validate_region_array() {
+  local regions="$1" capacity_bytes="${2:-null}"
+  jq -e --argjson capacity_bytes "${capacity_bytes:-null}" '
     type == "array" and
-    all(.[]; ((.offset | type) == "number") and ((.length | type) == "number") and (.offset >= 0) and (.length > 0) and ((.offset | floor) == .offset) and ((.length | floor) == .length) and (((.type // "regular") | IN("regular","zero","zeros","zeroed","hole"))))
+    all(.[];
+      ((.offset | type) == "number")
+      and ((.length | type) == "number")
+      and (.offset >= 0)
+      and (.length > 0)
+      and ((.offset | floor) == .offset)
+      and ((.length | floor) == .length)
+      and ((.offset + .length) > .offset)
+      and (
+        ($capacity_bytes == null)
+        or (
+          ($capacity_bytes | type) == "number"
+          and $capacity_bytes > 0
+          and (.offset + .length) <= $capacity_bytes
+        )
+      )
+      and (((.type // "regular") | IN("regular","zero","zeros","zeroed","hole")))
+    )
   ' <<<"${regions}" >/dev/null
 }
 
@@ -121,7 +200,8 @@ n2k_changed_regions_full_copy_from_source_map() {
     '{
       schema:"ablestack-n2k/changed-regions-v1",
       source_api:"v3",
-      ok:($mapped_count > 0),
+      ok:($mapped_count > 0 and (($skipped[0] // []) | length) == 0),
+      complete:($mapped_count > 0 and (($skipped[0] // []) | length) == 0),
       fallback:"full-copy",
       reason:$reason,
       current_recovery_point_id:$recovery_point_id,
@@ -408,7 +488,8 @@ n2k_patch_source_prepare() {
 
 n2k_transfer_patch_all() {
   local manifest="$1" phase="$2" source_map_json="$3" changed_regions_json="$4" recovery_point_id="${5:-}"
-  local count idx phase_key regions region_count bytes_written total_regions=0 total_bytes=0
+  local count idx phase_key regions capacity_bytes region_count bytes_written patch_rc=0 complete_rc=0
+  local patch_results_json='[]'
 
   case "${phase}" in
     incr) phase_key="incr_sync" ;;
@@ -424,36 +505,96 @@ n2k_transfer_patch_all() {
     echo "Manifest has no disks. Run init with inventory first." >&2
     return 2
   }
+  n2k_changed_regions_require_complete_metadata "${changed_regions_json}" || {
+    n2k_transfer_patch_record_failure \
+      "${manifest}" "${phase}" -1 "" 77 "changed_regions_incomplete" \
+      "$(jq -c '{
+        schema:(.schema // null),
+        ok:(.ok // null),
+        complete:(.complete // null),
+        error_count:((.errors // []) | length),
+        skipped_count:((.skipped // []) | length)
+      }' <<<"${changed_regions_json}")"
+    echo "Changed-region metadata is incomplete or contains collection errors; refusing to patch." >&2
+    n2k_source_cleanup_nfs_mounts
+    return 2
+  }
 
-  trap 'n2k_source_cleanup_nfs_mounts' RETURN
   for ((idx=0; idx<count; idx++)); do
+    n2k_changed_regions_has_disk "${changed_regions_json}" "${manifest}" "${idx}" || {
+      n2k_transfer_patch_record_failure \
+        "${manifest}" "${phase}" "${idx}" \
+        "$(jq -r ".disks[${idx}].disk_id // \"disk${idx}\"" "${manifest}")" \
+        78 "changed_regions_disk_missing" \
+        "$(jq -nc --argjson idx "${idx}" '{disk_index:$idx}')"
+      echo "Changed-region metadata is missing disk index: ${idx}" >&2
+      n2k_source_cleanup_nfs_mounts
+      return 2
+    }
     regions="$(n2k_changed_regions_for_disk "${changed_regions_json}" "${manifest}" "${idx}")"
-    n2k_validate_region_array "${regions}" || {
+    capacity_bytes="$(jq -r ".disks[${idx}].size_bytes // .disks[${idx}].disk_size_bytes // .disks[${idx}].capacity_bytes // .disks[${idx}].size // null" "${manifest}")"
+    n2k_validate_region_array "${regions}" "${capacity_bytes}" || {
+      n2k_transfer_patch_record_failure \
+        "${manifest}" "${phase}" "${idx}" \
+        "$(jq -r ".disks[${idx}].disk_id // \"disk${idx}\"" "${manifest}")" \
+        79 "changed_regions_invalid" \
+        "$(jq -nc --argjson idx "${idx}" --arg capacity "${capacity_bytes}" '{disk_index:$idx,capacity_bytes:($capacity | tonumber?)}')"
       echo "Invalid changed regions for disk index: ${idx}" >&2
+      n2k_source_cleanup_nfs_mounts
       return 2
     }
     region_count="$(jq -r 'length' <<<"${regions}")"
     bytes_written="$(jq -r 'map(.length) | add // 0' <<<"${regions}")"
-    total_regions=$((total_regions + region_count))
-    total_bytes=$((total_bytes + bytes_written))
-    n2k_transfer_patch_one "${manifest}" "${phase}" "${source_map_json}" "${changed_regions_json}" "${idx}" "${recovery_point_id}"
+    patch_rc=0
+    n2k_transfer_patch_one \
+      "${manifest}" "${phase}" "${source_map_json}" "${changed_regions_json}" \
+      "${idx}" || patch_rc=$?
+    if [[ "${patch_rc}" -ne 0 ]]; then
+      n2k_source_cleanup_nfs_mounts
+      return "${patch_rc}"
+    fi
+    patch_results_json="$(
+      jq -c \
+        --argjson idx "${idx}" \
+        --argjson bytes_written "${bytes_written}" \
+        --argjson regions "${region_count}" \
+        '. + [{
+          index: $idx,
+          bytes_written: $bytes_written,
+          regions: $regions
+        }]' <<<"${patch_results_json}"
+    )"
   done
 
   if [[ "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
-    n2k_manifest_record_sync_summary "${manifest}" "${phase_key}" "${total_bytes}" "${total_regions}" "${recovery_point_id}"
-    n2k_manifest_phase_done "${manifest}" "${phase_key}"
+    complete_rc=0
+    n2k_manifest_complete_patch_phase \
+      "${manifest}" "${phase_key}" "${patch_results_json}" "${recovery_point_id}" \
+      || complete_rc=$?
+    if [[ "${complete_rc}" -ne 0 ]]; then
+      n2k_source_cleanup_nfs_mounts
+      return "${complete_rc}"
+    fi
+    n2k_event INFO "sync.${phase}" "" "patch_round_committed" \
+      "$(jq -nc \
+        --arg recovery_point_id "${recovery_point_id}" \
+        --argjson results "${patch_results_json}" \
+        '{
+          disks: ($results | length),
+          bytes_written: ($results | map(.bytes_written) | add // 0),
+          regions: ($results | map(.regions) | add // 0),
+          recovery_point_id: $recovery_point_id
+        }')" || true
   fi
   n2k_source_cleanup_nfs_mounts
-  trap - RETURN
 }
 
 n2k_transfer_patch_one() {
-  local manifest="$1" phase="$2" source_map_json="$3" changed_regions_json="$4" idx="$5" recovery_point_id="${6:-}"
-  local disk_id source_path patch_source_path target_path target_format target_storage rbd_access_mode regions region_count bytes_written phase_key patch_rc=0
+  local manifest="$1" phase="$2" source_map_json="$3" changed_regions_json="$4" idx="$5"
+  local disk_id source_path patch_source_path target_path target_format target_storage rbd_access_mode regions capacity_bytes region_count bytes_written patch_rc=0
 
   case "${phase}" in
-    incr) phase_key="incr_sync" ;;
-    final) phase_key="final_sync" ;;
+    incr|final) ;;
     *)
       echo "Invalid patch phase: ${phase}" >&2
       return 2
@@ -467,6 +608,7 @@ n2k_transfer_patch_one() {
   target_storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
   rbd_access_mode="$(jq -r '.target.storage.rbd_access_mode // "librbd"' "${manifest}")"
   regions="$(n2k_changed_regions_for_disk "${changed_regions_json}" "${manifest}" "${idx}")"
+  capacity_bytes="$(jq -r ".disks[${idx}].size_bytes // .disks[${idx}].disk_size_bytes // .disks[${idx}].capacity_bytes // .disks[${idx}].size // null" "${manifest}")"
 
   [[ -n "${source_path}" ]] || {
     echo "Missing patch source path for disk: ${disk_id}" >&2
@@ -476,7 +618,7 @@ n2k_transfer_patch_one() {
     echo "Missing target path for disk: ${disk_id}" >&2
     return 2
   }
-  n2k_validate_region_array "${regions}" || {
+  n2k_validate_region_array "${regions}" "${capacity_bytes}" || {
     echo "Invalid changed regions for disk: ${disk_id}" >&2
     return 2
   }
@@ -499,9 +641,17 @@ n2k_transfer_patch_one() {
     n2k_storage_patch_target "${patch_source_path}" "${target_path}" "${target_storage}" "${target_format}" "${regions}" || patch_rc=$?
   fi
   n2k_patch_source_cleanup_cache_file "${patch_source_path}" "${disk_id}" "${phase}" || true
-  [[ "${patch_rc}" -eq 0 ]] || return "${patch_rc}"
+  if [[ "${patch_rc}" -ne 0 ]]; then
+    n2k_transfer_patch_record_failure \
+      "${manifest}" "${phase}" "${idx}" "${disk_id}" "${patch_rc}" "target_patch_failed" \
+      "$(jq -nc \
+        --arg source "${source_path}" \
+        --arg target "${target_path}" \
+        --argjson regions "${region_count}" \
+        '{source:$source,target:$target,regions:$regions}')"
+    return "${patch_rc}"
+  fi
 
-  n2k_manifest_mark_patch_done "${manifest}" "${idx}" "${phase_key}" "${bytes_written}" "${region_count}" "${recovery_point_id}"
   n2k_event INFO "sync.${phase}" "${disk_id}" "patch_disk_done" \
     "$(jq -nc --argjson bytes "${bytes_written}" --argjson regions "${region_count}" '{bytes_written:$bytes,regions:$regions}')"
 }

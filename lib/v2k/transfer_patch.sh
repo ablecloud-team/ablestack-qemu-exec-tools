@@ -179,7 +179,8 @@ v2k_transfer_patch_one() {
     fi
 
     # ---- resources we must cleanup even on failure ----
-    local src_dev="" dst_dev="" sock="" pidfile="" nbdlog="" target_cleanup_cmd="" areas_error_file=""
+    local src_dev="" dst_dev="" sock="" pidfile="" nbdlog="" target_cleanup_cmd=""
+    local areas_error_file="" areas_file=""
 
     cleanup() {
       set +e
@@ -214,6 +215,9 @@ v2k_transfer_patch_one() {
       [[ -n "${pidfile}" ]] && rm -f "${pidfile}" >/dev/null 2>&1 || true
       if [[ -n "${areas_error_file}" ]]; then
         rm -f "${areas_error_file}" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "${areas_file}" ]]; then
+        rm -f "${areas_file}" >/dev/null 2>&1 || true
       fi
 
       [[ -n "${src_dev}" ]] && v2k_nbd_free "${src_dev}" >/dev/null 2>&1 || true
@@ -354,11 +358,9 @@ v2k_transfer_patch_one() {
     if [[ "${areas_count}" -eq 0 ]]; then
       v2k_event INFO "sync.${which}" "${disk_id}" "no_changes" \
         "$(jq -nc --argjson coverage "${coverage_json}" '{coverage:$coverage}')"
-      if [[ -n "${new_change_id}" && "${new_change_id}" != "null" ]]; then
-        v2k_manifest_advance_cbt_change_ids \
-          "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}" "${coverage_record}"
-      fi
-      v2k_manifest_inc_incr_seq "${manifest}" "${idx}"
+      v2k_manifest_record_patch_success \
+        "${manifest}" "${idx}" "${which}" \
+        "${last_change_id}" "${new_change_id}" "${coverage_record}" 0 0
       v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" \
         "$(jq -nc --argjson coverage "${coverage_json}" \
           '{bytes_written:0,areas:0,coverage:$coverage}')"
@@ -449,15 +451,40 @@ v2k_transfer_patch_one() {
     fi
 
     if [[ "${areas_count}" -gt 0 ]]; then
-      v2k_python "${V2K_PY_DIR}/patch_apply.py" \
+      # Do not pass the complete CBT payload as a command-line argument.
+      # Linux limits a single execve(2) argument (commonly 128 KiB), so a VM
+      # with thousands of changed extents can fail before Python even starts.
+      # A mode-0600 file keeps argv bounded and is cleaned by the subshell trap.
+      areas_file="$(mktemp "${V2K_WORKDIR}/.cbt_areas_${which}_${idx}.XXXXXX.json")"
+      chmod 600 "${areas_file}"
+      builtin printf '%s\n' "${areas_json}" > "${areas_file}"
+
+      local patch_apply_rc=0
+      v2k_event INFO "sync.${which}" "${disk_id}" "patch_apply_start" \
+        "$(jq -nc --argjson areas "${areas_count}" --argjson bytes "${bytes_total}" \
+          '{areas:$areas,bytes:$bytes,input:"file"}')"
+      if v2k_python "${V2K_PY_DIR}/patch_apply.py" \
         --source "${src_dev}" \
         --target "${dst_dev}" \
-        --areas-json "${areas_json}" \
+        --areas-file "${areas_file}" \
         --coalesce-gap "${coalesce_gap}" \
         --chunk "${chunk}" \
         --target-kind "${kind}" \
-        --sparse-zero "${sparse_zero}" \
-        || { cleanup_patch; exit 41; }
+        --sparse-zero "${sparse_zero}"; then
+        :
+      else
+        patch_apply_rc=$?
+        v2k_event ERROR "sync.${which}" "${disk_id}" "patch_apply_failed" \
+          "$(jq -nc --argjson code "${patch_apply_rc}" --argjson areas "${areas_count}" \
+            --argjson bytes "${bytes_total}" '{code:$code,areas:$areas,bytes:$bytes,input:"file"}')"
+        cleanup_patch
+        exit 41
+      fi
+      rm -f "${areas_file}"
+      areas_file=""
+      v2k_event INFO "sync.${which}" "${disk_id}" "patch_apply_done" \
+        "$(jq -nc --argjson areas "${areas_count}" --argjson bytes "${bytes_total}" \
+          '{areas:$areas,bytes:$bytes,input:"file"}')"
     fi
 
     sync || true
@@ -465,18 +492,12 @@ v2k_transfer_patch_one() {
       [[ -b "${dst_dev}" ]] && blockdev --flushbufs "${dst_dev}" >/dev/null 2>&1 || true
     fi
 
-    # Advance CBT changeIds ONLY after successful apply/flush.
-    # - base_change_id will be fixed to the previous last_change_id on the first successful patch.
-    # - last_change_id advances to new_change_id.
-    if [[ -n "${new_change_id}" && "${new_change_id}" != "null" ]]; then
-      v2k_manifest_advance_cbt_change_ids \
-        "${manifest}" "${idx}" "${last_change_id}" "${new_change_id}" "${coverage_record}"
-    fi
-
-    # NOTE(v1): we only report new_change_id (manifest persistence can be added when manifest.sh exposes setter)
-
-    v2k_manifest_set_disk_metric_incr "${manifest}" "${idx}" "${bytes_total}" "${areas_count}"
-    v2k_manifest_inc_incr_seq "${manifest}" "${idx}"
+    # Publish CBT state, counters, sequence and completion timestamp together,
+    # only after the target writes have completed and buffers were flushed.
+    v2k_manifest_record_patch_success \
+      "${manifest}" "${idx}" "${which}" \
+      "${last_change_id}" "${new_change_id}" "${coverage_record}" \
+      "${bytes_total}" "${areas_count}"
 
     v2k_event INFO "sync.${which}" "${disk_id}" "disk_done" \
       "$(jq -nc \

@@ -135,6 +135,43 @@ n2k_storage_rbd_ensure_image() {
   fi
 }
 
+n2k_storage_rbd_staging_path() {
+  local target_path="$1" run_id="$2" idx="$3" attempt="$4"
+  local prefix image safe_run
+
+  [[ "${target_path}" == rbd:*/* ]] || return 2
+  prefix="${target_path%/*}"
+  image="${target_path##*/}"
+  safe_run="$(printf '%s' "${run_id}" | tr -c 'A-Za-z0-9_.-' '_')"
+  [[ -n "${safe_run}" ]] || safe_run="unknown"
+  printf '%s/%s.n2k-stage-%s-d%s-p%s-a%s' \
+    "${prefix}" "${image}" "${safe_run}" "${idx}" "$$" "${attempt}"
+}
+
+n2k_storage_rbd_remove_staging() {
+  local staging_path="$1" spec
+  [[ "${staging_path}" == rbd:*/*.n2k-stage-* ]] || return 2
+  spec="$(n2k_storage_rbd_image_name "${staging_path}")"
+  command -v rbd >/dev/null 2>&1 || return 1
+  if rbd info "${spec}" >/dev/null 2>&1; then
+    rbd rm "${spec}" >/dev/null
+  fi
+}
+
+n2k_storage_rbd_publish_staging() {
+  local staging_path="$1" target_path="$2" staging_spec target_spec
+  [[ "${staging_path}" == rbd:*/*.n2k-stage-* ]] || return 2
+  [[ "${target_path}" == rbd:*/* ]] || return 2
+  staging_spec="$(n2k_storage_rbd_image_name "${staging_path}")"
+  target_spec="$(n2k_storage_rbd_image_name "${target_path}")"
+  command -v rbd >/dev/null 2>&1 || return 1
+  rbd info "${staging_spec}" >/dev/null 2>&1 || return 1
+  if rbd info "${target_spec}" >/dev/null 2>&1; then
+    return 3
+  fi
+  rbd mv "${staging_spec}" "${target_spec}" >/dev/null
+}
+
 n2k_storage_rbd_sparsify() {
   local target_path="$1" needed="${2:-0}" mode="${N2K_RBD_SPARSIFY_AFTER:-auto}" spec
   case "${mode}" in
@@ -157,6 +194,35 @@ n2k_storage_detect_image_format() {
   fmt="$(qemu-img info --output=json "${path}" 2>/dev/null | jq -r '.format // empty' 2>/dev/null || true)"
   [[ -n "${fmt}" ]] || fmt="raw"
   printf '%s' "${fmt}"
+}
+
+n2k_storage_target_size_bytes() {
+  local target_path="$1" target_storage="$2" target_format="$3" size
+
+  case "${target_storage}" in
+    file)
+      [[ -f "${target_path}" ]] || return 1
+      if [[ "${target_format}" == "qcow2" ]]; then
+        n2k_storage_require_command qemu-img "qcow2 target size validation"
+        size="$(qemu-img info --output=json "${target_path}" 2>/dev/null \
+          | jq -r '."virtual-size" // .virtual_size // empty' 2>/dev/null || true)"
+        [[ "${size}" =~ ^[0-9]+$ && "${size}" -gt 0 ]] || return 1
+        printf '%s' "${size}"
+      else
+        n2k_storage_file_size_bytes "${target_path}"
+      fi
+      ;;
+    block)
+      [[ -b "${target_path}" ]] || return 1
+      blockdev --getsize64 "${target_path}"
+      ;;
+    rbd)
+      n2k_storage_rbd_current_size_bytes "${target_path}"
+      ;;
+    *)
+      return 2
+      ;;
+  esac
 }
 
 n2k_storage_copy_base() {
@@ -191,6 +257,7 @@ n2k_storage_copy_base() {
       dd if="${source_path}" of="${target_path}" bs=16M status=none conv=fsync
       ;;
     rbd)
+      local convert_rc=0
       n2k_storage_require_command qemu-img "RBD base sync"
       [[ "${target_path}" == rbd:* ]] || {
         echo "RBD target path must start with rbd: ${target_path}" >&2
@@ -205,16 +272,18 @@ n2k_storage_copy_base() {
         fi
         if command -v rbd >/dev/null 2>&1 && n2k_storage_rbd_ensure_image "${target_path}" "${source_size}"; then
           if [[ "${rbd_preexisting}" -eq 0 ]]; then
-            qemu-img convert -p -n -S "${sparse_size}" -O raw "${source_path}" "${target_path}"
+            qemu-img convert -p -n -S "${sparse_size}" -O raw "${source_path}" "${target_path}" || convert_rc=$?
           else
-            qemu-img convert -p -S "${sparse_size}" -O raw "${source_path}" "${target_path}"
+            qemu-img convert -p -S "${sparse_size}" -O raw "${source_path}" "${target_path}" || convert_rc=$?
           fi
         else
-          qemu-img convert -p -S "${sparse_size}" -O raw "${source_path}" "${target_path}"
+          qemu-img convert -p -S "${sparse_size}" -O raw "${source_path}" "${target_path}" || convert_rc=$?
         fi
+        [[ "${convert_rc}" -eq 0 ]] || return "${convert_rc}"
         n2k_storage_rbd_sparsify "${target_path}" 0
       else
-        qemu-img convert -p -O raw "${source_path}" "${target_path}"
+        qemu-img convert -p -O raw "${source_path}" "${target_path}" || convert_rc=$?
+        [[ "${convert_rc}" -eq 0 ]] || return "${convert_rc}"
       fi
       ;;
     *)

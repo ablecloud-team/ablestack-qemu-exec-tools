@@ -980,6 +980,51 @@ n2k_cloud_target_record_result() {
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 
+n2k_cloud_target_record_checkpoint() {
+  local manifest="$1" stage="$2" patch_json="${3:-}"
+  local patch_compact ts tmp
+
+  [[ -n "${patch_json}" ]] || patch_json='{}'
+  if ! patch_compact="$(printf '%s' "${patch_json}" | jq -c 'if type == "object" then . else error("checkpoint patch must be an object") end')"; then
+    return 2
+  fi
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --arg stage "${stage}" \
+      --arg ts "${ts}" \
+      --argjson patch "${patch_compact}" \
+      '
+        .runtime = (.runtime // {})
+        | .runtime.cloud = (.runtime.cloud // {})
+        | .runtime.cloud.checkpoint = (
+            (.runtime.cloud.checkpoint // {})
+            * $patch
+            * {stage:$stage,updated_at:$ts}
+          )
+      ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
+}
+
+n2k_cloud_target_existing_checkpoint_json() {
+  local manifest="$1"
+  jq -c '.runtime.cloud.checkpoint // {}' "${manifest}"
+}
+
+n2k_cloud_target_checkpoint_reentry_state() {
+  local checkpoint="$1"
+  jq -r '
+    if (type != "object") or (length == 0) then "none"
+    elif (.complete // false) == true then "complete"
+    else "incomplete"
+    end
+  ' <<<"${checkpoint}"
+}
+
 n2k_cloud_target_preflight_json() {
   local endpoint="$1" api_key="$2" secret_key="$3"
   local api command response available_json="{}" ok=true
@@ -1003,7 +1048,7 @@ n2k_cloud_target_cutover() {
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
   local disk_offering_id owner_params root_import root_volume_id deploy vm_id data_volumes_json jobs_json
   local import_result attach_result start_result result_json disk_name source_deploy_params root_volume_result root_volume_json root_volume_update_job root_volume_converted
-  local nic_verification
+  local nic_verification checkpoint
   local pool_json pool_path import_volume_id disk_offering_json
 
   runtime="$(n2k_cloud_target_resolve_runtime_json "${manifest}" "${endpoint_arg}" "${api_key_arg}" "${secret_key_arg}" "${cred_file}")"
@@ -1076,6 +1121,21 @@ n2k_cloud_target_cutover() {
     return 0
   fi
 
+  checkpoint="$(n2k_cloud_target_existing_checkpoint_json "${manifest}")"
+  case "$(n2k_cloud_target_checkpoint_reentry_state "${checkpoint}")" in
+    complete)
+      result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
+      printf '%s' "${result_json}"
+      return 0
+      ;;
+    incomplete)
+      echo "Cloud cutover has an incomplete mutation checkpoint; refusing to import or deploy duplicate resources." >&2
+      jq -c '{stage,root_volume_id,vm_id,data_volumes,updated_at}' <<<"${checkpoint}" >&2
+      echo "Reconcile the recorded Cloud resources before retrying this workdir." >&2
+      return 79
+      ;;
+  esac
+
   if [[ -z "${disk_offering_id}" ]]; then
     if [[ -z "${pool_json:-}" ]]; then
       pool_json="$(n2k_cloud_target_storage_pool_json "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}")" || return $?
@@ -1106,12 +1166,28 @@ n2k_cloud_target_cutover() {
     echo "Cloud root import did not return a volume id." >&2
     return 1
   }
+  n2k_cloud_target_record_checkpoint "${manifest}" "root-imported" \
+    "$(jq -nc \
+      --arg root_volume_id "${root_volume_id}" \
+      --arg root_import_job_id "$(jq -r '.job_id // empty' <<<"${root_import}")" \
+      --arg root_import_path "${import_path}" \
+      --arg storage_id "${storage_id}" \
+      --arg disk_offering_id "${disk_offering_id}" \
+      '{complete:false,root_volume_id:$root_volume_id,root_import_job_id:$root_import_job_id,root_import_path:$root_import_path,storage_id:$storage_id,disk_offering_id:$disk_offering_id,data_volumes:{}}')" || {
+    echo "Cloud root volume was imported but its checkpoint could not be persisted: ${root_volume_id}" >&2
+    return 78
+  }
   deploy="$(n2k_cloud_target_deploy_vm_for_volume "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${root_volume_id}" "false" "${source_deploy_params}")" || return $?
   vm_id="$(jq -r '.id' <<<"${deploy}")"
   [[ -n "${vm_id}" ]] || {
     echo "Cloud deployVirtualMachineForVolume did not return a VM id." >&2
     return 1
   }
+  n2k_cloud_target_record_checkpoint "${manifest}" "vm-deployed" \
+    "$(jq -nc \
+      --arg vm_id "${vm_id}" \
+      --arg deploy_job_id "$(jq -r '.job_id // empty' <<<"${deploy}")" \
+      '{vm_id:$vm_id,deploy_job_id:$deploy_job_id}')" || return 78
   if ! nic_verification="$(n2k_cloud_target_wait_for_vm_nic_match \
       "${endpoint}" "${api_key}" "${secret_key}" "${cfg}" "${vm_id}")"; then
     result_json="$(jq -nc \
@@ -1138,10 +1214,18 @@ n2k_cloud_target_cutover() {
     n2k_cloud_target_record_result "${manifest}" "${result_json}"
     return 1
   fi
+  n2k_cloud_target_record_checkpoint "${manifest}" "nic-verified" \
+    "$(jq -nc --argjson nic_verification "${nic_verification}" '{nic_verification:$nic_verification}')" || return 78
   root_volume_result="$(n2k_cloud_target_ensure_root_volume "${endpoint}" "${api_key}" "${secret_key}" "${root_volume_id}" "${vm_id}" "${import_path}")" || return $?
   root_volume_json="$(jq -c '.volume' <<<"${root_volume_result}")"
   root_volume_update_job="$(jq -r '.update.job_id // empty' <<<"${root_volume_result}")"
   root_volume_converted="$(jq -r '.converted // false' <<<"${root_volume_result}")"
+  n2k_cloud_target_record_checkpoint "${manifest}" "root-ready" \
+    "$(jq -nc \
+      --argjson root_volume "${root_volume_json}" \
+      --argjson root_volume_converted "${root_volume_converted}" \
+      --arg root_volume_update_job_id "${root_volume_update_job}" \
+      '{root_volume:$root_volume,root_volume_converted:$root_volume_converted,root_volume_update_job_id:$root_volume_update_job_id}')" || return 78
 
   data_volumes_json="[]"
   jobs_json="$(jq -nc --arg root_import_job "$(jq -r '.job_id' <<<"${root_import}")" --arg deploy_job "$(jq -r '.job_id' <<<"${deploy}")" '[{kind:"import-root",job_id:$root_import_job},{kind:"deploy-vm",job_id:$deploy_job}]')"
@@ -1161,7 +1245,18 @@ n2k_cloud_target_cutover() {
       echo "Cloud data disk import did not return a volume id for disk ${idx}." >&2
       return 1
     }
+    n2k_cloud_target_record_checkpoint "${manifest}" "data-imported" \
+      "$(jq -nc \
+        --arg idx "${idx}" \
+        --arg id "${import_volume_id}" \
+        --arg import_job_id "$(jq -r '.job_id // empty' <<<"${import_result}")" \
+        '.data_volumes = {($idx):{id:$id,import_job_id:$import_job_id,attached:false}}')" || return 78
     attach_result="$(n2k_cloud_target_attach_volume "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}" "${import_volume_id}" "${idx}")" || return $?
+    n2k_cloud_target_record_checkpoint "${manifest}" "data-attached" \
+      "$(jq -nc \
+        --arg idx "${idx}" \
+        --arg attach_job_id "$(jq -r '.job_id // empty' <<<"${attach_result}")" \
+        '.data_volumes = {($idx):{attach_job_id:$attach_job_id,attached:true}}')" || return 78
     data_volumes_json="$(jq -c \
       --argjson volumes "${data_volumes_json}" \
       --argjson imported "${import_result}" \
@@ -1177,6 +1272,8 @@ n2k_cloud_target_cutover() {
 
   if [[ "${start_vm}" -eq 1 ]]; then
     start_result="$(n2k_cloud_target_start_vm "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")" || return $?
+    n2k_cloud_target_record_checkpoint "${manifest}" "vm-started" \
+      "$(jq -nc --arg start_job_id "$(jq -r '.job_id // empty' <<<"${start_result}")" '{start_job_id:$start_job_id,started:true}')" || return 78
     jobs_json="$(jq -c --argjson jobs "${jobs_json}" --arg start_job "$(jq -r '.job_id' <<<"${start_result}")" '$jobs + [{kind:"start-vm",job_id:$start_job}]' <<<"{}")"
   fi
 
@@ -1198,5 +1295,11 @@ n2k_cloud_target_cutover() {
      + (if ($disk_offering | length) > 0 then {disk_offering:$disk_offering} else {} end)
      + (if ($root_volume_update_job_id | length) > 0 then {root_volume_update_job_id:$root_volume_update_job_id} else {} end)')"
   n2k_cloud_target_record_result "${manifest}" "${result_json}"
+  n2k_cloud_target_record_checkpoint "${manifest}" "complete" \
+    "$(jq -nc \
+      --arg vm_id "${vm_id}" \
+      --arg root_volume_id "${root_volume_id}" \
+      --argjson started "$(if [[ "${start_vm}" -eq 1 ]]; then printf true; else printf false; fi)" \
+      '{complete:true,vm_id:$vm_id,root_volume_id:$root_volume_id,started:$started}')" || return 78
   printf '%s' "${result_json}"
 }

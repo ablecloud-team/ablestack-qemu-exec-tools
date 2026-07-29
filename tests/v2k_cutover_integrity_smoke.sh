@@ -110,6 +110,421 @@ unset -f \
   v2k_linux_bootstrap_prepare_root_input \
   v2k_linux_bootstrap_one
 
+typed_mount_log="${WORK_DIR}/typed-mount.args"
+# shellcheck disable=SC2317
+findmnt() {
+  return 1
+}
+# shellcheck disable=SC2317
+mount() {
+  printf '%s\n' "$*" >> "${typed_mount_log}"
+}
+
+v2k_linux_bootstrap_mount_typed_robust \
+  "tmpfs" "tmpfs" "${WORK_DIR}/mnt/dev" "mode=0755,nosuid,noexec"
+v2k_linux_bootstrap_mount_typed_robust \
+  "proc" "proc" "${WORK_DIR}/mnt/proc" ""
+v2k_linux_bootstrap_mount_typed_robust \
+  "sysfs" "sysfs" "${WORK_DIR}/mnt/sys" ""
+
+grep -Fx -- \
+  "-t tmpfs -o mode=0755,nosuid,noexec tmpfs ${WORK_DIR}/mnt/dev" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] chroot /dev was not mounted as tmpfs" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+grep -Fx -- \
+  "-t proc proc ${WORK_DIR}/mnt/proc" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] chroot /proc was not mounted as proc" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+grep -Fx -- \
+  "-t sysfs sysfs ${WORK_DIR}/mnt/sys" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] chroot /sys was not mounted as sysfs" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+if grep -F -- " /proc ${WORK_DIR}/mnt/proc" "${typed_mount_log}" >/dev/null; then
+  echo "[ERR] chroot /proc used the host path as a block-device source" >&2
+  cat "${typed_mount_log}" >&2
+  exit 1
+fi
+
+bootstrap_root="${WORK_DIR}/bootstrap-root"
+bootstrap_kver="5.14.0-v2k-test"
+mkdir -p \
+  "${bootstrap_root}/lib/modules/${bootstrap_kver}" \
+  "${bootstrap_root}/etc" \
+  "${bootstrap_root}/boot"
+printf '%s\n' "kernel" > "${bootstrap_root}/boot/vmlinuz-${bootstrap_kver}"
+printf '%s\n' "existing initramfs" > "${bootstrap_root}/boot/initramfs-${bootstrap_kver}.img"
+: > "${typed_mount_log}"
+chroot_command_log="${WORK_DIR}/chroot-command.log"
+mock_chroot_mode="existing_valid"
+mock_chroot_kver="${bootstrap_kver}"
+# shellcheck disable=SC2317
+cp() {
+  return 0
+}
+# shellcheck disable=SC2317
+chroot() {
+  local mock_root="$1"
+  local mock_command="$*"
+  local mock_image=""
+  printf '%s\n' "${mock_command}" >> "${chroot_command_log}"
+  case "${mock_command}" in
+    *"grubby --default-kernel"*)
+      if [[ "${mock_chroot_mode}" != "no_default" ]]; then
+        printf '/boot/vmlinuz-%s\n' "${mock_chroot_kver}"
+      fi
+      ;;
+    *"lsinitrd"*)
+      if [[ "${mock_command}" == *".v2k-"* ]]; then
+        printf '%s\n' "virtio_pci virtio_scsi virtio_blk scsi_mod"
+        if [[ "${mock_chroot_mode}" != "lvm_verify_fail" ]]; then
+          printf '%s\n' \
+            "lvm" \
+            "kernel/drivers/md/dm-mod.ko.xz"
+        fi
+        if [[ "${mock_chroot_mode}" == "lvm_embedded_devices" ]]; then
+          printf '%s\n' "etc/lvm/devices/system.devices"
+        fi
+      elif [[ "${mock_chroot_mode}" == "existing_valid" ]]; then
+        printf '%s\n' "virtio_pci virtio_scsi virtio_blk scsi_mod"
+      else
+        printf '%s\n' "virtio_pci"
+      fi
+      ;;
+    *"depmod -a"*)
+      printf '%s\n' "kernel/drivers/virtio/virtio_pci.ko.xz:" \
+        > "${mock_root}/lib/modules/${mock_chroot_kver}/modules.dep"
+      ;;
+    *"dracut -f"*)
+      mock_image="${mock_command##* }"
+      mock_image="${mock_image%\'}"
+      mock_image="${mock_image#\'}"
+      printf '%s\n' "staged initramfs" > "${mock_root}${mock_image}"
+      ;;
+  esac
+  return 0
+}
+
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${bootstrap_root}" "/dev/v2k-nbd-does-not-exist"
+
+grep -Fx -- \
+  "-t proc proc ${bootstrap_root}/proc" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] initramfs rebuild path did not mount proc explicitly" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+grep -Fx -- \
+  "-t sysfs sysfs ${bootstrap_root}/sys" \
+  "${typed_mount_log}" >/dev/null || {
+    echo "[ERR] initramfs rebuild path did not mount sysfs explicitly" >&2
+    cat "${typed_mount_log}" >&2
+    exit 1
+  }
+
+if grep -F -- "dracut -f" "${chroot_command_log}" >/dev/null; then
+  echo "[ERR] already usable initramfs was rebuilt unnecessarily" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+fi
+
+version_root="${WORK_DIR}/version-root"
+mkdir -p \
+  "${version_root}/lib/modules/5.14.0-9.el9.x86_64" \
+  "${version_root}/lib/modules/5.14.0-10.el9.x86_64" \
+  "${version_root}/boot"
+printf '%s\n' "kernel" > "${version_root}/boot/vmlinuz-5.14.0-9.el9.x86_64"
+printf '%s\n' "kernel" > "${version_root}/boot/vmlinuz-5.14.0-10.el9.x86_64"
+mock_chroot_mode="no_default"
+version_selection="$(v2k_linux_bootstrap_select_kernel "${version_root}")"
+[[ "${version_selection}" == $'5.14.0-10.el9.x86_64\thighest_version' ]] || {
+  echo "[ERR] kernel fallback did not use version ordering: ${version_selection}" >&2
+  exit 1
+}
+
+escaped_root="${WORK_DIR}/escaped-root"
+mkdir -p "${escaped_root}/boot"
+ln -s /usr/lib "${escaped_root}/lib"
+if v2k_linux_bootstrap_module_root "${escaped_root}" >/dev/null 2>&1; then
+  echo "[ERR] guest module lookup escaped through an absolute /lib symlink" >&2
+  exit 1
+fi
+
+builtin_root="${WORK_DIR}/builtin-root"
+builtin_kver="5.14.0-builtins.el9.x86_64"
+mkdir -p "${builtin_root}/lib/modules/${builtin_kver}" "${builtin_root}/boot"
+printf '%s\n' \
+  "kernel/drivers/scsi/virtio_scsi.ko" \
+  "kernel/drivers/block/virtio_blk.ko" \
+  "kernel/drivers/scsi/scsi_mod.ko" \
+  > "${builtin_root}/lib/modules/${builtin_kver}/modules.builtin"
+printf '%s\n' "existing initramfs" > "${builtin_root}/boot/initramfs-${builtin_kver}.img"
+mock_chroot_mode="existing_builtins"
+mock_chroot_kver="${builtin_kver}"
+if ! v2k_linux_bootstrap_verify_initramfs_virtio \
+    "${builtin_root}" "${builtin_kver}" \
+    "/boot/initramfs-${builtin_kver}.img" "verify_builtin_initramfs"; then
+  echo "[ERR] built-in virtio drivers were treated as missing from initramfs" >&2
+  exit 1
+fi
+
+jq_bin="$(command -v jq)"
+# shellcheck disable=SC2317
+jq() {
+  if [[ "$*" == *'reduce $modules'* ]]; then
+    return 1
+  fi
+  "${jq_bin}" "$@"
+}
+if v2k_linux_bootstrap_verify_initramfs_virtio \
+    "${builtin_root}" "${builtin_kver}" \
+    "/boot/initramfs-${builtin_kver}.img" "verify_summary_failure"; then
+  echo "[ERR] initramfs module summary failure was accepted as success" >&2
+  exit 1
+fi
+unset -f jq
+
+repair_root="${WORK_DIR}/repair-root"
+repair_kver="5.14.0-427.el9.x86_64"
+mkdir -p \
+  "${repair_root}/lib/modules/${repair_kver}/kernel/drivers/virtio" \
+  "${repair_root}/etc" \
+  "${repair_root}/boot"
+printf '%s\n' "kernel module" \
+  > "${repair_root}/lib/modules/${repair_kver}/kernel/drivers/virtio/virtio_pci.ko.xz"
+printf '%s\n' "kernel" > "${repair_root}/boot/vmlinuz-${repair_kver}"
+printf '%s\n' "original initramfs" > "${repair_root}/boot/initramfs-${repair_kver}.img"
+: > "${chroot_command_log}"
+mock_chroot_mode="repair"
+mock_chroot_kver="${repair_kver}"
+
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${repair_root}" "/dev/v2k-nbd-does-not-exist"
+
+[[ -s "${repair_root}/lib/modules/${repair_kver}/modules.dep" ]] || {
+  echo "[ERR] missing modules.dep was not repaired before dracut" >&2
+  exit 1
+}
+grep -Fx -- "staged initramfs" "${repair_root}/boot/initramfs-${repair_kver}.img" >/dev/null || {
+  echo "[ERR] validated staged initramfs was not installed" >&2
+  exit 1
+}
+grep -F -- "depmod -a '${repair_kver}'" "${chroot_command_log}" >/dev/null || {
+  echo "[ERR] depmod repair command was not executed" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+}
+grep -F -- \
+  "/usr/bin/env -u LVM_SYSTEM_DIR /bin/bash -lc dracut -f -v --no-hostonly --fstab" \
+  "${chroot_command_log}" >/dev/null || {
+    echo "[ERR] dracut did not clear host LVM state and disable host-only mode" >&2
+    cat "${chroot_command_log}" >&2
+    exit 1
+  }
+grep -F -- "--add 'lvm' --add-drivers 'virtio_pci virtio_scsi virtio_blk scsi_mod dm_mod'" \
+  "${chroot_command_log}" >/dev/null || {
+    echo "[ERR] dracut did not explicitly include the target storage stack" >&2
+    cat "${chroot_command_log}" >&2
+    exit 1
+  }
+grep -F -- "--kver '${repair_kver}' '/boot/.initramfs-" \
+  "${chroot_command_log}" >/dev/null || {
+    echo "[ERR] dracut did not build into a staged initramfs path" >&2
+    cat "${chroot_command_log}" >&2
+    exit 1
+  }
+if grep -F -- \
+    "--kver '${repair_kver}' '/boot/initramfs-${repair_kver}.img'" \
+    "${chroot_command_log}" >/dev/null; then
+  echo "[ERR] dracut overwrote the live initramfs directly" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+fi
+
+lvm_root="${WORK_DIR}/lvm-root"
+lvm_kver="5.14.0-427.28.1.el9_4.x86_64"
+mkdir -p \
+  "${lvm_root}/lib/modules/${lvm_kver}/kernel/drivers/virtio" \
+  "${lvm_root}/etc/lvm/devices" \
+  "${lvm_root}/boot"
+printf '%s\n' "kernel module" \
+  > "${lvm_root}/lib/modules/${lvm_kver}/kernel/drivers/virtio/virtio_pci.ko.xz"
+printf '%s\n' "kernel/drivers/virtio/virtio_pci.ko.xz:" \
+  > "${lvm_root}/lib/modules/${lvm_kver}/modules.dep"
+printf '%s\n' "kernel" > "${lvm_root}/boot/vmlinuz-${lvm_kver}"
+printf '%s\n' "original LVM initramfs" > "${lvm_root}/boot/initramfs-${lvm_kver}.img"
+printf '%s\n' "IDTYPE=sys_wwid IDNAME=vmware-root" \
+  > "${lvm_root}/etc/lvm/devices/system.devices"
+: > "${chroot_command_log}"
+mock_chroot_mode="lvm_repair"
+mock_chroot_kver="${lvm_kver}"
+
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${lvm_root}" "/dev/v2k-nbd-does-not-exist" 1
+
+[[ ! -e "${lvm_root}/etc/lvm/devices/system.devices" ]] || {
+  echo "[ERR] migrated Rocky LVM devices file was left active" >&2
+  exit 1
+}
+lvm_devices_backup="$(find "${lvm_root}/etc/lvm/devices" -maxdepth 1 \
+  -type f -name 'system.devices.v2k-backup*' -print -quit)"
+[[ -n "${lvm_devices_backup}" ]] || {
+  echo "[ERR] original LVM devices file was not preserved" >&2
+  exit 1
+}
+grep -F -- "IDTYPE=sys_wwid IDNAME=vmware-root" "${lvm_devices_backup}" >/dev/null || {
+  echo "[ERR] LVM devices file backup content changed" >&2
+  exit 1
+}
+grep -Fx -- "staged initramfs" "${lvm_root}/boot/initramfs-${lvm_kver}.img" >/dev/null || {
+  echo "[ERR] validated LVM initramfs was not installed" >&2
+  exit 1
+}
+grep -Fx -- 'hostonly="no"' \
+  "${lvm_root}/etc/dracut.conf.d/99-ablestack-v2k-virtio.conf" >/dev/null || {
+    echo "[ERR] portable dracut configuration was not persisted" >&2
+    exit 1
+  }
+grep -F -- \
+  "lsinitrd '/boot/.initramfs-${lvm_kver}.v2k-" \
+  "${chroot_command_log}" >/dev/null || {
+  echo "[ERR] staged initramfs LVM stack was not verified" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+}
+
+mock_chroot_mode="lvm_embedded_devices"
+if v2k_linux_bootstrap_verify_initramfs_lvm \
+    "${lvm_root}" "${lvm_kver}" \
+    "/boot/.initramfs-${lvm_kver}.v2k-embedded.img" \
+    "verify_embedded_lvm_devices"; then
+  echo "[ERR] initramfs containing stale system.devices was accepted" >&2
+  exit 1
+fi
+
+lvm_fail_root="${WORK_DIR}/lvm-fail-root"
+lvm_fail_kver="5.14.0-500.1.el9.x86_64"
+mkdir -p \
+  "${lvm_fail_root}/lib/modules/${lvm_fail_kver}/kernel/drivers/virtio" \
+  "${lvm_fail_root}/etc/lvm/devices" \
+  "${lvm_fail_root}/boot"
+printf '%s\n' "kernel module" \
+  > "${lvm_fail_root}/lib/modules/${lvm_fail_kver}/kernel/drivers/virtio/virtio_pci.ko.xz"
+printf '%s\n' "kernel/drivers/virtio/virtio_pci.ko.xz:" \
+  > "${lvm_fail_root}/lib/modules/${lvm_fail_kver}/modules.dep"
+printf '%s\n' "kernel" > "${lvm_fail_root}/boot/vmlinuz-${lvm_fail_kver}"
+printf '%s\n' "must remain unchanged" \
+  > "${lvm_fail_root}/boot/initramfs-${lvm_fail_kver}.img"
+printf '%s\n' "IDTYPE=sys_wwid IDNAME=vmware-root" \
+  > "${lvm_fail_root}/etc/lvm/devices/system.devices"
+: > "${chroot_command_log}"
+mock_chroot_mode="lvm_verify_fail"
+mock_chroot_kver="${lvm_fail_kver}"
+
+set +e
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${lvm_fail_root}" "/dev/v2k-nbd-does-not-exist" 1
+lvm_fail_rc=$?
+set -e
+[[ "${lvm_fail_rc}" -eq 82 ]] || {
+  echo "[ERR] incomplete staged LVM initramfs returned rc=${lvm_fail_rc}" >&2
+  exit 1
+}
+grep -Fx -- "must remain unchanged" \
+  "${lvm_fail_root}/boot/initramfs-${lvm_fail_kver}.img" >/dev/null || {
+    echo "[ERR] failed LVM validation damaged the existing initramfs" >&2
+    exit 1
+  }
+grep -F -- "IDTYPE=sys_wwid IDNAME=vmware-root" \
+  "${lvm_fail_root}/etc/lvm/devices/system.devices" >/dev/null || {
+    echo "[ERR] failed LVM validation did not restore system.devices" >&2
+    exit 1
+  }
+
+invalid_root="${WORK_DIR}/invalid-root"
+invalid_kver="5.14.0-500.el9.x86_64"
+mkdir -p \
+  "${invalid_root}/lib/modules/${invalid_kver}" \
+  "${invalid_root}/etc" \
+  "${invalid_root}/boot"
+printf '%s\n' "kernel" > "${invalid_root}/boot/vmlinuz-${invalid_kver}"
+printf '%s\n' "must remain unchanged" > "${invalid_root}/boot/initramfs-${invalid_kver}.img"
+: > "${chroot_command_log}"
+mock_chroot_mode="missing_payload"
+mock_chroot_kver="${invalid_kver}"
+
+set +e
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${invalid_root}" "/dev/v2k-nbd-does-not-exist"
+invalid_rc=$?
+set -e
+[[ "${invalid_rc}" -eq 82 ]] || {
+  echo "[ERR] incomplete module payload returned unexpected rc=${invalid_rc}" >&2
+  exit 1
+}
+grep -Fx -- "must remain unchanged" "${invalid_root}/boot/initramfs-${invalid_kver}.img" >/dev/null || {
+  echo "[ERR] invalid module tree damaged the existing initramfs" >&2
+  exit 1
+}
+if grep -F -- "dracut -f" "${chroot_command_log}" >/dev/null; then
+  echo "[ERR] dracut ran despite an incomplete kernel module payload" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+fi
+
+unset -f findmnt mount cp chroot
+
+# Consumed dynamically by the sourced engine.
+# shellcheck disable=SC2034
+V2K_BOOTSTRAP_LOCK_FD=10
+lock_probe_output=""
+lock_probe_rc=0
+eval "exec 10>${WORK_DIR}/bootstrap.lock"
+v2k_linux_bootstrap_run_capture lock_probe_output lock_probe_rc -- \
+  bash -c 'if [[ -e /proc/self/fd/10 ]]; then echo leaked; exit 1; fi; echo clean'
+[[ "${lock_probe_rc}" -eq 0 && "${lock_probe_output}" == "clean" ]] || {
+  echo "[ERR] bootstrap lock FD leaked into a child command: rc=${lock_probe_rc} out=${lock_probe_output}" >&2
+  exit 1
+}
+[[ -e /proc/$$/fd/10 ]] || {
+  echo "[ERR] bootstrap lock FD was closed in the parent shell" >&2
+  exit 1
+}
+eval "exec 10>&-"
+# shellcheck disable=SC2034
+V2K_BOOTSTRAP_LOCK_FD=""
+
+lvm_report='{
+  "report": [
+    {
+      "vg": [
+        {"vg_name": " rl "},
+        {"vg_name": "data"},
+        {"vg_name": "rl"}
+      ]
+    }
+  ]
+}'
+lvm_vgs="$(printf '%s' "${lvm_report}" | v2k_linux_bootstrap_lvm_vg_names_from_report)"
+[[ "${lvm_vgs}" == $'data\nrl' ]] || {
+  echo "[ERR] structured LVM VG report was not normalized: ${lvm_vgs}" >&2
+  exit 1
+}
+if printf '%s' "File descriptor 10 leaked ${lvm_report}" \
+    | v2k_linux_bootstrap_lvm_vg_names_from_report >/dev/null 2>&1; then
+  echo "[ERR] contaminated LVM output was accepted as a structured report" >&2
+  exit 1
+fi
+
 set +e
 v2k_linux_bootstrap_mount_robust \
   "/dev/v2k-device-does-not-exist" "${WORK_DIR}/mnt" "ro"

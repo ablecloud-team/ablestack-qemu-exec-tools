@@ -407,8 +407,8 @@ Options:
   --vlan <id>                               Default: unset
   --winpe-bootstrap                         Default: on for Windows guests, auto-skip for non-Windows
   --no-winpe-bootstrap
-  --winpe-iso <path>                        Default: /usr/share/ablestack/v2k/winpe.iso
-  --virtio-iso <path>                       Default: /usr/share/virtio-win/virtio-win.iso
+  --winpe-iso <path>                        Default: RPM metadata/link auto-resolution
+  --virtio-iso <path>                       Default: installed VirtIO ISO auto-resolution
   --winpe-timeout <SEC>                     Default: 600
   --linux-bootstrap                         Default: auto for Linux guests
   --no-linux-bootstrap

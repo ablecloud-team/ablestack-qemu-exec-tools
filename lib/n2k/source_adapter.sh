@@ -1509,6 +1509,46 @@ n2k_source_v4_changed_region_pairs_from_indexes() {
         ]'
 }
 
+n2k_source_changed_regions_next_offset_state() {
+  local current_offset="${1:-0}" next_offset="${2:-}"
+
+  [[ "${current_offset}" =~ ^[0-9]+$ ]] || return 2
+  if [[ -z "${next_offset}" || "${next_offset}" == "null" || "${next_offset}" == "0" ]]; then
+    printf 'complete'
+    return 0
+  fi
+  [[ "${next_offset}" =~ ^[0-9]+$ ]] || return 2
+  [[ "${next_offset}" -gt "${current_offset}" ]] || return 2
+  printf 'next:%s' "${next_offset}"
+}
+
+n2k_source_changed_regions_validate_payload() {
+  local regions="$1" capacity_bytes="${2:-null}"
+
+  jq -e --argjson capacity_bytes "${capacity_bytes:-null}" '
+    type == "array"
+    and all(.[];
+      ((.offset | type) == "number")
+      and ((.length | type) == "number")
+      and ((.offset | floor) == .offset)
+      and ((.length | floor) == .length)
+      and (.offset >= 0)
+      and (.length > 0)
+      and ((.offset + .length) > .offset)
+      and (
+        ($capacity_bytes == null)
+        or (
+          ($capacity_bytes | type) == "number"
+          and $capacity_bytes > 0
+          and (.offset + .length) <= $capacity_bytes
+        )
+      )
+      and (((.type // "regular") | tostring | ascii_downcase)
+        | IN("regular","zero","zeros","zeroed","hole"))
+    )
+  ' <<<"${regions}" >/dev/null
+}
+
 n2k_source_v4_compute_changed_regions_for_pair() {
   local pc="$1" username="$2" password="$3" insecure="$4"
   local current_ref_json="$5" reference_ref_json="${6:-null}" revision="${7:-}" max_pages="${8:-256}" block_size="${9:-32768}"
@@ -1516,7 +1556,7 @@ n2k_source_v4_compute_changed_regions_for_pair() {
   local discover_json pe_ip jwt jwt_revision compute_revision compute_path
   local discover_error_file discover_error
   local start_offset=0 page_count=0 body response="" http_code="" api_error="" response_json regions="[]"
-  local file_size="null" next_offset="" region_count bytes_total
+  local file_size="null" page_file_size="null" next_offset="" next_state="" region_count bytes_total
 
   recovery_point_ext_id="$(jq -r '.recoveryPointExtId // empty' <<<"${current_ref_json}")"
   vm_recovery_point_ext_id="$(jq -r '.vmRecoveryPointExtId // empty' <<<"${current_ref_json}")"
@@ -1593,11 +1633,33 @@ n2k_source_v4_compute_changed_regions_for_pair() {
       return 0
     fi
 
-    file_size="$(printf '%s' "${response_json}" | jq -r '
+    page_file_size="$(printf '%s' "${response_json}" | jq -r '
       ((.metadata.extraInfo // .metadata.extra_info // [])
         | map(select((.name // "") == "fileSize"))
         | .[0].value // null)
     ')"
+    if [[ "${page_file_size}" != "null" && -n "${page_file_size}" ]]; then
+      if [[ ! "${page_file_size}" =~ ^[0-9]+$ || "${page_file_size}" -le 0 ]]; then
+        jq -nc \
+          --arg status "invalid_file_size" \
+          --arg file_size "${page_file_size}" \
+          --argjson page_count "$((page_count + 1))" \
+          --argjson current_ref "${current_ref_json}" \
+          '{ok:false,status:$status,file_size:$file_size,page_count:$page_count,current_ref:$current_ref,response:null}'
+        return 0
+      fi
+      if [[ "${file_size}" != "null" && "${file_size}" != "${page_file_size}" ]]; then
+        jq -nc \
+          --arg status "file_size_changed" \
+          --arg previous_file_size "${file_size}" \
+          --arg file_size "${page_file_size}" \
+          --argjson page_count "$((page_count + 1))" \
+          --argjson current_ref "${current_ref_json}" \
+          '{ok:false,status:$status,previous_file_size:$previous_file_size,file_size:$file_size,page_count:$page_count,current_ref:$current_ref,response:null}'
+        return 0
+      fi
+      file_size="${page_file_size}"
+    fi
     regions="$(jq -cs '
       def normalize_region:
         {
@@ -1614,12 +1676,18 @@ n2k_source_v4_compute_changed_regions_for_pair() {
     ')"
     page_count="$((page_count + 1))"
 
-    [[ -n "${next_offset}" ]] || break
-    [[ "${next_offset}" =~ ^[0-9]+$ ]] || break
-    [[ "${next_offset}" -gt 0 ]] || break
-    if [[ "${next_offset}" -le "${start_offset}" ]]; then
-      break
+    if ! next_state="$(n2k_source_changed_regions_next_offset_state "${start_offset}" "${next_offset}")"; then
+      jq -nc \
+        --arg status "invalid_pagination" \
+        --arg next_offset "${next_offset}" \
+        --argjson start_offset "${start_offset}" \
+        --argjson page_count "${page_count}" \
+        --argjson current_ref "${current_ref_json}" \
+        --argjson reference_ref "${reference_ref_json:-null}" \
+        '{ok:false,status:$status,start_offset:$start_offset,next_offset:$next_offset,page_count:$page_count,current_ref:$current_ref,reference_ref:$reference_ref,response:null}'
+      return 0
     fi
+    [[ "${next_state}" == "complete" ]] && break
     if [[ "${page_count}" -ge "${max_pages}" ]]; then
       jq -nc \
         --arg status "pagination_limit" \
@@ -1631,8 +1699,19 @@ n2k_source_v4_compute_changed_regions_for_pair() {
         '{ok:false,status:$status,pe_ip:$pe_ip,compute_path:$compute_path,page_count:$page_count,current_ref:$current_ref,reference_ref:$reference_ref,response:null}'
       return 0
     fi
-    start_offset="${next_offset}"
+    start_offset="${next_state#next:}"
   done
+
+  if ! n2k_source_changed_regions_validate_payload "${regions}" "${file_size}"; then
+    jq -nc \
+      --arg status "invalid_regions" \
+      --argjson file_size "${file_size}" \
+      --argjson page_count "${page_count}" \
+      --argjson current_ref "${current_ref_json}" \
+      --argjson reference_ref "${reference_ref_json:-null}" \
+      '{ok:false,status:$status,file_size:$file_size,page_count:$page_count,current_ref:$current_ref,reference_ref:$reference_ref,response:null}'
+    return 0
+  fi
 
   region_count="$(printf '%s' "${regions}" | jq -r 'length')"
   bytes_total="$(printf '%s' "${regions}" | jq -r 'map(.length) | add // 0')"
@@ -1660,8 +1739,10 @@ n2k_source_v4_compute_changed_regions_for_pair() {
       compute_revision:$compute_revision,
       compute_path:$compute_path,
       file_size:$file_size,
-	      page_count:$page_count,
-	      region_count:$region_count,
+		      page_count:$page_count,
+		      complete:true,
+		      pagination:{complete:true,pages:$page_count,terminal:"end"},
+		      region_count:$region_count,
 	      bytes_total:$bytes_total,
 	      disk_recovery_point_ext_id:($current_ref.diskRecoveryPointExtId // ""),
 	      regions:($regions[0] // [])
@@ -1672,12 +1753,13 @@ n2k_source_v4_collect_changed_regions_from_indexes() {
   local pc="$1" username="$2" password="$3" insecure="$4"
   local current_index_json="$5" reference_index_json="${6:-null}" manifest="$7"
   local current_recovery_point_id="${8:-}" reference_recovery_point_id="${9:-}" revision="${10:-}" max_pages="${11:-256}" block_size="${12:-32768}"
-  local pairs_json pair_count idx pair disk_key capacity_bytes result
-  local disk_id regions regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
+  local pairs_json pair_count expected_disk_count idx pair disk_key capacity_bytes result
+  local disk_id regions file_size pe_ip compute_path regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
   local total_regions=0 total_bytes=0 mapped_count=0
 
   pairs_json="$(n2k_source_v4_changed_region_pairs_from_indexes "${current_index_json}" "${reference_index_json}")"
   pair_count="$(printf '%s' "${pairs_json}" | jq -r 'length')"
+  expected_disk_count="$(jq -r '.disks | length' "${manifest}")"
   if [[ "${pair_count}" -eq 0 ]]; then
     jq -nc \
       --arg current_recovery_point_id "${current_recovery_point_id}" \
@@ -1724,21 +1806,33 @@ n2k_source_v4_collect_changed_regions_from_indexes() {
       continue
     fi
 
-	    regions="$(printf '%s' "${result}" | jq -c '.regions // []')"
-	    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
+		    regions="$(printf '%s' "${result}" | jq -c '.regions // []')"
+		    if ! n2k_source_changed_regions_validate_payload "${regions}" "${capacity_bytes}"; then
+		      errors="$(jq -cs '.[0] + [.[1]]' \
+		        <(printf '%s\n' "${errors}") \
+		        <(jq -nc \
+		          --arg status "regions_exceed_manifest_capacity" \
+		          --arg disk_key "${disk_key}" \
+		          --arg disk_id "${disk_id}" \
+		          --argjson capacity_bytes "${capacity_bytes}" \
+		          '{ok:false,status:$status,disk_key:$disk_key,disk_id:$disk_id,capacity_bytes:$capacity_bytes}'))"
+		      idx="$((idx + 1))"
+		      continue
+		    fi
+		    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
 	      <(printf '%s\n' "${regions_by_disk}") <(printf '%s\n' "${regions}"))"
 	    file_size="$(printf '%s' "${result}" | jq -r '.file_size // null')"
 	    pe_ip="$(printf '%s' "${result}" | jq -r '.pe_ip // ""')"
 	    compute_path="$(printf '%s' "${result}" | jq -r '.compute_path // ""')"
-	    mappings="$(jq -c \
+		    mappings="$(jq -c \
 	      --arg disk_id "${disk_id}" \
 	      --arg disk_key "${disk_key}" \
 	      --argjson pair "${pair}" \
 	      --argjson file_size "${file_size}" \
 	      --arg pe_ip "${pe_ip}" \
 	      --arg compute_path "${compute_path}" \
-	      '. + {($disk_id):{disk_key:$disk_key,current_ref:$pair.current_ref,reference_ref:$pair.reference_ref,file_size:$file_size,pe_ip:$pe_ip,compute_path:$compute_path}}' \
-	      <<<"${mappings}")"
+		      '. + {($disk_id):{disk_key:$disk_key,current_ref:$pair.current_ref,reference_ref:$pair.reference_ref,file_size:$file_size,pe_ip:$pe_ip,compute_path:$compute_path,complete:true}}' \
+		      <<<"${mappings}")"
     total_regions="$((total_regions + $(printf '%s' "${result}" | jq -r '.region_count // 0')))"
     total_bytes="$((total_bytes + $(printf '%s' "${result}" | jq -r '.bytes_total // 0')))"
     mapped_count="$((mapped_count + 1))"
@@ -1746,9 +1840,11 @@ n2k_source_v4_collect_changed_regions_from_indexes() {
   done
 
 	  jq -nc \
-	    --arg current_recovery_point_id "${current_recovery_point_id}" \
-	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
-	    --argjson mapped_count "${mapped_count}" \
+		    --arg current_recovery_point_id "${current_recovery_point_id}" \
+		    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+		    --argjson expected_disk_count "${expected_disk_count}" \
+		    --argjson pair_count "${pair_count}" \
+		    --argjson mapped_count "${mapped_count}" \
 	    --argjson total_regions "${total_regions}" \
 	    --argjson total_bytes "${total_bytes}" \
 	    --slurpfile disks <(printf '%s\n' "${regions_by_disk}") \
@@ -1758,8 +1854,23 @@ n2k_source_v4_collect_changed_regions_from_indexes() {
 	    '{
 	      schema:"ablestack-n2k/changed-regions-v1",
 	      source_api:"v4",
-	      ok:((($errors[0] // []) | length) == 0 and $mapped_count > 0),
-	      current_recovery_point_id:$current_recovery_point_id,
+		      ok:(
+		        (($errors[0] // []) | length) == 0
+		        and (($skipped[0] // []) | length) == 0
+		        and $expected_disk_count > 0
+		        and $pair_count == $expected_disk_count
+		        and $mapped_count == $expected_disk_count
+		      ),
+		      complete:(
+		        (($errors[0] // []) | length) == 0
+		        and (($skipped[0] // []) | length) == 0
+		        and $expected_disk_count > 0
+		        and $pair_count == $expected_disk_count
+		        and $mapped_count == $expected_disk_count
+		      ),
+		      expected_disk_count:$expected_disk_count,
+		      pair_count:$pair_count,
+		      current_recovery_point_id:$current_recovery_point_id,
 	      base_recovery_point_id:$reference_recovery_point_id,
 	      reference_recovery_point_id:$reference_recovery_point_id,
 	      disk_count:$mapped_count,
@@ -1835,7 +1946,7 @@ n2k_source_legacy_collect_changed_regions_for_pair() {
   local disk_key="$5" snapshot_file_path="$6" reference_snapshot_file_path="${7:-}"
   local current_recovery_point_id="${8:-}" reference_recovery_point_id="${9:-}" max_pages="${10:-256}"
   local start_offset=0 page_count=0 body response="" http_code="" api_error="" response_json regions="[]"
-  local file_size="null" next_offset="" region_count bytes_total
+  local file_size="null" page_file_size="null" next_offset="" next_state="" region_count bytes_total
 
   while true; do
     body="$(n2k_source_legacy_changed_regions_body "${snapshot_file_path}" "${reference_snapshot_file_path}" "${start_offset}")"
@@ -1866,17 +1977,45 @@ n2k_source_legacy_collect_changed_regions_for_pair() {
       return 0
     fi
 
-    file_size="$(printf '%s' "${response_json}" | jq -r '.file_size // null')"
+    page_file_size="$(printf '%s' "${response_json}" | jq -r '.file_size // null')"
+    if [[ "${page_file_size}" != "null" && -n "${page_file_size}" ]]; then
+      if [[ ! "${page_file_size}" =~ ^[0-9]+$ || "${page_file_size}" -le 0 ]]; then
+        jq -nc \
+          --arg disk_key "${disk_key}" \
+          --arg status "invalid_file_size" \
+          --arg file_size "${page_file_size}" \
+          --argjson page_count "$((page_count + 1))" \
+          '{ok:false,disk_key:$disk_key,status:$status,file_size:$file_size,page_count:$page_count,response:null}'
+        return 0
+      fi
+      if [[ "${file_size}" != "null" && "${file_size}" != "${page_file_size}" ]]; then
+        jq -nc \
+          --arg disk_key "${disk_key}" \
+          --arg status "file_size_changed" \
+          --arg previous_file_size "${file_size}" \
+          --arg file_size "${page_file_size}" \
+          --argjson page_count "$((page_count + 1))" \
+          '{ok:false,disk_key:$disk_key,status:$status,previous_file_size:$previous_file_size,file_size:$file_size,page_count:$page_count,response:null}'
+        return 0
+      fi
+      file_size="${page_file_size}"
+    fi
     regions="$(jq -cs '.[0] + ((.[1].region_list // .[1].regions // .[1].changed_regions // []) | map({offset:(.offset // .start // .start_offset), length:(.length // .len // .size), type:((.type // .region_type // "regular") | tostring | ascii_downcase)}))' \
       <(printf '%s\n' "${regions}") <(printf '%s\n' "${response_json}"))"
     next_offset="$(printf '%s' "${response_json}" | jq -r '.next_offset // empty')"
     page_count="$((page_count + 1))"
 
-    [[ -n "${next_offset}" ]] || break
-    [[ "${next_offset}" =~ ^[0-9]+$ ]] || break
-    if [[ "${next_offset}" -le "${start_offset}" ]]; then
-      break
+    if ! next_state="$(n2k_source_changed_regions_next_offset_state "${start_offset}" "${next_offset}")"; then
+      jq -nc \
+        --arg disk_key "${disk_key}" \
+        --arg status "invalid_pagination" \
+        --arg next_offset "${next_offset}" \
+        --argjson start_offset "${start_offset}" \
+        --argjson page_count "${page_count}" \
+        '{ok:false,disk_key:$disk_key,status:$status,start_offset:$start_offset,next_offset:$next_offset,page_count:$page_count,response:null}'
+      return 0
     fi
+    [[ "${next_state}" == "complete" ]] && break
     if [[ "${page_count}" -ge "${max_pages}" ]]; then
       jq -nc \
         --arg disk_key "${disk_key}" \
@@ -1886,8 +2025,18 @@ n2k_source_legacy_collect_changed_regions_for_pair() {
         '{ok:false,disk_key:$disk_key,status:"pagination_limit",snapshot_file_path:$snapshot_file_path,reference_snapshot_file_path:$reference_snapshot_file_path,page_count:$page_count,response:null}'
       return 0
     fi
-    start_offset="${next_offset}"
+    start_offset="${next_state#next:}"
   done
+
+  if ! n2k_source_changed_regions_validate_payload "${regions}" "${file_size}"; then
+    jq -nc \
+      --arg disk_key "${disk_key}" \
+      --arg status "invalid_regions" \
+      --argjson file_size "${file_size}" \
+      --argjson page_count "${page_count}" \
+      '{ok:false,disk_key:$disk_key,status:$status,file_size:$file_size,page_count:$page_count,response:null}'
+    return 0
+  fi
 
   region_count="$(printf '%s' "${regions}" | jq -r 'length')"
   bytes_total="$(printf '%s' "${regions}" | jq -r 'map(.length) | add // 0')"
@@ -1912,9 +2061,11 @@ n2k_source_legacy_collect_changed_regions_for_pair() {
       reference_recovery_point_id:$reference_recovery_point_id,
       snapshot_file_path:$snapshot_file_path,
       reference_snapshot_file_path:(if $reference_snapshot_file_path == "" then null else $reference_snapshot_file_path end),
-	      file_size:$file_size,
-	      page_count:$page_count,
-	      region_count:$region_count,
+		      file_size:$file_size,
+		      page_count:$page_count,
+		      complete:true,
+		      pagination:{complete:true,pages:$page_count,terminal:"end"},
+		      region_count:$region_count,
 	      bytes_total:$bytes_total,
 	      disks:{($disk_key):($regions[0] // [])}
 	    }'
@@ -1958,12 +2109,13 @@ n2k_source_v3_collect_changed_regions_from_indexes() {
   local pc="$1" username="$2" password="$3" insecure="$4"
   local current_index_json="$5" reference_index_json="$6" manifest="$7"
   local current_recovery_point_id="${8:-}" reference_recovery_point_id="${9:-}" max_pages="${10:-256}"
-  local pairs_json pair_count idx pair vdisk_uuid snapshot_file_path reference_snapshot_file_path result
-  local file_size disk_id regions regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
+  local pairs_json pair_count expected_disk_count idx pair vdisk_uuid snapshot_file_path reference_snapshot_file_path result
+  local file_size manifest_capacity disk_id regions regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
   local total_regions=0 total_bytes=0 mapped_count=0
 
   pairs_json="$(n2k_source_legacy_changed_region_candidate_pairs_from_indexes "${current_index_json}" "${reference_index_json}" 200)"
   pair_count="$(printf '%s' "${pairs_json}" | jq -r 'length')"
+  expected_disk_count="$(jq -r '.disks | length' "${manifest}")"
   if [[ "${pair_count}" -eq 0 ]]; then
     jq -nc \
       --arg current_recovery_point_id "${current_recovery_point_id}" \
@@ -2011,8 +2163,25 @@ n2k_source_v3_collect_changed_regions_from_indexes() {
       continue
     fi
 
-	    regions="$(printf '%s' "${result}" | jq -c --arg vdisk_uuid "${vdisk_uuid}" '.disks[$vdisk_uuid] // []')"
-	    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
+		    regions="$(printf '%s' "${result}" | jq -c --arg vdisk_uuid "${vdisk_uuid}" '.disks[$vdisk_uuid] // []')"
+		    manifest_capacity="$(jq -r --arg disk_id "${disk_id}" '
+		      [.disks[] | select((.disk_id // .device_key // "") == $disk_id)
+		        | (.size_bytes // .disk_size_bytes // .capacity_bytes // .size // null)]
+		      | .[0] // null
+		    ' "${manifest}")"
+		    if ! n2k_source_changed_regions_validate_payload "${regions}" "${manifest_capacity}"; then
+		      errors="$(jq -cs '.[0] + [.[1]]' \
+		        <(printf '%s\n' "${errors}") \
+		        <(jq -nc \
+		          --arg status "regions_exceed_manifest_capacity" \
+		          --arg vdisk_uuid "${vdisk_uuid}" \
+		          --arg disk_id "${disk_id}" \
+		          --argjson capacity_bytes "${manifest_capacity}" \
+		          '{ok:false,status:$status,vdisk_uuid:$vdisk_uuid,disk_id:$disk_id,capacity_bytes:$capacity_bytes}'))"
+		      idx="$((idx + 1))"
+		      continue
+		    fi
+		    regions_by_disk="$(jq -cs --arg disk_id "${disk_id}" '.[0] + {($disk_id):(.[1] // [])}' \
 	      <(printf '%s\n' "${regions_by_disk}") <(printf '%s\n' "${regions}"))"
 	    mappings="$(jq -c \
 	      --arg disk_id "${disk_id}" \
@@ -2020,29 +2189,46 @@ n2k_source_v3_collect_changed_regions_from_indexes() {
 	      --arg snapshot_file_path "${snapshot_file_path}" \
       --arg reference_snapshot_file_path "${reference_snapshot_file_path}" \
       --argjson file_size "${file_size}" \
-      '. + {($disk_id):{vdisk_uuid:$vdisk_uuid,file_size:$file_size,snapshot_file_path:$snapshot_file_path,reference_snapshot_file_path:$reference_snapshot_file_path}}' \
-      <<<"${mappings}")"
+	      '. + {($disk_id):{vdisk_uuid:$vdisk_uuid,file_size:$file_size,snapshot_file_path:$snapshot_file_path,reference_snapshot_file_path:$reference_snapshot_file_path,complete:true}}' \
+	      <<<"${mappings}")"
     total_regions="$((total_regions + $(printf '%s' "${result}" | jq -r '.region_count // 0')))"
     total_bytes="$((total_bytes + $(printf '%s' "${result}" | jq -r '.bytes_total // 0')))"
     mapped_count="$((mapped_count + 1))"
     idx="$((idx + 1))"
   done
 
-	  jq -nc \
-	    --arg current_recovery_point_id "${current_recovery_point_id}" \
-	    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
-	    --argjson mapped_count "${mapped_count}" \
+		  jq -nc \
+		    --arg current_recovery_point_id "${current_recovery_point_id}" \
+		    --arg reference_recovery_point_id "${reference_recovery_point_id}" \
+		    --argjson expected_disk_count "${expected_disk_count}" \
+		    --argjson pair_count "${pair_count}" \
+		    --argjson mapped_count "${mapped_count}" \
 	    --argjson total_regions "${total_regions}" \
 	    --argjson total_bytes "${total_bytes}" \
 	    --slurpfile disks <(printf '%s\n' "${regions_by_disk}") \
 	    --slurpfile mappings <(printf '%s\n' "${mappings}") \
 	    --slurpfile errors <(printf '%s\n' "${errors}") \
 	    --slurpfile skipped <(printf '%s\n' "${skipped}") \
-	    '{
-	      schema:"ablestack-n2k/changed-regions-v1",
-	      source_api:"v3",
-	      ok:((($errors[0] // []) | length) == 0 and $mapped_count > 0),
-	      current_recovery_point_id:$current_recovery_point_id,
+		    '{
+		      schema:"ablestack-n2k/changed-regions-v1",
+		      source_api:"v3",
+		      ok:(
+		        (($errors[0] // []) | length) == 0
+		        and (($skipped[0] // []) | length) == 0
+		        and $expected_disk_count > 0
+		        and $pair_count == $expected_disk_count
+		        and $mapped_count == $expected_disk_count
+		      ),
+		      complete:(
+		        (($errors[0] // []) | length) == 0
+		        and (($skipped[0] // []) | length) == 0
+		        and $expected_disk_count > 0
+		        and $pair_count == $expected_disk_count
+		        and $mapped_count == $expected_disk_count
+		      ),
+		      expected_disk_count:$expected_disk_count,
+		      pair_count:$pair_count,
+		      current_recovery_point_id:$current_recovery_point_id,
 	      base_recovery_point_id:$reference_recovery_point_id,
 	      reference_recovery_point_id:$reference_recovery_point_id,
 	      disk_count:$mapped_count,

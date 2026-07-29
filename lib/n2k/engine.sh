@@ -388,6 +388,26 @@ n2k_cmd_status() {
         "Mode: " + (.source.mode // "") + "\n" +
         "Target: " + (.target.storage // "") + "/" + (.target.format // "") + "\n" +
         "Disks: " + ((.disks_count // 0) | tostring) + "\n" +
+        "Disk sync:\n" +
+        (
+          (.disks // [])
+          | map(
+              "  [" + (.index | tostring) + "] " + (.disk_id // "") +
+              " base=" + ((.base_done // false) | tostring) +
+              " base_bytes=" + ((.base_bytes_written // 0) | tostring) +
+              " incr_bytes=" + ((.incr_bytes_written // 0) | tostring) +
+              " regions=" + ((.incr_regions // 0) | tostring) +
+              " last=" + (.last_sync.phase // "none") +
+              "@" + (.last_synced_at // "") +
+              (
+                if ((.last_error.reason // "") | length) > 0
+                then " error=" + .last_error.reason
+                else ""
+                end
+              )
+            )
+          | if length > 0 then join("\n") else "  (none)" end
+        ) + "\n" +
         "Workdir: " + (.workdir // "") + "\n" +
         "Last step: " + (.runtime.progress.last_step // "") + "\n" +
         "Progress: " + ((.resume.percent // 0) | tostring) + "%\n" +
@@ -892,8 +912,7 @@ n2k_run_start_background() {
   [[ "${N2K_FORCE:-0}" -eq 1 ]] && worker_cmd+=(--force)
   worker_cmd+=(run --foreground "$@")
 
-  # The runner state only records log_file as metadata; it does not read it.
-  # shellcheck disable=SC2094
+  # shellcheck disable=SC2094  # log_file is recorded as metadata, not read.
   (
     n2k_run_write_runner_state "running" "${BASHPID}" "${split}" "${log_file}" ""
     set +e
@@ -1974,6 +1993,119 @@ n2k_cmd_sync() {
   esac
 }
 n2k_cmd_verify() { n2k_not_implemented "verify"; }
+
+n2k_cutover_integrity_json() {
+  local manifest="$1"
+  local state errors targets="[]" count idx disk_id target_path target_storage target_format
+  local expected_size actual_size="" target_ok target_reason
+
+  state="$(jq -c '
+    (.runtime.selected_mode // "") as $selected_mode
+    | (
+        if ($selected_mode | IN("v4-incremental","v3-incremental","legacy-cbt")) then "incremental"
+        elif $selected_mode == "cold-export" then "cold"
+        elif $selected_mode == "manual-disk" then "manual"
+        else (.runtime.sync.mode // "manual")
+        end
+      ) as $sync_mode
+    | (($sync_mode == "manual") or ($selected_mode == "manual-disk")) as $manual
+    | {
+        sync_mode:$sync_mode,
+        selected_mode:$selected_mode,
+        manual:$manual,
+        disk_count:(.disks | length),
+        base_sync_done:(.phases.base_sync.done // false),
+        final_sync_done:(.phases.final_sync.done // false),
+        final_ready:(.runtime.sync.final_ready // false),
+        base_disks_complete:(
+          (.disks | length) > 0
+          and all(.disks[]; (.transfer.base_done // false) == true)
+        ),
+        errors:(
+          []
+          + (if (.disks | length) == 0 then ["manifest_has_no_disks"] else [] end)
+          + (if ($manual | not) and ((.phases.base_sync.done // false) | not)
+             then ["base_sync_incomplete"] else [] end)
+          + (if ($manual | not) and (
+                ((.disks | length) == 0)
+                or (all(.disks[]; (.transfer.base_done // false) == true) | not)
+             ) then ["base_disk_incomplete"] else [] end)
+          + (if $sync_mode == "incremental" and ((.phases.final_sync.done // false) | not)
+             then ["final_sync_incomplete"] else [] end)
+          + (if $sync_mode == "incremental" and ((.runtime.sync.final_ready // false) | not)
+             then ["final_sync_not_ready"] else [] end)
+        )
+      }
+  ' "${manifest}")"
+  errors="$(jq -c '.errors' <<<"${state}")"
+  count="$(jq -r '.disks | length' "${manifest}")"
+  target_storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
+  target_format="$(jq -r '.target.format // "qcow2"' "${manifest}")"
+
+  for ((idx=0; idx<count; idx++)); do
+    disk_id="$(jq -r ".disks[${idx}].disk_id // .disks[${idx}].device_key // \"disk${idx}\"" "${manifest}")"
+    target_path="$(jq -r ".disks[${idx}].transfer.target_path // \"\"" "${manifest}")"
+    expected_size="$(jq -r ".disks[${idx}].size_bytes // .disks[${idx}].disk_size_bytes // .disks[${idx}].capacity_bytes // .disks[${idx}].size // 0" "${manifest}")"
+    actual_size=""
+    target_ok=true
+    target_reason=""
+
+    if [[ -z "${target_path}" ]]; then
+      target_ok=false
+      target_reason="target_path_missing"
+    elif [[ "${target_path}" == *".n2k-stage-"* ]]; then
+      target_ok=false
+      target_reason="staging_target_not_publishable"
+    elif [[ ! "${expected_size}" =~ ^[0-9]+$ || "${expected_size}" -le 0 ]]; then
+      target_ok=false
+      target_reason="expected_size_invalid"
+    else
+      actual_size="$(n2k_storage_target_size_bytes \
+        "${target_path}" "${target_storage}" "${target_format}" 2>/dev/null || true)"
+      if [[ ! "${actual_size}" =~ ^[0-9]+$ || "${actual_size}" -lt "${expected_size}" ]]; then
+        target_ok=false
+        target_reason="target_size_incomplete"
+      fi
+    fi
+
+    targets="$(jq -c \
+      --argjson targets "${targets}" \
+      --argjson idx "${idx}" \
+      --arg disk_id "${disk_id}" \
+      --arg target_path "${target_path}" \
+      --arg expected_size "${expected_size}" \
+      --arg actual_size "${actual_size}" \
+      --argjson ok "${target_ok}" \
+      --arg reason "${target_reason}" \
+      '$targets + [{
+        disk_index:$idx,
+        disk_id:$disk_id,
+        target_path:$target_path,
+        expected_size:($expected_size | tonumber?),
+        actual_size:($actual_size | tonumber?),
+        ok:$ok,
+        reason:(if $ok then null else $reason end)
+      }]' <<<"{}")"
+    if [[ "${target_ok}" != "true" ]]; then
+      errors="$(jq -c --arg reason "${target_reason}" --argjson idx "${idx}" \
+        '. + [("disk_" + ($idx | tostring) + "_" + $reason)]' <<<"${errors}")"
+    fi
+  done
+
+  jq -nc \
+    --argjson state "${state}" \
+    --argjson targets "${targets}" \
+    --argjson errors "${errors}" \
+    '{
+      ok:(($errors | length) == 0),
+      sync_mode:$state.sync_mode,
+      selected_mode:$state.selected_mode,
+      state:$state,
+      targets:$targets,
+      errors:$errors
+    }'
+}
+
 n2k_cmd_cutover() {
   local define_only=0 apply_define=0 start_vm=0
   local rbd_access_mode=""
@@ -2056,6 +2188,20 @@ n2k_cmd_cutover() {
     n2k_cloud_target_apply_manifest_config "${N2K_MANIFEST}" "$(if [[ "${target_provider_arg_set}" -eq 1 ]]; then printf '%s' "${target_provider}"; else printf ''; fi)" "${cloud_config_json}"
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"
+
+  if [[ "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]]; then
+    local integrity_json
+    integrity_json="$(n2k_cutover_integrity_json "${N2K_MANIFEST}")"
+    if ! jq -e '.ok == true' <<<"${integrity_json}" >/dev/null; then
+      n2k_manifest_record_sync_failure \
+        "${N2K_MANIFEST}" "cutover" -1 46 "cutover_integrity_failed" "${integrity_json}" || true
+      n2k_event ERROR "cutover" "" "integrity_failed" "${integrity_json}"
+      echo "Cutover integrity validation failed; refusing to apply or start the target." >&2
+      jq -c '.errors' <<<"${integrity_json}" >&2
+      return 46
+    fi
+    n2k_event INFO "cutover" "" "integrity_verified" "${integrity_json}"
+  fi
 
   local xml_path vm cloud_result
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then

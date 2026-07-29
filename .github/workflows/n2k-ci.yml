@@ -41,6 +41,9 @@ jobs:
       - name: Shellcheck
         run: shellcheck bin/ablestack_n2k.sh lib/n2k/*.sh
 
+      - name: Manifest observability smoke
+        run: tests/n2k_manifest_observability_smoke.sh
+
       - name: JSON fixtures
         run: find tests/fixtures/n2k -name '*.json' -print0 | xargs -0 jq empty
 

@@ -255,36 +255,86 @@ n2k_source_map_from_v3_nfs_path_index() {
   printf '%s' "${source_map}"
 }
 
+n2k_transfer_cold_retryable_source_log() {
+  local log_file="$1"
+  [[ -s "${log_file}" ]] || return 1
+  grep -Eiq \
+    'Input/output error|Stale file handle|Connection (timed out|reset)|Transport endpoint|server not responding|Broken pipe|Resource temporarily unavailable' \
+    "${log_file}"
+}
+
+n2k_transfer_cold_record_failure() {
+  local manifest="$1" idx="$2" disk_id="$3" code="$4" reason="$5" details_json="${6:-}"
+  [[ -n "${details_json}" ]] || details_json='{}'
+  n2k_manifest_record_sync_failure \
+    "${manifest}" "base" "${idx}" "${code}" "${reason}" "${details_json}" || true
+  n2k_event ERROR "sync.base" "${disk_id}" "cold_export_disk_failed" \
+    "$(jq -nc \
+      --argjson code "${code}" \
+      --arg reason "${reason}" \
+      --argjson details "${details_json}" \
+      '{code:$code,reason:$reason,details:$details}')"
+}
+
 n2k_transfer_cold_base_all() {
   local manifest="$1" source_map_json="$2"
-  local count idx
+  local count idx base_rc=0
   count="$(jq -r '.disks | length' "${manifest}")"
   [[ "${count}" -gt 0 ]] || {
     echo "Manifest has no disks. Run init with inventory first." >&2
     return 2
   }
 
-  trap 'n2k_source_cleanup_nfs_mounts' RETURN
   for ((idx=0; idx<count; idx++)); do
-    n2k_transfer_cold_base_one "${manifest}" "${source_map_json}" "${idx}"
+    base_rc=0
+    n2k_transfer_cold_base_one "${manifest}" "${source_map_json}" "${idx}" || base_rc=$?
+    if [[ "${base_rc}" -ne 0 ]]; then
+      n2k_source_cleanup_nfs_mounts
+      return "${base_rc}"
+    fi
   done
 
   if [[ "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
     n2k_manifest_phase_done "${manifest}" "base_sync"
   fi
   n2k_source_cleanup_nfs_mounts
-  trap - RETURN
 }
 
 n2k_transfer_cold_base_one() {
   local manifest="$1" source_map_json="$2" idx="$3"
-  local disk_id source_path target_path target_format target_storage bytes_written
+  local disk_id source_path target_path target_format target_storage bytes_written non_rbd_copy_rc=0
+  local base_done expected_size existing_size
 
   disk_id="$(jq -r ".disks[${idx}].disk_id" "${manifest}")"
   source_path="$(n2k_source_for_disk "${source_map_json}" "${manifest}" "${idx}")"
   target_path="$(jq -r ".disks[${idx}].transfer.target_path" "${manifest}")"
   target_format="$(jq -r '.target.format // "qcow2"' "${manifest}")"
   target_storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
+  base_done="$(jq -r ".disks[${idx}].transfer.base_done // false" "${manifest}")"
+
+  if [[ "${base_done}" == "true" && "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
+    expected_size="$(jq -r ".disks[${idx}].size_bytes // .disks[${idx}].disk_size_bytes // .disks[${idx}].capacity_bytes // .disks[${idx}].size // 0" "${manifest}")"
+    existing_size="$(n2k_storage_target_size_bytes \
+      "${target_path}" "${target_storage}" "${target_format}" 2>/dev/null || true)"
+    if [[ "${expected_size}" =~ ^[0-9]+$ && "${expected_size}" -gt 0 \
+        && "${existing_size}" =~ ^[0-9]+$ && "${existing_size}" -ge "${expected_size}" ]]; then
+      n2k_event INFO "sync.base" "${disk_id}" "resume_disk_already_complete" \
+        "$(jq -nc \
+          --arg target "${target_path}" \
+          --argjson expected_size "${expected_size}" \
+          --argjson actual_size "${existing_size}" \
+          '{target:$target,expected_size:$expected_size,actual_size:$actual_size}')"
+      return 0
+    fi
+    n2k_transfer_cold_record_failure \
+      "${manifest}" "${idx}" "${disk_id}" 71 "completed_base_target_invalid" \
+      "$(jq -nc \
+        --arg target "${target_path}" \
+        --arg expected_size "${expected_size}" \
+        --arg actual_size "${existing_size}" \
+        '{target:$target,expected_size:($expected_size | tonumber?),actual_size:($actual_size | tonumber?)}')"
+    return 71
+  fi
 
   [[ -n "${source_path}" ]] || {
     echo "Missing cold-export source path for disk: ${disk_id}" >&2
@@ -310,9 +360,125 @@ n2k_transfer_cold_base_one() {
     return 0
   fi
 
-  n2k_storage_copy_base "${source_path}" "${target_path}" "${target_storage}" "${target_format}"
+  if [[ "${target_storage}" == "rbd" ]]; then
+    local source_size run_id retry_limit retry_delay_base max_attempts attempt retry_delay
+    local staging_path="" attempt_log="" copy_rc=0 publish_rc=0 actual_size="" retryable=0
+    local logdir="${N2K_WORKDIR:-$(dirname "${manifest}")}/logs"
 
-  bytes_written="$(n2k_file_size_bytes "${source_path}")"
+    command -v rbd >/dev/null 2>&1 || {
+      n2k_transfer_cold_record_failure \
+        "${manifest}" "${idx}" "${disk_id}" 72 "rbd_staging_unavailable" \
+        "$(jq -nc --arg target "${target_path}" '{target:$target,note:"rbd CLI is required for staging and atomic publish"}')"
+      return 72
+    }
+    if n2k_storage_rbd_exists "${target_path}"; then
+      n2k_transfer_cold_record_failure \
+        "${manifest}" "${idx}" "${disk_id}" 73 "rbd_target_already_exists" \
+        "$(jq -nc --arg target "${target_path}" '{target:$target,note:"refusing to overwrite a canonical RBD image"}')"
+      return 73
+    fi
+
+    source_size="$(n2k_storage_source_virtual_size_bytes "${source_path}")"
+    [[ "${source_size}" =~ ^[0-9]+$ && "${source_size}" -gt 0 ]] || {
+      n2k_transfer_cold_record_failure \
+        "${manifest}" "${idx}" "${disk_id}" 74 "source_size_invalid" \
+        "$(jq -nc --arg source "${source_path}" --arg size "${source_size}" '{source:$source,size:$size}')"
+      return 74
+    }
+    retry_limit="${N2K_BASE_COPY_RETRIES:-2}"
+    retry_delay_base="${N2K_BASE_RETRY_DELAY_SECONDS:-5}"
+    [[ "${retry_limit}" =~ ^[0-9]+$ ]] || retry_limit=2
+    [[ "${retry_delay_base}" =~ ^[0-9]+$ ]] || retry_delay_base=5
+    max_attempts=$((retry_limit + 1))
+    run_id="${N2K_RUN_ID:-$(jq -r '.run.id // "unknown"' "${manifest}")}"
+    mkdir -p "${logdir}"
+
+    for ((attempt=1; attempt<=max_attempts; attempt++)); do
+      staging_path="$(n2k_storage_rbd_staging_path "${target_path}" "${run_id}" "${idx}" "${attempt}")"
+      n2k_storage_rbd_remove_staging "${staging_path}" >/dev/null 2>&1 || true
+      attempt_log="${logdir}/base_${idx}_attempt_${attempt}.log"
+      : > "${attempt_log}"
+      n2k_event INFO "sync.base" "${disk_id}" "rbd_staging_copy_start" \
+        "$(jq -nc \
+          --arg target "${target_path}" \
+          --arg staging "${staging_path}" \
+          --arg log "${attempt_log}" \
+          --argjson attempt "${attempt}" \
+          --argjson max_attempts "${max_attempts}" \
+          '{target:$target,staging:$staging,log:$log,attempt:$attempt,max_attempts:$max_attempts}')"
+
+      copy_rc=0
+      n2k_storage_copy_base \
+        "${source_path}" "${staging_path}" "${target_storage}" "${target_format}" \
+        >"${attempt_log}" 2>&1 || copy_rc=$?
+      cat "${attempt_log}" >&2
+
+      if [[ "${copy_rc}" -eq 0 ]]; then
+        actual_size="$(n2k_storage_rbd_current_size_bytes "${staging_path}" || true)"
+        if [[ ! "${actual_size}" =~ ^[0-9]+$ || "${actual_size}" -lt "${source_size}" ]]; then
+          copy_rc=75
+          printf 'RBD staging size mismatch: source=%s staging=%s\n' \
+            "${source_size}" "${actual_size:-unknown}" >>"${attempt_log}"
+        fi
+      fi
+
+      if [[ "${copy_rc}" -eq 0 ]]; then
+        publish_rc=0
+        n2k_storage_rbd_publish_staging "${staging_path}" "${target_path}" || publish_rc=$?
+        if [[ "${publish_rc}" -ne 0 ]]; then
+          n2k_transfer_cold_record_failure \
+            "${manifest}" "${idx}" "${disk_id}" 76 "rbd_staging_publish_failed" \
+            "$(jq -nc \
+              --arg target "${target_path}" \
+              --arg staging "${staging_path}" \
+              --argjson publish_rc "${publish_rc}" \
+              '{target:$target,staging:$staging,publish_rc:$publish_rc,note:"completed staging image was retained for operator recovery"}')"
+          return 76
+        fi
+        staging_path=""
+        n2k_event INFO "sync.base" "${disk_id}" "rbd_staging_published" \
+          "$(jq -nc --arg target "${target_path}" --argjson attempt "${attempt}" '{target:$target,attempt:$attempt,atomic:true}')"
+        break
+      fi
+
+      retryable=0
+      n2k_transfer_cold_retryable_source_log "${attempt_log}" && retryable=1
+      n2k_storage_rbd_remove_staging "${staging_path}" >/dev/null 2>&1 || true
+      staging_path=""
+      if [[ "${retryable}" -eq 1 && "${attempt}" -lt "${max_attempts}" ]]; then
+        retry_delay=$((retry_delay_base * attempt))
+        n2k_event WARN "sync.base" "${disk_id}" "source_copy_retry_scheduled" \
+          "$(jq -nc \
+            --argjson attempt "${attempt}" \
+            --argjson next_attempt "$((attempt + 1))" \
+            --argjson delay_seconds "${retry_delay}" \
+            '{attempt:$attempt,next_attempt:$next_attempt,delay_seconds:$delay_seconds,reason:"transient_nfs_source_error"}')"
+        sleep "${retry_delay}"
+        continue
+      fi
+
+      n2k_transfer_cold_record_failure \
+        "${manifest}" "${idx}" "${disk_id}" "${copy_rc}" "rbd_staging_copy_failed" \
+        "$(jq -nc \
+          --arg target "${target_path}" \
+          --arg log "${attempt_log}" \
+          --argjson attempt "${attempt}" \
+          --argjson retryable "${retryable}" \
+          '{target:$target,log:$log,attempt:$attempt,retryable:($retryable==1)}')"
+      return "${copy_rc}"
+    done
+    bytes_written="${source_size}"
+  else
+    n2k_storage_copy_base "${source_path}" "${target_path}" "${target_storage}" "${target_format}" || non_rbd_copy_rc=$?
+    if [[ "${non_rbd_copy_rc}" -ne 0 ]]; then
+      n2k_transfer_cold_record_failure \
+        "${manifest}" "${idx}" "${disk_id}" "${non_rbd_copy_rc}" "base_copy_failed" \
+        "$(jq -nc --arg source "${source_path}" --arg target "${target_path}" '{source:$source,target:$target}')"
+      return "${non_rbd_copy_rc}"
+    fi
+    bytes_written="$(n2k_file_size_bytes "${source_path}")"
+  fi
+
   n2k_manifest_set_cold_source "${manifest}" "${idx}" "${source_path}"
   n2k_manifest_mark_base_done "${manifest}" "${idx}" "${bytes_written}"
   n2k_event INFO "sync.base" "${disk_id}" "cold_export_disk_done" \

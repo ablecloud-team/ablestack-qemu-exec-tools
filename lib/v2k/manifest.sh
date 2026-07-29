@@ -36,6 +36,11 @@ v2k_manifest_path() {
   echo "${V2K_MANIFEST:?Manifest path not set}"
 }
 
+v2k_manifest_now() {
+  date +"%Y-%m-%dT%H:%M:%S%z" \
+    | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+}
+
 # ---------------------------------------------------------------------
 # Runtime helpers (split-run/state machine)
 # [추가: 런타임(split/state machine) 헬퍼]
@@ -44,6 +49,23 @@ v2k_manifest_path() {
 v2k_manifest_runtime_set() {
   # Usage: v2k_manifest_runtime_set <manifest> <jq_path> <json_value>
   local manifest="$1" path="$2" value_json="${3:-null}"
+
+  # Legacy orchestrator paths used to write only runtime.split, leaving the
+  # authoritative phases marker and timestamps inconsistent. Route those
+  # exact completion writes through the atomic dual-view helper.
+  if [[ "${value_json}" == "true" ]]; then
+    case "${path}" in
+      .runtime.split.phase1.done)
+        v2k_manifest_mark_split_done "${manifest}" "phase1"
+        return
+        ;;
+      .runtime.split.phase2.done)
+        v2k_manifest_mark_split_done "${manifest}" "phase2"
+        return
+        ;;
+    esac
+  fi
+
   local tmp
   tmp="$(mktemp)"
   jq --arg path "${path}" --argjson v "${value_json}" '
@@ -51,27 +73,6 @@ v2k_manifest_runtime_set() {
     (setpath(($path|ltrimstr(".")|split(".")); $v))
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
-
-v2k_manifest_mark_split_done() {
-  # Usage: v2k_manifest_mark_split_done <manifest> <phase1|phase2>
-  local manifest="$1" which="$2"
-  local ts
-  ts="$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')"
-  local tmp
-  tmp="$(mktemp)"
-  jq --arg which "${which}" --arg ts "${ts}" '
-    .runtime = (.runtime // {}) |
-    .runtime.split = (.runtime.split // {phase1:{done:false,ts:""},phase2:{done:false,ts:""}}) |
-    .runtime.split[$which].done = true |
-    .runtime.split[$which].ts = $ts
-  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
-}
-
-v2k_manifest_split_done() {
-  local manifest="$1" which="$2"
-  jq -r --arg which "${which}" '.runtime.split[$which].done // false' "${manifest}" 2>/dev/null
-}
-
 
 v2k_manifest_set_rbd_mapped_device() {
   # Usage: v2k_manifest_set_rbd_mapped_device <manifest> <disk_id> <uri> <dev_path>
@@ -287,7 +288,10 @@ v2k_manifest_init() {
                       end
                     end
                   ),
-                  base_done:false, incr_seq:0, last_synced_at:""
+                  base_done:false,
+                  incr_seq:0,
+                  last_synced_at:"",
+                  last_sync:null
                 },
                 metrics:{ base_bytes_written:0, incr_bytes_written:0, incr_areas:0 }
               })
@@ -545,15 +549,89 @@ v2k_manifest_policy_purge_snapshots_on_success() {
   [[ "${v}" == "true" ]]
 }
 
-# split execution completion markers (used by orchestrator split=phase2 gating)
+# Split completion is consumed through two compatibility paths:
+# - .phases["split.phaseN"] is the authoritative state-machine marker.
+# - .runtime.split.phaseN is used by fleet/status views.
+# Persist both in one manifest-local rename so they can never diverge.
 v2k_manifest_mark_split_done() {
   local manifest="$1" which="$2"
-  v2k_manifest_phase_done "${manifest}" "split.${which}"
+  local ts tmp
+
+  case "${which}" in
+    phase1|phase2) ;;
+    *)
+      echo "Invalid split completion marker: ${which}" >&2
+      return 2
+      ;;
+  esac
+
+  ts="$(v2k_manifest_now)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq --arg which "${which}" --arg ts "${ts}" '
+      (.phases["split." + $which] // {}) as $phase_before
+      | (.runtime.split[$which] // {}) as $runtime_before
+      | (
+          if (
+            ($phase_before.done // false)
+            and (($phase_before.ts // "") | length) > 0
+          )
+          then $phase_before.ts
+          elif (
+            ($runtime_before.done // false)
+            and (($runtime_before.ts // "") | length) > 0
+          )
+          then $runtime_before.ts
+          else $ts
+          end
+        ) as $effective_ts
+      | .phases = (.phases // {})
+      | .phases["split." + $which] = {done:true, ts:$effective_ts}
+      | .runtime = (.runtime // {})
+      | .runtime.split = (
+          .runtime.split
+          // {phase1:{done:false,ts:""},phase2:{done:false,ts:""}}
+        )
+      | .runtime.split[$which] = {done:true, ts:$effective_ts}
+      | reduce ["phase1", "phase2"][] as $phase (.;
+          (.phases["split." + $phase] // {}) as $phase_view
+          | (.runtime.split[$phase] // {}) as $runtime_view
+          | .runtime.split[$phase] = {
+              done:(
+                $phase_view.done
+                // $runtime_view.done
+                // false
+              ),
+              ts:(
+                if (($phase_view.ts // "") | length) > 0
+                then $phase_view.ts
+                else ($runtime_view.ts // "")
+                end
+              )
+            }
+        )
+    ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
+}
+
+v2k_manifest_split_done() {
+  local manifest="$1" which="$2"
+  jq -r --arg which "${which}" '
+    .phases["split." + $which].done
+    // .runtime.split[$which].done
+    // false
+  ' "${manifest}" 2>/dev/null
 }
 
 v2k_manifest_split_is_done() {
   local manifest="$1" which="$2"
-  v2k_manifest_phase_is_done "${manifest}" "split.${which}"
+  [[ -f "${manifest}" ]] || return 1
+  jq -e --arg which "${which}" \
+    '.phases["split." + $which].done == true' \
+    "${manifest}" >/dev/null 2>&1
 }
 
 v2k_manifest_snapshot_set() {
@@ -734,15 +812,167 @@ v2k_manifest_set_disk_metric_incr() {
   mv "${tmp}" "${manifest}"
 }
 
+# Commit all successful incremental/final observability together with the CBT
+# state that authorizes the next delta. A failed manifest write therefore
+# cannot expose a new changeId without its matching counters and timestamp.
+v2k_manifest_record_patch_success() {
+  local manifest="$1"
+  local idx="$2"
+  local which="$3"
+  local prev_last_change_id="$4"
+  local new_last_change_id="$5"
+  local coverage_json="${6:-null}"
+  local bytes="${7:-0}"
+  local areas="${8:-0}"
+  local ts tmp
+
+  case "${which}" in
+    incr|final) ;;
+    *)
+      echo "Invalid patch success phase: ${which}" >&2
+      return 2
+      ;;
+  esac
+  [[ "${idx}" =~ ^[0-9]+$ ]] || return 2
+  [[ "${bytes}" =~ ^[0-9]+$ ]] || return 2
+  [[ "${areas}" =~ ^[0-9]+$ ]] || return 2
+  if ! printf '%s' "${coverage_json}" | jq -e \
+      'type == "object" or . == null' >/dev/null 2>&1; then
+    return 2
+  fi
+
+  ts="$(v2k_manifest_now)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --argjson idx "${idx}" \
+      --arg which "${which}" \
+      --arg prev "${prev_last_change_id}" \
+      --arg new "${new_last_change_id}" \
+      --argjson coverage "${coverage_json}" \
+      --argjson bytes "${bytes}" \
+      --argjson areas "${areas}" \
+      --arg ts "${ts}" '
+        .disks[$idx].cbt = (.disks[$idx].cbt // {})
+        | if (
+            ((.disks[$idx].cbt.base_change_id // "") == "")
+            or ((.disks[$idx].cbt.base_change_id // "") == "null")
+            or ((.disks[$idx].cbt.base_change_id // "") == "*")
+          ) and ($prev != "") and ($prev != "null") and ($prev != "*")
+          then .disks[$idx].cbt.base_change_id = $prev
+          else .
+          end
+        | if ($new != "") and ($new != "null")
+          then .disks[$idx].cbt.last_change_id = $new
+          else .
+          end
+        | if $coverage == null
+          then .
+          else .disks[$idx].cbt.last_coverage = $coverage
+          end
+        | .disks[$idx].metrics = (.disks[$idx].metrics // {})
+        | .disks[$idx].metrics.incr_bytes_written =
+            ((.disks[$idx].metrics.incr_bytes_written // 0) + $bytes)
+        | .disks[$idx].metrics.incr_areas =
+            ((.disks[$idx].metrics.incr_areas // 0) + $areas)
+        | .disks[$idx].transfer = (.disks[$idx].transfer // {})
+        | .disks[$idx].transfer.incr_seq =
+            ((.disks[$idx].transfer.incr_seq // 0) + 1)
+        | .disks[$idx].transfer.last_synced_at = $ts
+        | .disks[$idx].transfer.last_sync = {
+            phase:$which,
+            bytes_written:$bytes,
+            areas:$areas,
+            ts:$ts
+          }
+      ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
+}
+
 v2k_manifest_mark_base_done() {
-  local manifest="$1" idx="$2"
-  local ts
-  ts="$(date +"%Y-%m-%dT%H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/')"
-  local tmp
-  tmp="$(mktemp)"
-  jq --argjson idx "${idx}" --arg ts "${ts}" \
-    '.disks[$idx].transfer.base_done=true | .disks[$idx].transfer.last_synced_at=$ts' "${manifest}" > "${tmp}"
-  mv "${tmp}" "${manifest}"
+  local manifest="$1" idx="$2" logical_bytes="${3:-0}"
+  local ts tmp
+
+  [[ "${idx}" =~ ^[0-9]+$ ]] || return 2
+  [[ "${logical_bytes}" =~ ^[0-9]+$ ]] || return 2
+  ts="$(v2k_manifest_now)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --argjson idx "${idx}" \
+      --argjson bytes "${logical_bytes}" \
+      --arg ts "${ts}" '
+        .disks[$idx].transfer = (.disks[$idx].transfer // {})
+        | .disks[$idx].transfer.base_done = true
+        | .disks[$idx].transfer.last_synced_at = $ts
+        | .disks[$idx].transfer.last_sync = {
+            phase:"base",
+            bytes_written:$bytes,
+            areas:0,
+            ts:$ts
+          }
+        | .disks[$idx].metrics = (.disks[$idx].metrics // {})
+        | .disks[$idx].metrics.base_bytes_written = $bytes
+      ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
+}
+
+v2k_manifest_record_sync_failure() {
+  local manifest="$1"
+  local which="$2"
+  local idx="$3"
+  local code="$4"
+  local reason="$5"
+  local details_json="${6:-{}}"
+  local ts tmp
+
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if ! printf '%s' "${details_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    details_json='{}'
+  fi
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --arg which "${which}" \
+      --argjson idx "${idx}" \
+      --argjson code "${code}" \
+      --arg reason "${reason}" \
+      --arg ts "${ts}" \
+      --argjson details "${details_json}" \
+      '
+        .runtime = (.runtime // {})
+        | .runtime.sync_issues = (.runtime.sync_issues // [])
+        | .runtime.sync_issues += [{
+            which:$which,
+            disk_index:$idx,
+            code:$code,
+            reason:$reason,
+            ts:$ts,
+            details:$details
+          }]
+        | .runtime.last_error = {
+            code:$code,
+            reason:$reason,
+            ts:$ts
+          }
+        | .disks[$idx].transfer.base_done = false
+        | .disks[$idx].transfer.last_error = {
+            code:$code,
+            reason:$reason,
+            ts:$ts,
+            details:$details
+          }
+      ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
 }
 
 v2k_manifest_status_summary() {
@@ -762,13 +992,55 @@ v2k_manifest_status_summary() {
           target:.transfer.target_path,
           base_done:.transfer.base_done,
           incr_seq:.transfer.incr_seq,
+          last_synced_at:(.transfer.last_synced_at // ""),
+          last_sync:(.transfer.last_sync // null),
+          base_bytes_written:(.metrics.base_bytes_written // 0),
+          incr_bytes_written:(.metrics.incr_bytes_written // 0),
+          incr_areas:(.metrics.incr_areas // 0),
           cbt_enabled:.cbt.enabled,
           base_change_id:(.cbt.base_change_id // ""),
-          last_change_id:(.cbt.last_change_id // "")
+          last_change_id:(.cbt.last_change_id // ""),
+          last_coverage:(.cbt.last_coverage // null)
         })),
 
         # ---- Status observability additions ----
         runtime:{
+          split:{
+            phase1:(
+              (.phases["split.phase1"] // {}) as $phase_view
+              | ($rt.split.phase1 // {}) as $runtime_view
+              | {
+                  done:(
+                    $phase_view.done
+                    // $runtime_view.done
+                    // false
+                  ),
+                  ts:(
+                    if (($phase_view.ts // "") | length) > 0
+                    then $phase_view.ts
+                    else ($runtime_view.ts // "")
+                    end
+                  )
+                }
+            ),
+            phase2:(
+              (.phases["split.phase2"] // {}) as $phase_view
+              | ($rt.split.phase2 // {}) as $runtime_view
+              | {
+                  done:(
+                    $phase_view.done
+                    // $runtime_view.done
+                    // false
+                  ),
+                  ts:(
+                    if (($phase_view.ts // "") | length) > 0
+                    then $phase_view.ts
+                    else ($runtime_view.ts // "")
+                    end
+                  )
+                }
+            )
+          },
           sync_issues:$issues,
           last_sync_issue:(if ($issues|length) > 0 then $issues[-1] else null end)
         },

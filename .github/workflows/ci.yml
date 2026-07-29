@@ -25,6 +25,38 @@ jobs:
         run: |
           tests/iso_pkg_manager_selection_smoke.sh
 
+      - name: V2K large CBT payload delivery smoke
+        run: |
+          python3 tests/v2k_patch_areas_file_smoke.py
+
+      - name: V2K base transfer NFC retry smoke
+        run: |
+          tests/v2k_base_transfer_retry_smoke.sh
+
+      - name: V2K manifest observability smoke
+        run: |
+          tests/v2k_manifest_observability_smoke.sh
+
+      - name: V2K cutover bootstrap integrity smoke
+        run: |
+          tests/v2k_cutover_integrity_smoke.sh
+
+      - name: V2K Ubuntu initramfs integrity smoke
+        run: |
+          tests/v2k_ubuntu_initramfs_smoke.sh
+
+      - name: V2K WinPE asset integrity smoke
+        run: |
+          tests/v2k_winpe_asset_smoke.sh
+
+      - name: N2K migration integrity smoke
+        run: |
+          tests/n2k_integrity_hardening_smoke.sh
+
+      - name: N2K manifest observability smoke
+        run: |
+          tests/n2k_manifest_observability_smoke.sh
+
       - name: Release WinPE and MSI workflow smoke
         run: |
           python3 tests/release_winpe_wix_smoke.py

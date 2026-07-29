@@ -456,7 +456,24 @@ jobs:
           set -euo pipefail
           echo "[INFO] WinPE files staged before V2K RPM build:"
           find winpe -maxdepth 1 -type f -printf '%f %s bytes\n' | sort || true
-          test -n "$(find winpe -maxdepth 1 -type f -iname '*.iso' -print -quit)"
+          mapfile -d '' -t WINPE_ISOS < <(
+            find winpe -maxdepth 1 -type f -iname '*.iso' -print0 | sort -z
+          )
+          if [[ "${#WINPE_ISOS[@]}" -ne 1 ]]; then
+            echo "[ERR] Expected exactly one staged WinPE ISO, found ${#WINPE_ISOS[@]}." >&2
+            exit 2
+          fi
+          (
+            cd winpe
+            sha256sum -c SHA256SUMS
+          )
+          RELEASE_TAG="${{ inputs.release_tag }}"
+          WINPE_SUFFIX="${RELEASE_TAG:-validation-${GITHUB_RUN_NUMBER}}"
+          EXPECTED_NAME="winpe-ablestack-v2k-${WINPE_SUFFIX}-amd64.iso"
+          if [[ "$(basename "${WINPE_ISOS[0]}")" != "${EXPECTED_NAME}" ]]; then
+            echo "[ERR] Versioned WinPE filename mismatch: expected=${EXPECTED_NAME} actual=$(basename "${WINPE_ISOS[0]}")" >&2
+            exit 2
+          fi
 
       - name: Build V2K RPM (separate path)
         run: |
@@ -1063,42 +1080,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release/winpe
-
-          WINPE_ISO="$(find release/winpe -maxdepth 1 -type f -iname '*winpe*.iso' 2>/dev/null | head -n 1 || true)"
-          if [[ -z "$WINPE_ISO" ]]; then
-            WINPE_ISO="$(find dist -type f -iname '*winpe*.iso' 2>/dev/null | head -n 1 || true)"
-          fi
-          if [[ -z "$WINPE_ISO" ]]; then
-            WINPE_ISO="$(find assets -type f -iname '*winpe*.iso' 2>/dev/null | head -n 1 || true)"
-          fi
-          if [[ -z "$WINPE_ISO" ]]; then
-            WINPE_ISO="$(find winpe -maxdepth 2 -type f -iname '*winpe*.iso' 2>/dev/null | head -n 1 || true)"
-          fi
-
-          if [[ -n "$WINPE_ISO" && -f "$WINPE_ISO" ]]; then
-            echo "[INFO] Found WinPE ISO: $WINPE_ISO"
-            WINPE_SUM="$(find "$(dirname "$WINPE_ISO")" -maxdepth 1 -type f -name 'SHA256SUMS' -print -quit)"
-            if [[ -z "$WINPE_SUM" || ! -f "$WINPE_SUM" ]]; then
-              echo "[ERR] SHA256SUMS was not found beside the WinPE ISO." >&2
-              exit 2
-            fi
-            if [[ "$(dirname "$WINPE_ISO")" != "release/winpe" ]]; then
-              cp -a "$WINPE_ISO" release/winpe/
-            fi
-            if [[ "$(dirname "$WINPE_SUM")" != "release/winpe" ]]; then
-              cp -a "$WINPE_SUM" release/winpe/SHA256SUMS
-            fi
-            (
-              cd release/winpe
-              sha256sum -c SHA256SUMS
-            )
-            echo "[OK] Staged WinPE ISO(s):"
-            ls -lah release/winpe/*.iso release/winpe/SHA256SUMS
-          else
-            echo "[ERR] Required WinPE ISO was not found in workflow artifacts." >&2
+          WINPE_ARTIFACT_DIR="dist/${{ inputs.winpe_artifact_name }}"
+          if [[ ! -d "${WINPE_ARTIFACT_DIR}" ]]; then
+            echo "[ERR] Required WinPE artifact directory was not found: ${WINPE_ARTIFACT_DIR}" >&2
             exit 2
           fi
+          mapfile -d '' -t WINPE_ISOS < <(
+            find "${WINPE_ARTIFACT_DIR}" -maxdepth 1 -type f -iname '*.iso' -print0 | sort -z
+          )
+          if [[ "${#WINPE_ISOS[@]}" -ne 1 ]]; then
+            echo "[ERR] Expected exactly one WinPE ISO in ${WINPE_ARTIFACT_DIR}, found ${#WINPE_ISOS[@]}." >&2
+            exit 2
+          fi
+          WINPE_SUM="${WINPE_ARTIFACT_DIR}/SHA256SUMS"
+          if [[ ! -f "${WINPE_SUM}" ]]; then
+            echo "[ERR] SHA256SUMS was not found beside the WinPE ISO." >&2
+            exit 2
+          fi
+          (
+            cd "${WINPE_ARTIFACT_DIR}"
+            sha256sum -c SHA256SUMS
+          )
+          WINPE_SUFFIX="${{ inputs.release_tag }}"
+          WINPE_SUFFIX="${WINPE_SUFFIX:-validation-${GITHUB_RUN_NUMBER}}"
+          EXPECTED_NAME="winpe-ablestack-v2k-${WINPE_SUFFIX}-amd64.iso"
+          if [[ "$(basename "${WINPE_ISOS[0]}")" != "${EXPECTED_NAME}" ]]; then
+            echo "[ERR] Release WinPE filename mismatch: expected=${EXPECTED_NAME} actual=$(basename "${WINPE_ISOS[0]}")" >&2
+            exit 2
+          fi
+          rm -rf release/winpe
+          mkdir -p release/winpe
+          cp -a "${WINPE_ISOS[0]}" release/winpe/
+          cp -a "${WINPE_SUM}" release/winpe/SHA256SUMS
+          (
+            cd release/winpe
+            sha256sum -c SHA256SUMS
+          )
+          echo "[OK] Staged versioned WinPE ISO:"
+          ls -lah release/winpe/*.iso release/winpe/SHA256SUMS
 
       # Windows installer script generation (install.ps1 / install.bat)
       - name: Create Windows installer scripts
@@ -1624,24 +1643,29 @@ jobs:
                               echo "[WARN] Skipping compatibility profile asset installation."
                           fi
 
-                          # Optional WinPE ISO staging for Windows bootstrap scenarios
-                          # Include the first matching winpe ISO found under supported paths.
-                          WINPE_SRC_DIR="${ISO_MNT}/winpe"
+                          # WinPE is owned by the V2K RPM. Do not copy a second,
+                          # independently selected ISO from the Tools media.
                           WINPE_DST_DIR="/usr/share/ablestack/v2k/winpe"
                           WINPE_LINK="/usr/share/ablestack/v2k/winpe.iso"
-                          if [[ -d "${WINPE_SRC_DIR}" ]]; then
-                              WINPE_ISO_FILE="$(ls -1 "${WINPE_SRC_DIR}"/*.iso 2>/dev/null | head -n 1 || true)"
-                              if [[ -n "${WINPE_ISO_FILE}" && -f "${WINPE_ISO_FILE}" ]]; then
-                                  echo "[INFO] Installing WinPE ISO from: ${WINPE_ISO_FILE}"
-                                  sudo mkdir -p "${WINPE_DST_DIR}"
-                                  sudo cp -a "${WINPE_ISO_FILE}" "${WINPE_DST_DIR}/"
-                                  sudo ln -sfn "${WINPE_DST_DIR}/$(basename "${WINPE_ISO_FILE}")" "${WINPE_LINK}"
-                                  echo "[OK] WinPE ISO installed: ${WINPE_LINK}"
-                              else
-                                  echo "[WARN] WinPE ISO not found under ${WINPE_SRC_DIR}"
+                          WINPE_META="${WINPE_DST_DIR}/current.json"
+                          if [[ -f "${WINPE_META}" && -f "${WINPE_LINK}" ]]; then
+                              WINPE_NAME="$(jq -r '.filename // empty' "${WINPE_META}")"
+                              WINPE_EXPECTED="${WINPE_DST_DIR}/${WINPE_NAME}"
+                              WINPE_CHECKSUM_OK=0
+                              if (cd "${WINPE_DST_DIR}" && sha256sum -c SHA256SUMS); then
+                                  WINPE_CHECKSUM_OK=1
                               fi
+                              if [[ -z "${WINPE_NAME}" \
+                                  || "$(readlink -e "${WINPE_LINK}" 2>/dev/null || true)" != "${WINPE_EXPECTED}" \
+                                  || ! -f "${WINPE_EXPECTED}" \
+                                  || "${WINPE_CHECKSUM_OK}" -ne 1 ]]; then
+                                  echo "[ERR] RPM-installed WinPE ISO metadata/link/checksum validation failed." >&2
+                                  exit 2
+                              fi
+                              echo "[OK] RPM-installed WinPE ISO verified: ${WINPE_EXPECTED}"
                           else
-                              echo "[WARN] WinPE dir not found in ISO: ${WINPE_SRC_DIR} (skip)"
+                              echo "[ERR] RPM-installed WinPE ISO metadata or compatibility link is missing." >&2
+                              exit 2
                           fi
                       else
                           echo "[WARN] No bundled V2K repo matches host Rocky ${VERSION_ID:-unknown}."
