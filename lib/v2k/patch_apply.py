@@ -60,6 +60,24 @@ def discard_range(target: str, offset: int, length: int) -> bool:
         return False
 
 
+def load_areas(areas_file: str, areas_json: str) -> Dict:
+    if areas_file:
+        try:
+            with open(areas_file, "r", encoding="utf-8") as areas_fd:
+                areas_obj = json.load(areas_fd)
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"failed to read areas file {areas_file}: {exc}") from exc
+    else:
+        try:
+            areas_obj = json.loads(areas_json)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"failed to parse areas JSON: {exc}") from exc
+
+    if not isinstance(areas_obj, dict):
+        raise SystemExit("changed areas payload must be a JSON object")
+    return areas_obj
+
+
 def copy_region(src_fd, dst_fd, target: str, offset: int, length: int, chunk: int, sparse_zero: bool) -> Tuple[int, int]:
     remaining = length
     pos = offset
@@ -89,14 +107,22 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True)
     ap.add_argument("--target", required=True)
-    ap.add_argument("--areas-json", required=True)
+    areas_input = ap.add_mutually_exclusive_group(required=True)
+    areas_input.add_argument(
+        "--areas-file",
+        help="UTF-8 JSON file containing changed areas (recommended for large payloads)",
+    )
+    areas_input.add_argument(
+        "--areas-json",
+        help="inline changed areas JSON (legacy compatibility only)",
+    )
     ap.add_argument("--coalesce-gap", type=int, default=1024 * 1024)
     ap.add_argument("--chunk", type=int, default=4 * 1024 * 1024)
     ap.add_argument("--target-kind", default="")
     ap.add_argument("--sparse-zero", choices=("on", "off"), default="off")
     args = ap.parse_args()
 
-    areas_obj: Dict = json.loads(args.areas_json)
+    areas_obj = load_areas(args.areas_file, args.areas_json)
     areas = [(int(a["offset"]), int(a["length"])) for a in areas_obj.get("areas", [])]
     merged = coalesce(areas, args.coalesce_gap)
 
