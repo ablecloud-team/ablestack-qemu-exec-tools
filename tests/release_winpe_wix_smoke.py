@@ -60,12 +60,15 @@ for required in (
     "needs: [build-winpe]",
     "inputs.use_prebuilt_winpe || needs.build-winpe.result == 'success'",
     "Stage generated WinPE ISO into V2K RPM source",
+    "Expected exactly one staged WinPE ISO",
+    'EXPECTED_NAME="winpe-ablestack-v2k-${WINPE_SUFFIX}-amd64.iso"',
     "if-no-files-found: error",
     "No MSI artifacts found in the msi-package workflow artifact.",
     "Stage required WinPE ISO into release tree",
     "SHA256SUMS was not found beside the WinPE ISO.",
     "sha256sum -c SHA256SUMS",
-    "Required WinPE ISO was not found in workflow artifacts.",
+    "Required WinPE artifact directory was not found",
+    "RPM-installed WinPE ISO metadata/link/checksum validation failed.",
     "Expected exactly 12 GitHub Release assets",
 ):
     if required not in workflow:
@@ -111,6 +114,7 @@ for required in (
     "contents: write",
     "actions: read",
     "source_ref: ${{ github.sha }}",
+    "iso_suffix: ${{ github.ref_name }}",
     "needs: [build]",
     "uses: ./.github/workflows/build.yml",
     "release_tag: ${{ github.ref_name }}",
@@ -124,5 +128,24 @@ if "\n  attach:\n" in tag_workflow:
     fail("tag workflow still creates a partial WinPE-only GitHub Release")
 if "softprops/action-gh-release" in tag_workflow:
     fail("tag workflow must delegate the single final publication to build.yml")
+if 'iso_suffix: ""' in tag_workflow:
+    fail("tag workflow still creates an unversioned WinPE ISO")
+if 'WINPE_ISO_FILE="$(ls -1 "${WINPE_SRC_DIR}"/*.iso' in workflow:
+    fail("Tools ISO installer still selects and copies a second WinPE payload")
+
+v2k_spec = read_utf8("rpm/ablestack_v2k.spec")
+for required in (
+    "with_winpe=1 requires exactly one staged WinPE ISO",
+    "winpe/SHA256SUMS",
+    "current.json",
+    'ln -s "winpe/${winpe_name}"',
+    "%posttrans",
+    "Installed WinPE ISO, metadata, checksum, and compatibility link are inconsistent.",
+    "/usr/share/ablestack/v2k/winpe.iso",
+):
+    if required not in v2k_spec:
+        fail(f"ablestack_v2k.spec is missing WinPE ownership guard: {required}")
+if "find /usr/share/ablestack/v2k/winpe" in v2k_spec:
+    fail("ablestack_v2k.spec still selects the first installed WinPE ISO dynamically")
 
 print("[OK] release WinPE generation and MSI failure guards")

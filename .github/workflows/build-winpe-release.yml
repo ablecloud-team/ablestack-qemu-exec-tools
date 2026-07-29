@@ -16,7 +16,7 @@ jobs:
       source_ref: ${{ github.sha }}
       architecture: "amd64"
       iso_base_name: "winpe-ablestack-v2k"
-      iso_suffix: ""                # 릴리즈는 suffix 없이 고정
+      iso_suffix: ${{ github.ref_name }}
       artifact_name: "winpe-iso-release"
       retention_days: 30
 

@@ -72,13 +72,46 @@ fi
 mkdir -p %{buildroot}/usr/share/ablestack/v2k/runtime-assets/share/ablestack/v2k
 cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/runtime-assets/share/ablestack/v2k/ 2>/dev/null || :
 
-# Optional WinPE ISO payload. The release workflow stages the generated WinPE
-# ISO into winpe/ before building the release V2K RPM. Local builds without an
-# ISO still create the target directory so install scripts can place one later.
+# Optional WinPE ISO payload. Official release builds stage exactly one
+# versioned ISO plus SHA256SUMS and set with_winpe=1. The payload, authoritative
+# metadata, and compatibility link are all owned by the same RPM transaction.
 mkdir -p %{buildroot}/usr/share/ablestack/v2k/winpe
-if ls winpe/*.iso >/dev/null 2>&1; then
-  install -m 0444 winpe/*.iso %{buildroot}/usr/share/ablestack/v2k/winpe/
+%if 0%{?with_winpe}
+set -- winpe/*.iso
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+  echo "[ERR] with_winpe=1 requires exactly one staged WinPE ISO." >&2
+  exit 1
 fi
+if [ ! -f winpe/SHA256SUMS ]; then
+  echo "[ERR] with_winpe=1 requires winpe/SHA256SUMS." >&2
+  exit 1
+fi
+(
+  cd winpe
+  sha256sum -c SHA256SUMS
+)
+winpe_src="$1"
+winpe_name="$(basename "${winpe_src}")"
+case "${winpe_name}" in
+  winpe-ablestack-v2k-*-amd64.iso) ;;
+  *)
+    echo "[ERR] Unexpected versioned WinPE ISO filename: ${winpe_name}" >&2
+    exit 1
+    ;;
+esac
+winpe_sha="$(awk -v name="${winpe_name}" '$2 == name {print $1; exit}' winpe/SHA256SUMS)"
+if ! printf '%s' "${winpe_sha}" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+  echo "[ERR] SHA256SUMS does not contain ${winpe_name}." >&2
+  exit 1
+fi
+install -m 0444 "${winpe_src}" %{buildroot}/usr/share/ablestack/v2k/winpe/
+install -m 0444 winpe/SHA256SUMS %{buildroot}/usr/share/ablestack/v2k/winpe/SHA256SUMS
+printf '{"schema":1,"filename":"%s","sha256":"%s","architecture":"amd64","package_version":"%s"}\n' \
+  "${winpe_name}" "${winpe_sha}" "%{version}" \
+  > %{buildroot}/usr/share/ablestack/v2k/winpe/current.json
+chmod 0444 %{buildroot}/usr/share/ablestack/v2k/winpe/current.json
+ln -s "winpe/${winpe_name}" %{buildroot}/usr/share/ablestack/v2k/winpe.iso
+%endif
 
 # Bash completion (standard location)
 mkdir -p %{buildroot}%{_datadir}/bash-completion/completions
@@ -95,12 +128,19 @@ if [ -x /usr/local/bin/v2k_test_install.sh ] && [ -d /usr/share/ablestack/v2k/ru
     --validate-profile all
 fi
 
-if [ -d /usr/share/ablestack/v2k/winpe ]; then
-  winpe_iso="$(find /usr/share/ablestack/v2k/winpe -maxdepth 1 -type f -name '*.iso' | sort | head -n 1 || true)"
-  if [ -n "${winpe_iso}" ]; then
-    ln -sfn "${winpe_iso}" /usr/share/ablestack/v2k/winpe.iso
-  fi
+%posttrans
+%if 0%{?with_winpe}
+winpe_root=/usr/share/ablestack/v2k/winpe
+winpe_name="$(jq -r '.filename // empty' "${winpe_root}/current.json" 2>/dev/null || true)"
+if [ -z "${winpe_name}" ] \
+    || [ ! -f "${winpe_root}/${winpe_name}" ] \
+    || [ "$(readlink -e /usr/share/ablestack/v2k/winpe.iso 2>/dev/null || true)" != "${winpe_root}/${winpe_name}" ] \
+    || ! (cd "${winpe_root}" && sha256sum -c SHA256SUMS); then
+  echo "[ERR] Installed WinPE ISO, metadata, checksum, and compatibility link are inconsistent." >&2
+  exit 1
 fi
+%endif
+:
 
 %preun
 if [ "$1" -eq 0 ]; then
@@ -108,10 +148,6 @@ if [ "$1" -eq 0 ]; then
   rm -rf /usr/share/ablestack/v2k/compat >/dev/null 2>&1 || true
   rm -rf /usr/share/ablestack/v2k/runtime-assets >/dev/null 2>&1 || true
   rm -f /etc/profile.d/v2k-compat.sh >/dev/null 2>&1 || true
-
-  # Remove installer-managed WinPE staging when the V2K add-on is erased.
-  rm -f /usr/share/ablestack/v2k/winpe.iso >/dev/null 2>&1 || true
-  rm -rf /usr/share/ablestack/v2k/winpe >/dev/null 2>&1 || true
 
   # Remove now-empty parent directories when possible.
   rmdir /usr/share/ablestack/v2k >/dev/null 2>&1 || true
@@ -129,6 +165,9 @@ fi
 /usr/share/ablestack/v2k/compat
 /usr/share/ablestack/v2k/runtime-assets
 /usr/share/ablestack/v2k/winpe
+%if 0%{?with_winpe}
+/usr/share/ablestack/v2k/winpe.iso
+%endif
 %{_datadir}/bash-completion/completions/%{name}
 
 %changelog

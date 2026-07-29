@@ -2576,26 +2576,36 @@ v2k_resolve_virtio_iso() {
   # Echo resolved path or empty.
   local p="${1-}"
   if [[ -n "${p}" ]]; then
-    [[ -f "${p}" ]] && { echo "${p}"; return 0; }
+    if [[ -f "${p}" && -r "${p}" && -s "${p}" ]]; then
+      readlink -e -- "${p}"
+      return 0
+    fi
+    echo "[v2k] Explicit VirtIO ISO is not a readable non-empty file: ${p}" >&2
     return 1
   fi
 
   if [[ -n "${V2K_VIRTIO_ISO-}" ]]; then
-    [[ -f "${V2K_VIRTIO_ISO}" ]] && { echo "${V2K_VIRTIO_ISO}"; return 0; }
+    if [[ -f "${V2K_VIRTIO_ISO}" && -r "${V2K_VIRTIO_ISO}" && -s "${V2K_VIRTIO_ISO}" ]]; then
+      readlink -e -- "${V2K_VIRTIO_ISO}"
+      return 0
+    fi
+    echo "[v2k] V2K_VIRTIO_ISO is set but is not a readable non-empty file: ${V2K_VIRTIO_ISO}" >&2
+    return 1
   fi
 
+  local virtio_root="${V2K_VIRTIO_INSTALL_ROOT:-/usr/share/virtio-win}"
   local candidates=(
-    "/usr/share/virtio-win/virtio-win.iso"
-    "/usr/share/virtio-win/virtio-win-*.iso"
-    "/usr/share/virtio-win/*.iso"
+    "${virtio_root}/virtio-win.iso"
+    "${virtio_root}/virtio-win-*.iso"
+    "${virtio_root}/*.iso"
     "/usr/share/virtio-win.iso"
   )
-  local c
+  local c f
   for c in "${candidates[@]}"; do
     # shellcheck disable=SC2086
     for f in ${c}; do
-      [[ -f "${f}" ]] || continue
-      echo "${f}"
+      [[ -f "${f}" && -r "${f}" && -s "${f}" ]] || continue
+      readlink -e -- "${f}"
       return 0
     done
   done
@@ -2603,32 +2613,142 @@ v2k_resolve_virtio_iso() {
 }
 
 v2k_resolve_winpe_iso() {
-  # Echo resolved path or empty.
+  # Echo one verified absolute path. Explicit CLI/environment overrides are
+  # strict. Automatic resolution uses RPM metadata first, then the compatibility
+  # link, and finally one unambiguous legacy payload.
   local p="${1-}"
+  local install_root="${V2K_WINPE_INSTALL_ROOT:-/usr/share/ablestack/v2k}"
+  local payload_root="${install_root}/winpe"
+  local metadata="${payload_root}/current.json"
+  local compatibility_link="${install_root}/winpe.iso"
+  local filename="" expected_sha="" actual_sha="" candidate=""
+  local -a discovered=()
+
   if [[ -n "${p}" ]]; then
-    [[ -f "${p}" ]] && { echo "${p}"; return 0; }
+    if [[ -f "${p}" && -r "${p}" && -s "${p}" ]]; then
+      readlink -e -- "${p}"
+      return 0
+    fi
+    echo "[v2k] Explicit WinPE ISO is not a readable non-empty file: ${p}" >&2
     return 1
   fi
 
   if [[ -n "${V2K_WINPE_ISO-}" ]]; then
-    [[ -f "${V2K_WINPE_ISO}" ]] && { echo "${V2K_WINPE_ISO}"; return 0; }
+    if [[ -f "${V2K_WINPE_ISO}" && -r "${V2K_WINPE_ISO}" && -s "${V2K_WINPE_ISO}" ]]; then
+      readlink -e -- "${V2K_WINPE_ISO}"
+      return 0
+    fi
+    echo "[v2k] V2K_WINPE_ISO is set but is not a readable non-empty file: ${V2K_WINPE_ISO}" >&2
+    return 1
   fi
 
-  local candidates=(
-    "/usr/share/ablestack/v2k/winpe/winpe-ablestack-v2k-amd64.iso"
-    "/usr/share/ablestack/v2k/winpe/winpe-ablestack-v2k-*.iso"
-    "/usr/share/ablestack/v2k/*.iso"
-  )
-  local c
-  for c in "${candidates[@]}"; do
-    # shellcheck disable=SC2086
-    for f in ${c}; do
-      [[ -f "${f}" ]] || continue
-      echo "${f}"
+  if [[ -s "${metadata}" ]]; then
+    filename="$(jq -r '.filename // empty' "${metadata}" 2>/dev/null || true)"
+    expected_sha="$(jq -r '.sha256 // empty' "${metadata}" 2>/dev/null || true)"
+    if [[ -z "${filename}" || "${filename}" == */* || "${filename}" == "." || "${filename}" == ".." ]]; then
+      echo "[v2k] Invalid WinPE RPM metadata filename: ${metadata}" >&2
+      return 1
+    fi
+    if [[ ! "${expected_sha}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+      echo "[v2k] Invalid WinPE RPM metadata checksum: ${metadata}" >&2
+      return 1
+    fi
+
+    candidate="${payload_root}/${filename}"
+    if [[ ! -f "${candidate}" || ! -r "${candidate}" || ! -s "${candidate}" ]]; then
+      echo "[v2k] WinPE RPM metadata target is missing or unreadable: ${candidate}" >&2
+      return 1
+    fi
+    actual_sha="$(sha256sum -- "${candidate}" | awk '{print $1}')"
+    if [[ "${actual_sha,,}" != "${expected_sha,,}" ]]; then
+      echo "[v2k] WinPE RPM metadata checksum mismatch: ${candidate}" >&2
+      return 1
+    fi
+
+    if [[ ! -f "${compatibility_link}" ]] \
+        || [[ "$(readlink -e -- "${compatibility_link}" 2>/dev/null || true)" \
+          != "$(readlink -e -- "${candidate}")" ]]; then
+      echo "[v2k] WARN: WinPE compatibility link is missing or stale; using verified RPM metadata target: ${candidate}" >&2
+    fi
+    readlink -e -- "${candidate}"
+    return 0
+  fi
+
+  if [[ -d "${payload_root}" ]]; then
+    mapfile -d '' -t discovered < <(
+      find "${payload_root}" -maxdepth 1 -type f -name '*.iso' -print0 2>/dev/null \
+        | LC_ALL=C sort -z
+    )
+  fi
+  if [[ "${#discovered[@]}" -gt 1 ]]; then
+    echo "[v2k] Multiple WinPE ISO candidates found without authoritative metadata:" >&2
+    printf '  %s\n' "${discovered[@]}" >&2
+    return 1
+  fi
+  if [[ "${#discovered[@]}" -eq 1 ]]; then
+    candidate="${discovered[0]}"
+    if [[ -r "${candidate}" && -s "${candidate}" ]]; then
+      if [[ ! -f "${compatibility_link}" ]] \
+          || [[ "$(readlink -e -- "${compatibility_link}" 2>/dev/null || true)" \
+            != "$(readlink -e -- "${candidate}")" ]]; then
+        echo "[v2k] WARN: WinPE compatibility link is missing or stale; using the only installed ISO: ${candidate}" >&2
+      fi
+      readlink -e -- "${candidate}"
       return 0
-    done
-  done
+    fi
+  fi
+
+  if [[ -f "${compatibility_link}" && -r "${compatibility_link}" && -s "${compatibility_link}" ]]; then
+    readlink -e -- "${compatibility_link}"
+    return 0
+  fi
+
+  discovered=()
+  if [[ -d "${install_root}" ]]; then
+    mapfile -d '' -t discovered < <(
+      find "${install_root}" -maxdepth 1 -type f -name '*.iso' -print0 2>/dev/null \
+        | LC_ALL=C sort -z
+    )
+  fi
+
+  if [[ "${#discovered[@]}" -eq 1 ]]; then
+    candidate="${discovered[0]}"
+    if [[ -r "${candidate}" && -s "${candidate}" ]]; then
+      echo "[v2k] WARN: WinPE RPM metadata/link unavailable; using the only top-level ISO: ${candidate}" >&2
+      readlink -e -- "${candidate}"
+      return 0
+    fi
+  elif [[ "${#discovered[@]}" -gt 1 ]]; then
+    echo "[v2k] Multiple WinPE ISO candidates found without authoritative metadata:" >&2
+    printf '  %s\n' "${discovered[@]}" >&2
+    return 1
+  fi
+
+  echo "[v2k] No usable WinPE ISO found under ${install_root}" >&2
   return 1
+}
+
+v2k_verify_preflight_iso_unchanged() {
+  local label="$1"
+  local path="$2"
+  local expected_path="$3"
+  local expected_sha="$4"
+  local resolved="" actual_sha=""
+
+  if [[ ! -f "${path}" || ! -r "${path}" || ! -s "${path}" ]]; then
+    echo "[v2k] ${label} ISO disappeared after cutover preflight: ${path}" >&2
+    return 1
+  fi
+  resolved="$(readlink -e -- "${path}" 2>/dev/null || true)"
+  if [[ -z "${resolved}" || "${resolved}" != "${expected_path}" ]]; then
+    echo "[v2k] ${label} ISO path changed after cutover preflight: ${path}" >&2
+    return 1
+  fi
+  actual_sha="$(sha256sum -- "${resolved}" | awk '{print $1}')"
+  if [[ -z "${actual_sha}" || "${actual_sha,,}" != "${expected_sha,,}" ]]; then
+    echo "[v2k] ${label} ISO checksum changed after cutover preflight: ${resolved}" >&2
+    return 1
+  fi
 }
 
 # Compute the SSL SHA1 thumbprint for vCenter or another target server.
@@ -3407,6 +3527,18 @@ v2k_windows_winpe_bootstrap_libvirt() {
     echo "VirtIO ISO not found. Expected ${virtio_iso}. Set --virtio-iso or install it under /usr/share/virtio-win/." >&2
     return 72
   fi
+  if [[ -n "${V2K_WINPE_PREFLIGHT_PATH:-}" ]] \
+      && ! v2k_verify_preflight_iso_unchanged \
+        "WinPE" "${winpe_iso_resolved}" \
+        "${V2K_WINPE_PREFLIGHT_PATH}" "${V2K_WINPE_PREFLIGHT_SHA256:-}"; then
+    return 71
+  fi
+  if [[ -n "${V2K_VIRTIO_PREFLIGHT_PATH:-}" ]] \
+      && ! v2k_verify_preflight_iso_unchanged \
+        "VirtIO" "${virtio_iso_resolved}" \
+        "${V2K_VIRTIO_PREFLIGHT_PATH}" "${V2K_VIRTIO_PREFLIGHT_SHA256:-}"; then
+    return 72
+  fi
 
   v2k_event INFO "winpe" "" "phase_start" \
     "{\"vm\":\"${vm}\",\"winpe_iso\":\"${winpe_iso_resolved}\",\"virtio_iso\":\"${virtio_iso_resolved}\",\"timeout\":${winpe_timeout}}"
@@ -3565,8 +3697,8 @@ v2k_cmd_cutover() {
   local safe_mode=0
   local winpe_bootstrap=1
   local winpe_cli_set=0 start_cli_set=0
-  local winpe_iso="/usr/share/ablestack/v2k/winpe.iso"
-  local virtio_iso="/usr/share/virtio-win/virtio-win.iso"
+  local winpe_iso=""
+  local virtio_iso=""
   local winpe_timeout=600
   local shutdown_force=1 shutdown_timeout=300
   local vcpu=2 memory=2048
@@ -3705,6 +3837,54 @@ v2k_cmd_cutover() {
     0|1) ;;
     *) echo "Invalid winpe_bootstrap value: ${winpe_bootstrap}" >&2; exit 2;;
   esac
+
+  # Resolve and hash boot media before shutting down the VMware source. A
+  # missing/stale package link must never be discovered only after final sync.
+  unset V2K_WINPE_PREFLIGHT_PATH V2K_WINPE_PREFLIGHT_SHA256
+  unset V2K_VIRTIO_PREFLIGHT_PATH V2K_VIRTIO_PREFLIGHT_SHA256
+  if [[ "${winpe_bootstrap}" -eq 1 ]]; then
+    local winpe_preflight_path="" winpe_preflight_sha=""
+    local virtio_preflight_path="" virtio_preflight_sha=""
+
+    if ! winpe_preflight_path="$(v2k_resolve_winpe_iso "${winpe_iso}")"; then
+      v2k_event ERROR "cutover" "" "winpe_assets_preflight_failed" \
+        "$(jq -nc --arg requested "${winpe_iso:-auto}" \
+          '{asset:"winpe",requested:$requested,code:71,shutdown_started:false}')"
+      echo "WinPE ISO preflight failed before VMware shutdown. requested=${winpe_iso:-auto}" >&2
+      exit 71
+    fi
+    if ! virtio_preflight_path="$(v2k_resolve_virtio_iso "${virtio_iso}")"; then
+      v2k_event ERROR "cutover" "" "winpe_assets_preflight_failed" \
+        "$(jq -nc --arg requested "${virtio_iso:-auto}" \
+          '{asset:"virtio",requested:$requested,code:72,shutdown_started:false}')"
+      echo "VirtIO ISO preflight failed before VMware shutdown. requested=${virtio_iso:-auto}" >&2
+      exit 72
+    fi
+
+    winpe_preflight_sha="$(sha256sum -- "${winpe_preflight_path}" | awk '{print $1}')"
+    virtio_preflight_sha="$(sha256sum -- "${virtio_preflight_path}" | awk '{print $1}')"
+    if [[ ! "${winpe_preflight_sha}" =~ ^[0-9a-fA-F]{64}$ \
+        || ! "${virtio_preflight_sha}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+      v2k_event ERROR "cutover" "" "winpe_assets_preflight_failed" \
+        '{"asset":"checksum","code":73,"shutdown_started":false}'
+      echo "WinPE/VirtIO ISO checksum preflight failed before VMware shutdown." >&2
+      exit 73
+    fi
+
+    winpe_iso="${winpe_preflight_path}"
+    virtio_iso="${virtio_preflight_path}"
+    export V2K_WINPE_PREFLIGHT_PATH="${winpe_preflight_path}"
+    export V2K_WINPE_PREFLIGHT_SHA256="${winpe_preflight_sha}"
+    export V2K_VIRTIO_PREFLIGHT_PATH="${virtio_preflight_path}"
+    export V2K_VIRTIO_PREFLIGHT_SHA256="${virtio_preflight_sha}"
+    v2k_event INFO "cutover" "" "winpe_assets_preflight_done" \
+      "$(jq -nc \
+        --arg winpe_path "${winpe_preflight_path}" \
+        --arg winpe_sha256 "${winpe_preflight_sha}" \
+        --arg virtio_path "${virtio_preflight_path}" \
+        --arg virtio_sha256 "${virtio_preflight_sha}" \
+        '{winpe:{path:$winpe_path,sha256:$winpe_sha256},virtio:{path:$virtio_path,sha256:$virtio_sha256},shutdown_started:false}')"
+  fi
 
   export V2K_FORCE_CLEANUP="${force_cleanup}"
   v2k_maybe_force_cleanup

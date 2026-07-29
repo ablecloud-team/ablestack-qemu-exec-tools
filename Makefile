@@ -17,6 +17,7 @@
 NAME = ablestack-qemu-exec-tools
 V2K_NAME = ablestack_v2k
 V2K_SPEC = rpm/$(V2K_NAME).spec
+V2K_WITH_WINPE = $(if $(wildcard winpe/*.iso),1,0)
 N2K_NAME = ablestack_n2k
 N2K_SPEC = rpm/$(N2K_NAME).spec
 N2K_COMPLETIONS_FILE = completions/$(N2K_NAME)
@@ -288,6 +289,7 @@ v2k-rpm:
 	         --define "version $(VERSION)" \
 	         --define "release $(RELEASE)" \
 	         --define "githash $(GIT_HASH)" \
+	         --define "with_winpe $(V2K_WITH_WINPE)" \
 	         rpmbuild_v2k/SPECS/$(V2K_NAME).spec
 
 	mkdir -p build/rpm-v2k
@@ -320,6 +322,10 @@ v2k-rpm:
 	if find winpe -maxdepth 1 -type f -name '*.iso' 2>/dev/null | grep -q .; then \
 	  rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/winpe/.*[.]iso$$" || \
 	    (echo "[ERR] staged WinPE ISO missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	  rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/winpe/current[.]json$$" || \
+	    (echo "[ERR] WinPE metadata missing in RPM: $$RPM_FILE" >&2; exit 2); \
+	  rpm -qlp "$$RPM_FILE" | grep -qE "/usr/share/ablestack/v2k/winpe[.]iso$$" || \
+	    (echo "[ERR] RPM-owned WinPE compatibility link missing: $$RPM_FILE" >&2; exit 2); \
 	fi
 
 	@echo "V2K RPM package created: build/rpm-v2k/"
