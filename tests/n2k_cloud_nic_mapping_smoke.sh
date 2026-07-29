@@ -150,12 +150,23 @@ unset N2K_CLOUD_NIC_VERIFY_ATTEMPTS N2K_CLOUD_NIC_VERIFY_INTERVAL
 
 inventory_json="$(jq -c '{vm:{nics:.source.vm.nics}}' "${manifest}")"
 choices=$'network-a\tNetwork A\tL2\nnetwork-b\tNetwork B\tL2'
-n2k_interactive_select_tsv() {
-  awk -F '\t' 'NF && $1 != "" {print $1; exit}' <<<"$2"
-}
-selected_networks="$(n2k_interactive_select_cloud_networks_for_nics \
-  "${inventory_json}" "${choices}" 0)"
+selected_networks="$(
+  # shellcheck disable=SC2317
+  n2k_interactive_has_tty() { return 0; }
+  n2k_interactive_select_cloud_networks_for_nics \
+    "${inventory_json}" "${choices}" 0 <<<"1"
+)"
 [[ "${selected_networks}" == "network-a,network-b" ]]
+
+if (
+  # shellcheck disable=SC2317
+  n2k_interactive_select_tsv() { return 2; }
+  n2k_interactive_select_cloud_networks_for_nics \
+    "${inventory_json}" "${choices}" 0 >/dev/null 2>&1
+); then
+  echo "[ERR] Cloud network selection failure was ignored" >&2
+  exit 1
+fi
 
 n2k_cloud_api_get() {
   jq -e '.listall == true and .zoneid == "zone-1"' <<<"$5" >/dev/null

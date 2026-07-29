@@ -600,6 +600,82 @@ v2k_linux_bootstrap_wait_blockdev() {
   done
 }
 
+v2k_linux_bootstrap_nbd_size_bytes() {
+  local dev="$1"
+  local size_bytes
+  size_bytes="$(blockdev --getsize64 "${dev}" 2>/dev/null || echo 0)"
+  if [[ "${size_bytes}" =~ ^[0-9]+$ ]]; then
+    printf '%s' "${size_bytes}"
+  else
+    printf '0'
+  fi
+}
+
+v2k_linux_bootstrap_connect_nbd() {
+  local img="$1"
+  local format="$2"
+  local nbd_dev="$3"
+
+  case "${format}" in
+    raw|qcow2) ;;
+    *)
+      v2k_event ERROR "linux_bootstrap" "" "qemu_nbd_format_invalid" \
+        "$(v2k_linux_bootstrap_json \
+          --arg nbd "${nbd_dev}" \
+          --arg img "${img}" \
+          --arg format "${format}" \
+          '{nbd:$nbd,img:$img,format:$format}')"
+      return 79
+      ;;
+  esac
+
+  local qout="" qrc=0
+  v2k_linux_bootstrap_run_event "cmd_qemu_nbd_connect" qout qrc -- \
+    qemu-nbd --connect="${nbd_dev}" --format="${format}" --cache=none "${img}"
+
+  if [[ "${qrc}" -ne 0 ]]; then
+    local failed_size
+    failed_size="$(v2k_linux_bootstrap_nbd_size_bytes "${nbd_dev}")"
+    v2k_event ERROR "linux_bootstrap" "" "qemu_nbd_connect_failed" \
+      "$(v2k_linux_bootstrap_json \
+        --arg nbd "${nbd_dev}" \
+        --arg img "${img}" \
+        --arg format "${format}" \
+        --arg out "$(printf '%s' "${qout}" | head -c 1500)" \
+        --argjson rc "${qrc}" \
+        --argjson size_bytes "${failed_size}" \
+        '{nbd:$nbd,img:$img,format:$format,rc:$rc,size_bytes:$size_bytes,out:$out}')"
+    return 79
+  fi
+
+  local attempt=0 max_attempts=30 size_bytes=0
+  while [[ "${attempt}" -lt "${max_attempts}" ]]; do
+    size_bytes="$(v2k_linux_bootstrap_nbd_size_bytes "${nbd_dev}")"
+    if [[ "${size_bytes}" -gt 0 ]]; then
+      v2k_event INFO "linux_bootstrap" "" "qemu_nbd_connect_ready" \
+        "$(v2k_linux_bootstrap_json \
+          --arg nbd "${nbd_dev}" \
+          --arg img "${img}" \
+          --arg format "${format}" \
+          --argjson size_bytes "${size_bytes}" \
+          '{nbd:$nbd,img:$img,format:$format,size_bytes:$size_bytes}')"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    udevadm settle >/dev/null 2>&1 || true
+    sleep 0.2
+  done
+
+  v2k_event ERROR "linux_bootstrap" "" "qemu_nbd_connect_not_ready" \
+    "$(v2k_linux_bootstrap_json \
+      --arg nbd "${nbd_dev}" \
+      --arg img "${img}" \
+      --arg format "${format}" \
+      --argjson attempts "${max_attempts}" \
+      '{nbd:$nbd,img:$img,format:$format,attempts:$attempts}')"
+  return 79
+}
+
 v2k_linux_bootstrap_json() {
   # Build valid JSON safely.
   # Example: v2k_linux_bootstrap_json --arg k v --argjson n 1 '{k:$k,n:$n}'
@@ -947,7 +1023,7 @@ v2k_linux_bootstrap_initramfs() {
   v2k_event INFO "linux_bootstrap" "" "phase_start" \
     "{\"disk0\":\"${root_input}\",\"format\":\"${fmt}\",\"storage\":\"${st}\"}"
 
-  v2k_linux_bootstrap_one "${root_input}"
+  v2k_linux_bootstrap_one "${root_input}" "${fmt}"
   local rc=$?
   if [[ -n "${root_cleanup_cmd}" ]]; then
     eval "${root_cleanup_cmd}" >/dev/null 2>&1 || true
@@ -1009,6 +1085,7 @@ v2k_linux_bootstrap_prepare_root_input() {
 }
 v2k_linux_bootstrap_one() {
   local img="$1"
+  local format="$2"
 
   # [NEW] Ensure NBD module is loaded (Auto-recovery after reboot)
   if ! lsmod | grep -q "^nbd"; then
@@ -1111,6 +1188,23 @@ v2k_linux_bootstrap_one() {
           sleep 0.5
       done
       udevadm settle >/dev/null 2>&1 || true
+
+      local remaining_size
+      remaining_size="$(v2k_linux_bootstrap_nbd_size_bytes "${nbd_dev}")"
+      pid="$(cat "${sys_pid}" 2>/dev/null || echo "")"
+      if [[ "${remaining_size}" -gt 0 || ( -n "${pid}" && "${pid}" != "0" ) ]]; then
+        v2k_event ERROR "linux_bootstrap" "" "qemu_nbd_disconnect_incomplete" \
+          "$(v2k_linux_bootstrap_json \
+            --arg nbd "${nbd_dev}" \
+            --arg pid "${pid}" \
+            --argjson size_bytes "${remaining_size}" \
+            '{nbd:$nbd,pid:$pid,size_bytes:$size_bytes}')"
+      else
+        v2k_event INFO "linux_bootstrap" "" "qemu_nbd_disconnect_done" \
+          "$(v2k_linux_bootstrap_json \
+            --arg nbd "${nbd_dev}" \
+            '{nbd:$nbd}')"
+      fi
       
       # --------------------------------------------------------
       # [CRITICAL FIX] Post-Disconnect Cache Wipe
@@ -1254,13 +1348,10 @@ v2k_linux_bootstrap_one() {
     return $?
   fi
 
-local qout qrc
-  v2k_linux_bootstrap_run_event "cmd_qemu_nbd_connect" qout qrc -- \
-    qemu-nbd --connect "${nbd_dev}" "${img}"
-  if [[ "${qrc}" -ne 0 ]]; then
-    v2k_event ERROR "linux_bootstrap" "" "qemu_nbd_connect_failed" \
-      "{\"nbd\":\"${nbd_dev}\",\"img\":\"${img}\",\"rc\":${qrc}}"
-    finish 79
+  local connect_rc=0
+  v2k_linux_bootstrap_connect_nbd "${img}" "${format}" "${nbd_dev}" || connect_rc=$?
+  if [[ "${connect_rc}" -ne 0 ]]; then
+    finish "${connect_rc}"
     return $?
   fi
 
