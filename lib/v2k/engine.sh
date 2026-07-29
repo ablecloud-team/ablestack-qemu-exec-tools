@@ -1203,6 +1203,7 @@ v2k_linux_bootstrap_one() {
       v2k_linux_bootstrap_umount_robust "${mnt}/dev"  --recursive >/dev/null 2>&1 || true
       v2k_linux_bootstrap_umount_robust "${mnt}/proc" --recursive >/dev/null 2>&1 || true
       v2k_linux_bootstrap_umount_robust "${mnt}/sys"  --recursive >/dev/null 2>&1 || true
+      v2k_linux_bootstrap_umount_robust "${mnt}/run"  --recursive >/dev/null 2>&1 || true
       v2k_linux_bootstrap_umount_robust "${mnt}/boot" --recursive >/dev/null 2>&1 || true
       v2k_linux_bootstrap_umount_robust "${mnt}"      --recursive >/dev/null 2>&1 || true
     fi
@@ -1600,6 +1601,7 @@ v2k_linux_bootstrap_kernel_has_evidence() {
 v2k_linux_bootstrap_default_kernel() {
   local rootmnt="$1"
   local default_path="" default_kver=""
+  local kernel_link kernel_target
   local grubenv saved_entry bls_file linux_path
 
   default_path="$(
@@ -1617,6 +1619,21 @@ v2k_linux_bootstrap_default_kernel() {
       return 0
     fi
   fi
+
+  # Debian/Ubuntu maintain /vmlinuz (and sometimes /boot/vmlinuz) as the
+  # selected kernel symlink. Read only the link basename; resolving an
+  # absolute guest symlink with host readlink -f would escape the guest root.
+  for kernel_link in "${rootmnt}/vmlinuz" "${rootmnt}/boot/vmlinuz"; do
+    [[ -L "${kernel_link}" ]] || continue
+    kernel_target="$(readlink -- "${kernel_link}" 2>/dev/null || true)"
+    default_kver="${kernel_target##*/}"
+    default_kver="${default_kver#vmlinuz-}"
+    if v2k_linux_bootstrap_kernel_release_valid "${default_kver}" \
+        && v2k_linux_bootstrap_kernel_has_evidence "${rootmnt}" "${default_kver}"; then
+      printf '%s\n' "${default_kver}"
+      return 0
+    fi
+  done
 
   while IFS= read -r grubenv; do
     saved_entry="$(sed -n 's/^saved_entry=//p' "${grubenv}" 2>/dev/null | tail -n1 || true)"
@@ -1823,6 +1840,114 @@ v2k_linux_bootstrap_verify_initramfs_lvm() {
     && "${devices_file_embedded}" -eq 0 ]]
 }
 
+v2k_linux_bootstrap_verify_initramfs_tools() {
+  # Verify a Debian/Ubuntu initramfs-tools image before it replaces the active
+  # initrd. lsinitramfs is used instead of the dracut-specific lsinitrd.
+  local rootmnt="$1"
+  local kver="$2"
+  local image="$3"
+  local command_event="$4"
+  local require_lvm="${5:-0}"
+  local verify_output="" verify_rc=0 effective_output=""
+  local module_root="" builtin_file="" module=""
+  local module_summary="" summary_failed=0 missing_count=4
+  local lvm_present=0 dm_present=0
+
+  v2k_linux_bootstrap_run_event "${command_event}" verify_output verify_rc -- \
+    chroot "${rootmnt}" /bin/bash -lc \
+      "lsinitramfs '${image}' | grep -E 'virtio_(pci|blk|scsi)|scsi_mod|dm[-_]mod|(^|/)(lvm|dmsetup)([[:space:]/.-]|$)|scripts/.*/lvm'"
+
+  effective_output="${verify_output}"
+  module_root="$(v2k_linux_bootstrap_module_root "${rootmnt}" 2>/dev/null || true)"
+  builtin_file="${module_root}/${kver}/modules.builtin"
+  if [[ -n "${module_root}" && -s "${builtin_file}" ]]; then
+    for module in virtio_pci virtio_scsi virtio_blk scsi_mod; do
+      if grep -Eq "/${module}\.ko(\.(gz|xz|zst))?$" "${builtin_file}" 2>/dev/null; then
+        effective_output+=$'\n'"${module} (built-in)"
+      fi
+    done
+    if grep -Eq '/dm[-_]mod\.ko(\.(gz|xz|zst))?$' "${builtin_file}" 2>/dev/null; then
+      effective_output+=$'\n'"dm_mod (built-in)"
+    fi
+  fi
+
+  if ! module_summary="$(jq -nc \
+      --arg output "${effective_output}" \
+      --argjson modules '["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]' \
+      '
+        reduce $modules[] as $mod (
+          {present:[],missing:[]};
+          if ($output | contains($mod)) then
+            .present += [$mod]
+          else
+            .missing += [$mod]
+          end
+        )
+      ' 2>/dev/null)"; then
+    summary_failed=1
+    module_summary='{"present":[],"missing":["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"],"error":"summary_failed"}'
+  fi
+  missing_count="$(printf '%s' "${module_summary}" | jq -r '.missing | length' 2>/dev/null || echo 4)"
+
+  if grep -Eq \
+      '(^|[[:space:]/])(lvm|lvm\.static)([[:space:]]|$| -> )|usr/(sbin|bin)/lvm([[:space:]]|$)|scripts/.*/lvm' \
+      <<< "${effective_output}"; then
+    lvm_present=1
+  fi
+  if grep -Eq 'dm[-_]mod(\.ko)?|dm_mod \(built-in\)' <<< "${effective_output}"; then
+    dm_present=1
+  fi
+
+  v2k_event INFO "linux_bootstrap" "" "initramfs_tools_stack" \
+    "$(v2k_linux_bootstrap_json \
+      --arg kver "${kver}" \
+      --arg image "${image}" \
+      --arg command_event "${command_event}" \
+      --argjson command_rc "${verify_rc}" \
+      --argjson modules "${module_summary}" \
+      --argjson require_lvm "${require_lvm}" \
+      --argjson lvm_present "${lvm_present}" \
+      --argjson dm_present "${dm_present}" \
+      '{kver:$kver,image:$image,command_event:$command_event,command_rc:$command_rc,present:($modules.present // []),missing:($modules.missing // []),summary_error:($modules.error // null),require_lvm:$require_lvm,lvm_present:$lvm_present,dm_mod_present:$dm_present}')"
+
+  if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+    local present_modules missing_modules
+    present_modules="$(printf '%s' "${module_summary}" | jq -r '.present | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
+    missing_modules="$(printf '%s' "${module_summary}" | jq -r '.missing | if length > 0 then join(", ") else "none" end' 2>/dev/null || echo "unknown")"
+    echo "[v2k] Initramfs-tools modules present: ${present_modules}"
+    echo "[v2k] Initramfs-tools modules missing: ${missing_modules}"
+    if [[ "${require_lvm}" -eq 1 ]]; then
+      echo "[v2k] Initramfs-tools LVM stack: lvm=${lvm_present}, dm_mod=${dm_present}"
+    fi
+  fi
+
+  [[ "${summary_failed}" -eq 0 \
+    && "${verify_rc}" -eq 0 \
+    && "${missing_count}" -eq 0 \
+    && ( "${require_lvm}" -eq 0 \
+      || ( "${lvm_present}" -eq 1 && "${dm_present}" -eq 1 ) ) ]]
+}
+
+v2k_linux_bootstrap_configure_initramfs_tools() {
+  local rootmnt="$1"
+  local modules_file="${rootmnt}/etc/initramfs-tools/modules"
+  local config_file="${rootmnt}/etc/initramfs-tools/conf.d/zz-ablestack-v2k"
+  local module=""
+
+  mkdir -p "${rootmnt}/etc/initramfs-tools/conf.d" || return 1
+  touch "${modules_file}" || return 1
+  for module in virtio_pci virtio_scsi virtio_blk scsi_mod dm_mod; do
+    if ! grep -Eq "^[[:space:]]*${module}([[:space:]]|$)" "${modules_file}" 2>/dev/null; then
+      printf '%s\n' "${module}" >> "${modules_file}" || return 1
+    fi
+  done
+  cat > "${config_file}" <<'EOF'
+# Generated by ABLESTACK V2K. A generic initramfs must not inherit the
+# converter host's storage topology.
+MODULES=most
+EOF
+}
+
 v2k_linux_bootstrap_disable_lvm_devices_file() {
   # RHEL/Rocky 9 records hardware-specific device identities in system.devices.
   # A VMware identity cannot be reused after the root PV moves to virtio. Keep a
@@ -1967,7 +2092,7 @@ v2k_linux_bootstrap_rebuild_initramfs() {
   # Instead of binding host /dev, we populate a tmpfs with
   # only the necessary nodes + this VM's NBD devices.
   # ------------------------------------------------------------
-  mkdir -p "${rootmnt}/dev" "${rootmnt}/proc" "${rootmnt}/sys"
+  mkdir -p "${rootmnt}/dev" "${rootmnt}/proc" "${rootmnt}/sys" "${rootmnt}/run"
   
   # 1. Mount isolated pseudo-filesystems with explicit filesystem types.
   v2k_linux_bootstrap_mount_typed_robust \
@@ -1990,14 +2115,18 @@ v2k_linux_bootstrap_rebuild_initramfs() {
     "proc" "proc" "${rootmnt}/proc" "" || return 85
   v2k_linux_bootstrap_mount_typed_robust \
     "sysfs" "sysfs" "${rootmnt}/sys" "" || return 85
+  v2k_linux_bootstrap_mount_typed_robust \
+    "tmpfs" "tmpfs" "${rootmnt}/run" "mode=0755,nosuid,nodev" || return 85
 
   # Harden propagation (best-effort)
   mount --make-rslave "${rootmnt}/dev"  >/dev/null 2>&1 || true
   mount --make-rslave "${rootmnt}/proc" >/dev/null 2>&1 || true
   mount --make-rslave "${rootmnt}/sys"  >/dev/null 2>&1 || true
+  mount --make-rslave "${rootmnt}/run"  >/dev/null 2>&1 || true
 
   # Detect distro family and bootloader using broad marker coverage.
   local distro_json os_id os_like os_version_id os_pretty os_source
+  local prefer_initramfs_tools=0
   local bootloader_json bootloader bootloader_source
   distro_json="$(v2k_linux_guest_detect_distro "${rootmnt}" 2>/dev/null || echo '{}')"
   os_id="$(printf '%s' "${distro_json}" | jq -r '.id // ""' 2>/dev/null || true)"
@@ -2005,6 +2134,11 @@ v2k_linux_bootstrap_rebuild_initramfs() {
   os_version_id="$(printf '%s' "${distro_json}" | jq -r '.version_id // ""' 2>/dev/null || true)"
   os_pretty="$(printf '%s' "${distro_json}" | jq -r '.pretty_name // ""' 2>/dev/null || true)"
   os_source="$(printf '%s' "${distro_json}" | jq -r '.source // ""' 2>/dev/null || true)"
+  if [[ "${os_id}" =~ ^(ubuntu|debian|linuxmint|pop)$ \
+      || " ${os_like} " == *" debian "* \
+      || " ${os_like} " == *" ubuntu "* ]]; then
+    prefer_initramfs_tools=1
+  fi
 
   bootloader_json="$(v2k_linux_guest_detect_bootloader "${rootmnt}" 2>/dev/null || echo '{}')"
   bootloader="$(printf '%s' "${bootloader_json}" | jq -r '.bootloader // "unknown"' 2>/dev/null || true)"
@@ -2051,7 +2185,8 @@ EOF
   }
 
   # Choose rebuild tool
-  if chroot "${rootmnt}" /bin/bash -lc 'command -v dracut >/dev/null 2>&1'; then
+  if [[ "${prefer_initramfs_tools}" -eq 0 ]] \
+      && chroot "${rootmnt}" /bin/bash -lc 'command -v dracut >/dev/null 2>&1'; then
     # RHEL/Rocky/Alma etc.
     local kernel_selection="" kver="" kver_source=""
     local final_image="" temp_image=""
@@ -2222,25 +2357,163 @@ EOF
     return 0
   fi
 
-  if chroot "${rootmnt}" /bin/bash -lc 'command -v update-initramfs >/dev/null 2>&1'; then
-    # Debian/Ubuntu
-    local uout urc
-    v2k_linux_bootstrap_run_event "cmd_update_initramfs" uout urc -- \
-      chroot "${rootmnt}" /bin/bash -lc 'update-initramfs -u -k all'
-    if [[ "${urc}" -ne 0 ]]; then
-      v2k_event ERROR "linux_bootstrap" "" "update_initramfs_failed" "{}"
+  if chroot "${rootmnt}" /bin/bash -lc \
+      'command -v update-initramfs >/dev/null 2>&1'; then
+    # Debian/Ubuntu: build one staged image with mkinitramfs instead of
+    # allowing update-initramfs -u -k all to overwrite active images in place.
+    local ubuntu_tools_out="" ubuntu_tools_rc=0
+    local kernel_selection="" kver="" kver_source=""
+    local final_image="" temp_image="" backup_image=""
+    local build_out="" build_rc=0 backup_out="" backup_rc=0
+    local install_out="" install_rc=0
+
+    v2k_linux_bootstrap_run_event \
+      "cmd_initramfs_tools_validate" ubuntu_tools_out ubuntu_tools_rc -- \
+      chroot "${rootmnt}" /bin/bash -lc \
+        'command -v mkinitramfs >/dev/null 2>&1 && command -v lsinitramfs >/dev/null 2>&1'
+    if [[ "${ubuntu_tools_rc}" -ne 0 ]]; then
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_tools_incomplete" \
+        "$(v2k_linux_bootstrap_json \
+          --argjson rc "${ubuntu_tools_rc}" \
+          --arg output "${ubuntu_tools_out}" \
+          '{rc:$rc,output:$output,required:["update-initramfs","mkinitramfs","lsinitramfs"]}')"
       return 83
     fi
-    
-    # [Added] Sync Barrier
+
+    kernel_selection="$(v2k_linux_bootstrap_select_kernel "${rootmnt}" 2>/dev/null || true)"
+    IFS=$'\t' read -r kver kver_source <<< "${kernel_selection}"
+    if [[ -z "${kver}" ]]; then
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_tools_kernel_not_found" \
+        '{"note":"no bootable Debian/Ubuntu kernel candidate found"}'
+      return 83
+    fi
+    v2k_event INFO "linux_bootstrap" "" "initramfs_tools_kernel_selected" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg source "${kver_source}" \
+        '{kver:$kver,source:$source}')"
+
+    if ! v2k_linux_bootstrap_configure_initramfs_tools "${rootmnt}"; then
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_tools_config_failed" \
+        '{"note":"failed to persist portable initramfs-tools module configuration"}'
+      return 83
+    fi
+
+    if [[ -e "${rootmnt}/boot/initrd.img-${kver}" \
+        || -L "${rootmnt}/boot/initrd.img-${kver}" ]]; then
+      final_image="/boot/initrd.img-${kver}"
+    elif [[ -e "${rootmnt}/boot/initramfs-${kver}.img" \
+        || -L "${rootmnt}/boot/initramfs-${kver}.img" ]]; then
+      final_image="/boot/initramfs-${kver}.img"
+    else
+      final_image="/boot/initrd.img-${kver}"
+    fi
+
+    if [[ -s "${rootmnt}${final_image}" ]] \
+        && v2k_linux_bootstrap_verify_initramfs_tools \
+          "${rootmnt}" "${kver}" "${final_image}" \
+          "verify_existing_initramfs_tools" "${root_is_lvm}"; then
+      v2k_event INFO "linux_bootstrap" "" "initramfs_tools_existing_usable" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${final_image}" \
+          --argjson root_is_lvm "${root_is_lvm}" \
+          '{kver:$kver,image:$image,root_is_lvm:$root_is_lvm,rebuild:false}')"
+      return 0
+    fi
+
+    if ! v2k_linux_bootstrap_prepare_module_tree "${rootmnt}" "${kver}"; then
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_tools_module_tree_invalid" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          '{kver:$kver,note:"module tree cannot safely build a staged initramfs"}')"
+      return 83
+    fi
+
+    temp_image="/boot/.initrd.img-${kver}.v2k-$$-${RANDOM}"
+    rm -f -- "${rootmnt}${temp_image}"
+    v2k_linux_bootstrap_run_event "cmd_mkinitramfs" build_out build_rc -- \
+      chroot "${rootmnt}" /usr/bin/env -u LVM_SYSTEM_DIR /bin/bash -lc \
+        "mkinitramfs -o '${temp_image}' '${kver}'"
+    if [[ "${build_rc}" -ne 0 || ! -s "${rootmnt}${temp_image}" ]]; then
+      rm -f -- "${rootmnt}${temp_image}"
+      v2k_event ERROR "linux_bootstrap" "" "mkinitramfs_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${temp_image}" \
+          --argjson rc "${build_rc}" \
+          --arg output "${build_out}" \
+          '{kver:$kver,image:$image,rc:$rc,output:$output}')"
+      return 83
+    fi
+
+    if ! v2k_linux_bootstrap_verify_initramfs_tools \
+        "${rootmnt}" "${kver}" "${temp_image}" \
+        "verify_staged_initramfs_tools" "${root_is_lvm}"; then
+      rm -f -- "${rootmnt}${temp_image}"
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_tools_verify_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${temp_image}" \
+          --argjson root_is_lvm "${root_is_lvm}" \
+          '{kver:$kver,image:$image,root_is_lvm:$root_is_lvm,note:"required target boot modules were not found in staged initramfs"}')"
+      return 83
+    fi
+
     flush_buffers
 
-    v2k_event INFO "linux_bootstrap" "" "update_initramfs_ok" "{}"
+    if [[ -e "${rootmnt}${final_image}" || -L "${rootmnt}${final_image}" ]]; then
+      backup_image="${final_image}.v2k-backup"
+      if [[ -e "${rootmnt}${backup_image}" || -L "${rootmnt}${backup_image}" ]]; then
+        backup_image="${backup_image}-$$-${RANDOM}"
+      fi
+      v2k_linux_bootstrap_run_event \
+        "cmd_initramfs_tools_backup" backup_out backup_rc -- \
+        cp -a -- "${rootmnt}${final_image}" "${rootmnt}${backup_image}"
+      if [[ "${backup_rc}" -ne 0 || ! -s "${rootmnt}${backup_image}" ]]; then
+        rm -f -- "${rootmnt}${temp_image}" "${rootmnt}${backup_image}"
+        v2k_event ERROR "linux_bootstrap" "" "initramfs_tools_backup_failed" \
+          "$(v2k_linux_bootstrap_json \
+            --arg kver "${kver}" \
+            --arg image "${final_image}" \
+            --arg backup "${backup_image}" \
+            --argjson rc "${backup_rc}" \
+            --arg output "${backup_out}" \
+            '{kver:$kver,image:$image,backup:$backup,rc:$rc,output:$output}')"
+        return 83
+      fi
+    fi
+
+    v2k_linux_bootstrap_run_event \
+      "cmd_initramfs_tools_install" install_out install_rc -- \
+      mv -f -- "${rootmnt}${temp_image}" "${rootmnt}${final_image}"
+    if [[ "${install_rc}" -ne 0 ]]; then
+      rm -f -- "${rootmnt}${temp_image}"
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_tools_install_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${final_image}" \
+          --arg backup "${backup_image}" \
+          --argjson rc "${install_rc}" \
+          --arg output "${install_out}" \
+          '{kver:$kver,image:$image,backup:$backup,rc:$rc,output:$output}')"
+      return 83
+    fi
+
+    flush_buffers
+    v2k_event INFO "linux_bootstrap" "" "initramfs_tools_ok" \
+      "$(v2k_linux_bootstrap_json \
+        --arg kver "${kver}" \
+        --arg image "${final_image}" \
+        --arg backup "${backup_image}" \
+        --arg source "${kver_source}" \
+        --argjson root_is_lvm "${root_is_lvm}" \
+        '{kver:$kver,image:$image,backup:(if $backup == "" then null else $backup end),kernel_source:$source,root_is_lvm:$root_is_lvm,atomic_install:true}')"
     return 0
   fi
 
   v2k_event ERROR "linux_bootstrap" "" "no_initramfs_tool" \
-    "{\"note\":\"dracut or update-initramfs not found in guest\"}"
+    "{\"note\":\"dracut or complete initramfs-tools stack not found in guest\"}"
   return 84
 }
 

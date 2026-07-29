@@ -37,6 +37,10 @@ jobs:
         run: |
           tests/v2k_cutover_integrity_smoke.sh
 
+      - name: V2K Ubuntu initramfs integrity smoke
+        run: |
+          tests/v2k_ubuntu_initramfs_smoke.sh
+
       - name: Release WinPE and MSI workflow smoke
         run: |
           python3 tests/release_winpe_wix_smoke.py
