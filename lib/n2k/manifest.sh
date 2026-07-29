@@ -101,7 +101,8 @@ n2k_manifest_init() {
                 target_path: disk_target_path($disk; $entry.key),
                 base_done: false,
                 incr_seq: 0,
-                last_synced_at: ""
+                last_synced_at: "",
+                last_error: null
               },
               recovery_points: {
                 base: {id: "", disk_id: ""},
@@ -208,6 +209,11 @@ n2k_manifest_phase_done() {
     | .phases[$phase].done = true
     | .phases[$phase].ts = $ts
     | .runtime.progress.last_step = $phase
+    | if ($phase | IN("base_sync","incr_sync","final_sync")) then
+        .runtime.last_error = {code:0,reason:"",ts:$ts}
+      else
+        .
+      end
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
 }
 
@@ -403,6 +409,14 @@ n2k_manifest_record_preflight_result() {
   tmp="$(mktemp)"
   jq --argjson pf "${preflight_compact}" '
     .runtime.selected_mode = ($pf.selected_mode // .runtime.selected_mode)
+    | .runtime.sync = (.runtime.sync // {})
+    | .runtime.sync.mode = (
+        if (($pf.selected_mode // "") | IN("v4-incremental","v3-incremental","legacy-cbt")) then "incremental"
+        elif ($pf.selected_mode // "") == "cold-export" then "cold"
+        elif ($pf.selected_mode // "") == "manual-disk" then "manual"
+        else (.runtime.sync.mode // "manual")
+        end
+      )
     | .runtime.preflight = {
         requested_mode: ($pf.requested_mode // ""),
         source_api_policy: ($pf.source_api_policy // "auto"),
@@ -452,8 +466,65 @@ n2k_manifest_mark_base_done() {
   jq --argjson idx "${idx}" --arg ts "${ts}" --argjson bytes_written "${bytes_written}" '
     .disks[$idx].transfer.base_done = true
     | .disks[$idx].transfer.last_synced_at = $ts
+    | .disks[$idx].transfer.last_error = null
     | .disks[$idx].metrics.base_bytes_written = $bytes_written
   ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+}
+
+n2k_manifest_record_sync_failure() {
+  local manifest="$1" phase="$2" idx="$3" code="$4" reason="$5" details_json="${6:-}"
+  local ts tmp
+
+  [[ -n "${details_json}" ]] || details_json='{}'
+  ts="$(n2k_now_iso)"
+  if ! printf '%s' "${details_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    details_json='{}'
+  fi
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --arg phase "${phase}" \
+      --argjson idx "${idx}" \
+      --argjson code "${code}" \
+      --arg reason "${reason}" \
+      --arg ts "${ts}" \
+      --argjson details "${details_json}" \
+      '
+        .runtime = (.runtime // {})
+        | .runtime.sync_issues = (.runtime.sync_issues // [])
+        | .runtime.sync_issues += [{
+            phase:$phase,
+            disk_index:$idx,
+            code:$code,
+            reason:$reason,
+            ts:$ts,
+            details:$details
+          }]
+        | .runtime.last_error = {
+            phase:$phase,
+            disk_index:$idx,
+            code:$code,
+            reason:$reason,
+            ts:$ts,
+            details:$details
+          }
+        | if $idx >= 0 and $idx < (.disks | length) then
+            .disks[$idx].transfer.last_error = {
+              phase:$phase,
+              code:$code,
+              reason:$reason,
+              ts:$ts,
+              details:$details
+            }
+            | if $phase == "base" then .disks[$idx].transfer.base_done = false else . end
+          else
+            .
+          end
+      ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
 }
 
 n2k_manifest_mark_patch_done() {
@@ -481,6 +552,7 @@ n2k_manifest_mark_patch_done() {
     '
       .disks[$idx].transfer.incr_seq = ((.disks[$idx].transfer.incr_seq // 0) + 1)
       | .disks[$idx].transfer.last_synced_at = $ts
+      | .disks[$idx].transfer.last_error = null
       | .disks[$idx].metrics.incr_bytes_written = ((.disks[$idx].metrics.incr_bytes_written // 0) + $bytes_written)
       | .disks[$idx].metrics.incr_regions = ((.disks[$idx].metrics.incr_regions // 0) + $regions)
       | if ($recovery_point_id | length) > 0 then

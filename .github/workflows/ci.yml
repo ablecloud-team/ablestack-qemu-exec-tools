@@ -45,6 +45,10 @@ jobs:
         run: |
           tests/v2k_winpe_asset_smoke.sh
 
+      - name: N2K migration integrity smoke
+        run: |
+          tests/n2k_integrity_hardening_smoke.sh
+
       - name: Release WinPE and MSI workflow smoke
         run: |
           python3 tests/release_winpe_wix_smoke.py
