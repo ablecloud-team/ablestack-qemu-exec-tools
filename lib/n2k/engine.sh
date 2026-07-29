@@ -388,6 +388,26 @@ n2k_cmd_status() {
         "Mode: " + (.source.mode // "") + "\n" +
         "Target: " + (.target.storage // "") + "/" + (.target.format // "") + "\n" +
         "Disks: " + ((.disks_count // 0) | tostring) + "\n" +
+        "Disk sync:\n" +
+        (
+          (.disks // [])
+          | map(
+              "  [" + (.index | tostring) + "] " + (.disk_id // "") +
+              " base=" + ((.base_done // false) | tostring) +
+              " base_bytes=" + ((.base_bytes_written // 0) | tostring) +
+              " incr_bytes=" + ((.incr_bytes_written // 0) | tostring) +
+              " regions=" + ((.incr_regions // 0) | tostring) +
+              " last=" + (.last_sync.phase // "none") +
+              "@" + (.last_synced_at // "") +
+              (
+                if ((.last_error.reason // "") | length) > 0
+                then " error=" + .last_error.reason
+                else ""
+                end
+              )
+            )
+          | if length > 0 then join("\n") else "  (none)" end
+        ) + "\n" +
         "Workdir: " + (.workdir // "") + "\n" +
         "Last step: " + (.runtime.progress.last_step // "") + "\n" +
         "Progress: " + ((.resume.percent // 0) | tostring) + "%\n" +

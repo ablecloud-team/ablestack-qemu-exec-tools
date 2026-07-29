@@ -102,6 +102,7 @@ n2k_manifest_init() {
                 base_done: false,
                 incr_seq: 0,
                 last_synced_at: "",
+                last_sync: null,
                 last_error: null
               },
               recovery_points: {
@@ -203,18 +204,28 @@ n2k_manifest_phase_done() {
   local manifest="$1" phase="$2"
   local ts tmp
   ts="$(n2k_now_iso)"
-  tmp="$(mktemp)"
-  jq --arg phase "${phase}" --arg ts "${ts}" '
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq --arg phase "${phase}" --arg ts "${ts}" '
     .phases[$phase] = (.phases[$phase] // {})
     | .phases[$phase].done = true
-    | .phases[$phase].ts = $ts
+    | .phases[$phase].ts = (
+        if ((.phases[$phase].ts // "") | length) > 0
+        then .phases[$phase].ts
+        else $ts
+        end
+      )
     | .runtime.progress.last_step = $phase
     | if ($phase | IN("base_sync","incr_sync","final_sync")) then
         .runtime.last_error = {code:0,reason:"",ts:$ts}
       else
         .
       end
-  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+  ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
 }
 
 n2k_manifest_mark_split_done() {
@@ -228,13 +239,23 @@ n2k_manifest_mark_split_done() {
       ;;
   esac
   ts="$(n2k_now_iso)"
-  tmp="$(mktemp)"
-  jq --arg which "${which}" --arg ts "${ts}" '
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq --arg which "${which}" --arg ts "${ts}" '
     .runtime.split = (.runtime.split // {phase1:{done:false,ts:""},phase2:{done:false,ts:""}})
     | .runtime.split[$which].done = true
-    | .runtime.split[$which].ts = $ts
+    | .runtime.split[$which].ts = (
+        if ((.runtime.split[$which].ts // "") | length) > 0
+        then .runtime.split[$which].ts
+        else $ts
+        end
+      )
     | .runtime.progress.last_step = ($which + "_done")
-  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+  ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
 }
 
 n2k_manifest_split_is_done() {
@@ -461,14 +482,30 @@ n2k_manifest_record_preflight_result() {
 n2k_manifest_mark_base_done() {
   local manifest="$1" idx="$2" bytes_written="$3"
   local ts tmp
+
+  [[ "${idx}" =~ ^[0-9]+$ ]] || return 2
+  [[ "${bytes_written}" =~ ^[0-9]+$ ]] || return 2
   ts="$(n2k_now_iso)"
-  tmp="$(mktemp)"
-  jq --argjson idx "${idx}" --arg ts "${ts}" --argjson bytes_written "${bytes_written}" '
-    .disks[$idx].transfer.base_done = true
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq --argjson idx "${idx}" --arg ts "${ts}" --argjson bytes_written "${bytes_written}" '
+    .disks[$idx].transfer = (.disks[$idx].transfer // {})
+    | .disks[$idx].transfer.base_done = true
     | .disks[$idx].transfer.last_synced_at = $ts
+    | .disks[$idx].transfer.last_sync = {
+        phase: "base",
+        bytes_written: $bytes_written,
+        regions: 0,
+        ts: $ts
+      }
     | .disks[$idx].transfer.last_error = null
+    | .disks[$idx].metrics = (.disks[$idx].metrics // {})
     | .disks[$idx].metrics.base_bytes_written = $bytes_written
-  ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+  ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
 }
 
 n2k_manifest_record_sync_failure() {
@@ -527,81 +564,137 @@ n2k_manifest_record_sync_failure() {
   mv -f "${tmp}" "${manifest}"
 }
 
-n2k_manifest_mark_patch_done() {
-  local manifest="$1" idx="$2" phase="$3" bytes_written="$4" regions="$5" recovery_point_id="${6:-}"
-  local ts tmp rp_key
-  ts="$(n2k_now_iso)"
-  tmp="$(mktemp)"
+# Commit all successful disk observations and the phase completion marker in
+# one manifest-local rename. A partial patch round never advances counters,
+# recovery points, timestamps, or phase state.
+n2k_manifest_complete_patch_phase() {
+  local manifest="$1" phase="$2" results_json="$3" recovery_point_id="${4:-}"
+  local ts tmp rp_key sync_kind final_ready results_compact
 
   case "${phase}" in
-    incr_sync) rp_key="incr" ;;
-    final_sync) rp_key="final" ;;
+    incr_sync)
+      rp_key="incr"
+      sync_kind="incr"
+      final_ready=false
+      ;;
+    final_sync)
+      rp_key="final"
+      sync_kind="final"
+      final_ready=true
+      ;;
     *)
-      echo "Unsupported patch phase: ${phase}" >&2
+      echo "Unsupported patch completion phase: ${phase}" >&2
       return 2
       ;;
   esac
 
-  jq \
-    --argjson idx "${idx}" \
-    --arg ts "${ts}" \
-    --arg rp_key "${rp_key}" \
-    --arg recovery_point_id "${recovery_point_id}" \
-    --argjson bytes_written "${bytes_written}" \
-    --argjson regions "${regions}" \
-    '
-      .disks[$idx].transfer.incr_seq = ((.disks[$idx].transfer.incr_seq // 0) + 1)
-      | .disks[$idx].transfer.last_synced_at = $ts
-      | .disks[$idx].transfer.last_error = null
-      | .disks[$idx].metrics.incr_bytes_written = ((.disks[$idx].metrics.incr_bytes_written // 0) + $bytes_written)
-      | .disks[$idx].metrics.incr_regions = ((.disks[$idx].metrics.incr_regions // 0) + $regions)
-      | if ($recovery_point_id | length) > 0 then
-          .disks[$idx].recovery_points[$rp_key].id = $recovery_point_id
-        else
-          .
-        end
-    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
-}
+  if ! results_compact="$(printf '%s' "${results_json}" | jq -c . 2>/dev/null)"; then
+    echo "Invalid patch completion results JSON." >&2
+    return 2
+  fi
+  if ! jq -e --argjson results "${results_compact}" '
+      (.disks | length) as $disk_count
+      | ($results | type) == "array"
+      and ($results | length) == (.disks | length)
+      and (
+        [
+          $results[]
+          | select(
+              (.index | type) != "number"
+              or (.index | floor) != .index
+              or .index < 0
+              or .index >= $disk_count
+              or (.bytes_written | type) != "number"
+              or (.bytes_written | floor) != .bytes_written
+              or .bytes_written < 0
+              or (.regions | type) != "number"
+              or (.regions | floor) != .regions
+              or .regions < 0
+            )
+        ]
+        | length
+      ) == 0
+      and ([$results[].index] | unique | length) == ($results | length)
+    ' "${manifest}" >/dev/null; then
+    echo "Patch completion results do not cover every disk exactly once." >&2
+    return 2
+  fi
 
-n2k_manifest_record_sync_summary() {
-  local manifest="$1" phase="$2" bytes_written="$3" regions="$4" recovery_point_id="${5:-}"
-  local tmp final_ready
-  tmp="$(mktemp)"
-  case "${phase}" in
-    final_sync) final_ready=true ;;
-    *) final_ready=false ;;
-  esac
-
-  jq \
-    --arg phase "${phase}" \
-    --arg recovery_point_id "${recovery_point_id}" \
-    --argjson bytes_written "${bytes_written}" \
-    --argjson regions "${regions}" \
-    --argjson final_ready "${final_ready}" \
-    '
-      .runtime.sync = (.runtime.sync // {})
-      | .runtime.sync.round = ((.runtime.sync.round // 0) + 1)
-      | .runtime.sync.last_phase = $phase
-      | .runtime.sync.last_changed_bytes = $bytes_written
-      | .runtime.sync.last_region_count = $regions
-      | .runtime.sync.final_ready = $final_ready
-      | .runtime.sync.phase_summaries = (.runtime.sync.phase_summaries // {})
-      | .runtime.sync.phase_summaries[$phase] = {
-          bytes_written: $bytes_written,
-          regions: $regions,
-          recovery_point_id: $recovery_point_id
-        }
-      | if ($recovery_point_id | length) > 0 then
-          .runtime.sync.last_recovery_point_id = $recovery_point_id
-          | if $final_ready then
-              .runtime.sync.final_recovery_point_id = $recovery_point_id
-            else
-              .
-            end
-        else
-          .
-        end
-    ' "${manifest}" > "${tmp}" && mv "${tmp}" "${manifest}"
+  ts="$(n2k_now_iso)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --arg phase "${phase}" \
+      --arg sync_kind "${sync_kind}" \
+      --arg rp_key "${rp_key}" \
+      --arg ts "${ts}" \
+      --arg recovery_point_id "${recovery_point_id}" \
+      --argjson final_ready "${final_ready}" \
+      --argjson results "${results_compact}" \
+      '
+        ($results | map(.bytes_written) | add // 0) as $total_bytes
+        | ($results | map(.regions) | add // 0) as $total_regions
+        | reduce $results[] as $result (.;
+            .disks[$result.index].transfer = (.disks[$result.index].transfer // {})
+            | .disks[$result.index].transfer.incr_seq =
+                ((.disks[$result.index].transfer.incr_seq // 0) + 1)
+            | .disks[$result.index].transfer.last_synced_at = $ts
+            | .disks[$result.index].transfer.last_sync = {
+                phase: $sync_kind,
+                bytes_written: $result.bytes_written,
+                regions: $result.regions,
+                ts: $ts
+              }
+            | .disks[$result.index].transfer.last_error = null
+            | .disks[$result.index].metrics = (.disks[$result.index].metrics // {})
+            | .disks[$result.index].metrics.incr_bytes_written =
+                ((.disks[$result.index].metrics.incr_bytes_written // 0) + $result.bytes_written)
+            | .disks[$result.index].metrics.incr_regions =
+                ((.disks[$result.index].metrics.incr_regions // 0) + $result.regions)
+            | .disks[$result.index].recovery_points =
+                (.disks[$result.index].recovery_points // {})
+            | .disks[$result.index].recovery_points[$rp_key] =
+                (.disks[$result.index].recovery_points[$rp_key] // {})
+            | if ($recovery_point_id | length) > 0 then
+                .disks[$result.index].recovery_points[$rp_key].id = $recovery_point_id
+              else
+                .
+              end
+          )
+        | .runtime = (.runtime // {})
+        | .runtime.sync = (.runtime.sync // {})
+        | .runtime.sync.round = ((.runtime.sync.round // 0) + 1)
+        | .runtime.sync.last_phase = $phase
+        | .runtime.sync.last_changed_bytes = $total_bytes
+        | .runtime.sync.last_region_count = $total_regions
+        | .runtime.sync.final_ready = $final_ready
+        | .runtime.sync.phase_summaries = (.runtime.sync.phase_summaries // {})
+        | .runtime.sync.phase_summaries[$phase] = {
+            bytes_written: $total_bytes,
+            regions: $total_regions,
+            recovery_point_id: $recovery_point_id,
+            ts: $ts
+          }
+        | if ($recovery_point_id | length) > 0 then
+            .runtime.sync.last_recovery_point_id = $recovery_point_id
+            | if $final_ready then
+                .runtime.sync.final_recovery_point_id = $recovery_point_id
+              else
+                .
+              end
+          else
+            .
+          end
+        | .phases = (.phases // {})
+        | .phases[$phase] = {done:true, ts:$ts}
+        | .runtime.progress = (.runtime.progress // {})
+        | .runtime.progress.last_step = $phase
+        | .runtime.last_error = {code:0,reason:"",ts:$ts}
+      ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  mv -f "${tmp}" "${manifest}"
 }
 
 n2k_manifest_record_recovery_point() {
@@ -805,6 +898,31 @@ n2k_manifest_status_summary() {
         dst_root: .target.dst_root
       },
       disks_count: (.disks | length),
+      disks: (
+        .disks
+        | to_entries
+        | map({
+            index: .key,
+            disk_id: (.value.disk_id // ("disk" + (.key | tostring))),
+            size_bytes: (
+              .value.size_bytes
+              // .value.disk_size_bytes
+              // .value.capacity_bytes
+              // .value.size
+              // 0
+            ),
+            target_path: (.value.transfer.target_path // ""),
+            base_done: (.value.transfer.base_done // false),
+            incr_seq: (.value.transfer.incr_seq // 0),
+            last_synced_at: (.value.transfer.last_synced_at // ""),
+            last_sync: (.value.transfer.last_sync // null),
+            base_bytes_written: (.value.metrics.base_bytes_written // 0),
+            incr_bytes_written: (.value.metrics.incr_bytes_written // 0),
+            incr_regions: (.value.metrics.incr_regions // 0),
+            recovery_points: (.value.recovery_points // {}),
+            last_error: (.value.transfer.last_error // null)
+          })
+      ),
       phases: .phases,
       runtime: .runtime,
       resume: $resume,
