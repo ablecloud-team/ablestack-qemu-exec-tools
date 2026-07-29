@@ -1495,9 +1495,11 @@ v2k_linux_bootstrap_one() {
   fi
 
   local root_dev=""
+  local root_is_lvm=0
   root_dev="$(v2k_linux_bootstrap_try_mount_partitions "${nbd_dev}" "${mnt}" || true)"
   if [[ -z "${root_dev}" ]]; then
     root_dev="$(v2k_linux_bootstrap_try_mount_lvm "${nbd_dev}" "${mnt}" || true)"
+    [[ -n "${root_dev}" ]] && root_is_lvm=1
   fi
   if [[ -z "${root_dev}" ]]; then
     v2k_event ERROR "linux_bootstrap" "" "root_partition_not_found" "{\"nbd\":\"${nbd_dev}\",\"note\":\"no distro identity markers found on partitions or LVM LVs\"}"
@@ -1548,7 +1550,7 @@ v2k_linux_bootstrap_one() {
 
   v2k_event INFO "linux_bootstrap" "" "root_mounted" "{\"root_part\":\"${root_dev}\"}"
 
-  v2k_linux_bootstrap_rebuild_initramfs "${mnt}" "${nbd_dev}"
+  v2k_linux_bootstrap_rebuild_initramfs "${mnt}" "${nbd_dev}" "${root_is_lvm}"
   local rc=$?
   if [[ "${rc}" -ne 0 ]]; then
     finish "${rc}"
@@ -1767,6 +1769,115 @@ v2k_linux_bootstrap_verify_initramfs_virtio() {
   [[ "${summary_failed}" -eq 0 && "${verify_rc}" -eq 0 && "${missing_count}" -eq 0 ]]
 }
 
+v2k_linux_bootstrap_verify_initramfs_lvm() {
+  local rootmnt="$1"
+  local kver="$2"
+  local image="$3"
+  local command_event="$4"
+  local verify_output="" verify_rc=0 effective_output=""
+  local module_root="" builtin_file=""
+  local lvm_present=0 dm_present=0 devices_file_embedded=0
+
+  v2k_linux_bootstrap_run_event "${command_event}" verify_output verify_rc -- \
+    chroot "${rootmnt}" /bin/bash -lc \
+      "lsinitrd '${image}' | grep -E '(^|/)(lvm|dmsetup)([[:space:]/.-]|$)|dm[-_]mod|dracut modules|system\\.devices'"
+
+  effective_output="${verify_output}"
+  module_root="$(v2k_linux_bootstrap_module_root "${rootmnt}" 2>/dev/null || true)"
+  builtin_file="${module_root}/${kver}/modules.builtin"
+  if [[ -n "${module_root}" && -s "${builtin_file}" ]] \
+      && grep -Eq '/dm[-_]mod\.ko(\.(gz|xz|zst))?$' "${builtin_file}" 2>/dev/null; then
+    effective_output+=$'\n'"dm_mod (built-in)"
+  fi
+
+  if grep -Eq \
+      '(^|[[:space:]/])(lvm|lvm\.static)([[:space:]]|$| -> )|usr/(sbin|bin)/lvm([[:space:]]|$)' \
+      <<< "${effective_output}"; then
+    lvm_present=1
+  fi
+  if grep -Eq 'dm[-_]mod(\.ko)?|dm_mod \(built-in\)' <<< "${effective_output}"; then
+    dm_present=1
+  fi
+  if grep -Fq 'system.devices' <<< "${effective_output}"; then
+    devices_file_embedded=1
+  fi
+
+  v2k_event INFO "linux_bootstrap" "" "initramfs_lvm_stack" \
+    "$(v2k_linux_bootstrap_json \
+      --arg kver "${kver}" \
+      --arg image "${image}" \
+      --arg command_event "${command_event}" \
+      --argjson command_rc "${verify_rc}" \
+      --argjson lvm_present "${lvm_present}" \
+      --argjson dm_present "${dm_present}" \
+      --argjson devices_file_embedded "${devices_file_embedded}" \
+      '{kver:$kver,image:$image,command_event:$command_event,command_rc:$command_rc,lvm_present:$lvm_present,dm_mod_present:$dm_present,system_devices_embedded:$devices_file_embedded}')"
+
+  if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
+    echo "[v2k] Initramfs LVM stack: lvm=${lvm_present}, dm_mod=${dm_present}, system.devices=${devices_file_embedded}"
+  fi
+
+  [[ "${verify_rc}" -eq 0 \
+    && "${lvm_present}" -eq 1 \
+    && "${dm_present}" -eq 1 \
+    && "${devices_file_embedded}" -eq 0 ]]
+}
+
+v2k_linux_bootstrap_disable_lvm_devices_file() {
+  # RHEL/Rocky 9 records hardware-specific device identities in system.devices.
+  # A VMware identity cannot be reused after the root PV moves to virtio. Keep a
+  # recoverable backup and let LVM use its normal device scan on the target VM.
+  # Usage: v2k_linux_bootstrap_disable_lvm_devices_file <rootmnt> <out_backup>
+  local rootmnt="$1"
+  local out_backup_name="$2"
+  local devices_file="${rootmnt}/etc/lvm/devices/system.devices"
+  local backup_file=""
+
+  printf -v "${out_backup_name}" '%s' ""
+  if [[ ! -e "${devices_file}" && ! -L "${devices_file}" ]]; then
+    return 0
+  fi
+
+  backup_file="${devices_file}.v2k-backup"
+  if [[ -e "${backup_file}" || -L "${backup_file}" ]]; then
+    backup_file="${backup_file}-$$-${RANDOM}"
+  fi
+  if ! mv -- "${devices_file}" "${backup_file}"; then
+    v2k_event ERROR "linux_bootstrap" "" "lvm_devices_file_disable_failed" \
+      "$(v2k_linux_bootstrap_json \
+        --arg path "/etc/lvm/devices/system.devices" \
+        '{path:$path,note:"failed to preserve and disable hardware-specific LVM devices file"}')"
+    return 1
+  fi
+
+  printf -v "${out_backup_name}" '%s' "${backup_file}"
+  v2k_event INFO "linux_bootstrap" "" "lvm_devices_file_disabled" \
+    "$(v2k_linux_bootstrap_json \
+      --arg path "/etc/lvm/devices/system.devices" \
+      --arg backup "/etc/lvm/devices/${backup_file##*/}" \
+      '{path:$path,backup:$backup,recoverable:true}')"
+}
+
+v2k_linux_bootstrap_restore_lvm_devices_file() {
+  local rootmnt="$1"
+  local backup_file="${2:-}"
+  local devices_file="${rootmnt}/etc/lvm/devices/system.devices"
+
+  [[ -n "${backup_file}" ]] || return 0
+  if ! mv -f -- "${backup_file}" "${devices_file}"; then
+    v2k_event ERROR "linux_bootstrap" "" "lvm_devices_file_restore_failed" \
+      "$(v2k_linux_bootstrap_json \
+        --arg path "/etc/lvm/devices/system.devices" \
+        --arg backup "/etc/lvm/devices/${backup_file##*/}" \
+        '{path:$path,backup:$backup}')"
+    return 1
+  fi
+  v2k_event INFO "linux_bootstrap" "" "lvm_devices_file_restored" \
+    "$(v2k_linux_bootstrap_json \
+      --arg path "/etc/lvm/devices/system.devices" \
+      '{path:$path}')"
+}
+
 v2k_linux_bootstrap_prepare_module_tree() {
   local rootmnt="$1"
   local kver="$2"
@@ -1828,9 +1939,9 @@ v2k_linux_bootstrap_prepare_module_tree() {
 
   v2k_linux_bootstrap_run_event "cmd_kernel_modules_validate" validate_output validate_rc -- \
     chroot "${rootmnt}" /bin/bash -lc \
-      "for mod in virtio_pci virtio_scsi virtio_blk scsi_mod; do
+      "for mod in virtio_pci virtio_scsi virtio_blk scsi_mod dm_mod; do
          modinfo -k '${kver}' \"\${mod}\" >/dev/null 2>&1 \
-           || grep -Eq \"/\${mod}\\.ko(\\.(gz|xz|zst))?\$\" '/lib/modules/${kver}/modules.builtin' 2>/dev/null \
+           || grep -Eq \"/\${mod//_/-}\\.ko(\\.(gz|xz|zst))?\$|/\${mod}\\.ko(\\.(gz|xz|zst))?\$\" '/lib/modules/${kver}/modules.builtin' 2>/dev/null \
            || exit 1
        done"
   if [[ "${validate_rc}" -ne 0 ]]; then
@@ -1839,7 +1950,7 @@ v2k_linux_bootstrap_prepare_module_tree() {
         --arg kver "${kver}" \
         --argjson rc "${validate_rc}" \
         --arg output "${validate_output}" \
-        '{kver:$kver,rc:$rc,output:$output,required:["virtio_pci","virtio_scsi","virtio_blk","scsi_mod"]}')"
+        '{kver:$kver,rc:$rc,output:$output,required:["virtio_pci","virtio_scsi","virtio_blk","scsi_mod","dm_mod"]}')"
     return 1
   fi
 
@@ -1849,6 +1960,7 @@ v2k_linux_bootstrap_prepare_module_tree() {
 v2k_linux_bootstrap_rebuild_initramfs() {
   local rootmnt="$1"
   local nbd_dev="$2"
+  local root_is_lvm="${3:-0}"
 
   # ------------------------------------------------------------
   # [Modified] bind mounts for chroot with ISOLATION
@@ -1905,11 +2017,17 @@ virtio_pci
 virtio_scsi
 virtio_blk
 scsi_mod
+dm_mod
 EOF
 
-  # For dracut-based distros, force include drivers in initramfs
+  # Build a portable target initramfs. This command runs from a migration
+  # chroot, not from the VM that will boot the disk, so host-only discovery
+  # would otherwise capture the converter host/NBD topology.
   cat > "${rootmnt}/etc/dracut.conf.d/99-ablestack-v2k-virtio.conf" <<'EOF'
-add_drivers+=" virtio_pci virtio_scsi virtio_blk scsi_mod "
+hostonly="no"
+lvmconf="no"
+add_dracutmodules+=" lvm "
+add_drivers+=" virtio_pci virtio_scsi virtio_blk scsi_mod dm_mod "
 EOF
 
   v2k_event INFO "linux_bootstrap" "" "initramfs_rebuild_start" \
@@ -1939,6 +2057,9 @@ EOF
     local final_image="" temp_image=""
     local dout="" drc=0 install_out="" install_rc=0
     local candidates_json=""
+    local existing_usable=1
+    local lvm_devices_file_present=0
+    local lvm_devices_backup=""
 
     kernel_selection="$(v2k_linux_bootstrap_select_kernel "${rootmnt}" 2>/dev/null || true)"
     IFS=$'\t' read -r kver kver_source <<< "${kernel_selection}"
@@ -1960,22 +2081,47 @@ EOF
         --arg source "${kver_source}" \
         '{kver:$kver,source:$source}')"
 
+    if [[ "${root_is_lvm}" -eq 1 \
+        && ( -e "${rootmnt}/etc/lvm/devices/system.devices" \
+          || -L "${rootmnt}/etc/lvm/devices/system.devices" ) ]]; then
+      lvm_devices_file_present=1
+      v2k_event WARN "linux_bootstrap" "" "lvm_devices_file_migration_required" \
+        "$(v2k_linux_bootstrap_json \
+          --arg path "/etc/lvm/devices/system.devices" \
+          '{path:$path,note:"hardware-specific LVM device identities must not be reused after VMware-to-virtio migration"}')"
+    fi
+
     final_image="/boot/initramfs-${kver}.img"
     if [[ -s "${rootmnt}${final_image}" ]]; then
-      if v2k_linux_bootstrap_verify_initramfs_virtio \
+      existing_usable=1
+      if ! v2k_linux_bootstrap_verify_initramfs_virtio \
           "${rootmnt}" "${kver}" "${final_image}" "verify_existing_initramfs_virtio"; then
+        existing_usable=0
+      fi
+      if [[ "${root_is_lvm}" -eq 1 ]] \
+          && ! v2k_linux_bootstrap_verify_initramfs_lvm \
+            "${rootmnt}" "${kver}" "${final_image}" "verify_existing_initramfs_lvm"; then
+        existing_usable=0
+      fi
+      if [[ "${lvm_devices_file_present}" -eq 1 ]]; then
+        existing_usable=0
+      fi
+      if [[ "${existing_usable}" -eq 1 ]]; then
         v2k_event INFO "linux_bootstrap" "" "initramfs_existing_usable" \
           "$(v2k_linux_bootstrap_json \
             --arg kver "${kver}" \
             --arg image "${final_image}" \
-            '{kver:$kver,image:$image,rebuild:false}')"
+            --argjson root_is_lvm "${root_is_lvm}" \
+            '{kver:$kver,image:$image,root_is_lvm:$root_is_lvm,rebuild:false}')"
         return 0
       fi
-      v2k_event WARN "linux_bootstrap" "" "initramfs_existing_missing_virtio" \
+      v2k_event WARN "linux_bootstrap" "" "initramfs_existing_not_portable" \
         "$(v2k_linux_bootstrap_json \
           --arg kver "${kver}" \
           --arg image "${final_image}" \
-          '{kver:$kver,image:$image,action:"rebuild"}')"
+          --argjson root_is_lvm "${root_is_lvm}" \
+          --argjson lvm_devices_file_present "${lvm_devices_file_present}" \
+          '{kver:$kver,image:$image,root_is_lvm:$root_is_lvm,lvm_devices_file_present:$lvm_devices_file_present,action:"rebuild"}')"
     fi
 
     if ! v2k_linux_bootstrap_prepare_module_tree "${rootmnt}" "${kver}"; then
@@ -1986,13 +2132,21 @@ EOF
       return 82
     fi
 
+    if [[ "${root_is_lvm}" -eq 1 ]] \
+        && ! v2k_linux_bootstrap_disable_lvm_devices_file \
+          "${rootmnt}" lvm_devices_backup; then
+      return 82
+    fi
+
     temp_image="/boot/.initramfs-${kver}.v2k-$$-${RANDOM}.img"
     rm -f -- "${rootmnt}${temp_image}"
     v2k_linux_bootstrap_run_event "cmd_dracut" dout drc -- \
-      chroot "${rootmnt}" /bin/bash -lc \
-        "dracut -f -v --kver '${kver}' '${temp_image}'"
+      chroot "${rootmnt}" /usr/bin/env -u LVM_SYSTEM_DIR /bin/bash -lc \
+        "dracut -f -v --no-hostonly --fstab --add 'lvm' --add-drivers 'virtio_pci virtio_scsi virtio_blk scsi_mod dm_mod' --kver '${kver}' '${temp_image}'"
     if [[ "${drc}" -ne 0 ]]; then
       rm -f -- "${rootmnt}${temp_image}"
+      v2k_linux_bootstrap_restore_lvm_devices_file \
+        "${rootmnt}" "${lvm_devices_backup}" || true
       v2k_event ERROR "linux_bootstrap" "" "dracut_failed" \
         "$(v2k_linux_bootstrap_json \
           --arg kver "${kver}" \
@@ -2006,11 +2160,27 @@ EOF
     if ! v2k_linux_bootstrap_verify_initramfs_virtio \
         "${rootmnt}" "${kver}" "${temp_image}" "verify_staged_initramfs_virtio"; then
       rm -f -- "${rootmnt}${temp_image}"
+      v2k_linux_bootstrap_restore_lvm_devices_file \
+        "${rootmnt}" "${lvm_devices_backup}" || true
       v2k_event ERROR "linux_bootstrap" "" "initramfs_verify_failed" \
         "$(v2k_linux_bootstrap_json \
           --arg kver "${kver}" \
           --arg image "${temp_image}" \
           '{kver:$kver,image:$image,note:"all required virtio drivers were not found in staged initramfs"}')"
+      return 82
+    fi
+
+    if [[ "${root_is_lvm}" -eq 1 ]] \
+        && ! v2k_linux_bootstrap_verify_initramfs_lvm \
+          "${rootmnt}" "${kver}" "${temp_image}" "verify_staged_initramfs_lvm"; then
+      rm -f -- "${rootmnt}${temp_image}"
+      v2k_linux_bootstrap_restore_lvm_devices_file \
+        "${rootmnt}" "${lvm_devices_backup}" || true
+      v2k_event ERROR "linux_bootstrap" "" "initramfs_lvm_verify_failed" \
+        "$(v2k_linux_bootstrap_json \
+          --arg kver "${kver}" \
+          --arg image "${temp_image}" \
+          '{kver:$kver,image:$image,note:"LVM and device-mapper boot stack was not found in staged initramfs"}')"
       return 82
     fi
 
@@ -2022,6 +2192,8 @@ EOF
       mv -f -- "${rootmnt}${temp_image}" "${rootmnt}${final_image}"
     if [[ "${install_rc}" -ne 0 ]]; then
       rm -f -- "${rootmnt}${temp_image}"
+      v2k_linux_bootstrap_restore_lvm_devices_file \
+        "${rootmnt}" "${lvm_devices_backup}" || true
       v2k_event ERROR "linux_bootstrap" "" "initramfs_install_failed" \
         "$(v2k_linux_bootstrap_json \
           --arg kver "${kver}" \
@@ -2033,12 +2205,20 @@ EOF
     fi
     flush_buffers
 
+    if [[ -n "${lvm_devices_backup}" ]]; then
+      v2k_event INFO "linux_bootstrap" "" "lvm_devices_file_backup_retained" \
+        "$(v2k_linux_bootstrap_json \
+          --arg backup "/etc/lvm/devices/${lvm_devices_backup##*/}" \
+          '{backup:$backup,note:"original VMware device identities preserved for manual recovery"}')"
+    fi
+
     v2k_event INFO "linux_bootstrap" "" "dracut_ok" \
       "$(v2k_linux_bootstrap_json \
         --arg kver "${kver}" \
         --arg image "${final_image}" \
         --arg source "${kver_source}" \
-        '{kver:$kver,image:$image,kernel_source:$source,atomic_install:true}')"
+        --argjson root_is_lvm "${root_is_lvm}" \
+        '{kver:$kver,image:$image,kernel_source:$source,root_is_lvm:$root_is_lvm,hostonly:false,atomic_install:true}')"
     return 0
   fi
 

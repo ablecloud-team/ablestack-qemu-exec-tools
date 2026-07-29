@@ -183,7 +183,17 @@ chroot() {
       fi
       ;;
     *"lsinitrd"*)
-      if [[ "${mock_chroot_mode}" == "existing_valid" || "${mock_command}" == *".v2k-"* ]]; then
+      if [[ "${mock_command}" == *".v2k-"* ]]; then
+        printf '%s\n' "virtio_pci virtio_scsi virtio_blk scsi_mod"
+        if [[ "${mock_chroot_mode}" != "lvm_verify_fail" ]]; then
+          printf '%s\n' \
+            "lvm" \
+            "kernel/drivers/md/dm-mod.ko.xz"
+        fi
+        if [[ "${mock_chroot_mode}" == "lvm_embedded_devices" ]]; then
+          printf '%s\n' "etc/lvm/devices/system.devices"
+        fi
+      elif [[ "${mock_chroot_mode}" == "existing_valid" ]]; then
         printf '%s\n' "virtio_pci virtio_scsi virtio_blk scsi_mod"
       else
         printf '%s\n' "virtio_pci"
@@ -313,19 +323,132 @@ grep -F -- "depmod -a '${repair_kver}'" "${chroot_command_log}" >/dev/null || {
   cat "${chroot_command_log}" >&2
   exit 1
 }
-grep -F -- "dracut -f -v --kver '${repair_kver}' '/boot/.initramfs-" \
+grep -F -- \
+  "/usr/bin/env -u LVM_SYSTEM_DIR /bin/bash -lc dracut -f -v --no-hostonly --fstab" \
+  "${chroot_command_log}" >/dev/null || {
+    echo "[ERR] dracut did not clear host LVM state and disable host-only mode" >&2
+    cat "${chroot_command_log}" >&2
+    exit 1
+  }
+grep -F -- "--add 'lvm' --add-drivers 'virtio_pci virtio_scsi virtio_blk scsi_mod dm_mod'" \
+  "${chroot_command_log}" >/dev/null || {
+    echo "[ERR] dracut did not explicitly include the target storage stack" >&2
+    cat "${chroot_command_log}" >&2
+    exit 1
+  }
+grep -F -- "--kver '${repair_kver}' '/boot/.initramfs-" \
   "${chroot_command_log}" >/dev/null || {
     echo "[ERR] dracut did not build into a staged initramfs path" >&2
     cat "${chroot_command_log}" >&2
     exit 1
   }
 if grep -F -- \
-    "dracut -f -v --kver '${repair_kver}' '/boot/initramfs-${repair_kver}.img'" \
+    "--kver '${repair_kver}' '/boot/initramfs-${repair_kver}.img'" \
     "${chroot_command_log}" >/dev/null; then
   echo "[ERR] dracut overwrote the live initramfs directly" >&2
   cat "${chroot_command_log}" >&2
   exit 1
 fi
+
+lvm_root="${WORK_DIR}/lvm-root"
+lvm_kver="5.14.0-427.28.1.el9_4.x86_64"
+mkdir -p \
+  "${lvm_root}/lib/modules/${lvm_kver}/kernel/drivers/virtio" \
+  "${lvm_root}/etc/lvm/devices" \
+  "${lvm_root}/boot"
+printf '%s\n' "kernel module" \
+  > "${lvm_root}/lib/modules/${lvm_kver}/kernel/drivers/virtio/virtio_pci.ko.xz"
+printf '%s\n' "kernel/drivers/virtio/virtio_pci.ko.xz:" \
+  > "${lvm_root}/lib/modules/${lvm_kver}/modules.dep"
+printf '%s\n' "kernel" > "${lvm_root}/boot/vmlinuz-${lvm_kver}"
+printf '%s\n' "original LVM initramfs" > "${lvm_root}/boot/initramfs-${lvm_kver}.img"
+printf '%s\n' "IDTYPE=sys_wwid IDNAME=vmware-root" \
+  > "${lvm_root}/etc/lvm/devices/system.devices"
+: > "${chroot_command_log}"
+mock_chroot_mode="lvm_repair"
+mock_chroot_kver="${lvm_kver}"
+
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${lvm_root}" "/dev/v2k-nbd-does-not-exist" 1
+
+[[ ! -e "${lvm_root}/etc/lvm/devices/system.devices" ]] || {
+  echo "[ERR] migrated Rocky LVM devices file was left active" >&2
+  exit 1
+}
+lvm_devices_backup="$(find "${lvm_root}/etc/lvm/devices" -maxdepth 1 \
+  -type f -name 'system.devices.v2k-backup*' -print -quit)"
+[[ -n "${lvm_devices_backup}" ]] || {
+  echo "[ERR] original LVM devices file was not preserved" >&2
+  exit 1
+}
+grep -F -- "IDTYPE=sys_wwid IDNAME=vmware-root" "${lvm_devices_backup}" >/dev/null || {
+  echo "[ERR] LVM devices file backup content changed" >&2
+  exit 1
+}
+grep -Fx -- "staged initramfs" "${lvm_root}/boot/initramfs-${lvm_kver}.img" >/dev/null || {
+  echo "[ERR] validated LVM initramfs was not installed" >&2
+  exit 1
+}
+grep -Fx -- 'hostonly="no"' \
+  "${lvm_root}/etc/dracut.conf.d/99-ablestack-v2k-virtio.conf" >/dev/null || {
+    echo "[ERR] portable dracut configuration was not persisted" >&2
+    exit 1
+  }
+grep -F -- \
+  "lsinitrd '/boot/.initramfs-${lvm_kver}.v2k-" \
+  "${chroot_command_log}" >/dev/null || {
+  echo "[ERR] staged initramfs LVM stack was not verified" >&2
+  cat "${chroot_command_log}" >&2
+  exit 1
+}
+
+mock_chroot_mode="lvm_embedded_devices"
+if v2k_linux_bootstrap_verify_initramfs_lvm \
+    "${lvm_root}" "${lvm_kver}" \
+    "/boot/.initramfs-${lvm_kver}.v2k-embedded.img" \
+    "verify_embedded_lvm_devices"; then
+  echo "[ERR] initramfs containing stale system.devices was accepted" >&2
+  exit 1
+fi
+
+lvm_fail_root="${WORK_DIR}/lvm-fail-root"
+lvm_fail_kver="5.14.0-500.1.el9.x86_64"
+mkdir -p \
+  "${lvm_fail_root}/lib/modules/${lvm_fail_kver}/kernel/drivers/virtio" \
+  "${lvm_fail_root}/etc/lvm/devices" \
+  "${lvm_fail_root}/boot"
+printf '%s\n' "kernel module" \
+  > "${lvm_fail_root}/lib/modules/${lvm_fail_kver}/kernel/drivers/virtio/virtio_pci.ko.xz"
+printf '%s\n' "kernel/drivers/virtio/virtio_pci.ko.xz:" \
+  > "${lvm_fail_root}/lib/modules/${lvm_fail_kver}/modules.dep"
+printf '%s\n' "kernel" > "${lvm_fail_root}/boot/vmlinuz-${lvm_fail_kver}"
+printf '%s\n' "must remain unchanged" \
+  > "${lvm_fail_root}/boot/initramfs-${lvm_fail_kver}.img"
+printf '%s\n' "IDTYPE=sys_wwid IDNAME=vmware-root" \
+  > "${lvm_fail_root}/etc/lvm/devices/system.devices"
+: > "${chroot_command_log}"
+mock_chroot_mode="lvm_verify_fail"
+mock_chroot_kver="${lvm_fail_kver}"
+
+set +e
+v2k_linux_bootstrap_rebuild_initramfs \
+  "${lvm_fail_root}" "/dev/v2k-nbd-does-not-exist" 1
+lvm_fail_rc=$?
+set -e
+[[ "${lvm_fail_rc}" -eq 82 ]] || {
+  echo "[ERR] incomplete staged LVM initramfs returned rc=${lvm_fail_rc}" >&2
+  exit 1
+}
+grep -Fx -- "must remain unchanged" \
+  "${lvm_fail_root}/boot/initramfs-${lvm_fail_kver}.img" >/dev/null || {
+    echo "[ERR] failed LVM validation damaged the existing initramfs" >&2
+    exit 1
+  }
+grep -F -- "IDTYPE=sys_wwid IDNAME=vmware-root" \
+  "${lvm_fail_root}/etc/lvm/devices/system.devices" >/dev/null || {
+    echo "[ERR] failed LVM validation did not restore system.devices" >&2
+    exit 1
+  }
 
 invalid_root="${WORK_DIR}/invalid-root"
 invalid_kver="5.14.0-500.el9.x86_64"
