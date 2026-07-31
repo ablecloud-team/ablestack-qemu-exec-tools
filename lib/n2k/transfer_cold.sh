@@ -201,7 +201,8 @@ n2k_source_map_from_v3_nfs_changed_regions() {
 n2k_source_map_from_v3_nfs_path_index() {
   local manifest="$1" path_index_json="$2" nfs_host="$3"
   local entries count idx item vdisk_uuid snapshot_file_path uri local_path file_size disk_id source_map="{}"
-  local mapped_count=0 mount_errors="[]" missing_files="[]"
+  local expected_disk_count source_map_count
+  local mapped_count=0 mount_errors="[]" missing_files="[]" mapping_errors="[]"
   [[ -n "${nfs_host}" ]] || {
     echo "NFS host is required to build source-map from v3 path index." >&2
     return 2
@@ -239,17 +240,43 @@ n2k_source_map_from_v3_nfs_path_index() {
     fi
     file_size="$(n2k_storage_file_size_bytes "${local_path}")"
     disk_id="$(n2k_source_manifest_disk_id_for_snapshot_file "${manifest}" "${vdisk_uuid}" "${file_size}" "${idx}")"
-    [[ -n "${disk_id}" ]] || continue
+    if [[ -z "${disk_id}" ]]; then
+      mapping_errors="$(jq -c \
+        --arg vdisk_uuid "${vdisk_uuid}" \
+        --argjson file_size "${file_size}" \
+        '. + [{vdisk_uuid:$vdisk_uuid,file_size:$file_size,reason:"snapshot disk identity is ambiguous or missing"}]' \
+        <<<"${mapping_errors}")"
+      continue
+    fi
     source_map="$(jq -c --arg disk_id "${disk_id}" --arg uri "${uri}" '. + {($disk_id):$uri}' <<<"${source_map}")"
     mapped_count=$((mapped_count + 1))
   done
-  if [[ "${mapped_count}" -eq 0 ]]; then
+  expected_disk_count="$(jq -r '.disks | length' "${manifest}")"
+  source_map_count="$(jq -r 'length' <<<"${source_map}")"
+  if [[ "${expected_disk_count}" -eq 0 \
+    || "${count}" -ne "${expected_disk_count}" \
+    || "${mapped_count}" -ne "${expected_disk_count}" \
+    || "${source_map_count}" -ne "${expected_disk_count}" ]]; then
     jq -nc \
       --arg host "${nfs_host}" \
       --argjson snapshot_disk_count "${count}" \
+      --argjson expected_disk_count "${expected_disk_count}" \
+      --argjson mapped_disk_count "${mapped_count}" \
+      --argjson source_map_count "${source_map_count}" \
       --argjson mount_errors "${mount_errors}" \
       --argjson missing_files "${missing_files}" \
-      '{message:"Unable to build Nutanix NFS source map from v3 snapshot paths",source_endpoint:$host,snapshot_disk_count:$snapshot_disk_count,mount_errors:$mount_errors,missing_files:$missing_files}' >&2
+      --argjson mapping_errors "${mapping_errors}" \
+      '{
+        message:"Unable to build a complete Nutanix NFS source map from v3 snapshot paths",
+        source_endpoint:$host,
+        snapshot_disk_count:$snapshot_disk_count,
+        expected_disk_count:$expected_disk_count,
+        mapped_disk_count:$mapped_disk_count,
+        source_map_count:$source_map_count,
+        mount_errors:$mount_errors,
+        missing_files:$missing_files,
+        mapping_errors:$mapping_errors
+      }' >&2
     return 2
   fi
   printf '%s' "${source_map}"

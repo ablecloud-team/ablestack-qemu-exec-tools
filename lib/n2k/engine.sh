@@ -292,7 +292,43 @@ n2k_cmd_init() {
     cloud_config_json="$(jq -c --argjson pool "${storage_pool_config}" '. + {storage_pool:$pool}' <<<"${cloud_config_json}")"
   fi
   n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}"
+  if [[ -n "${inventory_json}" ]]; then
+    local controller_validation_rc=0
+    if n2k_manifest_record_source_controller_validation "${N2K_MANIFEST}"; then
+      n2k_event INFO "init" "" "source_disk_controller_validation_passed" \
+        "$(jq -c '{
+            supported_controllers:.runtime.source_validation.supported_controllers,
+            root_selection:.runtime.source_validation.root_selection,
+            controller_plan:.source.controller_plan
+          }' "${N2K_MANIFEST}")"
+    else
+      controller_validation_rc=$?
+      n2k_event ERROR "init" "" "source_disk_controller_validation_failed" \
+        "$(jq -c '{
+            code:(.runtime.last_error.code // 44),
+            reason:(.runtime.last_error.reason // "source_controller_plan_failed"),
+            controller_plan:(.source.controller_plan // {}),
+            action:"stop_before_snapshot"
+          }' "${N2K_MANIFEST}")"
+      return "${controller_validation_rc}"
+    fi
+  fi
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    local cloud_controller_plan_rc=0
+    if n2k_cloud_target_prepare_disk_controller_plan "${N2K_MANIFEST}"; then
+      n2k_event INFO "init" "" "cloud_disk_controller_plan_ready" \
+        "$(jq -c '.target.cloud.disk_controller_plan' "${N2K_MANIFEST}")"
+    else
+      cloud_controller_plan_rc=$?
+      n2k_event ERROR "init" "" "cloud_disk_controller_plan_failed" \
+        "$(jq -c '{
+            code:(.runtime.last_error.code // 44),
+            reason:(.runtime.last_error.reason // "cloud_disk_controller_plan_failed"),
+            plan:(.target.cloud.disk_controller_plan // {}),
+            action:"stop_before_snapshot"
+          }' "${N2K_MANIFEST}")"
+      return "${cloud_controller_plan_rc}"
+    fi
     n2k_cloud_target_ensure_manifest_nic_mappings "${N2K_MANIFEST}" || \
       n2k_die "Failed to create ordered source NIC to Cloud network mappings"
   fi
@@ -642,6 +678,40 @@ n2k_run_manifest_has_recovery_point() {
 n2k_run_manifest_value() {
   local manifest="$1" filter="$2"
   jq -r "${filter}" "${manifest}"
+}
+
+n2k_require_disk_controller_integrity() {
+  local manifest="$1"
+  local provider plan_status
+
+  if ! n2k_manifest_source_controller_validation_is_valid "${manifest}"; then
+    echo "N2K migration requires an unambiguous, supported source disk-controller plan. Start phase1 with a new workdir after correcting the source inventory." >&2
+    return 44
+  fi
+
+  provider="$(jq -r '.target.provider // "libvirt"' "${manifest}")"
+  case "${provider}" in
+    ablestack-cloud)
+      plan_status="$(jq -r '.target.cloud.disk_controller_plan.status // ""' "${manifest}")"
+      if [[ -z "${plan_status}" ]]; then
+        n2k_cloud_target_prepare_disk_controller_plan "${manifest}" || return $?
+      fi
+      n2k_cloud_target_disk_controller_plan_is_valid "${manifest}" || {
+        echo "ABLESTACK Cloud migration requires a valid single root/data disk-controller plan." >&2
+        return 44
+      }
+      ;;
+    libvirt)
+      n2k_libvirt_disk_controller_plan_is_valid "${manifest}" || {
+        echo "Libvirt migration requires supported disk controllers and an explicit boot disk for mixed-controller inventories." >&2
+        return 44
+      }
+      ;;
+    *)
+      echo "Unsupported target provider for disk-controller validation: ${provider}" >&2
+      return 44
+      ;;
+  esac
 }
 
 n2k_run_text_or_json() {
@@ -1193,6 +1263,7 @@ n2k_cmd_run() {
     n2k_cloud_target_apply_manifest_config "${N2K_MANIFEST}" "$(if [[ "${target_provider_arg_set}" -eq 1 ]]; then printf '%s' "${target_provider}"; else printf ''; fi)" "${cloud_config_json}"
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"
+  n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
   if [[ "${target_provider}" == "ablestack-cloud" && "$(jq -r '.target.storage.type // ""' "${N2K_MANIFEST}")" == "file" ]]; then
     n2k_cloud_target_resolve_file_storage_for_manifest "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" >/dev/null
   fi
@@ -1490,6 +1561,7 @@ n2k_cmd_snapshot() {
     export N2K_EVENTS_LOG
   fi
   n2k_require_manifest
+  n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
 
   local metadata_json="{}"
   if [[ "${source_api}" == "v3" && "${create_vm_snapshot}" == "true" ]]; then
@@ -1893,6 +1965,7 @@ n2k_cmd_sync() {
     export N2K_EVENTS_LOG
   fi
   n2k_require_manifest
+  n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
 
   case "${insecure}" in
     0|1) ;;
@@ -2163,6 +2236,7 @@ n2k_cmd_cutover() {
     export N2K_EVENTS_LOG
   fi
   n2k_require_manifest
+  n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
   [[ "${start_vm}" -eq 0 || "${apply_define}" -eq 1 ]] || n2k_die "--start requires --apply"
 
   if [[ -n "${rbd_access_mode}" ]]; then

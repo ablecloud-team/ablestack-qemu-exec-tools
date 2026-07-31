@@ -325,9 +325,130 @@ n2k_cloud_target_optional_owner_params() {
   '
 }
 
+n2k_cloud_target_prepare_disk_controller_plan() {
+  local manifest="$1"
+  local ts tmp status
+
+  [[ -f "${manifest}" ]] || return 2
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+
+  if ! jq --arg ts "${ts}" '
+      def controller($raw):
+        ($raw // "" | tostring | ascii_downcase) as $kind
+        | if ($kind | test("virtio")) then "virtio"
+          elif ($kind | test("sata")) then "sata"
+          elif ($kind | test("ide")) then "ide"
+          elif ($kind | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
+          else "" end;
+      def supported($kind):
+        ((["ide","scsi","sata","virtio"] | index($kind)) != null);
+
+      (.disks // []) as $disks
+      | ([ $disks[] | select((.role // "") == "root") ]) as $roots
+      | ([ $disks[] | select((.role // "") == "data") ]) as $data_disks
+      | (controller($roots[0].controller.kind // $roots[0].controller.type // "")) as $root_kind
+      | ([ $data_disks[]
+            | controller(.controller.kind // .controller.type // "")
+            | select(length > 0)
+         ] | unique) as $data_kinds
+      | (
+          if ($roots | length) != 1 then "cloud_root_disk_ambiguous"
+          elif (supported($root_kind) | not) then "cloud_root_controller_unsupported"
+          elif ([ $data_disks[]
+                    | controller(.controller.kind // .controller.type // "")
+                    | select(supported(.) | not)
+                 ] | length) > 0
+            then "cloud_data_controller_unsupported"
+          elif ($data_kinds | length) > 1
+            then "cloud_mixed_data_controller_unsupported"
+          else ""
+          end
+        ) as $reason
+      | (($data_kinds[0] // "") | tostring) as $data_kind
+      | .target.cloud = (.target.cloud // {})
+      | .target.cloud.disk_controller_plan = {
+          status:(if ($reason | length) == 0 then "passed" else "failed" end),
+          planned_at:$ts,
+          source:{root:$root_kind,data:$data_kind,data_kinds:$data_kinds},
+          effective:{
+            root:(if ($reason | length) == 0 then $root_kind else "" end),
+            data:(if ($reason | length) == 0 then $data_kind else "" end)
+          },
+          failure_reason:$reason
+        }
+      | if ($reason | length) > 0 then
+          .runtime = (.runtime // {})
+          | .phases.init.done = false
+          | .phases.init.ts = ""
+          | .runtime.last_error = {
+              code:44,
+              reason:$reason,
+              ts:$ts,
+              details:{
+                root_controller:$root_kind,
+                data_controllers:$data_kinds
+              }
+            }
+        else .
+        end
+    ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 2
+  fi
+  mv -f "${tmp}" "${manifest}"
+
+  status="$(jq -r '.target.cloud.disk_controller_plan.status // "failed"' "${manifest}" 2>/dev/null || echo failed)"
+  [[ "${status}" == "passed" ]] && return 0
+  return 44
+}
+
+n2k_cloud_target_disk_controller_plan_is_valid() {
+  local manifest="$1"
+  jq -e '
+    def controller($raw):
+      ($raw // "" | tostring | ascii_downcase) as $kind
+      | if ($kind | test("virtio")) then "virtio"
+        elif ($kind | test("sata")) then "sata"
+        elif ($kind | test("ide")) then "ide"
+        elif ($kind | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
+        else "" end;
+    def supported($kind):
+      ((["ide","scsi","sata","virtio"] | index($kind)) != null);
+    (.target.cloud.disk_controller_plan // {}) as $plan
+    | ([ .disks[]? | select((.role // "") == "root") ]) as $roots
+    | ([ .disks[]? | select((.role // "") == "data")
+          | controller(.controller.kind // .controller.type // "")
+       ] | unique) as $data_kinds
+    | (controller($roots[0].controller.kind // $roots[0].controller.type // "")) as $root_kind
+    | $plan.status == "passed"
+      and ($roots | length) == 1
+      and ($data_kinds | length) <= 1
+      and supported($plan.effective.root // "")
+      and ($plan.effective.root // "") == $root_kind
+      and (
+        (($plan.effective.data // "") | length) == 0
+        or (
+          supported($plan.effective.data)
+          and ($plan.effective.data // "") == ($data_kinds[0] // "")
+        )
+      )
+      and (
+        ($data_kinds | length) == 1
+        or (($plan.effective.data // "") | length) == 0
+      )
+  ' "${manifest}" >/dev/null 2>&1
+}
+
 n2k_cloud_target_source_deploy_params_json() {
   local manifest="$1"
-  jq -c '
+  if jq -e '((.target.cloud.disk_controller_plan.status // "") | length) > 0' "${manifest}" >/dev/null 2>&1 \
+    && ! n2k_cloud_target_disk_controller_plan_is_valid "${manifest}"; then
+    echo "Cloud deployment requires a valid disk-controller plan." >&2
+    return 44
+  fi
+  jq -ce '
     def controller($raw):
       ($raw // "" | tostring | ascii_downcase) as $s
       | if ($s | test("virtio")) then "virtio"
@@ -335,6 +456,8 @@ n2k_cloud_target_source_deploy_params_json() {
         elif ($s | test("ide")) then "ide"
         elif ($s | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
         else "" end;
+    def supported($kind):
+      ((["ide","scsi","sata","virtio"] | index($kind)) != null);
 
     (.source.vm // {}) as $vm
     | (($vm.cpu // 0) | tonumber? // 0) as $cpu
@@ -344,8 +467,31 @@ n2k_cloud_target_source_deploy_params_json() {
     | ((.target.cloud.cpu_speed // "1000") | tostring) as $cpu_speed
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
-    | (controller(.disks[0].controller.type // "")) as $root_controller
-    | (controller((.disks[1:] // [] | map(.controller.type // "") | map(select((. | tostring | length) > 0)) | first) // "")) as $data_controller
+    | (.target.cloud.disk_controller_plan // {}) as $controller_plan
+    | (
+        if $controller_plan.status == "passed"
+        then (($controller_plan.effective.root // "") | tostring | ascii_downcase)
+        else controller(.disks[0].controller.kind // .disks[0].controller.type // "")
+        end
+      ) as $root_controller
+    | ([ .disks[1:][]?
+          | controller(.controller.kind // .controller.type // "")
+          | select(length > 0)
+       ] | unique) as $data_controllers
+    | (
+        if $controller_plan.status == "passed"
+        then (($controller_plan.effective.data // "") | tostring | ascii_downcase)
+        else ($data_controllers[0] // "")
+        end
+      ) as $data_controller
+    | if (supported($root_controller) | not) then
+        error("cloud_root_controller_unsupported")
+      elif ([ $data_controllers[] | select(supported(.) | not) ] | length) > 0 then
+        error("cloud_data_controller_unsupported")
+      elif ($data_controllers | length) > 1 then
+        error("cloud_mixed_data_controller_unsupported")
+      else .
+      end
     | {}
       + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
       + {"details[0].cpuSpeed": $cpu_speed}
@@ -1063,7 +1209,7 @@ n2k_cloud_target_cutover() {
   storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
   disk_offering_id="$(jq -r '.disk_offering_id // ""' <<<"${cfg}")"
   owner_params="$(n2k_cloud_target_optional_owner_params "${cfg}")"
-  source_deploy_params="$(n2k_cloud_target_source_deploy_params_json "${manifest}")"
+  source_deploy_params="$(n2k_cloud_target_source_deploy_params_json "${manifest}")" || return $?
   disk_count="$(jq -r '.disks | length' "${manifest}")"
   [[ "${disk_count}" -gt 0 ]] || {
     echo "Cloud target cutover requires at least one migrated disk." >&2

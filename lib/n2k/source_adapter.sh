@@ -2072,12 +2072,11 @@ n2k_source_legacy_collect_changed_regions_for_pair() {
 }
 
 n2k_source_manifest_disk_id_for_snapshot_file() {
-  local manifest="$1" vdisk_uuid="$2" file_size="${3:-null}" ordinal="${4:-0}"
+  local manifest="$1" vdisk_uuid="$2" file_size="${3:-null}"
 
   jq -r \
     --arg vdisk_uuid "${vdisk_uuid}" \
     --argjson file_size "${file_size}" \
-    --argjson ordinal "${ordinal}" \
     '
       def disk_size($d):
         (($d.size_bytes // $d.disk_size_bytes // $d.capacity_bytes // $d.size // null) | tonumber?);
@@ -2089,15 +2088,12 @@ n2k_source_manifest_disk_id_for_snapshot_file() {
               or (.nutanix.vdisk_uuid // "") == $vdisk_uuid
             ) | (.disk_id // .device_key // "")]
           | map(select(length > 0))
-          | .[0]
-        ) as $direct
-      | if ($direct // "") != "" then $direct
+        ) as $direct_matches
+      | if ($direct_matches | length) == 1 then $direct_matches[0]
         else
           ([$disks[]? | select(($file_size != null) and (disk_size(.) == $file_size)) | (.disk_id // .device_key // "")]
            | map(select(length > 0))) as $size_matches
           | if ($size_matches | length) == 1 then $size_matches[0]
-            elif ($ordinal < ($disks | length)) and ($file_size != null) and (disk_size($disks[$ordinal]) == $file_size) then
-              ($disks[$ordinal].disk_id // $disks[$ordinal].device_key // "")
             else
               ""
             end

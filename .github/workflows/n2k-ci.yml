@@ -8,6 +8,7 @@ on:
       - "bin/ablestack_n2k.sh"
       - "lib/n2k/**"
       - "docs/n2k/**"
+      - "tests/n2k_*.sh"
       - "tests/fixtures/n2k/**"
       - "completions/ablestack_n2k"
       - "rpm/ablestack_n2k.spec"
@@ -18,6 +19,7 @@ on:
       - "bin/ablestack_n2k.sh"
       - "lib/n2k/**"
       - "docs/n2k/**"
+      - "tests/n2k_*.sh"
       - "tests/fixtures/n2k/**"
       - "completions/ablestack_n2k"
       - "rpm/ablestack_n2k.spec"
@@ -43,6 +45,9 @@ jobs:
 
       - name: Manifest observability smoke
         run: tests/n2k_manifest_observability_smoke.sh
+
+      - name: Disk controller and identity integrity smoke
+        run: tests/n2k_controller_integrity_smoke.sh
 
       - name: JSON fixtures
         run: find tests/fixtures/n2k -name '*.json' -print0 | xargs -0 jq empty

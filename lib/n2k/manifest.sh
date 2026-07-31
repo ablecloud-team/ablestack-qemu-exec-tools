@@ -140,6 +140,7 @@ n2k_manifest_init() {
         type: "nutanix",
         mode: $mode,
         pc: $pc,
+        controller_plan: ($inv.controller_plan // {}),
         api: {
           family: "",
           namespaces: {}
@@ -198,6 +199,105 @@ n2k_manifest_init() {
         last_error: {code: 0, reason: "", ts: ""}
       }
     }' > "${manifest}"
+}
+
+n2k_manifest_record_source_controller_validation() {
+  local manifest="$1"
+  local ts tmp status
+  ts="$(n2k_now_iso)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+
+  if ! jq --arg ts "${ts}" '
+    def supported($kind):
+      ((["ide","scsi","sata","virtio"] | index($kind)) != null);
+
+    (.source.controller_plan // {}) as $plan
+    | ([ .disks[]? | select((.role // "") == "root") ]) as $roots
+    | ([ .disks[]? | ((.controller.kind // .controller.type // "") | tostring | ascii_downcase) ]) as $controller_kinds
+    | ([ $controller_kinds[] | select(supported(.) | not) ] | unique) as $unsupported_kinds
+    | (
+        if (.disks | length) == 0 then "inventory_has_no_disks"
+        elif ($roots | length) != 1 then "root_disk_ambiguous"
+        elif ($unsupported_kinds | length) > 0 then "unsupported_disk_controller"
+        elif ($plan.status // "") != "passed" then ($plan.failure_reason // "source_controller_plan_failed")
+        elif ($plan.root.disk_id // "") != ($roots[0].disk_id // "") then "source_controller_plan_root_mismatch"
+        elif (($controller_kinds | unique | length) > 1)
+          and (($plan.root_selection // "") != "explicit_boot_address")
+          then "mixed_controller_boot_disk_ambiguous"
+        else ""
+        end
+      ) as $reason
+    | .runtime.source_validation = {
+        status:(if ($reason | length) == 0 then "passed" else "failed" end),
+        validated_at:$ts,
+        supported_controllers:["ide","scsi","sata","virtio"],
+        failure_reason:$reason,
+        unsupported_controllers:$unsupported_kinds,
+        root_selection:($plan.root_selection // "unresolved")
+      }
+    | if ($reason | length) > 0 then
+        .phases.init.done = false
+        | .phases.init.ts = ""
+        | .runtime.last_error = {
+          code:44,
+          reason:$reason,
+          ts:$ts,
+          details:{
+            controller_plan:$plan,
+            unsupported_controllers:$unsupported_kinds
+          }
+        }
+      else
+        .phases.init.done = true
+        | .phases.init.ts = (
+            if ((.phases.init.ts // "") | length) > 0 then .phases.init.ts else $ts end
+          )
+      end
+  ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 2
+  fi
+  mv -f "${tmp}" "${manifest}"
+
+  status="$(jq -r '.runtime.source_validation.status // "failed"' "${manifest}" 2>/dev/null || echo failed)"
+  [[ "${status}" == "passed" ]] && return 0
+  return 44
+}
+
+n2k_manifest_source_controller_validation_is_valid() {
+  local manifest="$1"
+  jq -e '
+    def controller($raw):
+      ($raw // "" | tostring | ascii_downcase) as $kind
+      | if ($kind | test("virtio")) then "virtio"
+        elif ($kind | test("sata")) then "sata"
+        elif ($kind | test("ide")) then "ide"
+        elif ($kind | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
+        else "" end;
+    ([ .disks[]? | controller(.controller.kind // .controller.type // "") ]) as $controllers
+    | ([ .disks[]? | select((.role // "") == "root") ]) as $roots
+    | (.source.controller_plan // {}) as $plan
+    | ((.runtime.source_validation.status // "") | tostring) as $status
+    | ($controllers | length) > 0
+      and ([ $controllers[] | select(length == 0) ] | length) == 0
+      and (
+        (
+          $status == "passed"
+          and ($plan.status // "") == "passed"
+          and ($roots | length) == 1
+          and ($plan.root.disk_id // "") == ($roots[0].disk_id // "")
+          and (
+            ($controllers | unique | length) <= 1
+            or ($plan.root_selection // "") == "explicit_boot_address"
+          )
+        )
+        or (
+          ($status | length) == 0
+          and ($controllers | unique | length) == 1
+        )
+      )
+  ' "${manifest}" >/dev/null 2>&1
 }
 
 n2k_manifest_phase_done() {
