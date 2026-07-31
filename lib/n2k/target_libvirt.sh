@@ -38,8 +38,33 @@ n2k_disk_bus_from_inventory() {
   case "${controller_type}" in
     *sata*|*ide*) printf 'sata' ;;
     *virtio*) printf 'virtio' ;;
-    *) printf 'scsi' ;;
+    *scsi*|*lsilogic*|*buslogic*) printf 'scsi' ;;
+    *) return 44 ;;
   esac
+}
+
+n2k_libvirt_disk_controller_plan_is_valid() {
+  local manifest="$1"
+  jq -e '
+    def controller($raw):
+      ($raw // "" | tostring | ascii_downcase) as $kind
+      | if ($kind | test("virtio")) then "virtio"
+        elif ($kind | test("sata")) then "sata"
+        elif ($kind | test("ide")) then "ide"
+        elif ($kind | test("scsi|lsilogic|pvscsi|buslogic")) then "scsi"
+        else "" end;
+    ([ .disks[]? | controller(.controller.kind // .controller.type // "") ]) as $controllers
+    | (.source.controller_plan // {}) as $plan
+    | ($controllers | length) > 0
+      and ([ $controllers[] | select(length == 0) ] | length) == 0
+      and (
+        ($controllers | unique | length) <= 1
+        or (
+          ($plan.status // "") == "passed"
+          and ($plan.root_selection // "") == "explicit_boot_address"
+        )
+      )
+  ' "${manifest}" >/dev/null 2>&1
 }
 
 n2k_target_first_existing_file() {
@@ -127,8 +152,11 @@ n2k_target_disk_xml() {
   target_path="$(jq -r ".disks[${idx}].transfer.target_path" "${manifest}")"
   target_format="$(jq -r '.target.format // "qcow2"' "${manifest}")"
   rbd_access_mode="${N2K_RBD_ACCESS_MODE:-$(jq -r '.target.storage.rbd_access_mode // "librbd"' "${manifest}")}"
-  controller_type="$(jq -r ".disks[${idx}].controller.type // \"scsi\"" "${manifest}")"
-  bus="$(n2k_disk_bus_from_inventory "${controller_type}")"
+  controller_type="$(jq -r ".disks[${idx}].controller.kind // .disks[${idx}].controller.type // \"\"" "${manifest}")"
+  if ! bus="$(n2k_disk_bus_from_inventory "${controller_type}")"; then
+    echo "Unsupported libvirt disk controller for disk ${idx}: ${controller_type:-unknown}" >&2
+    return 44
+  fi
   dev="sd$(n2k_disk_letter "${idx}")"
 
   case "${storage}" in
@@ -250,6 +278,10 @@ n2k_target_generate_libvirt_xml() {
   local manifest="$1"
   local vm vcpu memory_mb fw secure_boot count idx xml disks_xml iface_xml
   local ovmf_code ovmf_vars ovmf_nvram loader_attrs
+  n2k_libvirt_disk_controller_plan_is_valid "${manifest}" || {
+    echo "Libvirt target requires supported disk controllers and an explicit boot disk for mixed-controller inventories." >&2
+    return 44
+  }
   vm="$(jq -r '.target.libvirt.name // .source.vm.name' "${manifest}")"
   vcpu="$(jq -r '(.source.vm.cpu // 0 | tonumber? // 0) as $v | if $v > 0 then $v else 2 end' "${manifest}")"
   memory_mb="$(jq -r '(.source.vm.memory_mb // 0 | tonumber? // 0) as $m | if $m > 0 then $m else 2048 end' "${manifest}")"
