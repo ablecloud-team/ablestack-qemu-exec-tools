@@ -2779,10 +2779,11 @@ v2k_manifest_append_sync_issue() {
   local which="${1:-}"
   local code="${2:-0}"
   local reason="${3:-}"
-  local details_json="${4:-{}}"
+  local details_json="${4-}"
 
   v2k_require_manifest
 
+  [[ -n "${details_json}" ]] || details_json='{}'
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -3160,6 +3161,51 @@ EOF
 
   # Build manifest using inventory json + target settings (from env)
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
+
+  local controller_validation_rc=0
+  if v2k_manifest_validate_source_disk_controllers "${V2K_MANIFEST}"; then
+    controller_validation_rc=0
+    v2k_event INFO "init" "" "source_disk_controller_validation_passed" \
+      "$(jq -c '{
+          supported_controllers:.runtime.source_validation.supported_controllers,
+          disks:[.disks[] | {
+            disk_id,
+            device_key:(.device_key // ""),
+            role,
+            controller:(.controller.kind // "unknown")
+          }]
+        }' "${V2K_MANIFEST}")"
+  else
+    controller_validation_rc=$?
+    v2k_event ERROR "init" "" "source_disk_controller_validation_failed" \
+      "$(jq -c '{
+          code:(.runtime.last_error.code // 44),
+          reason:(.runtime.last_error.reason // "unsupported_source_disk_controller"),
+          unsupported_disks:(.runtime.source_validation.unsupported_disks // []),
+          action:"stop_before_cbt"
+        }' "${V2K_MANIFEST}")"
+    return "${controller_validation_rc}"
+  fi
+
+  if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    local cloud_controller_plan_rc=0
+    if v2k_cloud_target_prepare_disk_controller_plan "${V2K_MANIFEST}"; then
+      cloud_controller_plan_rc=0
+      v2k_event INFO "init" "" "cloud_disk_controller_plan_ready" \
+        "$(jq -c '.target.cloud.disk_controller_plan' "${V2K_MANIFEST}")"
+    else
+      cloud_controller_plan_rc=$?
+      v2k_event ERROR "init" "" "cloud_disk_controller_plan_failed" \
+        "$(jq -c '{
+            code:(.runtime.last_error.code // 44),
+            reason:(.runtime.last_error.reason // "cloud_disk_controller_plan_failed"),
+            plan:(.target.cloud.disk_controller_plan // {}),
+            action:"stop_before_cbt"
+          }' "${V2K_MANIFEST}")"
+      return "${cloud_controller_plan_rc}"
+    fi
+  fi
+
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     v2k_cloud_target_ensure_manifest_nic_mappings "${V2K_MANIFEST}" || exit $?
   fi
@@ -3169,6 +3215,7 @@ EOF
   v2k_manifest_set_compat_detected_esxi_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_ESXI_VERSION:-}"
   v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}" "${V2K_NBDKIT_BIN:-}" "${V2K_NBDKIT_VDDK_PLUGIN:-}"
   v2k_compat_write_env "${V2K_WORKDIR}" || true
+  v2k_manifest_phase_done "${V2K_MANIFEST}" "init"
 
   v2k_event INFO "init" "" "phase_done" "{\"manifest\":\"${V2K_MANIFEST}\",\"workdir\":\"${V2K_WORKDIR}\"}"
 
@@ -3185,7 +3232,17 @@ v2k_cmd_cbt() {
   case "${action}" in
     enable)
       v2k_event INFO "cbt_enable" "" "phase_start" "{}"
-      v2k_vmware_cbt_enable_all "${V2K_MANIFEST}"
+      local cbt_enable_rc=0
+      if v2k_vmware_cbt_enable_all "${V2K_MANIFEST}"; then
+        cbt_enable_rc=0
+      else
+        cbt_enable_rc=$?
+        v2k_event ERROR "cbt_enable" "" "phase_failed" \
+          "{\"code\":${cbt_enable_rc},\"action\":\"stop_before_base\"}"
+        v2k_manifest_append_sync_issue "base" "${cbt_enable_rc}" \
+          "cbt_enable_failed" '{"action":"stop_before_base"}' || true
+        return "${cbt_enable_rc}"
+      fi
       v2k_manifest_phase_done "${V2K_MANIFEST}" "cbt_enable"
       v2k_event INFO "cbt_enable" "" "phase_done" "{}"
       v2k_json_or_text_ok "cbt.enable" "{}" "CBT enabled (requested) and verified."
@@ -3432,11 +3489,14 @@ v2k_cmd_sync() {
   case "${which}" in
     base)
       v2k_event INFO "sync.base" "" "phase_start" "{\"jobs\":${jobs}}"
-      v2k_transfer_base_all "${V2K_MANIFEST}" "${jobs}"
 
-      # After base sync, fetch the current change IDs so the next incremental starts from a stable baseline.
+      # Establish and validate the CBT baseline against the base snapshot before
+      # copying any disk data. Unsupported controllers or missing changeIds must
+      # fail before a long base transfer can misleadingly reach 100%.
       local py_script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vmware_changed_areas.py"
       v2k_manifest_fetch_and_save_base_change_ids "${V2K_MANIFEST}" "${py_script_path}"
+
+      v2k_transfer_base_all "${V2K_MANIFEST}" "${jobs}"
 
       v2k_prepare_cbt_change_ids_after_base "${V2K_MANIFEST}"
       v2k_manifest_phase_done "${V2K_MANIFEST}" "base_sync"
@@ -3652,6 +3712,15 @@ v2k_select_bootstrap_fallback() {
       --arg reason "${reason}" \
       --argjson code "${code}" \
       '{enabled:true,bus:$bus,phase:$phase,code:$code,reason:$reason}')" || true
+  if [[ "$(jq -r '.target.provider // "libvirt"' "${manifest}" 2>/dev/null || echo libvirt)" == "ablestack-cloud" ]]; then
+    if ! v2k_cloud_target_apply_disk_controller_override \
+        "${manifest}" "${bus}" "bootstrap_sata_fallback"; then
+      v2k_event ERROR "cutover" "" "bootstrap_fallback_controller_plan_failed" \
+        "$(jq -nc --arg bus "${bus}" --arg phase "${phase}" \
+          '{bus:$bus,phase:$phase,action:"stop_before_cloud_deploy"}')" || true
+      return 1
+    fi
+  fi
   v2k_event WARN "cutover" "" "bootstrap_fallback_selected" \
     "$(jq -nc \
       --arg bus "${bus}" \
