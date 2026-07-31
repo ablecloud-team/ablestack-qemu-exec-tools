@@ -306,8 +306,130 @@ v2k_cloud_target_optional_owner_params() {
   '
 }
 
+v2k_cloud_target_prepare_disk_controller_plan() {
+  local manifest="$1"
+  local ts tmp status
+
+  [[ -f "${manifest}" ]] || return 2
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+
+  if ! jq \
+      --arg ts "${ts}" '
+      def supported($kind):
+        ((["ide","scsi","sata"] | index($kind)) != null);
+
+      (.disks // []) as $disks
+      | ([ $disks[] | select((.role // "") == "root") ]) as $roots
+      | ([ $disks[] | select((.role // "") == "data") ]) as $data_disks
+      | (($roots[0].controller.kind // "") | tostring | ascii_downcase) as $root_kind
+      | ([ $data_disks[].controller.kind // "" ]
+          | map(tostring | ascii_downcase)
+          | map(select(length > 0))
+          | unique) as $data_kinds
+      | (
+          if ($roots | length) != 1 then "cloud_root_disk_ambiguous"
+          elif (supported($root_kind) | not) then "cloud_root_controller_unsupported"
+          elif ([ $data_kinds[] | select(supported(.) | not) ] | length) > 0
+            then "cloud_data_controller_unsupported"
+          elif ($data_kinds | length) > 1
+            then "cloud_mixed_data_controller_unsupported"
+          else ""
+          end
+        ) as $reason
+      | (($data_kinds[0] // "") | tostring) as $data_kind
+      | .target.cloud = (.target.cloud // {})
+      | .target.cloud.disk_controller_plan = {
+          status:(if ($reason | length) == 0 then "passed" else "failed" end),
+          planned_at:$ts,
+          source:{root:$root_kind,data:$data_kind,data_kinds:$data_kinds},
+          effective:{
+            root:(if ($reason | length) == 0 then $root_kind else "" end),
+            data:(if ($reason | length) == 0 then $data_kind else "" end)
+          },
+          override_reason:"",
+          failure_reason:$reason
+        }
+      | if ($reason | length) > 0 then
+          .runtime = (.runtime // {})
+          | .runtime.last_error = {
+              code:44,
+              reason:$reason,
+              ts:$ts,
+              details:{
+                root_controller:$root_kind,
+                data_controllers:$data_kinds
+              }
+            }
+        else
+          .
+        end
+    ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 2
+  fi
+  mv -f "${tmp}" "${manifest}"
+
+  status="$(jq -r '.target.cloud.disk_controller_plan.status // "failed"' "${manifest}" 2>/dev/null || echo failed)"
+  [[ "${status}" == "passed" ]] && return 0
+  return 44
+}
+
+v2k_cloud_target_disk_controller_plan_is_valid() {
+  local manifest="$1"
+  jq -e '
+    def supported($kind):
+      ((["ide","scsi","sata"] | index($kind)) != null);
+    (.target.cloud.disk_controller_plan // {}) as $plan
+    | $plan.status == "passed"
+      and supported($plan.effective.root // "")
+      and (
+        (($plan.effective.data // "") | length) == 0
+        or supported($plan.effective.data)
+      )
+  ' "${manifest}" >/dev/null 2>&1
+}
+
+v2k_cloud_target_apply_disk_controller_override() {
+  local manifest="$1"
+  local bus="$2"
+  local reason="$3"
+  local ts tmp
+
+  case "${bus}" in
+    ide|scsi|sata) ;;
+    *) return 44 ;;
+  esac
+  v2k_cloud_target_disk_controller_plan_is_valid "${manifest}" || return 44
+
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+  if ! jq \
+      --arg bus "${bus}" \
+      --arg reason "${reason}" \
+      --arg ts "${ts}" '
+      .target.cloud.disk_controller_plan.effective.root = $bus
+      | .target.cloud.disk_controller_plan.effective.data = (
+          if ((.disks // []) | length) > 1 then $bus else "" end
+        )
+      | .target.cloud.disk_controller_plan.override_reason = $reason
+      | .target.cloud.disk_controller_plan.override_at = $ts
+    ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 2
+  fi
+  mv -f "${tmp}" "${manifest}"
+}
+
 v2k_cloud_target_source_deploy_params_json() {
   local manifest="$1"
+  if jq -e '.runtime.source_validation.status == "passed"' "${manifest}" >/dev/null 2>&1 \
+    && ! v2k_cloud_target_disk_controller_plan_is_valid "${manifest}"; then
+    echo "Cloud deployment requires a validated disk-controller plan." >&2
+    return 44
+  fi
   jq -c '
     def controller($raw):
       ($raw // "" | tostring | ascii_downcase) as $s
@@ -327,8 +449,24 @@ v2k_cloud_target_source_deploy_params_json() {
     | (($vm.secure_boot // false) == true) as $secure_boot
     | ((.runtime.bootstrap_fallback.bus // "") | tostring | ascii_downcase) as $fallback_bus
     | ((.disks // []) | length) as $disk_count
-    | (if $fallback_bus == "sata" then "sata" else controller(.disks[0].controller.type // "") end) as $root_controller
-    | (if $fallback_bus == "sata" and $disk_count > 1 then "sata" else controller((.disks[1:] // [] | map(.controller.type // "") | map(select((. | tostring | length) > 0)) | first) // "") end) as $data_controller
+    | (.target.cloud.disk_controller_plan // {}) as $controller_plan
+    | (
+        if $controller_plan.status == "passed"
+          then (($controller_plan.effective.root // "") | tostring | ascii_downcase)
+        elif $fallback_bus == "sata" then "sata"
+        else controller(.disks[0].controller.kind // .disks[0].controller.type // "")
+        end
+      ) as $root_controller
+    | (
+        if $controller_plan.status == "passed"
+          then (($controller_plan.effective.data // "") | tostring | ascii_downcase)
+        elif $fallback_bus == "sata" and $disk_count > 1 then "sata"
+        else controller((.disks[1:] // []
+          | map(.controller.kind // .controller.type // "")
+          | map(select((. | tostring | length) > 0))
+          | first) // "")
+        end
+      ) as $data_controller
     | {}
       + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
       + {"details[0].cpuSpeed": $cpu_speed}

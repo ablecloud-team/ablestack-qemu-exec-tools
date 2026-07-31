@@ -29,6 +29,18 @@ jobs:
         run: |
           python3 tests/v2k_patch_areas_file_smoke.py
 
+      - name: V2K CBT pagination and controller selector smoke
+        run: |
+          python3 tests/v2k_cbt_pagination_smoke.py
+
+      - name: V2K mixed-controller inventory smoke
+        run: |
+          tests/v2k_inventory_disk_order_smoke.sh
+
+      - name: V2K mixed-controller CBT safety smoke
+        run: |
+          tests/v2k_controller_cbt_smoke.sh
+
       - name: V2K base transfer NFC retry smoke
         run: |
           tests/v2k_base_transfer_retry_smoke.sh

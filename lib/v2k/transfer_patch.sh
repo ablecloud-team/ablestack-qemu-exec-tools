@@ -153,8 +153,9 @@ v2k_transfer_patch_one() {
   (
     set -euo pipefail
 
-    local disk_id vmdk_path target_path
+    local disk_id device_key vmdk_path target_path
     disk_id="$(jq -r ".disks[$idx].disk_id" "${manifest}")"
+    device_key="$(jq -r ".disks[$idx].device_key // empty" "${manifest}")"
     vmdk_path="$(jq -r ".disks[$idx].vmdk.path" "${manifest}")"  # fallback/reference only
     target_path="$(jq -r ".disks[$idx].transfer.target_path" "${manifest}")"
 
@@ -287,12 +288,18 @@ v2k_transfer_patch_one() {
     last_change_id="$(jq -r ".disks[$idx].cbt.last_change_id // empty" "${manifest}" 2>/dev/null || true)"
 
     local areas_json areas_error_text areas_query_rc
+    local -a selector_args=(
+      --vm "$(jq -r '.source.vm.name' "${manifest}")"
+      --snapshot "${snap_name}"
+      --disk-id "${disk_id}"
+      --change-id "${last_change_id}"
+    )
+    if [[ -n "${device_key}" && "${device_key}" != "null" ]]; then
+      selector_args+=(--device-key "${device_key}")
+    fi
     areas_error_file="$(mktemp)"
     if areas_json="$(v2k_python "${V2K_PY_DIR}/vmware_changed_areas.py" \
-        --vm "$(jq -r '.source.vm.name' "${manifest}")" \
-        --snapshot "${snap_name}" \
-        --disk-id "${disk_id}" \
-        --change-id "${last_change_id}" 2>"${areas_error_file}")"; then
+        "${selector_args[@]}" 2>"${areas_error_file}")"; then
       areas_query_rc=0
     else
       areas_query_rc=$?
@@ -301,8 +308,9 @@ v2k_transfer_patch_one() {
       v2k_event ERROR "sync.${which}" "${disk_id}" "cbt_query_failed" \
         "$(jq -nc \
           --argjson code "${areas_query_rc}" \
+          --arg device_key "${device_key}" \
           --arg error "${areas_error_text}" \
-          '{code:$code,error:$error}')"
+          '{code:$code,device_key:$device_key,error:$error}')"
       echo "VMware CBT query failed for disk=${disk_id}: ${areas_error_text}" >&2
       exit 44
     fi

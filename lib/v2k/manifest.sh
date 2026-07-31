@@ -375,7 +375,7 @@ v2k_manifest_init() {
         disks: $disks,
         policy:{purge_snapshots_on_success:true},
         phases:{
-          init:{done:true, ts:$created_at},
+          init:{done:false, ts:""},
           cbt_enable:{done:false, ts:""},
           base_sync:{done:false, ts:""},
           incr_sync:{done:false, ts:""},
@@ -384,6 +384,12 @@ v2k_manifest_init() {
         },
         runtime:{
           split:{phase1:{done:false,ts:""},phase2:{done:false,ts:""}},
+          source_validation:{
+            status:"pending",
+            policy_version:1,
+            supported_controllers:["ide","scsi","sata"],
+            unsupported_disks:[]
+          },
           cloud:{},
           progress:{percent:0,last_step:""},
           sync_within_deadline:null,
@@ -392,6 +398,110 @@ v2k_manifest_init() {
         }
       }
   ' > "${manifest}"
+}
+
+v2k_manifest_validate_source_disk_controllers() {
+  local manifest="$1"
+  local ts tmp status
+
+  [[ -f "${manifest}" ]] || return 2
+  ts="$(v2k_manifest_now)"
+  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+  chmod 600 "${tmp}" 2>/dev/null || true
+
+  if ! jq \
+      --arg ts "${ts}" '
+      def normalized_kind($disk):
+        (($disk.controller.kind // "") | tostring | ascii_downcase) as $kind
+        | (($disk.controller.type // "") | tostring | ascii_downcase) as $type
+        | (($disk.disk_id // "") | tostring | ascii_downcase) as $disk_id
+        | if (["ide","scsi","sata","nvme"] | index($kind)) != null then $kind
+          elif ($type | test("nvme")) then "nvme"
+          elif ($type | test("idecontroller")) then "ide"
+          elif ($type | test("sata|ahci")) then "sata"
+          elif ($type | test("scsi|lsilogic|paravirtual|pvscsi|buslogic")) then "scsi"
+          elif ($disk_id | test("^nvme[0-9]+:[0-9]+$")) then "nvme"
+          elif ($disk_id | test("^ide[0-9]+:[0-9]+$")) then "ide"
+          elif ($disk_id | test("^scsi[0-9]+:[0-9]+$")) then "scsi"
+          elif ($disk_id | test("^sata[0-9]+:[0-9]+$")) then "sata"
+          else "unknown"
+          end;
+
+      def supported_address($kind; $disk_id):
+        ((["ide","scsi","sata"] | index($kind)) != null)
+        and (($disk_id | tostring | ascii_downcase)
+          | test("^" + $kind + "[0-9]+:[0-9]+$"));
+
+      .disks = (
+        (.disks // [])
+        | to_entries
+        | map(
+            .key as $idx
+            | .value
+            | normalized_kind(.) as $kind
+            | ((.disk_id // "") | tostring) as $disk_id
+            | .role = (if $idx == 0 then "root" else "data" end)
+            | .controller = (.controller // {})
+            | .controller.kind = $kind
+            | .controller.supported = supported_address($kind; $disk_id)
+          )
+      )
+      | ([
+          .disks[]
+          | select(.controller.supported != true)
+          | (.controller.kind // "unknown") as $controller_kind
+          | {
+              disk_id:(.disk_id // ""),
+              device_key:(.device_key // ""),
+              role:(.role // ""),
+              controller_kind:(.controller.kind // "unknown"),
+              controller_type:(.controller.type // "unknown"),
+              reason:(
+                if $controller_kind == "nvme" then "nvme_support_deferred"
+                elif ((["ide","scsi","sata"] | index($controller_kind)) != null)
+                  then "controller_address_invalid"
+                else "controller_unrecognized"
+                end
+              )
+            }
+        ]) as $unsupported
+      | .runtime = (.runtime // {})
+      | .runtime.source_validation = {
+          status:(if ($unsupported | length) == 0 then "passed" else "failed" end),
+          policy_version:1,
+          validated_at:$ts,
+          supported_controllers:["ide","scsi","sata"],
+          unsupported_disks:$unsupported
+        }
+      | if ($unsupported | length) > 0 then
+          .runtime.last_error = {
+            code:44,
+            reason:"unsupported_source_disk_controller",
+            ts:$ts,
+            details:{unsupported_disks:$unsupported}
+          }
+        else
+          .
+        end
+    ' "${manifest}" > "${tmp}"; then
+    rm -f "${tmp}" >/dev/null 2>&1 || true
+    return 2
+  fi
+  mv -f "${tmp}" "${manifest}"
+
+  status="$(jq -r '.runtime.source_validation.status // "failed"' "${manifest}" 2>/dev/null || echo failed)"
+  [[ "${status}" == "passed" ]] && return 0
+  return 44
+}
+
+v2k_manifest_source_controller_validation_is_done() {
+  local manifest="$1"
+  jq -e '
+    .runtime.source_validation.status == "passed"
+    and (.runtime.source_validation.policy_version // 0) >= 1
+    and (.runtime.source_validation.supported_controllers == ["ide","scsi","sata"])
+    and ([.disks[]? | select(.controller.supported != true)] | length) == 0
+  ' "${manifest}" >/dev/null 2>&1
 }
 
 v2k_manifest_get_compat_requested_profile() {
@@ -629,6 +739,23 @@ v2k_manifest_split_done() {
 v2k_manifest_split_is_done() {
   local manifest="$1" which="$2"
   [[ -f "${manifest}" ]] || return 1
+  if [[ "${which}" == "phase1" ]]; then
+    local validation_status
+    validation_status="$(jq -r '.runtime.source_validation.status // empty' "${manifest}" 2>/dev/null || true)"
+    if [[ -n "${validation_status}" ]]; then
+      if ! v2k_manifest_source_controller_validation_is_done "${manifest}"; then
+        echo "Phase1 manifest failed IDE/SCSI/SATA disk-controller validation; restart phase1 with a new workdir." >&2
+        return 1
+      fi
+      if [[ "$(jq -r '.target.provider // "libvirt"' "${manifest}" 2>/dev/null || echo libvirt)" == "ablestack-cloud" ]]; then
+        if ! declare -F v2k_cloud_target_disk_controller_plan_is_valid >/dev/null 2>&1 \
+          || ! v2k_cloud_target_disk_controller_plan_is_valid "${manifest}"; then
+          echo "Phase1 manifest has no valid Cloud disk-controller plan; restart phase1 with a new workdir." >&2
+          return 1
+        fi
+      fi
+    fi
+  fi
   jq -e --arg which "${which}" \
     '.phases["split." + $which].done == true' \
     "${manifest}" >/dev/null 2>&1
@@ -929,9 +1056,10 @@ v2k_manifest_record_sync_failure() {
   local idx="$3"
   local code="$4"
   local reason="$5"
-  local details_json="${6:-{}}"
+  local details_json="${6-}"
   local ts tmp
 
+  [[ -n "${details_json}" ]] || details_json='{}'
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if ! printf '%s' "${details_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
     details_json='{}'
@@ -1064,7 +1192,7 @@ v2k_manifest_status_summary() {
 
 v2k_manifest_fetch_and_save_base_change_ids() {
   local manifest="$1" py_script="$2"
-  local count i disk_id vm_name snap_name json_out new_id source rc err_file err detail
+  local count i disk_id device_key vm_name snap_name json_out new_id source rc err_file err detail
   local missing=0
 
   # Python 스크립트 실행을 위한 환경변수 설정 (govc 환경변수 사용)
@@ -1081,10 +1209,21 @@ v2k_manifest_fetch_and_save_base_change_ids() {
 
   for ((i=0;i<count;i++)); do
     disk_id="$(jq -r ".disks[$i].disk_id" "${manifest}")"
+    device_key="$(jq -r ".disks[$i].device_key // empty" "${manifest}")"
     
     # --change-id "*"를 넘겨 현재 시점의 Change ID(new_change_id)만 받아온다.
     err_file="$(mktemp)"
-    if json_out="$(v2k_python "${py_script}" --vm "${vm_name}" --snapshot "${snap_name}" --disk-id "${disk_id}" --change-id "*" 2>"${err_file}")"; then
+    json_out=""
+    local -a selector_args=(
+      --vm "${vm_name}"
+      --snapshot "${snap_name}"
+      --disk-id "${disk_id}"
+      --change-id "*"
+    )
+    if [[ -n "${device_key}" && "${device_key}" != "null" ]]; then
+      selector_args+=(--device-key "${device_key}")
+    fi
+    if json_out="$(v2k_python "${py_script}" "${selector_args[@]}" 2>"${err_file}")"; then
       rc=0
     else
       rc=$?
@@ -1098,20 +1237,24 @@ v2k_manifest_fetch_and_save_base_change_ids() {
       # 조회한 ID를 last_change_id로 저장 (다음 incr의 기준선으로 사용)
       v2k_manifest_set_disk_last_change_id "${manifest}" "${i}" "${new_id}"
       if declare -F v2k_event >/dev/null 2>&1; then
-        detail="$(jq -n --arg disk_id "${disk_id}" --arg source "${source:-unknown}" \
-          '{disk_id:$disk_id,source:$source}')"
+        detail="$(jq -n --arg disk_id "${disk_id}" --arg device_key "${device_key}" --arg source "${source:-unknown}" \
+          '{disk_id:$disk_id,device_key:$device_key,source:$source}')"
         v2k_event INFO "sync.base" "${disk_id}" "cbt_base_change_id_saved" "${detail}"
       fi
     else
       missing=1
       if declare -F v2k_event >/dev/null 2>&1; then
-        detail="$(jq -n --arg disk_id "${disk_id}" --argjson code "${rc:-0}" --arg stderr "${err}" \
-          '{disk_id:$disk_id,code:$code,stderr:$stderr,action:"stop_before_incremental"}')"
+        detail="$(jq -n --arg disk_id "${disk_id}" --arg device_key "${device_key}" --argjson code "${rc:-0}" --arg stderr "${err}" \
+          '{disk_id:$disk_id,device_key:$device_key,code:$code,stderr:$stderr,action:"stop_before_base"}')"
         v2k_event ERROR "sync.base" "${disk_id}" "cbt_base_change_id_missing" "${detail}"
       fi
-      if declare -F v2k_manifest_append_sync_issue >/dev/null 2>&1; then
-        detail="$(jq -n --arg disk_id "${disk_id}" --arg stderr "${err}" \
-          '{disk_id:$disk_id,action:"stop_before_incremental",stderr:$stderr}')"
+      detail="$(jq -n --arg disk_id "${disk_id}" --arg device_key "${device_key}" --arg stderr "${err}" \
+        '{disk_id:$disk_id,device_key:$device_key,action:"stop_before_base",stderr:$stderr}')"
+      if declare -F v2k_manifest_record_sync_failure >/dev/null 2>&1; then
+        v2k_manifest_record_sync_failure \
+          "${manifest}" "base" "${i}" 44 \
+          "cbt_base_change_id_missing" "${detail}" || true
+      elif declare -F v2k_manifest_append_sync_issue >/dev/null 2>&1; then
         v2k_manifest_append_sync_issue "base" 44 "cbt_base_change_id_missing" "${detail}" || true
       fi
     fi

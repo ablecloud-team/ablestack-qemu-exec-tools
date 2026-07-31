@@ -144,8 +144,9 @@ v2k_transfer_base_record_failure() {
   local disk_id="$3"
   local code="$4"
   local reason="$5"
-  local details_json="${6:-{}}"
+  local details_json="${6-}"
 
+  [[ -n "${details_json}" ]] || details_json='{}'
   v2k_manifest_record_sync_failure \
     "${manifest}" "base" "${idx}" "${code}" "${reason}" "${details_json}" || true
   v2k_event ERROR "sync.base" "${disk_id}" "disk_failed" \

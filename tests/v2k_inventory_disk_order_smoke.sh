@@ -248,4 +248,94 @@ jq -e '
   exit 1
 }
 
+mixed_device_info="${WORK_DIR}/device.mixed-controller.json"
+cat > "${mixed_device_info}" <<'JSON'
+{
+  "devices": [
+    {
+      "key": 200,
+      "type": "VirtualIDEController",
+      "busNumber": 0,
+      "deviceInfo": {"label": "IDE 0"}
+    },
+    {
+      "key": 1000,
+      "type": "VirtualLsiLogicController",
+      "busNumber": 0,
+      "deviceInfo": {"label": "SCSI controller 0"}
+    },
+    {
+      "key": 15000,
+      "type": "VirtualAHCIController",
+      "busNumber": 0,
+      "deviceInfo": {"label": "SATA controller 0"}
+    },
+    {
+      "key": 31000,
+      "type": "VirtualNVMEController",
+      "busNumber": 0,
+      "deviceInfo": {"label": "NVME controller 0"}
+    },
+    {
+      "key": 2000,
+      "type": "VirtualDisk",
+      "controllerKey": 1000,
+      "unitNumber": 0,
+      "deviceInfo": {"label": "Hard disk 2"},
+      "backing": {"fileName": "[datastore1] demo-vm/data-scsi.vmdk"},
+      "capacityInBytes": 75161927680
+    },
+    {
+      "key": 3000,
+      "type": "VirtualDisk",
+      "controllerKey": 200,
+      "unitNumber": 0,
+      "deviceInfo": {"label": "Hard disk 1"},
+      "backing": {"fileName": "[datastore1] demo-vm/root-ide.vmdk"},
+      "capacityInBytes": 69787975680
+    },
+    {
+      "key": 16000,
+      "type": "VirtualDisk",
+      "controllerKey": 15000,
+      "unitNumber": 0,
+      "deviceInfo": {"label": "Hard disk 3"},
+      "backing": {"fileName": "[datastore1] demo-vm/data-sata.vmdk"},
+      "capacityInBytes": 10737418240
+    },
+    {
+      "key": 32000,
+      "type": "VirtualDisk",
+      "controllerKey": 31000,
+      "unitNumber": 0,
+      "deviceInfo": {"label": "Hard disk 4"},
+      "backing": {"fileName": "[datastore1] demo-vm/data-nvme.vmdk"},
+      "capacityInBytes": 21474836480
+    }
+  ]
+}
+JSON
+
+export V2K_TEST_VM_INFO_JSON="${vm_info_no_boot}"
+export V2K_TEST_DEVICE_INFO_JSON="${mixed_device_info}"
+inventory_mixed="$(v2k_vmware_inventory_json "demo-vm" "vc.example.local")"
+
+jq -e '
+  .disks[0].disk_id == "ide0:0"
+  and .disks[0].device_key == "3000"
+  and .disks[0].controller.kind == "ide"
+  and .disks[0].role == "root"
+  and .disks[1].disk_id == "scsi0:0"
+  and .disks[1].controller.kind == "scsi"
+  and .disks[1].role == "data"
+  and .disks[2].disk_id == "sata0:0"
+  and .disks[2].controller.kind == "sata"
+  and .disks[3].disk_id == "nvme0:0"
+  and .disks[3].controller.kind == "nvme"
+' <<<"${inventory_mixed}" >/dev/null || {
+  echo "[ERR] VMware mixed-controller inventory was not normalized safely" >&2
+  printf '%s\n' "${inventory_mixed}" >&2
+  exit 1
+}
+
 echo "[OK] v2k VMware inventory disk ordering passed"

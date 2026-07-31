@@ -185,25 +185,121 @@ def _snapshot_config(snapshot_ref: vim.VirtualMachineSnapshot) -> Optional[vim.v
     except Exception:
         return None
 
-def _disk_from_config_for_scsi(cfg: vim.vm.ConfigInfo, disk_id: str) -> Tuple[int, vim.vm.device.VirtualDisk]:
-    m = re.match(r"^scsi(\d+):(\d+)$", disk_id)
-    if not m:
-        raise SystemExit(f"Unsupported disk-id format: {disk_id}")
-    bus = int(m.group(1))
-    unit = int(m.group(2))
+def _controller_kind(device: Any) -> str:
+    """Return the stable VMware address prefix for a virtual controller."""
+    type_name = type(device).__name__.lower()
+    if isinstance(device, vim.vm.device.VirtualSCSIController):
+        return "scsi"
+    if "idecontroller" in type_name:
+        return "ide"
+    if "satacontroller" in type_name:
+        return "sata"
+    if "nvmecontroller" in type_name:
+        return "nvme"
+    return ""
 
+
+def _requested_device_key(disk_id: str, device_key: Optional[str]) -> Optional[int]:
+    raw = str(device_key or "").strip()
+    if not raw and str(disk_id or "").startswith("devkey:"):
+        raw = str(disk_id).split(":", 1)[1]
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid VMware device key: {raw}") from exc
+
+
+def _validate_supported_disk_controller(
+    devices: Any,
+    disk: vim.vm.device.VirtualDisk,
+    disk_id: str,
+) -> None:
+    controller_key = int(getattr(disk, "controllerKey", -1))
+    for device in list(devices or []):
+        if int(getattr(device, "key", -2)) != controller_key:
+            continue
+        kind = _controller_kind(device)
+        if kind in {"ide", "scsi", "sata"}:
+            return
+        if kind == "nvme":
+            raise SystemExit(
+                f"Unsupported source disk controller: nvme disk_id={disk_id}"
+            )
+        raise SystemExit(
+            f"Unsupported source disk controller: unknown disk_id={disk_id}"
+        )
+    raise SystemExit(
+        f"VirtualDisk controller not found: controller_key={controller_key} "
+        f"disk_id={disk_id}"
+    )
+
+
+def _disk_for_selector(
+    devices: Any,
+    disk_id: str,
+    device_key: Optional[str] = None,
+) -> Tuple[int, vim.vm.device.VirtualDisk]:
+    """
+    Resolve a VirtualDisk by immutable VMware device key first.
+
+    The manifest always records device_key for new runs. Address-based lookup
+    remains as a compatibility fallback for older manifests.
+    """
+    device_list = list(devices or [])
+    requested_key = _requested_device_key(disk_id, device_key)
+    if requested_key is not None:
+        for dev in device_list:
+            if (
+                isinstance(dev, vim.vm.device.VirtualDisk)
+                and int(getattr(dev, "key", -1)) == requested_key
+            ):
+                _validate_supported_disk_controller(device_list, dev, disk_id)
+                return requested_key, dev
+        raise SystemExit(
+            f"VirtualDisk not found for device_key={requested_key} disk_id={disk_id}"
+        )
+
+    match = re.match(r"^(ide|scsi|sata)(\d+):(\d+)$", disk_id)
+    if not match:
+        raise SystemExit(
+            f"Unsupported disk selector: disk_id={disk_id} device_key={device_key or ''}"
+        )
+    requested_kind = match.group(1)
+    bus = int(match.group(2))
+    unit = int(match.group(3))
+
+    controllers: Dict[int, Tuple[str, int]] = {}
+    for dev in device_list:
+        kind = _controller_kind(dev)
+        if kind:
+            controllers[int(dev.key)] = (
+                kind,
+                int(getattr(dev, "busNumber", 0)),
+            )
+
+    for dev in device_list:
+        if not isinstance(dev, vim.vm.device.VirtualDisk):
+            continue
+        controller_key = int(getattr(dev, "controllerKey", -1))
+        controller = controllers.get(controller_key)
+        if (
+            controller is not None
+            and controller == (requested_kind, bus)
+            and int(getattr(dev, "unitNumber", -1)) == unit
+        ):
+            _validate_supported_disk_controller(device_list, dev, disk_id)
+            return int(dev.key), dev
+    raise SystemExit(f"VirtualDisk not found for {disk_id}")
+
+
+def _disk_from_config_for_scsi(
+    cfg: vim.vm.ConfigInfo,
+    disk_id: str,
+) -> Tuple[int, vim.vm.device.VirtualDisk]:
     devices = list(getattr(getattr(cfg, "hardware", None), "device", []) or [])
-    ctrl_bus: Dict[int, int] = {}
-    for dev in devices:
-        if isinstance(dev, vim.vm.device.VirtualSCSIController):
-            ctrl_bus[int(dev.key)] = int(getattr(dev, "busNumber", 0))
-
-    for dev in devices:
-        if isinstance(dev, vim.vm.device.VirtualDisk):
-            ck = int(dev.controllerKey)
-            if ck in ctrl_bus and ctrl_bus[ck] == bus and int(dev.unitNumber) == unit:
-                return int(dev.key), dev
-    raise SystemExit(f"VirtualDisk not found for {disk_id} in snapshot config")
+    return _disk_for_selector(devices, disk_id)
 
 
 def _devices_from_snapshot_or_vm(vm: vim.VirtualMachine, snap: vim.vm.Snapshot):
@@ -222,47 +318,18 @@ def _devices_from_snapshot_or_vm(vm: vim.VirtualMachine, snap: vim.vm.Snapshot):
     return vm.config.hardware.device
 
 
-def _disk_key_for_scsi(vm: vim.VirtualMachine, disk_id: str) -> Tuple[int, vim.vm.device.VirtualDisk]:
-    # disk_id: scsi<bus>:<unit>
-    import re
-    m = re.match(r"^scsi(\d+):(\d+)$", disk_id)
-    if not m:
-        raise SystemExit(f"Unsupported disk-id format: {disk_id}")
-    bus = int(m.group(1))
-    unit = int(m.group(2))
-
-    # Map controllerKey -> busNumber
-    ctrl_bus: Dict[int, int] = {}
-    for dev in vm.config.hardware.device:
-        if isinstance(dev, vim.vm.device.VirtualSCSIController):
-            ctrl_bus[int(dev.key)] = int(getattr(dev, "busNumber", 0))
-
-    for dev in vm.config.hardware.device:
-        if isinstance(dev, vim.vm.device.VirtualDisk):
-            ck = int(dev.controllerKey)
-            if ck in ctrl_bus and ctrl_bus[ck] == bus and int(dev.unitNumber) == unit:
-                return int(dev.key), dev
-    raise SystemExit(f"VirtualDisk not found for {disk_id}")
+def _disk_key_for_scsi(
+    vm: vim.VirtualMachine,
+    disk_id: str,
+) -> Tuple[int, vim.vm.device.VirtualDisk]:
+    return _disk_for_selector(vm.config.hardware.device, disk_id)
 
 
-def _disk_for_scsi_in_devices(devices, disk_id: str) -> Tuple[int, vim.vm.device.VirtualDisk]:
-    m = re.match(r"^scsi(\d+):(\d+)$", disk_id)
-    if not m:
-        raise SystemExit(f"Unsupported disk-id format: {disk_id}")
-    bus = int(m.group(1))
-    unit = int(m.group(2))
-
-    ctrl_bus: Dict[int, int] = {}
-    for dev in devices:
-        if isinstance(dev, vim.vm.device.VirtualSCSIController):
-            ctrl_bus[int(dev.key)] = int(getattr(dev, "busNumber", 0))
-
-    for dev in devices:
-        if isinstance(dev, vim.vm.device.VirtualDisk):
-            ck = int(dev.controllerKey)
-            if ck in ctrl_bus and ctrl_bus[ck] == bus and int(dev.unitNumber) == unit:
-                return int(dev.key), dev
-    raise SystemExit(f"VirtualDisk not found for {disk_id} in snapshot/vm devices")
+def _disk_for_scsi_in_devices(
+    devices: Any,
+    disk_id: str,
+) -> Tuple[int, vim.vm.device.VirtualDisk]:
+    return _disk_for_selector(devices, disk_id)
 
 
 def _query_changed_areas(
@@ -390,7 +457,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vm", required=True)
     ap.add_argument("--snapshot", required=True)
-    ap.add_argument("--disk-id", required=True, help="Disk identifier like scsi0:0")
+    ap.add_argument(
+        "--disk-id",
+        required=True,
+        help="Human-readable disk address such as ide0:0, scsi0:0, or sata0:0",
+    )
+    ap.add_argument(
+        "--device-key",
+        default="",
+        help="Immutable VMware VirtualDisk device key; preferred over disk-id",
+    )
     # NOTE:
     # - transfer_patch.sh will now enforce that incremental/final patch must have a valid change-id.
     # - We still keep this tool defensive: if change-id is "*" or empty, return empty areas to avoid
@@ -405,7 +481,11 @@ def main() -> None:
         vm = _find_vm(content, args.vm)
         snap = _find_snapshot_ref(vm, args.snapshot)
         devs = _devices_from_snapshot_or_vm(vm, snap)
-        _, disk = _disk_for_scsi_in_devices(devs, args.disk_id)
+        selected_device_key, disk = _disk_for_selector(
+            devs,
+            args.disk_id,
+            args.device_key,
+        )
 
         # IMPORTANT SAFETY:
         # - "*" (and empty) are often used as placeholders when we couldn't persist a
@@ -428,7 +508,11 @@ def main() -> None:
                 raise SystemExit("Cannot establish CBT baseline: disk capacity is unavailable")
             if not cur:
                 try:
-                    _, current_disk = _disk_key_for_scsi(vm, args.disk_id)
+                    _, current_disk = _disk_for_selector(
+                        vm.config.hardware.device,
+                        args.disk_id,
+                        str(selected_device_key),
+                    )
                     cur = _disk_backing_change_id(current_disk) or ""
                     if cur:
                         change_id_source = "current"
@@ -436,6 +520,7 @@ def main() -> None:
                     sys.stderr.write(f"WARN: failed to read current backing changeId for {args.disk_id}: {exc}\n")
             result = {
                 "disk_id": args.disk_id,
+                "device_key": selected_device_key,
                 "snapshot": args.snapshot,
                 "start_change_id": effective_change_id,
                 "change_id": effective_change_id,
@@ -488,6 +573,7 @@ def main() -> None:
 
         print(json.dumps({
             "disk_id": args.disk_id,
+            "device_key": selected_device_key,
             "change_id": effective_change_id,
             "new_change_id": new_change_id,
             "change_id_source": change_id_source,
