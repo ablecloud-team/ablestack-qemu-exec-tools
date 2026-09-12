@@ -7731,6 +7731,7 @@ EOF
 }
 
 selftest_case_dr_runtime_test_failover_cleanup() {
+  local cloud_managed="${1:-false}"
   selftest_reset_env
   selftest_info "FTCTL_DR test failover selects restore point and cleanup returns READY"
 
@@ -7813,6 +7814,7 @@ JSON
     "restorePointRef": "ftctl:${plan}:run-sync:2",
     "checkpointWriterState": "DRAINED",
     "checkpointImmutableRequired": true,
+    "sourceSchedulerRestoreManagedByCloud": ${cloud_managed},
     "networkMode": "isolated"
   },
   "policy": {"testExecutionMode": "METADATA_ONLY"},
@@ -7950,13 +7952,22 @@ EOF
   ack_pid="$!"
   printf '%s\n' "${scheduler_pid}" > "$(ftctl_dr_scheduler_pid_path "${plan}" run-test-cleanup)"
 
+  local before_cleanup_generation
+  before_cleanup_generation="$(ftctl_dr_scheduler_control_generation "${plan}")"
   cleanup="$(bash "${ROOT_DIR}/bin/ablestack_vm_ftctl.sh" dr-test-artifact-cleanup \
     --config "${SELFTEST_CONFIG}" \
     --plan "${plan}" \
     --run run-test-cleanup \
     --profile-json "${profile}" \
     --json)"
-  wait "${ack_pid}"
+  if [[ "${cloud_managed}" == "true" ]]; then
+    kill "${ack_pid}" 2>/dev/null || true
+    wait "${ack_pid}" 2>/dev/null || true
+    selftest_assert_eq "$(ftctl_dr_scheduler_control_command "${plan}")" "pause" "Cloud cleanup must leave source paused"
+    selftest_assert_eq "$(ftctl_dr_scheduler_control_generation "${plan}")" "$((before_cleanup_generation + 1))" "Cloud cleanup must only request quiesce, never source RUN"
+  else
+    wait "${ack_pid}"
+  fi
   kill "${scheduler_pid}" 2>/dev/null || true
   wait "${scheduler_pid}" 2>/dev/null || true
   selftest_assert_contains "${cleanup}" '"state":"READY"' "test cleanup state"
@@ -7966,6 +7977,10 @@ EOF
   [[ ! -e "${SELFTEST_ROOT}/run/dr-runtime/plans/${plan}/test-sessions/active.json" ]] || selftest_fail "active test session should be removed"
   [[ ! -d "${artifact_dir}" ]] || selftest_fail "test artifact directory should be removed"
   [[ ! -e "${shared_artifact}" ]] || selftest_fail "Cloud-visible test artifact should be removed"
+}
+
+selftest_case_dr_runtime_cloud_managed_test_cleanup() {
+  selftest_case_dr_runtime_test_failover_cleanup true
 }
 
 selftest_case_dr_runtime_shared_file_artifact_cleanup() {
@@ -10074,7 +10089,7 @@ JSON
   selftest_assert_contains "$(ftctl_dr_kvm_vmware_mode_decision "${plan}" FAILBACK_FINAL AUTO)" $'MISSING_EXPECTED\tFULL_REVERSE_SEED\tINITIAL_REVERSE_BASELINE_MISSING\ttrue' "initial failback decision is explicit"
   mkdir -p "$(dirname "${baseline_path}")"
   cat > "${baseline_path}" <<JSON
-{"state":"LOCAL_DURABLE","generation":1,"disks":[{"diskIndex":0,"snapshot":"baseline-1"}]}
+{"state":"LOCAL_DURABLE","commonBaselineVerified":true,"generation":1,"disks":[{"diskIndex":0,"snapshot":"baseline-1"}]}
 JSON
   selftest_assert_eq "$(ftctl_dr_kvm_vmware_cycle_type "${plan}" incremental)" "REVERSE_INCREMENTAL" "durable reverse baseline enables incremental"
   selftest_assert_eq "$(ftctl_dr_kvm_vmware_cycle_type "${plan}" failback-final)" "REVERSE_FINAL" "durable reverse baseline enables final delta"
@@ -10089,7 +10104,7 @@ JSON
 
 selftest_case_dr_kvm_vmware_failover_seeds_reverse_baseline() (
   selftest_reset_env
-  selftest_info "FTCTL_DR failover seeds a durable KVM cutover baseline for the first reverse delta"
+  selftest_info "FTCTL_DR cutover tracking does not assert a common reverse baseline"
 
   local plan="plan-cutover-baseline" run="run-cutover-baseline"
   local profile="${SELFTEST_ROOT}/cutover-baseline-profile.json"
@@ -10127,8 +10142,8 @@ JSON
   selftest_assert_file_contains "${baseline_path}" '"snapshot":"ftctl-dr-plan-cut-cutover-7-run-cuto-0"'
   selftest_assert_file_contains "${rbd_log}" 'snap create rbd/w22-01-dr-disk-0@ftctl-dr-plan-cut-cutover-7-run-cuto-0'
   selftest_assert_contains "$(ftctl_dr_kvm_vmware_mode_decision "${plan}" FAILBACK_FINAL AUTO)" \
-    $'LOCAL_DURABLE\tREVERSE_FINAL\tDURABLE_BASELINE_FINAL_DELTA\tfalse' \
-    "cutover baseline makes the first failback incremental"
+    $'LOCAL_DURABLE\tFULL_REVERSE_SEED\tINITIAL_REVERSE_COMMON_BASELINE_UNVERIFIED\ttrue' \
+    "target-only cutover tracker requires initial full reconciliation"
 )
 
 selftest_case_dr_failback_resume_checkpoint_publishes_terminal_state() {
@@ -10502,13 +10517,13 @@ selftest_case_dr_failback_live_worker_journal_is_read_only() (
   ticks="$(ftctl_dr_scheduler_process_start_ticks "${pid}")"
   ftctl_state_write_kv_all "${run_path}" \
     "action=dr-failback" "state=RUNNING" "step=failback-transfer" "progress=55" \
-    "failback_phase=REVERSE_SYNCING" "worker_state=RUNNING" \
+    "failback_phase=REVERSE_SYNCING" "worker_state=RUNNING" "checkpoint_sequence=185" \
     "worker_pid=${pid}" "worker_start_ticks=$((ticks + 1))" "worker_pid_alive=true" \
     "transfer_progress_path=${progress_path}"
   ftctl_dr_runtime_worker_journal_write "${plan}" "${run}" "nonce-live" "7" \
     "${pid}" "${ticks}" "RUNNING" "$(ftctl_now_iso8601)"
-  printf '{"state":"COPYING","transferPayloadBytes":1048576,"updatedAtEpochMs":%s}\n' \
-    "$(( $(date +%s) * 1000 ))" > "${progress_path}"
+  printf '{"schemaVersion":2,"planUuid":"%s","runUuid":"%s","direction":"KVM_TO_VMWARE","cycleSequence":185,"state":"COPYING","transferPayloadBytes":1048576,"updatedAtEpochMs":%s}\n' \
+    "${plan}" "${run}" "$(( $(date +%s) * 1000 ))" > "${progress_path}"
   before="$(sha256sum "${run_path}" "${worker_path}")"
   output="$(ftctl_dr_runtime_emit_state_json "dr-failback" "ok" "${plan}" "${run}" "${run_path}" "0")"
   after="$(sha256sum "${run_path}" "${worker_path}")"
@@ -10521,6 +10536,16 @@ selftest_case_dr_failback_live_worker_journal_is_read_only() (
   selftest_assert_contains "${output}" '"transfer_activity_state":"COPYING"' "live transfer activity is projected"
   selftest_assert_contains "${output}" '"transfer_payload_bytes":1048576' "live payload bytes are projected"
   selftest_assert_contains "${output}" '"terminal_authoritative":false' "live transfer has no terminal"
+  selftest_assert_contains "${output}" "\"transfer_run_uuid\":\"${run}\"" "progress is bound to operation"
+  jq '.runUuid = "previous-run" | .state = "COMPLETE" | .percent = 100' "${progress_path}" > "${progress_path}.tmp"
+  mv "${progress_path}.tmp" "${progress_path}"
+  output="$(ftctl_dr_runtime_emit_state_json "dr-failback" "ok" "${plan}" "${run}" "${run_path}" "0")"
+  selftest_assert_contains "${output}" '"transfer_activity_state":"UNKNOWN"' "old completed Run is not current transfer"
+  selftest_assert_contains "${output}" '"transfer_payload_bytes":0' "old completed bytes are not reused"
+  jq --arg run "${run}" '.runUuid = $run | .cycleSequence = 184' "${progress_path}" > "${progress_path}.tmp"
+  mv "${progress_path}.tmp" "${progress_path}"
+  output="$(ftctl_dr_runtime_emit_state_json "dr-failback" "ok" "${plan}" "${run}" "${run_path}" "0")"
+  selftest_assert_contains "${output}" '"transfer_activity_state":"UNKNOWN"' "older checkpoint of the same Run is not current transfer"
 )
 
 selftest_case_dr_kvm_vmware_reverse_preflight_ignores_domain_runtime() {

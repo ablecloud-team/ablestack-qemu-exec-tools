@@ -117,6 +117,7 @@ def copy_extents(
     progress_cycle_sequence: int = 0,
     progress_final_disk: bool = False,
     bandwidth_limit_mbps: int = 0,
+    progress_direction: str = "VMWARE_TO_KVM",
 ) -> Dict[str, int]:
     source_fd = os.open(source, os.O_RDONLY)
     target_fd = None
@@ -163,7 +164,7 @@ def copy_extents(
             "phase": "VERIFY" if state == "VERIFYING" else "TRANSFER",
             "state": state,
             "mode": progress_mode,
-            "direction": "VMWARE_TO_KVM",
+            "direction": progress_direction,
             "diskIndex": progress_disk_index,
             "diskCount": max(1, progress_disk_count),
             "diskLabel": progress_disk_label,
@@ -172,7 +173,7 @@ def copy_extents(
             "sourceReadBytes": progress_base_bytes + bytes_read,
             "targetWrittenBytes": progress_base_bytes + bytes_written,
             "transferPayloadBytes": progress_base_bytes + bytes_read,
-            "verifiedBytes": verified_bytes,
+            "verifiedBytes": progress_base_bytes + verified_bytes if verify else 0,
             "percent": round(max(0.0, min(100.0, percent)), 2),
             "throughputBps": throughput,
             "etaSeconds": int(remaining / throughput) if throughput > 0 and remaining > 0 else 0,
@@ -302,6 +303,7 @@ def main() -> int:
     parser.add_argument("--progress-disk-count", type=int, default=1)
     parser.add_argument("--progress-disk-label", default="")
     parser.add_argument("--progress-mode", default="CBT_INCREMENTAL")
+    parser.add_argument("--progress-direction", default="VMWARE_TO_KVM")
     parser.add_argument("--progress-plan-uuid", default="")
     parser.add_argument("--progress-run-uuid", default="")
     parser.add_argument("--progress-cycle-sequence", type=int, default=0)
@@ -330,6 +332,7 @@ def main() -> int:
         max(0, args.progress_cycle_sequence),
         args.progress_final_disk,
         max(0, args.bandwidth_limit_mbps),
+        args.progress_direction,
     )
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0

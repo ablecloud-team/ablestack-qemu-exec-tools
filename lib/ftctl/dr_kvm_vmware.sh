@@ -422,7 +422,7 @@ for disk in disk_map.get("disks") or []:
 payload = {
     "schemaVersion": 1, "planUuid": plan, "runUuid": run,
     "direction": "KVM_TO_VMWARE", "providerPair": "ABLESTACK_TO_VMWARE",
-    "origin": "FAILOVER_CUTOVER", "trackerType": "QCOW2_BITMAP",
+    "origin": "FAILOVER_CUTOVER", "commonBaselineVerified": False, "trackerType": "QCOW2_BITMAP",
     "generation": int(sequence), "createdFromCheckpoint": int(sequence),
     "state": "LOCAL_DURABLE", "committedAt": now,
     "virtualBytes": sum(int(d.get("virtualBytes") or 0) for d in disk_map.get("disks") or []),
@@ -547,6 +547,7 @@ payload = {
     "direction": "KVM_TO_VMWARE",
     "providerPair": "ABLESTACK_TO_VMWARE",
     "origin": "FAILOVER_CUTOVER",
+    "commonBaselineVerified": False,
     "generation": generation,
     "createdFromCheckpoint": generation,
     "state": "LOCAL_DURABLE",
@@ -606,6 +607,10 @@ ftctl_dr_kvm_vmware_mode_decision() {
         effective_mode="FULL_REVERSE_SEED"
         decision_code="INITIAL_REVERSE_BASELINE_MISSING"
         initial_seed=true
+      elif ! jq -e '.commonBaselineVerified == true' "$(ftctl_dr_kvm_vmware_baseline_path "${plan}")" >/dev/null 2>&1; then
+        effective_mode="FULL_REVERSE_SEED"
+        decision_code="INITIAL_REVERSE_COMMON_BASELINE_UNVERIFIED"
+        initial_seed=true
       elif [[ "${operation_intent}" == "FAILBACK_FINAL" ]]; then
         effective_mode="REVERSE_FINAL"
         decision_code="DURABLE_BASELINE_FINAL_DELTA"
@@ -622,6 +627,10 @@ ftctl_dr_kvm_vmware_mode_decision() {
     REVERSE_FINAL|REVERSE_INCREMENTAL)
       if [[ "${baseline_state}" != "LOCAL_DURABLE" ]]; then
         printf '%s\t%s\t%s\t%s\n' "${baseline_state}" "" "DR_REVERSE_BASELINE_REQUIRED" "false"
+        return 83
+      fi
+      if ! jq -e '.commonBaselineVerified == true' "$(ftctl_dr_kvm_vmware_baseline_path "${plan}")" >/dev/null 2>&1; then
+        printf '%s\t%s\t%s\t%s\n' "${baseline_state}" "" "DR_REVERSE_COMMON_BASELINE_UNVERIFIED" "true"
         return 83
       fi
       effective_mode="${requested_mode}"
@@ -653,6 +662,7 @@ ftctl_dr_kvm_vmware_cycle_type() {
 ftctl_dr_kvm_vmware_reverse_preflight() {
   local plan="${1-}" profile_file="${2-}" operation_intent="${3-FAILBACK_FINAL}" requested_mode="${4-AUTO}" json="${5-0}"
   local map_path="" decision="" rc=0 baseline_state="" effective_mode="" decision_code="" initial_seed=false
+  local credential_override="${6-}"
   local source_disk_count=0 estimated_virtual_bytes=0
   local source_domain_probe_state="NOT_REQUIRED" source_disk_probe_state="READY" target_writer_probe_state="READY" target_backing_probe_state="NOT_CHECKED" error_code="" ready=true credentials_file
   [[ -n "${plan}" && -f "${profile_file}" ]] || return 2
@@ -662,7 +672,16 @@ ftctl_dr_kvm_vmware_reverse_preflight() {
   ftctl_dr_kvm_vmware_canonicalize_profile "${profile_file}" "${map_path}" || {
     rc=67; error_code="DR_REVERSE_DISK_MAP_INVALID"; ready=false
   }
-  credentials_file="$(ftctl_dr_runtime_credential_path "${plan}" 2>/dev/null || true)"
+  credentials_file="${credential_override}"
+  if [[ -z "${credentials_file}" ]]; then
+    credentials_file="$(ftctl_dr_runtime_credential_path "${plan}" 2>/dev/null || true)"
+    # Request profiles carry authoritative credentials, even when empty/invalid.
+    # The internal worker passes its owner-only credential file explicitly because
+    # its persisted reverse profile has credentials redacted for safe storage.
+    if jq -e 'has("credentials")' "${profile_file}" >/dev/null 2>&1; then
+      credentials_file="${profile_file}"
+    fi
+  fi
   if [[ "${rc}" == "0" ]]; then
     if ftctl_dr_kvm_vmware_refresh_target_backings "${profile_file}" "${map_path}" "${credentials_file}"; then
       target_backing_probe_state="READY"
@@ -759,6 +778,10 @@ common = {
     "writerState": metrics.get("writerState", ""),
     "targetWritten": bool(metrics.get("targetWritten")),
     "writeVerified": bool(metrics.get("writeVerified")),
+    "transferCompletionVerified": metrics.get("transferCompletionVerified"),
+    "verificationMethod": metrics.get("verificationMethod"),
+    "readbackVerified": metrics.get("readbackVerified"),
+    "readbackVerifiedBytes": metrics.get("readbackVerifiedBytes"),
 }
 manifest = dict(common, state="reverse-data-durable", disks=disk_map.get("disks", []), completedAt=now)
 checkpoint = dict(common, state="TARGET_READY", sourceCheckpointAt=now, targetDurableAt=now,

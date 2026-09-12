@@ -337,19 +337,22 @@ PY
   fi
   v2k_dir="$(ftctl_guestprep_v2k_lib_dir || true)"
   [[ -n "${v2k_dir}" ]] || return 47
+  # Keep diagnostics outside the artifact directory which successful rollback removes.
+  (umask 077; : > "${run_path}.guestprep.log")
   case "${family}" in
     linux)
-      env V2K_LIB_DIR="${v2k_dir}" V2K_WORKDIR="${artifacts_dir}" V2K_MANIFEST="${manifest}" V2K_JSON_OUT=1 \
+      env V2K_LIB_DIR="${v2k_dir}" V2K_WORKDIR="${artifacts_dir}" V2K_MANIFEST="${manifest}" V2K_JSON_OUT=1 V2K_EVENTS_LOG="${run_path}.guestprep.log" \
         bash -c 'source "$1/engine.sh"; v2k_linux_bootstrap_initramfs "$2"' _ "${v2k_dir}" "${manifest}" || rc=$?
       ;;
     windows)
       winpe_iso="$(ftctl_guestprep_resolve_winpe_iso "${v2k_dir}")" || return 47
-      env V2K_LIB_DIR="${v2k_dir}" V2K_WORKDIR="${artifacts_dir}" V2K_MANIFEST="${manifest}" V2K_JSON_OUT=1 \
+      env V2K_LIB_DIR="${v2k_dir}" V2K_WORKDIR="${artifacts_dir}" V2K_MANIFEST="${manifest}" V2K_JSON_OUT=1 V2K_EVENTS_LOG="${run_path}.guestprep.log" \
         bash -c 'source "$1/engine.sh"; v2k_cloud_windows_winpe_bootstrap "$2" "${FTCTL_DR_VIRTIO_ISO:-/usr/share/virtio-win/virtio-win.iso}" "${FTCTL_DR_WINPE_TIMEOUT:-900}"' \
           _ "${v2k_dir}" "${winpe_iso}" || rc=$?
       ;;
     *) return 48 ;;
   esac
+  ftctl_dr_runtime_path_set "${run_path}" "guest_prep_exit_code=${rc}"
   [[ "${rc}" == "0" ]] || return 49
 
   state_file="$(mktemp -t ftctl.dr.guestprep-artifacts.XXXXXX)"

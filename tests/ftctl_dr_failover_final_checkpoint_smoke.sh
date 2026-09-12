@@ -27,7 +27,7 @@ jq() {
     '.direction // ""') printf 'VMWARE_TO_KVM\n' ;;
     '.request.sourceIsolationAcknowledged // false') printf 'false\n' ;;
     '.request.sourceIsolationReason // empty') printf '\n' ;;
-    *) return 1 ;;
+    *) /usr/bin/jq "$@" ;;
   esac
 }
 ftctl_dr_runtime_profile_bool_default() { return 0; }
@@ -41,7 +41,12 @@ ftctl_dr_runtime_failover_final_checkpoint() {
   printf 'checkpoint_sequence=5\nfailover_final_checkpoint_sequence=5\nfailover_final_restore_point_ref=%s\n' \
     "${FINAL_REF}" > "$4"
 }
-ftctl_dr_kvm_vmware_seed_cutover_baseline() { :; }
+ftctl_dr_runtime_plan_dir() { printf '%s\n' "${TMP}"; }
+ftctl_dr_runtime_default_restore_points_path() { printf '%s\n' "${REPAIR_POINTS:-${TMP}/points}"; }
+ftctl_dr_kvm_vmware_baseline_path() { printf '%s/baseline.json\n' "${TMP}"; }
+ftctl_dr_kvm_vmware_seed_cutover_baseline() { printf '{}\n' > "${TMP}/baseline.json"; }
+printf '{"state":"TARGET_READY","targetDurableAt":"2026-08-25T00:00:00Z"}\n' > "${TMP}/checkpoint.json"
+printf '{"checkpointSequence":5,"checkpointRef":"%s","checkpoint":"%s/checkpoint.json"}\n' "${FINAL_REF}" "${TMP}" > "${TMP}/points"
 ftctl_dr_runtime_failover_dir() { printf '%s/failover\n' "${TMP}"; }
 ftctl_dr_runtime_key() { printf '%s\n' "$1"; }
 ftctl_guestprep_prepare_cutover_target() {

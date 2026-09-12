@@ -192,9 +192,14 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
     fh.write(json.dumps({"pidFile": sys.argv[2]}, separators=(",", ":")) + "\n")
 PY
 printf '{}\n' > "${rollback_manifest}"
-ftctl_dr_ablestack_target_export_abort "${rollback_records}" "${rollback_manifest}"
-! kill -0 "${rollback_process}" 2>/dev/null
-[[ ! -e "${rollback_records}" && ! -e "${rollback_manifest}" && ! -e "${rollback_pid}" ]]
+# A reused/unrelated PID cannot be killed or have its evidence discarded.
+if ftctl_dr_ablestack_target_export_abort "${rollback_records}" "${rollback_manifest}"; then
+  echo "unrelated PID accepted as export" >&2; exit 1
+fi
+kill -0 "${rollback_process}"
+[[ -e "${rollback_records}" && -e "${rollback_manifest}" && -e "${rollback_pid}" ]]
+kill "${rollback_process}"
+wait "${rollback_process}" 2>/dev/null || true
 
 FTCTL_DR_TARGET_EXPORT_PERSIST_ROOT="${TMP}/persist"
 persistent_manifest="${TMP}/persistent-exports.json"
@@ -220,6 +225,26 @@ else
   [[ "$?" == "2" ]]
 fi
 
+# Preserve the pre-reversal request as recovery input. Replaying its generation
+# must not fingerprint a reversed map or reverse the source/target a second time.
+(
+  original="${TMP}/reverse-owner-request.json"
+  jq '.request={exportGeneration:3,exportAuthorityScope:"plan-replay",exportDirection:"REVERSE",reverseTargetExport:true}' "${site_agent_profile}" > "${original}"
+  ftctl_dr_runtime_profile_value() { jq -r ".${2} // empty" "$1"; }
+  ftctl_dr_runtime_build_reverse_profile() {
+    mkdir -p "$(dirname "$4")"
+    jq '.mapping.disks |= map(.sourcePath as $source | .sourcePath=.targetPath | .targetPath=$source) | .reverseOf={operation:"export"}' "$3" > "$4"
+  }
+  # Transport is mocked; exercise real generation gate, profile conversion and durable publication.
+  ftctl_dr_ablestack_disk_rows() { :; }
+  ftctl_dr_ablestack_target_export_start plan-replay run-replay "${original}" 1 >/dev/null
+  persisted="$(ftctl_dr_ablestack_export_persist_profile_path plan-replay)"
+  [[ "$(jq -r '.mapping.disks[0].sourcePath' "${persisted}")" == "rbd:rbd/source-image" ]]
+  [[ "$(jq -r '.reverseOf // empty' "${persisted}")" == "" ]]
+  ftctl_dr_ablestack_target_export_start plan-replay run-replay "${persisted}" 1 >/dev/null
+  [[ "$(jq -r '.disks[0].targetPath' "$(ftctl_dr_ablestack_disk_map_path plan-replay)")" == "rbd:rbd/source-image" ]]
+  ftctl_dr_ablestack_export_persist_intent plan-replay run-replay STOPPED "" "" STOPPED
+)
 # A timer reconciliation may start while a site Agent is publishing a
 # multi-disk export set. Both operations must serialize on the Plan lock so the
 # response and persisted manifest can never expose a partial set.

@@ -106,6 +106,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m unittest tests.ftctl_dr_export_ownership_test
+          python3 -m unittest tests.ftctl_dr_checkpoint_test tests.ftctl_dr_common_baseline_test tests.ftctl_dr_resume_state_test
+          bash tests/ftctl_dr_ablestack_remote_rbd_smoke.sh
+          bash tests/ftctl_dr_boot_hardware_smoke.sh
           bash tests/ftctl_dr_full_lifecycle_smoke.sh
           tests/ftctl_dr_release_tombstone_smoke.sh
           bash tests/ftctl_dr_status_terminal_fallback_smoke.sh
@@ -119,6 +123,7 @@ jobs:
             tests.ftctl_qcow2_checkpoint_test \
             tests.ftctl_qcow2_bitmap_baseline_test \
             tests.ftctl_qcow2_bitmap_commit_test
+          bash tests/ftctl_dr_worker_maintenance_smoke.sh
           bash tests/ftctl_dr_scheduler_nbd_recovery_smoke.sh
           bash tests/ftctl_dr_systemd_async_start_smoke.sh
           bash tests/ftctl_dr_ablestack_remote_rbd_smoke.sh
@@ -149,7 +154,7 @@ jobs:
             cd "$verify_root"
             rpm2cpio "$GITHUB_WORKSPACE/$rpm_path" | cpio -idm --quiet
           )
-          for script in dr_runtime.sh dr_scheduler.sh qcow2_checkpoint.py qcow2_bitmap_baseline.py qcow2_bitmap_backup.py qcow2_bitmap_offline_backup.py qcow2_bitmap_commit.py; do
+          for script in dr_export_ownership.py dr_ablestack.sh dr_runtime.sh dr_scheduler.sh qcow2_checkpoint.py qcow2_bitmap_baseline.py qcow2_bitmap_backup.py qcow2_bitmap_offline_backup.py qcow2_bitmap_commit.py; do
             packaged="$verify_root/usr/local/lib/ablestack-qemu-exec-tools/ftctl/$script"
             source="lib/ftctl/$script"
             expected_interpreter='#!/usr/bin/bash'

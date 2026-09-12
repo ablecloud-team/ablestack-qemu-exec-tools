@@ -28,7 +28,7 @@ cat > "${profile}" <<'JSON'
     "checkpointRef":"ftctl:plan-old:run-old:259",
     "checkpointCycleType":"incremental",
     "checkpointCycleToken":"plan-old:259",
-    "checkpointEffectiveMode":"NO_CHANGE",
+    "checkpointEffectiveMode":"CBT_INCREMENTAL",
     "checkpointSourceCreatedAt":"2026-09-04T16:46:02+09:00",
     "checkpointTargetReadyAt":"2026-09-04T16:46:05+09:00",
     "checkpointIncrementalVerified":true
@@ -73,6 +73,7 @@ grep -q '^latest_completed_checkpoint_sequence=259$' "${status}"
 grep -q '^latest_completed_checkpoint_ref=ftctl:plan-old:run-old:259$' "${status}"
 grep -q '^latest_completed_cycle_token=plan-old:259$' "${status}"
 grep -q '^baseline_state=LOCAL_DURABLE$' "${status}"
+grep -q '^latest_completed_incremental_verified=$' "${status}"
 grep -q '^target_durable=true$' "${status}"
 [[ "$(ftctl_dr_scheduler_cycle_type 901 ABLESTACK "${status}" ABLESTACK plan-new)" == "incremental" ]]
 
@@ -84,3 +85,9 @@ if ftctl_dr_scheduler_seed_relocated_baseline plan-new "${bad_profile}" "${state
 fi
 
 echo 'ftctl DR relocated baseline smoke: PASS'
+
+source "${ROOT}/lib/ftctl/dr_runtime.sh"
+jq '.request.password="private-value" | .request.accessToken="private-value"' "${profile}" > "${tmp}/secret-profile.json"
+ftctl_dr_runtime_redacted_profile_json "${tmp}/secret-profile.json" > "${tmp}/redacted.json"
+jq -e '.request.checkpointCycleToken == "plan-old:259" and .request.password == "REDACTED" and .request.accessToken == "REDACTED"' "${tmp}/redacted.json" >/dev/null
+echo 'relocated checkpoint identity and secret redaction: PASS'

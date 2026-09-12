@@ -364,6 +364,7 @@ for export in arr(transport.get("exports")):
             "name": name,
             "uri": uri,
             "targetPath": target_path,
+            "exportGeneration": first_int(export.get("exportGeneration")),
         })
 
 disk_items = []
@@ -743,12 +744,12 @@ ftctl_dr_ablestack_export_persist_intent() {
       redacted="$(ftctl_dr_runtime_redacted_profile_json "${profile_file}")" || return $?
       ftctl_state_write_json_file "${persist_profile}" "${redacted}"
     else
-      cp -f "${profile_file}" "${persist_profile}"
+      if [[ ! "${profile_file}" -ef "${persist_profile}" ]]; then cp -f "${profile_file}" "${persist_profile}" || return $?; fi
     fi
     chmod 0600 "${persist_profile}" 2>/dev/null || true
   fi
   if [[ -n "${manifest}" && -f "${manifest}" ]]; then
-    cp -f "${manifest}" "${persist_manifest}"
+    if [[ ! "${manifest}" -ef "${persist_manifest}" ]]; then cp -f "${manifest}" "${persist_manifest}" || return $?; fi
     chmod 0600 "${persist_manifest}" 2>/dev/null || true
   fi
   tmp="${intent}.tmp.$$"
@@ -858,31 +859,53 @@ ftctl_dr_ablestack_target_export_systemd_available() {
 }
 
 ftctl_dr_ablestack_target_export_stop_item() {
-  local item="${1-}" pid_file pid unit_name
+  local item="${1-}" pid_file pid unit_name attempt
   pid_file="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("pidFile", ""))' "${item}")"
   unit_name="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("unitName", ""))' "${item}")"
+  [[ -z "${unit_name}" || "${unit_name}" =~ ^ablestack-vm-ftctl-dr-export-[a-f0-9]{20}\.service$ ]] || return 93
+  pid="$(cat "${pid_file}" 2>/dev/null || true)"
+  # A stale pid file must never authorize signalling an unrelated/reused PID.
+  if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+    python3 - "${pid}" "${pid_file}" <<'PY'
+import os,sys
+try:
+    args=open('/proc/'+sys.argv[1]+'/cmdline','rb').read().split(b'\0')
+    args=[x.decode() for x in args if x]
+    ok=os.path.basename(args[0])=='qemu-nbd' and '--pid-file' in args and args[args.index('--pid-file')+1]==sys.argv[2]
+except (OSError,IndexError,ValueError):
+    ok=False
+raise SystemExit(0 if ok else 93)
+PY
+    [[ "$?" == "0" ]] || return 93
+  fi
   if [[ -n "${unit_name}" ]] && ftctl_dr_ablestack_target_export_systemd_available; then
     systemctl stop "${unit_name}" >/dev/null 2>&1 || true
+    if systemctl is-active --quiet "${unit_name}"; then return 93; fi
     systemctl reset-failed "${unit_name}" >/dev/null 2>&1 || true
-  fi
-  pid="$(cat "${pid_file}" 2>/dev/null || true)"
-  if [[ "${pid}" =~ ^[0-9]+$ ]]; then
+  elif [[ "${pid}" =~ ^[0-9]+$ ]]; then
     kill "${pid}" >/dev/null 2>&1 || true
   fi
-  [[ -z "${pid_file}" ]] || rm -f "${pid_file}"
+  for attempt in $(seq 1 30); do
+    if [[ ! "${pid}" =~ ^[0-9]+$ ]] || ! kill -0 "${pid}" 2>/dev/null; then
+      [[ -z "${pid_file}" ]] || rm -f "${pid_file}"
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 93
 }
 
 ftctl_dr_ablestack_target_export_stop_records() {
   local records="${1-}" item
   [[ -s "${records}" ]] || return 0
   while IFS= read -r item; do
-    ftctl_dr_ablestack_target_export_stop_item "${item}"
+    ftctl_dr_ablestack_target_export_stop_item "${item}" || return $?
   done < "${records}"
 }
 
 ftctl_dr_ablestack_target_export_abort() {
   local records="${1-}" manifest="${2-}"
-  ftctl_dr_ablestack_target_export_stop_records "${records}"
+  ftctl_dr_ablestack_target_export_stop_records "${records}" || return $?
   rm -f "${records}" "${manifest}" "${manifest}.tmp"
 }
 
@@ -916,6 +939,18 @@ ftctl_dr_ablestack_target_export_start_unlocked() {
   local port name pid_file current_pid unit_name out="" err="" rc=0 records ready reverse_requested reverse_profile
   [[ -n "${plan}" && -n "${run}" ]] || return 2
   ftctl_dr_ablestack_target_export_resolve_profile "${plan}" "${profile_file}" profile_file || return $?
+  if ! jq -e '.mapping.disks | length > 0' "${profile_file}" >/dev/null 2>&1; then
+    local base_profile merged_profile
+    base_profile="$(ftctl_dr_ablestack_export_persist_profile_path "${plan}")"
+    merged_profile="$(ftctl_dr_ablestack_export_persist_dir "${plan}")/request-profile.json"
+    if [[ "${profile_file}" != "${base_profile}" && -f "${base_profile}" ]]; then
+      jq -s '.[0] * .[1]' "${base_profile}" "${profile_file}" > "${merged_profile}" || return 93
+      profile_file="${merged_profile}"
+    fi
+  fi
+  local export_generation ownership_profile_file="${profile_file}"
+  export_generation="$(python3 "${BASH_SOURCE[0]%/*}/dr_export_ownership.py" \
+    "$(ftctl_dr_ablestack_export_persist_dir "${plan}")" START "${profile_file}")" || return $?
   ftctl_dr_ablestack_export_persist_intent "${plan}" "${run}" "RUNNING" "${profile_file}" "" "STARTING" || return $?
   reverse_requested="$(ftctl_dr_runtime_profile_value "${profile_file}" "request.reverseTargetExport" 2>/dev/null || true)"
   if [[ "${reverse_requested,,}" == "true" || "${reverse_requested}" == "1" ]]; then
@@ -1042,11 +1077,15 @@ with open(tmp,"w",encoding="utf-8") as fh: json.dump(data,fh,sort_keys=True,sepa
 os.replace(tmp,sys.argv[2])
 PY
   rm -f "${records}"
-  ftctl_dr_ablestack_export_persist_intent "${plan}" "${run}" "RUNNING" "${profile_file}" "${manifest}" "RUNNING" || return $?
+  ftctl_dr_ablestack_export_persist_intent "${plan}" "${run}" "RUNNING" "${ownership_profile_file}" "${manifest}" "RUNNING" || return $?
   if [[ "${json}" == "1" ]]; then
-    python3 - "${manifest}" <<'PY'
-import json,sys
+    python3 - "${manifest}" "${export_generation}" "$(ftctl_dr_ablestack_export_persist_dir "${plan}")/ownership.json" <<'PY'
+import json,sys,os
 with open(sys.argv[1], encoding="utf-8") as fh: data=json.load(fh)
+data.update({"ownershipProtocol":1,"exportGeneration":int(sys.argv[2])})
+owner=json.load(open(sys.argv[3], encoding="utf-8")) if os.path.isfile(sys.argv[3]) else {}
+if owner.get("scope"):
+    data.update(ownershipProtocol=2,exportAuthorityScope=owner["scope"],exportDirection=owner["direction"])
 data.update({"command":"dr-target-export-start","result":"ok","accepted":True,"state":"READY","step":"target-export-ready","progress":100})
 print(json.dumps(data,separators=(",",":")))
 PY
@@ -1438,17 +1477,28 @@ ftctl_dr_ablestack_target_export_stop_unlocked() {
   if [[ -f "${profile_file}" ]]; then
     action_intent="$(jq -r '.request.actionIntent // empty' "${profile_file}" 2>/dev/null || true)"
   fi
+  local export_generation
+  export_generation="$(python3 "${BASH_SOURCE[0]%/*}/dr_export_ownership.py" \
+    "$(ftctl_dr_ablestack_export_persist_dir "${plan}")" STOP "${profile_file}")" || return $?
   ftctl_dr_ablestack_export_persist_intent "${plan}" "${run}" "STOPPED" "" "" "STOPPING" || return $?
-  if [[ -f "${manifest}" ]]; then
+  if [[ "${export_generation}" -gt 0 ]]; then
+    local owned_records
+    owned_records="$(python3 "${BASH_SOURCE[0]%/*}/dr_export_ownership.py" records "${plan}" \
+      "$(ftctl_dr_ablestack_export_persist_dir "${plan}")" "${profile_file}" "${manifest}")" || return 93
     while IFS= read -r item; do
-      ftctl_dr_ablestack_target_export_stop_item "${item}"
+      [[ -n "${item}" ]] || continue
+      ftctl_dr_ablestack_target_export_stop_item "${item}" || return $?
       stopped=$((stopped + 1))
-    done < <(python3 - "${manifest}" <<'PY'
-import json,sys
-with open(sys.argv[1], encoding="utf-8") as fh: data=json.load(fh)
-for item in data.get("exports") or []: print(json.dumps(item,separators=(",",":")))
-PY
-)
+    done <<< "${owned_records}"
+    rm -f "${manifest}"
+  elif [[ -f "${manifest}" ]]; then
+    local legacy_records
+    legacy_records="$(jq -c '.exports[]' "${manifest}")" || return 93
+    while IFS= read -r item; do
+      [[ -n "${item}" ]] || continue
+      ftctl_dr_ablestack_target_export_stop_item "${item}" || return $?
+      stopped=$((stopped + 1))
+    done <<< "${legacy_records}"
     rm -f "${manifest}"
   fi
   ftctl_dr_ablestack_export_persist_intent "${plan}" "${run}" "STOPPED" "" "" "STOPPED" || return $?
@@ -1467,7 +1517,7 @@ PY
     reverse_baseline_state="$(ftctl_dr_ablestack_reverse_baseline_status "${plan}" "${run}" "${checkpoint_sequence}")"
   fi
   if [[ "${json}" == "1" ]]; then
-    printf '{"command":"dr-target-export-stop","result":"ok","accepted":true,"state":"STOPPED","step":"target-export-stopped","progress":100,"stopped":%s,"reverse_baseline_state":"%s"}\n' "${stopped}" "$(ftctl__json_escape "${reverse_baseline_state}")"
+    printf '{"command":"dr-target-export-stop","result":"ok","accepted":true,"state":"STOPPED","step":"target-export-stopped","progress":100,"ownershipProtocol":1,"exportGeneration":%s,"stopped":%s,"reverse_baseline_state":"%s"}\n' "${export_generation}" "${stopped}" "$(ftctl__json_escape "${reverse_baseline_state}")" | python3 -c 'import json,sys,os; result=json.load(sys.stdin); owner=json.load(open(sys.argv[1])) if os.path.isfile(sys.argv[1]) else {}; result.update({"ownershipProtocol":2,"exportAuthorityScope":owner["scope"],"exportDirection":owner["direction"]} if owner.get("scope") else {}); print(json.dumps(result,separators=(",",":")))' "$(ftctl_dr_ablestack_export_persist_dir "${plan}")/ownership.json"
   else
     printf 'target exports stopped: plan=%s count=%s reverse_baseline=%s\n' "${plan}" "${stopped}" "${reverse_baseline_state}"
   fi
@@ -1485,6 +1535,10 @@ ftctl_dr_ablestack_target_export_reconcile_all() {
     [[ -n "${plan}" ]] || continue
     profile="$(ftctl_dr_ablestack_export_persist_profile_path "${plan}")"
     manifest="$(ftctl_dr_ablestack_export_manifest_path "${plan}")"
+    if [[ -f "$(ftctl_dr_ablestack_export_persist_dir "${plan}")/ownership.json" ]] \
+      && [[ "$(jq -r '.operation' "$(ftctl_dr_ablestack_export_persist_dir "${plan}")/ownership.json")" == "STOP" ]]; then
+      continue
+    fi
     if [[ -f "${manifest}" ]] && python3 - "${manifest}" <<'PY'
 import json, os, signal, socket, sys
 with open(sys.argv[1], encoding="utf-8") as fh:
@@ -2250,12 +2304,12 @@ ftctl_dr_ablestack_mark_driver_error() {
 ftctl_dr_ablestack_write_manifest() {
   local disk_map="${1-}" records_path="${2-}" manifest_path="${3-}" phase="${4-}"
   ftctl_ensure_dir "$(dirname "${manifest_path}")" "0755"
-  python3 - "${disk_map}" "${records_path}" "${manifest_path}" "${phase}" "$(ftctl_now_iso8601)" <<'PY'
+  python3 - "${disk_map}" "${records_path}" "${manifest_path}" "${phase}" "$(ftctl_now_iso8601)" "${FTCTL_DR_PRODUCER_RUN_UUID:-}" <<'PY'
 import json
 import os
 import sys
 
-disk_map_path, records_path, manifest_path, phase, now = sys.argv[1:6]
+disk_map_path, records_path, manifest_path, phase, now, producer_run = sys.argv[1:7]
 with open(disk_map_path, "r", encoding="utf-8") as fh:
     disk_map = json.load(fh)
 
@@ -2297,7 +2351,7 @@ manifest = {
     "phase": phase,
     "generatedAt": now,
     "planUuid": disk_map.get("planUuid", ""),
-    "runUuid": disk_map.get("runUuid", ""),
+    "runUuid": producer_run or disk_map.get("runUuid", ""),
     "sourceProvider": disk_map.get("sourceProvider", ""),
     "targetProvider": disk_map.get("targetProvider", ""),
     "target": disk_map.get("target", {}),
@@ -2319,14 +2373,14 @@ ftctl_dr_ablestack_write_checkpoint() {
   ftctl_ensure_dir "$(dirname "${checkpoint_path}")" "0755"
   python3 - "${disk_map}" "${manifest_path}" "${checkpoint_path}" "${state}" "${source_at}" "${target_at}" "${rpo}" \
     "${requested_mode}" "${effective_mode}" "${incremental_verified}" "${changed_bytes}" "${reseed_reason}" \
-    "${cycle_sequence}" "${nbd_source_count}" "${nbd_target_count}" <<'PY'
+    "${cycle_sequence}" "${nbd_source_count}" "${nbd_target_count}" "${FTCTL_DR_PRODUCER_RUN_UUID:-}" <<'PY'
 import datetime
 import json
 import os
 import sys
 import uuid
 
-disk_map_path, manifest_path, checkpoint_path, state, source_at, target_at, rpo, requested_mode, effective_mode, incremental_verified, changed_bytes, reseed_reason, cycle_sequence, nbd_source_count, nbd_target_count = sys.argv[1:16]
+disk_map_path, manifest_path, checkpoint_path, state, source_at, target_at, rpo, requested_mode, effective_mode, incremental_verified, changed_bytes, reseed_reason, cycle_sequence, nbd_source_count, nbd_target_count, producer_run = sys.argv[1:17]
 with open(disk_map_path, "r", encoding="utf-8") as fh:
     disk_map = json.load(fh)
 manifest = {}
@@ -2342,7 +2396,7 @@ checkpoint = {
     "targetReadyRpoSeconds": int(rpo) if str(rpo).isdigit() else None,
     "manifest": manifest_path,
     "planUuid": disk_map.get("planUuid", ""),
-    "runUuid": disk_map.get("runUuid", ""),
+    "runUuid": producer_run or disk_map.get("runUuid", ""),
     "disks": manifest.get("disks", disk_map.get("disks", [])),
 }
 if requested_mode:
@@ -2910,6 +2964,8 @@ ftctl_dr_ablestack_cycle_incremental_capable() {
 ftctl_dr_ablestack_replication_cycle() {
   local plan="${1-}" run="${2-}" profile_file="${3-}" sequence="${4-}" cycle_type="${5-}"
   local disk_map manifest_path checkpoint_path cycle_run normalized_cycle_type
+  # The scheduler producer survives profile/control Run changes during a cycle.
+  local -x FTCTL_DR_PRODUCER_RUN_UUID="${run}"
 
   [[ -n "${plan}" && -n "${run}" && -n "${profile_file}" ]] || return 2
   cycle_run="${run}-cycle-${sequence:-0}"

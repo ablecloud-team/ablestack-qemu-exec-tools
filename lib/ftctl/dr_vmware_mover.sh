@@ -1019,8 +1019,10 @@ ftctl_vmware_mover_patch_disk() {
     fi
     [[ -n "${thumbprint}" ]] || ftctl_vmware_mover_die 77 "DR_VMWARE_VDDK_THUMBPRINT_UNRESOLVED: thumbprint is missing for ${label}"
   fi
+  # Read the complete snapshot chain: parent-only sectors are valid guest data.
+  # SINGLE_LINK returns holes for them and corrupts full/CBT copies (#1003).
   local nbdkit_args=(--exit-with-parent --foreground --unix "${socket_path}" -r vddk
-    "server=${endpoint}" "user=${username}" "password=+${password_file}" "file=${source_vmdk}" "single-link=true")
+    "server=${endpoint}" "user=${username}" "password=+${password_file}" "file=${source_vmdk}" "single-link=false")
   [[ -n "${source_vm_ref}" ]] && nbdkit_args+=("vm=moref=${source_vm_ref}")
   [[ -n "${source_snapshot_ref}" ]] && nbdkit_args+=("snapshot=${source_snapshot_ref}")
   [[ -n "${transports}" ]] && nbdkit_args+=("transports=${transports}")
@@ -1613,6 +1615,7 @@ ftctl_vmware_mover_convert_disk() {
     FTCTL_DR_VMWARE_SOURCE_OPEN_THUMBPRINT_PRESENT="$([[ -n "${thumbprint}" ]] && printf 'true' || printf 'false')"
     FTCTL_DR_VMWARE_SOURCE_OPEN_THUMBPRINT_SOURCE="tls-verify"
   fi
+  # A snapshot leaf alone is not a complete guest disk (#1003).
   local nbdkit_args=(
     --exit-with-parent
     --foreground
@@ -1623,7 +1626,7 @@ ftctl_vmware_mover_convert_disk() {
     "user=${username}"
     "password=+${password_file}"
     "file=${source_vmdk}"
-    "single-link=true"
+    "single-link=false"
   )
   [[ -n "${source_vm_ref}" ]] && nbdkit_args+=("vm=moref=${source_vm_ref}")
   [[ -n "${source_snapshot_ref}" ]] && nbdkit_args+=("snapshot=${source_snapshot_ref}")

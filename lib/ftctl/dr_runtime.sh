@@ -688,7 +688,7 @@ def redact(value):
         out = {}
         for key, item in value.items():
             lower = str(key).lower()
-            if any(part in lower for part in SECRET_PARTS):
+            if lower not in ("checkpointcycletoken", "cycletoken", "latest_completed_cycle_token") and any(part in lower for part in SECRET_PARTS):
                 out[key] = "REDACTED"
             else:
                 out[key] = redact(item)
@@ -1210,7 +1210,7 @@ def redact(value):
         out = {}
         for key, item in value.items():
             lower = str(key).lower()
-            if any(part in lower for part in SECRET_PARTS):
+            if lower not in ("checkpointcycletoken", "cycletoken", "latest_completed_cycle_token") and any(part in lower for part in SECRET_PARTS):
                 out[key] = "REDACTED"
             else:
                 out[key] = redact(item)
@@ -1422,6 +1422,35 @@ elif isinstance(value, (str, int, float)) and not isinstance(value, bool):
 else:
     raise SystemExit(1)
 PY
+}
+
+# A control Run owns an intent, not a new replication baseline. Preserve only
+# validated completed-cycle evidence; never copy another Run's terminal state.
+ftctl_dr_runtime_inherit_resume_checkpoint() {
+  local plan="${1-}" run_path="${2-}" status_path="${3-}"
+  local checkpoint sequence ref baseline key value
+  local -a updates=()
+  [[ -f "${status_path}" && "${run_path}" != "${status_path}" ]] || return 0
+  checkpoint="$(ftctl_dr_runtime_state_get_from_path "${status_path}" latest_completed_checkpoint_path)"
+  sequence="$(ftctl_dr_runtime_state_get_from_path "${status_path}" latest_completed_checkpoint_sequence)"
+  ref="$(ftctl_dr_runtime_state_get_from_path "${status_path}" latest_completed_checkpoint_ref)"
+  baseline="$(ftctl_dr_runtime_state_get_from_path "${status_path}" baseline_state)"
+  [[ "${baseline}" != INVALID && "${baseline}" != MISSING ]] || return 0
+  [[ "${sequence}" =~ ^[1-9][0-9]*$ && -f "${checkpoint}" && -n "${ref}" ]] || return 0
+  jq -e --arg plan "${plan}" --argjson seq "${sequence}" '
+    .planUuid == $plan and (.state == "READY" or .state == "TARGET_READY")
+    and ((.cycleMetrics.sequence // .sequence // .baselineGeneration) == $seq)
+    and ((.targetDurableAt // "") | length > 0)
+  ' "${checkpoint}" >/dev/null 2>&1 || return 0
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      latest_completed_*|restore_points_path|source_disk_map_path)
+        updates+=("${key}=${value}") ;;
+    esac
+  done < "${status_path}"
+  updates+=("last_target_durable_at=$(jq -r '.targetDurableAt' "${checkpoint}")")
+  updates+=("last_source_checkpoint_at=$(jq -r '.sourceCheckpointAt // empty' "${checkpoint}")")
+  ftctl_dr_runtime_path_set "${run_path}" "${updates[@]}"
 }
 
 ftctl_dr_runtime_publish_latest_completed_checkpoint() {
@@ -1868,7 +1897,7 @@ ftctl_dr_runtime_reverse_checkpoint() {
     "updated_at=${now}" || true
   cp -f "${run_path}" "${status_path}" 2>/dev/null || true
 
-  output="$(FTCTL_DR_TRANSFER_PROGRESS_PATH="${transfer_progress_path}" \
+  output="$(FTCTL_DR_PROGRESS_RUN_UUID="${run}" FTCTL_DR_TRANSFER_PROGRESS_PATH="${transfer_progress_path}" \
     ftctl_dr_scheduler_run_cycle "${plan}" "${run}-${phase}" "${profile_file}" "${sequence}" "${cycle_type}")" || rc=$?
   [[ "${rc}" == "0" ]] || return "${rc}"
   manifest_path="$(awk -F '\t' 'NF >= 2 {print $1; exit}' <<< "${output}")"
@@ -2262,9 +2291,28 @@ import sys
 
 plan, run, active_path, session_path, selection_path, now = sys.argv[1:7]
 session = {}
-if os.path.exists(active_path):
-    with open(active_path, "r", encoding="utf-8") as fh:
+# Failed preparation has a run session before active.json is published.
+selected_path = session_path if os.path.exists(session_path) else active_path
+if os.path.exists(selected_path):
+    with open(selected_path, "r", encoding="utf-8") as fh:
         session = json.load(fh)
+    # active.json can precede materialization; follow its owned run record.
+    if selected_path == active_path:
+        owner = str(session.get("runUuid") or "")
+        if owner and owner not in (".", "..") and all(ch.isalnum() or ch in "-_." for ch in owner):
+            original_path = os.path.join(os.path.dirname(active_path), owner + ".json")
+            if os.path.exists(original_path):
+                with open(original_path, "r", encoding="utf-8") as fh:
+                    original = json.load(fh)
+                if original.get("runUuid") != owner or original.get("planUuid") != plan:
+                    raise RuntimeError("DR_TEST_CLEANUP_OWNER_MISMATCH: original session identity differs")
+                session = original
+    if session.get("planUuid") not in (None, "", plan):
+        raise RuntimeError("DR_TEST_CLEANUP_OWNER_MISMATCH: session belongs to another plan")
+    if selected_path == session_path and session.get("runUuid") not in (None, "", run):
+        # A cleanup run may already contain the original test session after a retry.
+        if session.get("cleanupRunUuid") != run:
+            raise RuntimeError("DR_TEST_CLEANUP_OWNER_MISMATCH: session belongs to another run")
 restore = session.get("restorePoint") if isinstance(session.get("restorePoint"), dict) else {}
 artifacts = session.get("testArtifacts") if isinstance(session.get("testArtifacts"), dict) else {}
 artifact_path = artifacts.get("path") if isinstance(artifacts, dict) else ""
@@ -2302,8 +2350,15 @@ for record in artifacts.get("records", []) if isinstance(artifacts, dict) else [
         except (OSError, ValueError, TypeError):
             pass
     if clone.startswith("rbd:"):
-        subprocess.run(["rbd", "rm", clone[4:]], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if backing.startswith("rbd:") and snapshot:
+        owner = "".join(ch if ch.isalnum() else "-" for ch in str(session.get("runUuid") or "")).strip("-")[:36]
+        if not owner or clone != backing + "-ftctl-test-" + owner:
+            raise RuntimeError("DR_TEST_CLEANUP_OWNER_MISMATCH: unowned RBD clone")
+        removed = subprocess.run(["rbd", "rm", clone[4:]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if removed.returncode != 0:
+            probe = subprocess.run(["rbd", "info", clone[4:]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if probe.returncode != 2 or "No such file or directory" not in probe.stderr:
+                raise RuntimeError("DR_TEST_ARTIFACT_CLEANUP_FAILED: RBD clone removal failed: " + clone)
+    if backing.startswith("rbd:") and snapshot and not record.get("retainedCheckpoint"):
         snap_ref = backing[4:] + "@" + snapshot
         subprocess.run(["rbd", "snap", "unprotect", snap_ref], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["rbd", "snap", "rm", snap_ref], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -2324,7 +2379,10 @@ with open(session_path, "w", encoding="utf-8") as fh:
     json.dump(session, fh, sort_keys=True, separators=(",", ":"))
     fh.write("\n")
 if os.path.exists(active_path):
-    os.unlink(active_path)
+    with open(active_path, "r", encoding="utf-8") as fh:
+        active = json.load(fh)
+    if active.get("sessionId") and active.get("sessionId") == session.get("sessionId"):
+        os.unlink(active_path)
 with open(selection_path, "w", encoding="utf-8") as fh:
     fh.write(f"test_session_id={session_id}\n")
     fh.write(f"test_lease_owner_run={session.get('runUuid', '') or ''}\n")
@@ -2385,6 +2443,14 @@ PY
     "updated_at=${now}"
 }
 
+# A Cloud cleanup profile may intentionally omit source credentials. Only the
+# durable Cloud recovery worker can restore that profile and the operator intent.
+ftctl_dr_runtime_cloud_managed_test_restore() {
+  local profile
+  profile="$(ftctl_dr_runtime_profile_path "${1-}")"
+  [[ -s "${profile}" ]] && jq -e '.request.sourceSchedulerRestoreManagedByCloud == true' "${profile}" >/dev/null 2>&1
+}
+
 ftctl_dr_runtime_finalize_failed_test() {
   local plan="${1-}" run="${2-}" run_path="${3-}" status_path="${4-}"
   local failure_rc="${5-1}" error_code="${6-DR_TEST_FAILOVER_FAILED}" failed_step="${7-test-failed}"
@@ -2393,6 +2459,10 @@ ftctl_dr_runtime_finalize_failed_test() {
   local transition_scope
 
   ftctl_dr_runtime_cleanup_test_session "${plan}" "${run}" "${run_path}" "${status_path}" || cleanup_rc=$?
+  # Keep failed resources reachable by the operator's later cleanup command.
+  if [[ "${cleanup_rc}" != "0" && ! -e "$(ftctl_dr_runtime_active_test_session_path "${plan}")"       && -f "$(ftctl_dr_runtime_test_session_path "${plan}" "${run}")" ]]; then
+    cp -f "$(ftctl_dr_runtime_test_session_path "${plan}" "${run}")"       "$(ftctl_dr_runtime_active_test_session_path "${plan}")"
+  fi
   sequence="$(ftctl_dr_runtime_state_get_from_path "${run_path}" "test_restore_point_sequence")"
   lease_owner_run="$(ftctl_dr_runtime_state_get_from_path "${run_path}" "test_lease_owner_run")"
   [[ -n "${lease_owner_run}" ]] || lease_owner_run="${run}"
@@ -2405,7 +2475,7 @@ ftctl_dr_runtime_finalize_failed_test() {
       "checkpoint_lease_path=" || true
   fi
   transition_scope="$(ftctl_dr_runtime_state_get_from_path "${run_path}" "scheduler_transition_scope")"
-  if [[ "${transition_scope}" != "REMOTE_SOURCE" ]] && command -v ftctl_dr_scheduler_resume_after_transition >/dev/null 2>&1; then
+  if [[ "${transition_scope}" != "REMOTE_SOURCE" ]] && ! ftctl_dr_runtime_cloud_managed_test_restore "${plan}" && command -v ftctl_dr_scheduler_resume_after_transition >/dev/null 2>&1; then
     ftctl_dr_scheduler_resume_after_transition "${plan}" "${run}" "test-failover-rollback" \
       "${run_path}" "${status_path}" || resume_rc=$?
   fi
@@ -2499,7 +2569,7 @@ def cleanup_records():
             if clone.startswith("rbd:"):
                 subprocess.run(["rbd", "rm", clone[4:]], check=False,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if backing.startswith("rbd:") and snapshot:
+            if backing.startswith("rbd:") and snapshot and not record.get("retainedCheckpoint"):
                 snap_ref = backing[4:] + "@" + snapshot
                 subprocess.run(["rbd", "snap", "unprotect", snap_ref], check=False,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -2601,6 +2671,7 @@ else:
                 "sizeBytes": disk.get("sizeBytes") or disk.get("capacityBytes") or 0,
             })
         set_request = {
+            "existingOnly": request.get("checkpointExistingSealRequired") is True,
             "plan": str(session.get("planUuid") or ""),
             "sequence": sequence,
             "checkpointRef": checkpoint_ref,
@@ -2636,30 +2707,50 @@ else:
                 fail(53, f"invalid RBD locator {locator}; expected rbd:pool/image")
             pool, image = source_rbd.split("/", 1)
             suffix = safe_key(session.get("runUuid") or now)
-            snapshot = f"ftctl-dr-test-{suffix}"
+            import hashlib
+            request = session.get("request") or {}
+            checkpoint_ref = str((session.get("restorePoint") or {}).get("ref") or "")
+            seal_key = hashlib.sha256((str(session.get("planUuid")) + ":" + checkpoint_ref + ":" + str(disk.get("device"))).encode()).hexdigest()[:32]
+            snapshot = f"ftctl-dr-seal-{seal_key}"
+            existing_only = request.get("checkpointExistingSealRequired") is True
             clone_image = f"{image}-ftctl-test-{suffix}"
             clone_spec = f"{pool}/{clone_image}"
             snap_spec = f"{source_rbd}@{snapshot}"
             try:
-                subprocess.run(["rbd", "info", source_rbd], check=True,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-                subprocess.run(["rbd", "snap", "create", snap_spec], check=True)
-                records.append({
-                    "device": disk.get("device") or f"disk{index}",
-                    "state": "CREATING",
-                    "type": "rbd-clone",
-                    "backing": f"rbd:{source_rbd}",
-                    "snapshot": snapshot,
-                    "clone": f"rbd:{clone_spec}",
-                    "path": f"rbd:{clone_spec}",
-                    "sizeBytes": disk.get("sizeBytes") or disk.get("capacityBytes") or 0,
-                })
-                subprocess.run(["rbd", "snap", "protect", snap_spec], check=True)
-                subprocess.run(["rbd", "clone", snap_spec, clone_spec], check=True)
-                records[-1]["state"] = "CREATED"
+                sys.path.insert(0, os.path.dirname(checkpoint_tool))
+                from dr_checkpoint_store import storage_lock
+                with storage_lock({"planUuid": str(session.get("planUuid")), "disks": [{"provider": "RBD", "canonicalLocator": locator}]}):
+                    subprocess.run(["rbd", "info", source_rbd], check=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                    proof_result = subprocess.run(["rbd", "image-meta", "get", source_rbd, snapshot], check=False,
+                                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    reused_seal = proof_result.returncode == 0
+                    if existing_only or reused_seal:
+                        proof = proof_result.stdout.strip()
+                        if proof != checkpoint_ref:
+                            fail(53, "DR_TEST_CHECKPOINT_SEQUENCE_MISMATCH: RBD checkpoint seal does not match request")
+                        subprocess.run(["rbd", "info", snap_spec], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    else:
+                        subprocess.run(["rbd", "snap", "create", snap_spec], check=True)
+                    records.append({
+                        "device": disk.get("device") or f"disk{index}",
+                        "state": "CREATING",
+                        "type": "rbd-clone",
+                        "backing": f"rbd:{source_rbd}",
+                        "snapshot": snapshot,
+                        "retainedCheckpoint": existing_only or reused_seal,
+                        "checkpointRef": checkpoint_ref,
+                        "clone": f"rbd:{clone_spec}",
+                        "path": f"rbd:{clone_spec}",
+                        "sizeBytes": disk.get("sizeBytes") or disk.get("capacityBytes") or 0,
+                    })
+                    if not existing_only and not reused_seal:
+                        subprocess.run(["rbd", "snap", "protect", snap_spec], check=True)
+                    subprocess.run(["rbd", "clone", snap_spec, clone_spec], check=True)
+                    records[-1]["state"] = "CREATED"
             except subprocess.CalledProcessError as exc:
                 stderr = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
-                fail(46, f"RBD test clone failed for {source_rbd}: {stderr or exc}")
+                fail(46, f"{'DR_TEST_SEALED_CHECKPOINT_MISSING' if existing_only else 'DR_TEST_MATERIALIZATION_FAILED'}: RBD test clone failed for {source_rbd}: {stderr or exc}")
             continue
         if provider == "FILE":
             request = session.get("request") if isinstance(session.get("request"), dict) else {}
@@ -2714,6 +2805,8 @@ else:
                 "--storage-root", storage_root,
                 "--output", copy_path,
             ]
+            if request.get("checkpointExistingSealRequired") is True:
+                command.append("--existing-only")
             try:
                 result = subprocess.run(command, check=False, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, text=True)
@@ -2733,6 +2826,17 @@ else:
             continue
         fail(54, f"unsupported test artifact provider {provider} for disk {index}")
     state = "CREATED" if any(record.get("state") == "CREATED" for record in records) else "NO_MATERIALIZED_DISKS"
+
+# Publish seals only after the complete disk set has materialized successfully.
+for record in records:
+    if record.get("type") == "rbd-clone" and not record.get("retainedCheckpoint"):
+        try:
+            subprocess.run(["rbd", "image-meta", "set", record["backing"][4:], record["snapshot"], record["checkpointRef"]], check=True)
+        except subprocess.CalledProcessError as exc:
+            fail(46, "DR_TEST_CHECKPOINT_SEAL_FAILED: RBD checkpoint publication failed")
+for record in records:
+    if record.get("type") == "rbd-clone":
+        record["retainedCheckpoint"] = True
 
 session["testArtifacts"] = {
     "state": state,
@@ -2786,6 +2890,49 @@ PY
     "test_checkpoint_integrity_state=${test_checkpoint_integrity_state}" \
     "test_checkpoint_sequence=${test_checkpoint_sequence}" \
     "test_checkpoint_path=${test_checkpoint_path}"
+}
+
+# Resolve with the same durable local artifact selector used by guest preparation.
+# Never derive cutover provenance from a copied Run's checkpoint_sequence.
+ftctl_dr_runtime_select_cutover_checkpoint() {
+  local plan="${1-}" run="${2-}" profile="${3-}" selector="${4-}" status="${5-}" output="${6-}"
+  local records libdir
+  records="$(ftctl_dr_runtime_default_restore_points_path "${plan}" "${status}")"
+  libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  python3 - "${libdir}" "${plan}" "${run}" "${profile}" "${selector}" "${records}" "${status}" "${output}" <<'PY'
+import hashlib
+import json
+import os
+import sys
+sys.path.insert(0, sys.argv[1])
+from guestprep_manifest import select_checkpoint, ManifestError
+_, plan, run, profile_path, selector, records, status, output = sys.argv[1:]
+with open(profile_path, encoding="utf-8") as handle:
+    profile = json.load(handle)
+request = profile.get("request") or {}
+try:
+    selected = select_checkpoint(plan, run, records,
+        selector or request.get("restorePointRef") or request.get("restorePointId") or "", status)
+except ManifestError as exc:
+    print(exc.code + ": " + exc.message, file=sys.stderr)
+    raise SystemExit(exc.exit_code)
+sequence = selected.get("sequence")
+if not isinstance(sequence, int) or sequence <= 0:
+    raise SystemExit(44)
+proof = {"checkpointSequence": sequence, "checkpointRef": selected["ref"],
+         "planUuid": plan, "cutoverRunUuid": run}
+for key in ("path", "manifest"):
+    path = selected.get(key)
+    if path and os.path.isfile(path):
+        with open(path, "rb") as handle:
+            proof[key + "Sha256"] = hashlib.sha256(handle.read()).hexdigest()
+with open(output + ".tmp", "w", encoding="utf-8") as handle:
+    json.dump(proof, handle, sort_keys=True)
+    handle.flush()
+    os.fsync(handle.fileno())
+os.replace(output + ".tmp", output)
+print(str(sequence) + "\t" + selected["ref"])
+PY
 }
 
 ftctl_dr_runtime_finalize_failover() {
@@ -3275,14 +3422,15 @@ ftctl_dr_runtime_failover_worker() {
     restore_point="${final_restore_point_ref}"
   fi
 
-  local cutover_workdir direction cutover_checkpoint_sequence
+  local cutover_workdir direction cutover_checkpoint_sequence=""
   direction="$(jq -r '.direction // ""' "${profile_file}" 2>/dev/null || true)"
   if [[ "${direction}" == "VMWARE_TO_KVM" ]]; then
-    cutover_checkpoint_sequence="$(ftctl_dr_runtime_state_get_from_path "${run_path}" "checkpoint_sequence")"
-    [[ "${cutover_checkpoint_sequence}" =~ ^[1-9][0-9]*$ ]] \
-      || cutover_checkpoint_sequence="$(ftctl_dr_runtime_state_get_from_path "${status_path}" "latest_completed_checkpoint_sequence")"
-    if [[ ! "${cutover_checkpoint_sequence}" =~ ^[1-9][0-9]*$ && "${restore_point##*:}" =~ ^[1-9][0-9]*$ ]]; then
-      cutover_checkpoint_sequence="${restore_point##*:}"
+    local cutover_selection cutover_provenance
+    cutover_provenance="$(ftctl_dr_runtime_plan_dir "${plan}")/cutover-provenance-$(ftctl_dr_runtime_key "${run}").json"
+    cutover_selection="$(ftctl_dr_runtime_select_cutover_checkpoint "${plan}" "${run}" "${profile_file}" \
+      "${restore_point}" "${status_path}" "${cutover_provenance}")" || rc=$?
+    if [[ "${rc}" == "0" ]]; then
+      IFS=$'\t' read -r cutover_checkpoint_sequence restore_point <<< "${cutover_selection}"
     fi
     ftctl_dr_runtime_path_set "${run_path}" \
       "state=RUNNING" \
@@ -3291,8 +3439,17 @@ ftctl_dr_runtime_failover_worker() {
       "reverse_baseline_state=PREPARING" \
       "updated_at=$(ftctl_now_iso8601)" || true
     cp -f "${run_path}" "${status_path}" 2>/dev/null || true
-    ftctl_dr_kvm_vmware_seed_cutover_baseline "${plan}" "${run}" "${profile_file}" \
-      "${cutover_checkpoint_sequence}" || rc=$?
+    if [[ "${rc}" == "0" ]]; then
+      ftctl_dr_kvm_vmware_seed_cutover_baseline "${plan}" "${run}" "${profile_file}" \
+        "${cutover_checkpoint_sequence}" || rc=$?
+    fi
+    if [[ "${rc}" == "0" ]]; then
+      local cutover_baseline
+      cutover_baseline="$(ftctl_dr_kvm_vmware_baseline_path "${plan}")"
+      jq --slurpfile proof "${cutover_provenance}" '. + {createdFromRestorePoint:$proof[0]}' \
+        "${cutover_baseline}" > "${cutover_baseline}.provenance.tmp" \
+        && mv -f "${cutover_baseline}.provenance.tmp" "${cutover_baseline}" || rc=67
+    fi
     if [[ "${rc}" != "0" ]]; then
       if [[ "${source_runtime_quiesce_held}" == "true" ]] \
           && command -v ftctl_dr_ablestack_cutover_quiesce_release >/dev/null 2>&1; then
@@ -3605,7 +3762,7 @@ ftctl_dr_runtime_failback_worker() {
     reverse_source_provider="$(ftctl_dr_scheduler_profile_provider "${reverse_profile}" source)"
     reverse_target_provider="$(ftctl_dr_scheduler_profile_provider "${reverse_profile}" target)"
     if [[ "${reverse_source_provider}" == "ABLESTACK" && "${reverse_target_provider}" == "VMWARE" ]]; then
-      reverse_preflight_json="$(ftctl_dr_kvm_vmware_reverse_preflight "${plan}" "${reverse_profile}" "FAILBACK_FINAL" "AUTO" 1)" || rc=$?
+      reverse_preflight_json="$(ftctl_dr_kvm_vmware_reverse_preflight "${plan}" "${reverse_profile}" "FAILBACK_FINAL" "AUTO" 1 "$(ftctl_dr_runtime_credential_path "${plan}")")" || rc=$?
     fi
   fi
   if [[ -n "${reverse_preflight_json}" ]]; then
@@ -4342,6 +4499,22 @@ sys.stdout.write("," + encoded[1:-1])
 PY
 }
 
+# Additive profile boot evidence; keep full observation fingerprint v2 unchanged.
+ftctl_dr_runtime_boot_hardware() {
+  local profile_path="${1-}"
+  [[ -f "${profile_path}" ]] || { printf '{}'; return 0; }
+  jq -c '
+    (.mapping.source.hardware // {})
+    | with_entries(select(.key == "sourceVmRef" or .key == "firmware" or .key == "UEFI"
+        or .key == "secureBoot" or .key == "rootDiskController" or .key == "dataDiskController"
+        or .key == "vmDetails"))
+    | if (.vmDetails | type) == "object" then
+        .vmDetails |= with_entries(select(.key | ascii_downcase |
+          test("^(uefi|rootdiskcontroller|datadiskcontroller|bootorder|boot[.]order|tpmversion|tpmmodel|machinetype)$")))
+      else del(.vmDetails) end
+  ' "${profile_path}" 2>/dev/null || printf '{}'
+}
+
 ftctl_dr_runtime_stable_hardware_fingerprint() {
   local profile_path="${1-}" canonical="" digest=""
   [[ -f "${profile_path}" ]] || return 1
@@ -4395,6 +4568,7 @@ ftctl_dr_runtime_emit_state_json() {
   local replication_activity protection_state resource_disposition active_worker_run_uuid active_worker_pid active_worker_start_ticks
   local worker_heartbeat_at control_request_run_uuid scheduler_control_request_run_uuid owner_matched
   local transfer_owner_run_uuid progress_plan_uuid progress_run_uuid progress_cycle_sequence
+  local transfer_plan_uuid="" transfer_run_uuid="" transfer_direction="" transfer_expected_sequence=""
   local scheduler_desired_state scheduler_service_unit scheduler_unit_active_state scheduler_unit_sub_state
   local scheduler_unit_main_pid scheduler_cgroup scheduler_recovery_state scheduler_recovery_trigger scheduler_recovered_at
   local transition_state transition_action transition_quiesced_at checkpoint_lease_state checkpoint_lease_path
@@ -4626,7 +4800,17 @@ ftctl_dr_runtime_emit_state_json() {
         worker_heartbeat_at="${worker_heartbeat_current}"
       fi
     fi
-    if [[ -f "${progress_journal_path}" ]]; then
+    if [[ "${action}" == dr-failback* ]]; then
+      transfer_expected_sequence="$(ftctl_dr_runtime_state_get_from_path "${state_path}" checkpoint_sequence)"
+    fi
+    if [[ -f "${progress_journal_path}" ]] && jq -e --arg plan "${plan}" --arg run "${run}" \
+        --arg sequence "${transfer_expected_sequence}" \
+        '.planUuid == $plan and .runUuid == $run and
+         ($sequence == "" or $sequence == "0" or (.cycleSequence | tostring) == $sequence)' \
+        "${progress_journal_path}" >/dev/null 2>&1; then
+      transfer_plan_uuid="${plan}"
+      transfer_run_uuid="${run}"
+      transfer_direction="$(jq -r '.direction // empty' "${progress_journal_path}")"
       transfer_activity_state="$(jq -r '.state // "UNKNOWN"' "${progress_journal_path}" 2>/dev/null || printf UNKNOWN)"
       transfer_payload_bytes="$(jq -r '.transferPayloadBytes // 0' "${progress_journal_path}" 2>/dev/null || printf 0)"
       transfer_progress_schema_version="$(jq -r '.schemaVersion // 0' "${progress_journal_path}" 2>/dev/null || printf 0)"
@@ -4782,6 +4966,9 @@ ftctl_dr_runtime_emit_state_json() {
                  || "${progress_cycle_sequence}" == "${plan_cycle_sequence}" ) \
             ]] && jq -e '(.schemaVersion // 0) >= 2 and (.bytesTotal // 0) > 0' \
                  "${progress_journal_path}" >/dev/null 2>&1; then
+        transfer_plan_uuid="${plan}"
+        transfer_run_uuid="${progress_run_uuid}"
+        transfer_direction="$(jq -r '.direction // empty' "${progress_journal_path}")"
         transfer_activity_state="$(jq -r '.state // "UNKNOWN"' "${progress_journal_path}")"
         transfer_payload_bytes="$(jq -r '.transferPayloadBytes // 0' "${progress_journal_path}")"
         transfer_progress_schema_version="$(jq -r '.schemaVersion // 0' "${progress_journal_path}")"
@@ -5243,6 +5430,8 @@ PY
   ftctl_dr_runtime_json_string_field "target_external_ref" "${target_external_ref}"
   ftctl_dr_runtime_json_string_field "source_firmware" "${source_firmware}"
   ftctl_dr_runtime_json_boolean_field "source_secure_boot" "${source_secure_boot}" || return $?
+  ftctl_dr_runtime_json_number_field "source_boot_hardware_version" "1"
+  printf ',"source_boot_hardware":%s' "$(ftctl_dr_runtime_boot_hardware "${profile_path:-}")"
   ftctl_dr_runtime_json_string_field "source_hardware_fingerprint" "${source_hardware_fingerprint}"
   ftctl_dr_runtime_json_string_field "source_hardware_fingerprint_version" "${source_hardware_fingerprint_version}"
   ftctl_dr_runtime_json_string_field "target_boot_type" "${target_boot_type}"
@@ -5324,6 +5513,27 @@ PY
   ftctl_dr_runtime_json_string_field "writer_state" "${writer_state}"
   ftctl_dr_runtime_json_boolean_field "target_written" "${target_written}" || return $?
   ftctl_dr_runtime_json_boolean_field "write_verified" "${write_verified}" || return $?
+  # Readback claims require explicit evidence from this reverse checkpoint.
+  local reverse_verification_method="" reverse_readback_verified="" reverse_readback_bytes=""
+  if [[ -s "${reverse_evidence_checkpoint_path}" ]]; then
+    reverse_verification_method="$(jq -r '.verificationMethod // .cycleMetrics.verificationMethod // empty' "${reverse_evidence_checkpoint_path}" 2>/dev/null || true)"
+    reverse_readback_verified="$(jq -r 'if .readbackVerified != null then .readbackVerified elif .cycleMetrics.readbackVerified != null then .cycleMetrics.readbackVerified else empty end' "${reverse_evidence_checkpoint_path}" 2>/dev/null || true)"
+    reverse_readback_bytes="$(jq -r '.readbackVerifiedBytes // .cycleMetrics.readbackVerifiedBytes // empty' "${reverse_evidence_checkpoint_path}" 2>/dev/null || true)"
+  fi
+  local provenance_baseline="" provenance_sequence="" provenance_ref=""
+  if command -v ftctl_dr_kvm_vmware_baseline_path >/dev/null 2>&1; then
+    provenance_baseline="$(ftctl_dr_kvm_vmware_baseline_path "${plan}")"
+    if [[ -s "${provenance_baseline}" ]]; then
+      provenance_sequence="$(jq -r '.createdFromRestorePoint.checkpointSequence // empty' "${provenance_baseline}" 2>/dev/null || true)"
+      provenance_ref="$(jq -r '.createdFromRestorePoint.checkpointRef // empty' "${provenance_baseline}" 2>/dev/null || true)"
+    fi
+  fi
+  ftctl_dr_runtime_json_number_field "reverse_origin_checkpoint_sequence" "${provenance_sequence}"
+  ftctl_dr_runtime_json_string_field "reverse_origin_checkpoint_ref" "${provenance_ref}"
+  ftctl_dr_runtime_json_string_field "reverse_verification_method" "${reverse_verification_method}"
+  ftctl_dr_runtime_json_boolean_field "reverse_readback_verified" "${reverse_readback_verified}" || return $?
+  ftctl_dr_runtime_json_number_field "reverse_readback_verified_bytes" "${reverse_readback_bytes}"
+
   ftctl_dr_runtime_json_string_field "reverse_guest_compatibility_state" "${reverse_guest_compatibility_state}"
   printf ',"reverse_evidence_missing_fields":['
   reverse_evidence_first="true"
@@ -5362,6 +5572,9 @@ PY
   ftctl_dr_runtime_json_number_field "transfer_cycle_sequence" "${transfer_cycle_sequence}"
   ftctl_dr_runtime_json_number_field "transfer_sample_sequence" "${transfer_sample_sequence}"
   ftctl_dr_runtime_json_string_field "transfer_phase" "${transfer_phase}"
+  ftctl_dr_runtime_json_string_field "transfer_plan_uuid" "${transfer_plan_uuid}"
+  ftctl_dr_runtime_json_string_field "transfer_run_uuid" "${transfer_run_uuid}"
+  ftctl_dr_runtime_json_string_field "transfer_direction" "${transfer_direction}"
   ftctl_dr_runtime_json_string_field "transfer_mode" "${transfer_mode}"
   ftctl_dr_runtime_json_number_field "transfer_bytes_total" "${transfer_bytes_total}"
   ftctl_dr_runtime_json_number_field "transfer_bytes_processed" "${transfer_bytes_processed}"
@@ -5400,6 +5613,9 @@ PY
   ftctl_dr_runtime_json_number_field "current_checkpoint_invalid_baseline_disk_count" "${current_checkpoint_invalid_baseline_disk_count}"
   ftctl_dr_runtime_json_string_field "current_checkpoint_ref" "${current_checkpoint_ref}"
   ftctl_dr_runtime_json_string_field "current_checkpoint_state" "${current_checkpoint_state}"
+  ftctl_dr_runtime_json_string_field "immutable_checkpoint_ref" "$(jq -r '.contract.checkpointRef // empty' "$(ftctl_dr_checkpoint_committed_path "${plan}")" 2>/dev/null || true)"
+  ftctl_dr_runtime_json_string_field "immutable_checkpoint_manifest_sha256" "$(jq -r '.manifestSha256 // empty' "$(ftctl_dr_checkpoint_committed_path "${plan}")" 2>/dev/null || true)"
+  ftctl_dr_runtime_json_string_field "checkpoint_publication_pending" "$(cat "$(ftctl_dr_checkpoint_pending_path "${plan}")" 2>/dev/null || true)"
   ftctl_dr_runtime_json_number_field "latest_completed_checkpoint_sequence" "${latest_completed_checkpoint_sequence}"
   ftctl_dr_runtime_json_number_field "latest_completed_cycle_sequence" "${latest_completed_checkpoint_sequence}"
   ftctl_dr_runtime_json_string_field "latest_completed_checkpoint_cycle_type" "${latest_completed_checkpoint_cycle_type}"
@@ -5860,6 +6076,9 @@ ftctl_dr_runtime_action() {
       return 2
     }
     [[ "${dry_run}" == "1" ]] || ftctl_dr_runtime_record_worker_role "${plan}" "${role}" || return $?
+    if [[ "${dry_run}" != "1" && ( "${action}" == "dr-sync-start" || "${action}" == "dr-sync-recover" ) && ( "${role}" == "source" || "${role}" == "coordinator" ) ]]; then
+      ftctl_dr_scheduler_restore_source_role_control "${plan}" "${run}" || return $?
+    fi
   fi
   if [[ "${action}" == "dr-test-prepare" ]]; then
     ftctl_dr_runtime_save_artifact_spec "${plan}" "${run}" "${artifact_spec_file}" || {
@@ -5899,6 +6118,10 @@ ftctl_dr_runtime_action() {
     fi
   fi
   ftctl_dr_runtime_write_state "${run_path}" "${plan}" "${run}" "${action}" "${state}" "${step}" "${progress}" "${external_ref}" ""
+  case "${action}" in
+    dr-sync-pause|dr-sync-resume)
+      ftctl_dr_runtime_inherit_resume_checkpoint "${plan}" "${run_path}" "${status_path}" || return $? ;;
+  esac
   if [[ "${authority_sequence_floor}" =~ ^[0-9]+$ ]]; then
     ftctl_dr_runtime_path_set "${run_path}" \
       "cloud_authority_sequence_floor=${authority_sequence_floor}" || return $?
@@ -6132,6 +6355,9 @@ ftctl_dr_runtime_action() {
           error_message="$(ftctl_dr_runtime_state_get_from_path "${run_path}" "guest_preflight_error_message")"
           [[ -n "${error_code}" ]] || error_code="$([[ "${rc}" == "47" ]] && printf DR_GUEST_PREP_RUNTIME_UNAVAILABLE || printf DR_GUEST_OS_UNRESOLVED)"
         fi
+        if [[ "${rc}" == "49" ]]; then
+          error_message="Guest preparation failed (exit $(ftctl_dr_runtime_state_get_from_path "${run_path}" guest_prep_exit_code)); diagnostic log: ${run_path}.guestprep.log"
+        fi
         local failed_step="test-session-restore-point-missing"
         [[ "${rc}" == "46" ]] && failed_step="test-materialization-failed"
         [[ "${rc}" -ge 47 ]] && failed_step="test-guest-preparation-failed"
@@ -6208,7 +6434,7 @@ ftctl_dr_runtime_action() {
       [[ -n "${test_lease_owner_run}" ]] || test_lease_owner_run="${run}"
       [[ -n "${test_sequence}" ]] && ftctl_dr_scheduler_checkpoint_lease_release_owned "${plan}" "${test_sequence}" "${test_lease_owner_run}"
       ftctl_dr_runtime_path_set "${run_path}" "checkpoint_lease_state=RELEASED" "checkpoint_lease_path=" || true
-      if [[ "${remote_source_transition}" != "1" ]] && command -v ftctl_dr_scheduler_resume_after_transition >/dev/null 2>&1; then
+      if [[ "${remote_source_transition}" != "1" ]] && ! ftctl_dr_runtime_cloud_managed_test_restore "${plan}" && command -v ftctl_dr_scheduler_resume_after_transition >/dev/null 2>&1; then
         ftctl_dr_scheduler_resume_after_transition "${plan}" "${run}" "test-cleanup" "${run_path}" "${status_path}" || rc=$?
       fi
       if [[ "${remote_source_transition}" != "1" ]] && command -v ftctl_dr_scheduler_transition_end >/dev/null 2>&1; then
@@ -8106,6 +8332,9 @@ ftctl_dr_runtime_capabilities() {
     "dr-target-materialized"
     "dr-target-export-start"
     "dr-target-export-stop"
+    "dr-checkpoint-publish"
+    "dr-checkpoint-ack"
+    "dr-checkpoint-restore"
     "dr-target-export-reconcile-v1"
     "dr-cutover-commit"
     "dr-cutover-commit-status"
@@ -8138,7 +8367,7 @@ PY
       first="0"
       printf '"%s"' "$(ftctl__json_escape "${command}")"
     done
-    printf '],"supported_features":["async-run","status-projection","status-scope-v2","target-materialized-notify","target-materialized-idempotent","target-materialization-manifest-v2","target-resource-ownership-generation-v1","hardware-contract-projection","control-protocol-v2","control-protocol-v3","control-protocol-v4","dr-site-agent-rbd-transport-v1","dr-target-disaster-promote-v1","dr-reverse-site-agent-rbd-transport-v1","dr-remote-source-failback-commit-v1","dr-scheduler-singleton-v1","dr-scheduler-self-owner-repair-v1","dr-scheduler-systemd-unit-v1","dr-sync-recover-v1","dr-local-reconcile-fence-v1","dr-checkpoint-producer-v1","dr-nbd-deterministic-drain-v1","dr-nbd-cleanup-recovery-v1","dr-plan-authority-snapshot-v1","dr-failover-authority-snapshot-v1","dr-completed-cycle-evidence-v2","dr-failover-abort-v1","dr-failover-cutover-reverse-baseline-v1","dr-transition-preflight-v1","dr-transition-preflight-v2","dr-reverse-preflight-v2","dr-reverse-evidence-publication-v1","dr-reverse-rbd-snapshot-readonly-v1","dr-terminal-causality-v1","dr-requested-cycle-terminal-v1","dr-failback-resume-terminal-v1","dr-worker-journal-v1","dr-live-transfer-progress-v1","dr-runtime-reconciliation-v1","dr-release-tombstone-v1","plan-scoped-locks","cycle-scoped-lock","quiesce-before-test-failover","checkpoint-lease","file-checkpoint-invariance-v1","dr-file-planned-failover-qmp-quiesce-v1","dr-file-planned-failover-runtime-quiesce-v2","guest-preparation-v1","guest-preparation-v2","test-domain-lifecycle-v1","test-artifact-lifecycle-v2","cloud-managed-test-vm-v1","cutover-ready-v1","cutover-manifest-v2","cutover-preflight-v1","cloud-cutover-commit-v1","cloud-cutover-commit-envelope-v2","cloud-cutover-commit-journal-v2","cloud-cutover-commit-status-v1","cloud-failback-lifecycle-v1","dr-failback-commit-journal-v1","dr-failback-commit-journal-v2","dr-failback-commit-envelope-v1","dr-failback-commit-journal-v3","dr-failback-late-ack-reconcile-v1","dr-failback-rollback-fence-v1"]}\n'
+    printf '],"supported_features":["async-run","status-projection","status-scope-v2","target-materialized-notify","target-materialized-idempotent","target-materialization-manifest-v2","target-resource-ownership-generation-v1","hardware-contract-projection","control-protocol-v2","control-protocol-v3","control-protocol-v4","dr-site-agent-rbd-transport-v1","dr-target-disaster-promote-v1","dr-source-independent-test-v1","dr-cloud-test-recovery-v1","dr-reverse-site-agent-rbd-transport-v1","dr-remote-source-failback-commit-v1","dr-scheduler-singleton-v1","dr-scheduler-self-owner-repair-v1","dr-scheduler-systemd-unit-v1","dr-sync-recover-v1","dr-local-reconcile-fence-v1","dr-checkpoint-producer-v1","dr-nbd-deterministic-drain-v1","dr-nbd-cleanup-recovery-v1","dr-plan-authority-snapshot-v1","dr-failover-authority-snapshot-v1","dr-completed-cycle-evidence-v2","dr-failover-abort-v1","dr-failover-cutover-reverse-baseline-v1","dr-transition-preflight-v1","dr-transition-preflight-v2","dr-reverse-preflight-v2","dr-reverse-evidence-publication-v1","dr-reverse-rbd-snapshot-readonly-v1","dr-terminal-causality-v1","dr-requested-cycle-terminal-v1","dr-failback-resume-terminal-v1","dr-worker-journal-v1","dr-live-transfer-progress-v1","dr-runtime-reconciliation-v1","dr-release-tombstone-v1","plan-scoped-locks","cycle-scoped-lock","quiesce-before-test-failover","checkpoint-lease","file-checkpoint-invariance-v1","dr-file-planned-failover-qmp-quiesce-v1","dr-file-planned-failover-runtime-quiesce-v2","guest-preparation-v1","guest-preparation-v2","test-domain-lifecycle-v1","test-artifact-lifecycle-v2","cloud-managed-test-vm-v1","cutover-ready-v1","cutover-manifest-v2","cutover-preflight-v1","cloud-cutover-commit-v1","cloud-cutover-commit-envelope-v2","cloud-cutover-commit-journal-v2","cloud-cutover-commit-status-v1","cloud-failback-lifecycle-v1","dr-failback-commit-journal-v1","dr-failback-commit-journal-v2","dr-failback-commit-envelope-v1","dr-failback-commit-journal-v3","dr-failback-late-ack-reconcile-v1","dr-failback-rollback-fence-v1"]}\n'
     return 0
   fi
 
@@ -8529,3 +8758,6 @@ ftctl_dr_runtime_cancel() {
     printf 'dr-cancel: plan=%s run=%s canceled\n' "${plan}" "${run}"
   fi
 }
+
+# Durable checkpoint publication shares the DR lifecycle libraries.
+source "${BASH_SOURCE[0]%/*}/dr_checkpoint.sh"

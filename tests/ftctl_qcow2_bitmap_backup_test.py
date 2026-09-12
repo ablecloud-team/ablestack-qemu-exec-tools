@@ -139,6 +139,10 @@ class Qcow2BitmapBackupTest(unittest.TestCase):
         self.assertEqual(1, progress["diskIndex"])
         self.assertEqual(2, progress["diskCount"])
         self.assertEqual("COMPLETED", progress["state"])
+        self.assertTrue(progress["transferCompletionVerified"])
+        self.assertFalse(progress["readbackVerified"])
+        self.assertEqual(0, progress["verifiedBytes"])
+        self.assertEqual(0, progress["readbackVerifiedBytes"])
 
     def test_non_final_full_seed_disk_does_not_publish_cycle_completion(self):
         with tempfile.TemporaryDirectory() as temp:

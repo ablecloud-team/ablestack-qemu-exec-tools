@@ -114,9 +114,11 @@ ftctl_kvm_vmware_start_writer() {
     thumbprint="$(ftctl_vmware_mover_resolve_thumbprint "${endpoint}" "${tls_verify}" "${thumbprint}" || true)"
     [[ -n "${thumbprint}" ]] || return 77
   fi
+  # Writable snapshot disks must retain the parent chain. Single-link writes
+  # can zero untouched sectors in a newly allocated grain (issue #1011).
   local args=(--exit-with-parent --foreground --unix "${socket_path}" vddk
     "server=${endpoint}" "user=${username}" "password=+${password_file}"
-    "file=${vmdk}" "single-link=true" "vm=moref=${vm_ref}")
+    "file=${vmdk}" "single-link=false" "vm=moref=${vm_ref}")
   [[ -n "${transports}" ]] && args+=("transports=${transports}")
   [[ -n "${thumbprint}" && "${tls_verify}" != "true" ]] && args+=("thumbprint=${thumbprint}")
   [[ -n "${libdir}" && -d "${libdir}" ]] && args+=("libdir=${libdir}")
@@ -134,6 +136,7 @@ ftctl_kvm_vmware_patch_disk() {
   local row="${1-}" cycle_type="${2-}" previous_snapshot="${3-}" new_snapshot="${4-}"
   local endpoint="${5-}" username="${6-}" password_file="${7-}" tls_verify="${8-}" thumbprint="${9-}" libdir="${10-}"
   local metrics_path="${11-}" extent_path="${12-}" progress_path="${13-}" progress_base_bytes="${14-0}"
+  local progress_total_bytes="${15-0}" progress_disk_count="${16-1}" progress_disk_ordinal="${17-0}"
   local work_dir source_dev="" target_dev="" pid="" rc=0 cleanup_rc=0
   local pool image vmdk vm_ref virtual_bytes source_uri writer_log lock_file
   pool="$(jq -r '.sourcePool' <<< "${row}")"
@@ -146,7 +149,7 @@ ftctl_kvm_vmware_patch_disk() {
   writer_log="${work_dir}/vddk-writer.log"
   lock_file="${FTCTL_DR_VMWARE_NBD_LOCK:-/run/ablestack-vm-ftctl/dr-runtime/nbd.lock}"
 
-  ftctl_kvm_vmware_build_extent_file "${cycle_type}" "${pool}" "${image}" "${previous_snapshot}" "${new_snapshot}" "${virtual_bytes}" "${extent_path}" || {
+  [[ "${18-false}" == "true" && -s "${extent_path}" ]] || ftctl_kvm_vmware_build_extent_file "${cycle_type}" "${pool}" "${image}" "${previous_snapshot}" "${new_snapshot}" "${virtual_bytes}" "${extent_path}" || {
     rm -rf "${work_dir}"
     return 83
   }
@@ -188,7 +191,14 @@ ftctl_kvm_vmware_patch_disk() {
   local patch_command=(python3 "${FTCTL_DR_KVM_VMWARE_LIB_DIR}/dr_extent_patch.py" --source "${source_dev}" --target "${target_dev}"
     --areas-json "${extent_path}" --expected-source-size "${virtual_bytes}" --expected-target-size "${virtual_bytes}" --verify
     --progress-json "${progress_path}" --progress-base-bytes "${progress_base_bytes}"
-    --progress-disk-index "$(jq -r '.diskIndex // 0' <<< "${row}")")
+    --progress-disk-index "${progress_disk_ordinal}" --progress-disk-count "${progress_disk_count}"
+    --progress-total-bytes "${progress_total_bytes}" --progress-disk-label "disk-$(jq -r '.diskIndex // 0' <<< "${row}")"
+    --progress-plan-uuid "${FTCTL_DR_PLAN_UUID}" --progress-run-uuid "${FTCTL_DR_PROGRESS_RUN_UUID:-${FTCTL_DR_RUN_UUID}}"
+    --progress-cycle-sequence "${FTCTL_DR_CHECKPOINT_SEQUENCE:-0}"
+    --progress-direction KVM_TO_VMWARE --progress-mode "${cycle_type}")
+  if (( progress_disk_ordinal + 1 == progress_disk_count )); then
+    patch_command+=(--progress-final-disk)
+  fi
   if [[ "${FTCTL_DR_BANDWIDTH_LIMIT_MBPS:-0}" =~ ^[1-9][0-9]*$ ]]; then
     patch_command+=(--bandwidth-limit-mbps "${FTCTL_DR_BANDWIDTH_LIMIT_MBPS}")
   fi
@@ -237,14 +247,15 @@ ftctl_kvm_vmware_patch_qcow2_disk() {
     --target-node "ftctl-dr-vddk-$(printf '%s' "${FTCTL_DR_PLAN_UUID}:${source_path}" | cksum | awk '{print $1}')"
     --virtual-size "${virtual_bytes}" --timeout "${FTCTL_DR_FULL_SEED_TIMEOUT_SEC:-3600}"
     --bandwidth-limit-mbps "${FTCTL_DR_BANDWIDTH_LIMIT_MBPS:-0}" --progress-path "${progress_path}"
-    --plan-uuid "${FTCTL_DR_PLAN_UUID}" --run-uuid "${FTCTL_DR_RUN_UUID}"
+    --plan-uuid "${FTCTL_DR_PLAN_UUID}" --run-uuid "${FTCTL_DR_PROGRESS_RUN_UUID:-${FTCTL_DR_RUN_UUID}}"
+    --progress-direction KVM_TO_VMWARE --progress-mode "${cycle_type}"
     --cycle-sequence "${FTCTL_DR_CHECKPOINT_SEQUENCE:-0}" --disk-index "$(jq -r '.diskIndex // 0' <<< "${row}")"
     --aggregate-completed-bytes "${progress_base_bytes}")
   [[ "${source_mode}" != "live" || "${backup_mode}" != "incremental" ]] || args+=(--preserve-bitmap)
   output="$("${args[@]}")" || rc=$?
   ftctl_vmware_mover_cleanup_nbdkit "${pid}" "${work_dir}"
   [[ "${rc}" == "0" ]] || return "${rc}"
-  jq '. + {writeVerified:true,verifiedBytes:(.targetWrittenBytes // .bytesProcessed // 0),
+  jq '. + {writeVerified:true,transferCompletionVerified:true,verificationMethod:"QEMU_BACKUP_COMPLETION",readbackVerified:false,readbackVerifiedBytes:0,verifiedBytes:0,
       transferPayloadBytes:(.targetWrittenBytes // .bytesProcessed // 0),
       changedExtentCount:(if (.changedBytes // 0) > 0 then 1 else 0 end)}' \
     <<< "${output}" > "${metrics_path}" || return 88
@@ -264,11 +275,25 @@ def load(path):
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 disk_map, baseline, metrics = load(map_path), load(baseline_path), load(metrics_path)
+# writeVerified remains a legacy durability gate, never readback evidence.
+# A QEMU completion and a byte comparison are different contracts.
+
+if len(metrics) != len(disk_map.get("disks") or []) or not metrics or any(
+        item.get("transferCompletionVerified") is not True
+        or item.get("verificationMethod") != "QEMU_BACKUP_COMPLETION"
+        or item.get("writeVerified") is not True
+        for item in metrics):
+    raise SystemExit("DR_REVERSE_DURABILITY_VERIFY_FAILED")
+if cycle_type == "FULL_REVERSE_SEED" and sum(int(item.get("targetWrittenBytes") or 0) for item in metrics) != sum(
+        int(item.get("virtualBytes") or 0) for item in disk_map.get("disks") or []):
+    raise SystemExit("DR_REVERSE_FULL_TRANSFER_INCOMPLETE")
 generation = max(int(baseline.get("generation") or 0) + 1, int(sequence or 0))
 for row in baseline.get("disks") or []:
     row["generation"] = generation
     row["state"] = "LOCAL_DURABLE"
 baseline.update({"generation": generation, "state": "LOCAL_DURABLE",
+                 "origin": "VERIFIED_REVERSE", "commonBaselineVerified": True,
+                 "commonBaselineVerification": "QEMU_BACKUP_COMPLETION",
                  "committedAtEpochMs": int(time.time() * 1000)})
 totals = {key: sum(int(item.get(key) or 0) for item in metrics) for key in (
     "changedExtentCount", "changedBytes", "sourceReadBytes", "targetWrittenBytes",
@@ -284,6 +309,8 @@ payload = {
     "baselineGeneration": generation, "trackerType": "QCOW2_BITMAP",
     "trackerState": "LOCAL_DURABLE", "writerState": "DURABLE",
     "targetWritten": True, "writeVerified": True, "cycleCommitState": "LOCAL_DURABLE",
+    "transferCompletionVerified": True, "verificationMethod": "QEMU_BACKUP_COMPLETION",
+    "readbackVerified": False, "readbackVerifiedBytes": 0,
     "disks": metrics,
 }
 payload.update(totals)
@@ -363,6 +390,14 @@ disk_map = load(map_path, {})
 old = load(old_path, {})
 rows = load(rows_path, [])
 metrics = load(metrics_path, [])
+if len(metrics) != len(disk_map.get("disks") or []) or not metrics or any(
+        item.get("writeVerified") is not True
+        or int(item.get("verifiedBytes") or 0) != int(item.get("targetWrittenBytes") or 0)
+        for item in metrics):
+    raise SystemExit("DR_REVERSE_DURABILITY_VERIFY_FAILED")
+if cycle_type == "FULL_REVERSE_SEED" and sum(int(item.get("verifiedBytes") or 0) for item in metrics) != sum(
+        int(item.get("virtualBytes") or 0) for item in disk_map.get("disks") or []):
+    raise SystemExit("DR_REVERSE_FULL_READBACK_INCOMPLETE")
 sequence_number = int(sequence or 0)
 generation = max(int(old.get("generation") or 0) + 1, sequence_number)
 now = int(time.time() * 1000)
@@ -382,6 +417,9 @@ baseline = {
     "schemaVersion": 1, "planUuid": plan, "direction": "KVM_TO_VMWARE",
     "providerPair": "ABLESTACK_TO_VMWARE", "generation": generation,
     "state": "LOCAL_DURABLE", "committedAtEpochMs": now, "disks": baseline_disks,
+    "commonBaselineVerified": True, "commonBaselineVerification": "REVERSE_READBACK",
+    "createdFromCheckpoint": old.get("createdFromCheckpoint"),
+    "createdFromRestorePoint": old.get("createdFromRestorePoint"),
 }
 totals = {key: sum(int(item.get(key) or 0) for item in metrics) for key in (
     "changedExtentCount", "changedBytes", "sourceReadBytes", "targetWrittenBytes",
@@ -398,6 +436,8 @@ payload = {
     "throughputBps": int(totals["targetWrittenBytes"] * 1000 / duration_ms) if duration_ms > 0 else 0,
     "baselineGeneration": generation, "trackerState": "LOCAL_DURABLE",
     "writerState": "DURABLE", "targetWritten": True, "writeVerified": True,
+    "transferCompletionVerified": True, "verificationMethod": "REVERSE_READBACK",
+    "readbackVerified": True, "readbackVerifiedBytes": totals["verifiedBytes"],
     "cycleCommitState": "LOCAL_DURABLE", "disks": metrics,
 }
 payload.update(totals)
@@ -418,7 +458,12 @@ main() {
   local credentials_file="${FTCTL_DR_CREDENTIALS_FILE:-}" cycle_type="${FTCTL_DR_CYCLE_TYPE:-FULL_REVERSE_SEED}"
   local endpoint username tls_verify thumbprint libdir govc_bin vm_ref power_state work_dir password_file rows_path disk_metrics_path
   local index row pool image previous_snapshot new_snapshot metric_path extent_path rc=0 baseline_file_state progress_base_bytes
+  local progress_total_bytes=0 progress_disk_count=0 progress_disk_ordinal=0 extent_bytes
   [[ -f "${map_path}" && -n "${baseline_path}" && -n "${metrics_path}" ]] || ftctl_kvm_vmware_die 65 "DR_REVERSE_MAP_MISSING"
+  if [[ "${cycle_type}" != "FULL_REVERSE_SEED" ]] \
+      && ! jq -e '.commonBaselineVerified == true' "${baseline_path}" >/dev/null 2>&1; then
+    ftctl_kvm_vmware_die 83 "DR_REVERSE_COMMON_BASELINE_UNVERIFIED: full reverse seed required"
+  fi
   for command in jq nbdkit blockdev flock python3; do
     ftctl_vmware_mover_require "${command}" 65
   done
@@ -494,7 +539,23 @@ main() {
     jq --argjson row "${row}" '. + [$row]' "${rows_path}" > "${rows_path}.tmp" && mv -f "${rows_path}.tmp" "${rows_path}"
   done < <(jq -c '.disks[]' "${map_path}")
 
+  # All snapshots are immutable. Resolve every extent list before publishing a
+  # cycle denominator so a finished first disk cannot look like the whole copy.
+  progress_disk_count="$(jq 'length' "${rows_path}")"
   while IFS= read -r row; do
+    index="$(jq -r '.diskIndex' <<< "${row}")"
+    extent_path="${work_dir}/disk-${index}-extents.json"
+    ftctl_kvm_vmware_build_extent_file "${cycle_type}" \
+      "$(jq -r '.sourcePool' <<< "${row}")" "$(jq -r '.sourceImage' <<< "${row}")" \
+      "$(jq -r '.previousSnapshot' <<< "${row}")" "$(jq -r '.newSnapshot' <<< "${row}")" \
+      "$(jq -r '.virtualBytes' <<< "${row}")" "${extent_path}" \
+      || { rc=83; break; }
+    extent_bytes="$(jq '[.areas[].length] | add // 0' "${extent_path}")"
+    progress_total_bytes=$((progress_total_bytes + extent_bytes))
+  done < <(jq -c '.[]' "${rows_path}")
+
+  while IFS= read -r row; do
+    [[ "${rc}" == "0" ]] || break
     index="$(jq -r '.diskIndex' <<< "${row}")"
     previous_snapshot="$(jq -r '.previousSnapshot' <<< "${row}")"
     new_snapshot="$(jq -r '.newSnapshot' <<< "${row}")"
@@ -508,10 +569,12 @@ main() {
     progress_base_bytes="$(jq '[.[].transferPayloadBytes // 0] | add // 0' "${disk_metrics_path}" 2>/dev/null || printf '0')"
     ftctl_kvm_vmware_patch_disk "${row}" "${cycle_type}" "${previous_snapshot}" "${new_snapshot}" \
       "${endpoint}" "${username}" "${password_file}" "${tls_verify}" "${thumbprint}" "${libdir}" "${metric_path}" "${extent_path}" \
-      "${FTCTL_DR_TRANSFER_PROGRESS_PATH:-}" "${progress_base_bytes}" || rc=$?
+      "${FTCTL_DR_TRANSFER_PROGRESS_PATH:-}" "${progress_base_bytes}" \
+      "${progress_total_bytes}" "${progress_disk_count}" "${progress_disk_ordinal}" true || rc=$?
     if [[ "${rc}" != "0" ]]; then
       break
     fi
+    progress_disk_ordinal=$((progress_disk_ordinal + 1))
     jq --argjson index "${index}" --arg old "${previous_snapshot}" --arg new "${new_snapshot}" --arg mode "${cycle_type}" \
       '. + {diskIndex:$index,previousSnapshot:$old,newSnapshot:$new,effectiveMode:$mode,writerState:"DURABLE",trackerState:"PENDING_COMMIT"}' \
       "${metric_path}" > "${metric_path}.tmp" && mv -f "${metric_path}.tmp" "${metric_path}"

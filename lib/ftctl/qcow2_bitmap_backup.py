@@ -163,14 +163,20 @@ def write_progress(path, args, state, processed, total, changed, started, sample
         "sampleSequence": sample_sequence,
         "state": published_state,
         "phase": "full-reseed-transfer" if args.mode == "full" else "incremental-transfer",
-        "mode": "FULL_RESEED" if args.mode == "full" else "CBT_INCREMENTAL",
+        "mode": getattr(args, "progress_mode", "") or ("FULL_RESEED" if args.mode == "full" else "CBT_INCREMENTAL"),
+        "direction": getattr(args, "progress_direction", ""),
         "bytesTotal": aggregate_total,
         "bytesProcessed": aggregate_processed,
         "changedBytes": changed,
         "transferPayloadBytes": aggregate_processed,
         "sourceReadBytes": aggregate_processed,
         "targetWrittenBytes": aggregate_processed,
-        "verifiedBytes": aggregate_processed if published_state == "COMPLETED" else 0,
+        # QMP completion does not compare destination bytes with the source.
+        "verifiedBytes": 0,
+        "readbackVerified": False,
+        "readbackVerifiedBytes": 0,
+        "verificationMethod": "QEMU_BACKUP_COMPLETION",
+        "transferCompletionVerified": published_state == "COMPLETED",
         "percent": percent,
         "throughputBps": throughput,
         "etaSeconds": eta,
@@ -312,6 +318,8 @@ def parse_args(argv=None):
     parser.add_argument("--cycle-sequence", type=int, default=0)
     parser.add_argument("--disk-index", type=int, default=0)
     parser.add_argument("--disk-count", type=int, default=1)
+    parser.add_argument("--progress-mode", default="")
+    parser.add_argument("--progress-direction", default="")
     parser.add_argument("--aggregate-total-bytes", type=int, default=0)
     parser.add_argument("--aggregate-completed-bytes", type=int, default=0)
     parser.add_argument("--uri", default="qemu:///system")

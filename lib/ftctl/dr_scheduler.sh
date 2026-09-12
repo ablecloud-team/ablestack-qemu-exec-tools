@@ -397,7 +397,7 @@ ftctl_dr_scheduler_recover() {
 
 ftctl_dr_scheduler_reconcile_plan() {
   local plan="${1-}" profile_file status_path state active_side control_state transition_state run="" state_path
-  local control_command scheduler_desired_state recovery_state recovery_trigger
+  local control_command scheduler_desired_state recovery_state recovery_trigger transient_error=false next_retry now
   profile_file="$(ftctl_dr_runtime_profile_path "${plan}")"
   status_path="$(ftctl_dr_runtime_status_path "${plan}")"
   [[ -f "${profile_file}" && -f "${status_path}" ]] || return 0
@@ -430,7 +430,12 @@ ftctl_dr_scheduler_reconcile_plan() {
   control_state="$(ftctl_dr_runtime_state_get_from_path "${status_path}" "control_state")"
   scheduler_desired_state="$(ftctl_dr_runtime_state_get_from_path "${status_path}" "scheduler_desired_state")"
   transition_state="$(ftctl_dr_runtime_state_get_from_path "${status_path}" "transition_state")"
-  [[ "${state}" == "READY" || "${state}" == "SYNCING" ||
+  if [[ "${state}" == "ERROR" && "$(ftctl_dr_runtime_state_get_from_path "${status_path}" "retryable")" == "true" ]]; then
+    case "$(ftctl_dr_runtime_state_get_from_path "${status_path}" "error_code")" in
+      DR_QCOW2_SOURCE_RUNTIME_UNAVAILABLE|DR_QCOW2_OFFLINE_SOURCE_BUSY) transient_error=true ;;
+    esac
+  fi
+  [[ "${state}" == "READY" || "${state}" == "SYNCING" || "${transient_error}" == "true" ||
     "$(ftctl_dr_runtime_state_get_from_path "${status_path}" "nbd_teardown_state")" == "QUARANTINED" ]] || return 0
   [[ "${active_side^^}" != "TARGET" ]] || return 0
   [[ "${control_state}" == "RUNNING" ]] || return 0
@@ -449,6 +454,13 @@ ftctl_dr_scheduler_reconcile_plan() {
   [[ -n "${run}" ]] || return 0
   state_path="$(ftctl_dr_runtime_run_path "${plan}" "${run}")"
   [[ -f "${state_path}" ]] || state_path="${status_path}"
+  if [[ "${transient_error}" == "true" ]]; then
+    now="$(date +%s)"
+    next_retry="$(ftctl_dr_runtime_state_get_from_path "${status_path}" "local_recovery_next_retry_epoch")"
+    [[ "${next_retry}" =~ ^[0-9]+$ ]] || next_retry=0
+    (( now >= next_retry )) || return 0
+    ftctl_dr_runtime_path_set "${status_path}" "local_recovery_next_retry_epoch=$((now + 60))" || return $?
+  fi
   ftctl_dr_scheduler_recover "${plan}" "${run}" "${profile_file}" "${state_path}" "${status_path}" "LOCAL_RECONCILE"
 }
 
@@ -705,7 +717,9 @@ ftctl_dr_scheduler_seed_relocated_baseline() {
   checkpoint_cycle_token="$(ftctl_dr_runtime_profile_value "${profile_file}" "request.checkpointCycleToken" 2>/dev/null || true)"
   checkpoint_effective_mode="$(ftctl_dr_runtime_profile_value "${profile_file}" "request.checkpointEffectiveMode" 2>/dev/null || true)"
   checkpoint_source_at="$(ftctl_dr_runtime_profile_value "${profile_file}" "request.checkpointSourceCreatedAt" 2>/dev/null || true)"
-  checkpoint_incremental_verified="$(ftctl_dr_runtime_profile_value "${profile_file}" "request.checkpointIncrementalVerified" 2>/dev/null || true)"
+  # The controller reference preserves durability, but carries no local NBD drain
+  # evidence. Do not claim locally verified incremental I/O on the new worker.
+  checkpoint_incremental_verified=""
   [[ -n "${checkpoint_cycle_type}" ]] || checkpoint_cycle_type="incremental"
   [[ -n "${checkpoint_cycle_token}" ]] || checkpoint_cycle_token="${plan}:${baseline}"
 
@@ -928,6 +942,55 @@ ftctl_dr_scheduler_control_set() {
     return 2
   fi
   ftctl_dr_scheduler_lock_release "${plan}" "plan" 204
+  printf '%s\n' "${generation}"
+}
+
+# Process startup is not an operator Resume. Initialize only under the same
+# Plan lock used by control_set, so a concurrent PAUSE/STOP cannot be lost.
+# A new source assignment supersedes only a host-local target-role suppression.
+# Operator pause/stop and lifecycle authority are not changed by relocation.
+ftctl_dr_scheduler_restore_source_role_control() {
+  local plan="${1-}" run="${2-}" path command reason owner generation rc=0
+  path="$(ftctl_dr_scheduler_control_path "${plan}")"
+  ftctl_dr_scheduler_lock_acquire "${plan}" "plan" 204 "${FTCTL_DR_TRANSITION_LOCK_TIMEOUT_SEC}" "source-role:${run}" || return $?
+  command="$(ftctl_state_read_kv "${path}" command 2>/dev/null || true)"
+  reason="$(ftctl_state_read_kv "${path}" reason 2>/dev/null || true)"
+  owner="$(ftctl_state_read_kv "${path}" owner_run 2>/dev/null || true)"
+  generation="$(ftctl_state_read_kv "${path}" generation 2>/dev/null || true)"
+  if [[ "${command}" == stop && "${reason}" == remote-source-target-suppressed && -z "${owner}" ]]; then
+    if [[ "${generation}" =~ ^[1-9][0-9]*$ && -n "${run}" ]]; then
+      ftctl_state_write_kv_all "${path}" \
+        "version=${FTCTL_DR_CONTROL_PROTOCOL_VERSION}" "generation=$((generation + 1))" \
+        "command=run" "reason=source-role-reassigned" "owner_run=${run}" \
+        "resume_after_cleanup=false" "requested_at=$(ftctl_now_iso8601)" \
+        "updated_at=$(ftctl_now_iso8601)" || rc=$?
+    else
+      rc=2
+    fi
+  fi
+  ftctl_dr_scheduler_lock_release "${plan}" "plan" 204
+  return "${rc}"
+}
+
+ftctl_dr_scheduler_initialize_control() {
+  local plan="${1-}" run="${2-}" path command generation rc=0
+  path="$(ftctl_dr_scheduler_control_path "${plan}")"
+  ftctl_ensure_dir "$(dirname "${path}")" "0755"
+  ftctl_dr_scheduler_lock_acquire "${plan}" "plan" 204 "${FTCTL_DR_TRANSITION_LOCK_TIMEOUT_SEC}" "initialize:${run}" || return $?
+  command="$(ftctl_state_read_kv "${path}" command 2>/dev/null || true)"
+  generation="$(ftctl_state_read_kv "${path}" generation 2>/dev/null || true)"
+  if [[ ! -e "${path}" ]]; then
+    generation=1
+    ftctl_state_write_kv_all "${path}" \
+      "version=${FTCTL_DR_CONTROL_PROTOCOL_VERSION}" "generation=1" \
+      "command=run" "reason=scheduler-initialize" "owner_run=${run}" \
+      "resume_after_cleanup=false" "requested_at=$(ftctl_now_iso8601)" \
+      "updated_at=$(ftctl_now_iso8601)" || rc=$?
+  elif [[ ! "${generation}" =~ ^[1-9][0-9]*$ ]] || [[ "${command}" != run && "${command}" != pause && "${command}" != stop ]]; then
+    rc=2
+  fi
+  ftctl_dr_scheduler_lock_release "${plan}" "plan" 204
+  (( rc == 0 )) || return "${rc}"
   printf '%s\n' "${generation}"
 }
 
@@ -1688,8 +1751,18 @@ if metrics:
     ):
         if key in metrics:
             record[key] = metrics[key]
+if os.path.exists(restore_path):
+    with open(restore_path, encoding="utf-8") as previous:
+        for line in previous:
+            existing = json.loads(line)
+            if existing.get("checkpointRef") == record["checkpointRef"]:
+                if existing.get("checkpointSequence") != record["checkpointSequence"] or existing.get("producerRunUuid") != record["producerRunUuid"]:
+                    raise SystemExit("DR_CHECKPOINT_IDENTITY_MISMATCH")
+                raise SystemExit(0)
 with open(restore_path, "a", encoding="utf-8") as fh:
     fh.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+    fh.flush()
+    os.fsync(fh.fileno())
 PY
 }
 
@@ -1918,23 +1991,26 @@ ftctl_dr_scheduler_worker() {
   scheduler_started_at="$(ftctl_now_iso8601)"
 
   printf '%s\n' "${worker_process_pid}" > "${pid_path}"
-  control_generation="$(ftctl_dr_scheduler_control_generation "${plan}")"
-  if [[ "$(ftctl_dr_scheduler_control_command "${plan}")" != "run" || ! "${control_generation}" =~ ^[1-9][0-9]*$ ]]; then
-    control_generation="$(ftctl_dr_scheduler_control_set "${plan}" "run" "scheduler-start" "${run}")"
-  fi
-  ftctl_dr_scheduler_control_ack "${plan}" "${control_generation}" "RUNNING" "IDLE" "${run}" \
+  control_generation="$(ftctl_dr_scheduler_initialize_control "${plan}" "${run}")" || return $?
+  local startup_state=RUNNING startup_activity=IDLE
+  command="$(ftctl_dr_scheduler_control_command "${plan}")"
+  case "${command}" in
+    pause) startup_state=PAUSED; startup_activity=PAUSED ;;
+    stop) startup_state=STOPPED; startup_activity=STOPPED ;;
+  esac
+  ftctl_dr_scheduler_control_ack "${plan}" "${control_generation}" "${startup_state}" "IDLE" "${run}" \
     "${session}" "${lease_epoch}" "${worker_process_pid}" "${start_ticks}"
   authority_sequence="$(ftctl_dr_scheduler_next_authority_sequence "${plan}")"
   now="$(ftctl_now_iso8601)"
   ftctl_dr_scheduler_update_state "${state_path}" "${status_path}" \
-    "scheduler_state=RUNNING" \
+    "scheduler_state=${startup_state}" \
     "scheduler_health=HEALTHY" \
-    "replication_activity=IDLE" \
+    "replication_activity=${startup_activity}" \
     "protection_state=$([[ "${sequence}" -gt 0 ]] && printf READY || printf SYNCING)" \
     "control_protocol_version=${FTCTL_DR_CONTROL_PROTOCOL_VERSION}" \
     "control_generation=${control_generation}" \
     "control_ack_generation=${control_generation}" \
-    "control_state=RUNNING" \
+    "control_state=${startup_state}" \
     "cycle_state=IDLE" \
     "worker_pid=${worker_process_pid}" \
     "scheduler_session_uuid=${session}" \
@@ -1955,11 +2031,11 @@ ftctl_dr_scheduler_worker() {
     "plan=${plan} run=${run} driver=${driver} interval=${interval} max_cycles=${max_cycles}"
 
   cycle_request_state="$(ftctl_state_read_kv "${sequence_path}" "requested_cycle_state" 2>/dev/null || true)"
-  if [[ "${cycle_request_state}" != "PENDING" ]]; then
+  if [[ "${command}" == "run" && "${cycle_request_state}" != "PENDING" ]]; then
     initial_jitter="$(ftctl_dr_scheduler_initial_jitter "${plan}" "${profile_file}" "${interval}")"
     if [[ "${initial_jitter}" =~ ^[1-9][0-9]*$ ]]; then
       ftctl_dr_scheduler_update_state "${state_path}" "${status_path}" \
-        "scheduler_state=RUNNING" \
+        "scheduler_state=${startup_state}" \
         "scheduler_health=HEALTHY" \
         "replication_activity=WAITING_SCHEDULE" \
         "initial_jitter_seconds=${initial_jitter}" \
@@ -2109,6 +2185,55 @@ ftctl_dr_scheduler_worker() {
     else
       cycle_type="$(ftctl_dr_scheduler_cycle_type "${next_sequence}" "${source_provider}" "${state_path}" "${target_provider}" "${plan}")"
     fi
+    local checkpoint_pending_path
+    checkpoint_pending_path="$(ftctl_dr_checkpoint_pending_path "${plan}")"
+    if ftctl_dr_checkpoint_enabled "${profile_file}" && [[ -s "${checkpoint_pending_path}" ]]; then
+      local pending_export_generation current_export_generation
+      pending_export_generation="$(jq -r '.exportGeneration // 0' "${checkpoint_pending_path}")"
+      current_export_generation="$(jq -r '.transport.exports[0].exportGeneration // 0' "${profile_file}")"
+      if [[ "${pending_export_generation}" != "${current_export_generation}" ]]; then
+        # Authority changed while ACK was missing. Never relabel current backing
+        # as that old candidate; preserve evidence and restart from a full seed.
+        local abandoned_checkpoint_sequence
+        abandoned_checkpoint_sequence="$(jq -r '.request.checkpointSequence' "${checkpoint_pending_path}")"
+        if [[ "${abandoned_checkpoint_sequence}" =~ ^[0-9]+$ ]] && (( next_sequence <= abandoned_checkpoint_sequence )); then
+          next_sequence=$((abandoned_checkpoint_sequence + 1))
+        fi
+        mv "${checkpoint_pending_path}" "${checkpoint_pending_path}.abandoned-$(date +%s%N)"
+        cycle_type="full-reseed"
+        pending_reseed_sequence="${next_sequence}"
+        pending_reseed_reason="TARGET_EXPORT_GENERATION_CHANGED"
+      fi
+    fi
+    if ftctl_dr_checkpoint_enabled "${profile_file}" && [[ -s "${checkpoint_pending_path}" ]]; then
+      next_sequence="$(jq -r '.request.checkpointSequence' "${checkpoint_pending_path}")"
+      cycle_run="$(jq -r '.request.producerRunUuid' "${checkpoint_pending_path}")"
+      local pending_cycle_context
+      if ! pending_cycle_context="$(ftctl_dr_checkpoint_resume_context "${checkpoint_pending_path}" \
+        "${cycle_request_state}" "${cycle_request_mode}" "${cycle_request_owner}" \
+        "$(ftctl_state_read_kv "${sequence_path}" requested_cycle_sequence 2>/dev/null || true)")"; then
+        if [[ "${cycle_request_state}" == "PENDING" && "${cycle_request_mode}" == "FULL_RESEED" \
+            && -n "${cycle_request_owner}" && "${cycle_request_owner}" != "${cycle_run}" ]]; then
+          # Preserve rejected evidence. Only an explicit new recovery request may
+          # supersede it; never relabel or approve another producer's candidate.
+          ftctl_dr_checkpoint_abandon_invalid "${checkpoint_pending_path}" "${plan}" \
+            "${cycle_request_owner}" || return 108
+          continue
+        fi
+        ftctl_dr_scheduler_update_state "${state_path}" "${status_path}" \
+          "state=ERROR" "step=checkpoint-recovery-required" \
+          "scheduler_state=RUNNING" "scheduler_health=RECOVERY_REQUIRED" \
+          "scheduler_recovery_state=FAILED" "cycle_retry_mode=OPERATOR_REPAIR_REQUIRED" \
+          "cycle_state=FAILED" "replication_activity=STOPPED" \
+          "protection_state=DEGRADED" "retryable=false" \
+          "error_code=DR_CHECKPOINT_CANDIDATE_INVALID" \
+          "error_message=Checkpoint evidence does not match its producer; request full resynchronization" \
+          "updated_at=$(ftctl_now_iso8601)" || true
+        ftctl_dr_scheduler_sleep_or_stop "${plan}" 30 "${control_generation}" || true
+        continue
+      fi
+      IFS=$'\t' read -r cycle_type cycle_request_bound <<< "${pending_cycle_context}"
+    fi
     checkpoint_ref="ftctl:${plan}:${cycle_run}:${next_sequence}"
     transfer_progress_path="$(ftctl_dr_runtime_run_journal_path "${plan}" "${cycle_run}" progress)"
     cycle_started_epoch="$(date +%s)"
@@ -2198,12 +2323,28 @@ ftctl_dr_scheduler_worker() {
     fi
 
     rc=0
+    if ftctl_dr_checkpoint_enabled "${profile_file}" && [[ -s "${checkpoint_pending_path}" ]]; then
+      output="$(jq -r '.output' "${checkpoint_pending_path}")"
+    else
     output="$(FTCTL_DR_TRANSFER_PROGRESS_PATH="${transfer_progress_path}" \
       FTCTL_DR_BANDWIDTH_LIMIT_MBPS="${bandwidth_limit_mbps}" \
       FTCTL_DR_AUTOMATIC_RESEED_REASON="$([[ "${pending_reseed_sequence}" == "${sequence}" ]] && printf '%s' "${pending_reseed_reason}")" \
       ftctl_dr_scheduler_run_cycle "${plan}" "${cycle_run}" "${profile_file}" "${sequence}" "${cycle_type}")" || rc=$?
+    fi
+    if [[ "${rc}" == "0" ]]; then
+      ftctl_dr_checkpoint_barrier "${plan}" "${cycle_run}" "${sequence}" "${output}" "${profile_file}" "${cycle_type}" || rc=$?
+    fi
     ftctl_dr_scheduler_slot_release 203
     ftctl_dr_scheduler_lock_release "${plan}" "cycle" 202
+    if [[ "${rc}" == "107" ]]; then
+      ftctl_dr_scheduler_update_state "${state_path}" "${status_path}" \
+        "step=waiting-checkpoint-publication" "cycle_state=WAITING_CHECKPOINT" \
+        "scheduler_state=RUNNING" "scheduler_health=WAITING_TARGET" \
+        "replication_activity=WAITING_CHECKPOINT" "retryable=true" \
+        "updated_at=$(ftctl_now_iso8601)" || true
+      sleep 2
+      continue
+    fi
     if [[ "${rc}" != "0" ]]; then
       if [[ "${rc}" == "97" || "${rc}" == "100" ]]; then
         now="$(ftctl_now_iso8601)"
@@ -2252,7 +2393,7 @@ ftctl_dr_scheduler_worker() {
         ftctl_dr_scheduler_sleep_or_stop "${plan}" "${resource_retry_delay}" "${control_generation}" || true
         continue
       fi
-      if [[ "${rc}" == "98" ]]; then
+      if [[ "${rc}" == "98" || "${rc}" == "110" ]]; then
         now="$(ftctl_now_iso8601)"
         source_outage_since="$(ftctl_dr_runtime_state_get_from_path "${status_path}" "source_outage_since" 2>/dev/null || true)"
         [[ -n "${source_outage_since}" ]] || source_outage_since="${now}"
@@ -2277,7 +2418,7 @@ ftctl_dr_scheduler_worker() {
           "step=waiting-source-recovery" \
           "scheduler_state=RUNNING" \
           "scheduler_health=WAITING_SOURCE" \
-          "scheduler_recovery_state=PENDING" \
+          "scheduler_recovery_state=$([[ "${rc}" == "110" ]] && printf REQUIRED || printf PENDING)" \
           "cycle_state=WAITING_SOURCE" \
           "replication_activity=WAITING_SOURCE" \
           "protection_state=DEGRADED" \
@@ -2287,8 +2428,8 @@ ftctl_dr_scheduler_worker() {
           "retry_after_sec=${source_retry_delay}" \
           "next_retry_at=$(ftctl_dr_scheduler_iso_from_epoch $(( $(date +%s) + source_retry_delay )))" \
           "source_outage_since=${source_outage_since}" \
-          "error_code=DR_SOURCE_SITE_UNAVAILABLE" \
-          "error_message=VMware source site is temporarily unreachable; the last durable baseline is preserved" \
+          "error_code=$([[ "${rc}" == "110" ]] && printf DR_QCOW2_SOURCE_RUNTIME_UNAVAILABLE || printf DR_SOURCE_SITE_UNAVAILABLE)" \
+          "error_message=Source runtime is unavailable on this worker; preserve the durable baseline and resolve current placement" \
           "updated_at=${now}" || true
         ftctl_log_event "dr-runtime" "dr.scheduler.source" "wait" "" "98" \
           "plan=${plan} run=${cycle_run} sequence=${sequence} retry_attempt=${source_retry_attempt} retry_after=${source_retry_delay}"
@@ -2609,6 +2750,9 @@ ftctl_dr_scheduler_worker() {
     cycle_wall_duration_seconds=$((cycle_completed_epoch - cycle_started_epoch))
     (( cycle_wall_duration_seconds < 0 )) && cycle_wall_duration_seconds=0
     ftctl_dr_scheduler_append_restore_point "${restore_points_path}" "${plan}" "${cycle_run}" "${sequence}" "${cycle_type}" "${driver}" "${manifest_path}" "${checkpoint_path}" "${cycle_wall_duration_seconds}" || return $?
+    if ftctl_dr_checkpoint_enabled "${profile_file}"; then
+      rm -f "${checkpoint_pending_path}"
+    fi
     ftctl_dr_scheduler_mark_resume_checkpoint_completed "${plan}" "${sequence}" || true
     ftctl_state_set_path "${sequence_path}" \
       "pending_resource_sequence=" \

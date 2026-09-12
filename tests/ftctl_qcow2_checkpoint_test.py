@@ -193,6 +193,43 @@ class Qcow2CheckpointTest(unittest.TestCase):
         self.assertIn("qemu-kvm", str(context.exception))
         self.assertFalse(self.output.exists())
 
+    @mock.patch.object(MODULE.shutil, "which", side_effect=lambda name: f"/usr/bin/{name}")
+    @mock.patch.object(MODULE.subprocess, "run")
+    def test_offline_reuses_seal_without_reading_mutated_replica(self, run_mock, _which):
+        run_mock.side_effect = self.fake_run
+        first = MODULE.execute(self.args)
+        self.output.unlink()
+        self.source.write_bytes(b"partial-next-cycle")
+        run_mock.reset_mock()
+        self.args.existing_only = True
+        result = MODULE.execute(self.args)
+        self.assertEqual(first["checkpointPath"], result["checkpointPath"])
+        commands = [call.args[0] for call in run_mock.call_args_list]
+        self.assertFalse(any(Path(cmd[0]).name == "cp" or cmd[1] == "compare" for cmd in commands))
+
+    def test_offline_does_not_create_missing_seal(self):
+        self.args.existing_only = True
+        with self.assertRaises(MODULE.CheckpointError) as context:
+            MODULE.execute(self.args)
+        self.assertEqual("DR_TEST_SEALED_CHECKPOINT_MISSING", context.exception.code)
+        self.assertFalse(self.output.exists())
+
+    @mock.patch.object(MODULE.shutil, "which", side_effect=lambda name: f"/usr/bin/{name}")
+    @mock.patch.object(MODULE.subprocess, "run")
+    def test_offline_set_failure_preserves_sealed_manifest(self, run_mock, _which):
+        run_mock.side_effect = self.fake_run
+        request = self.checkpoint_set_request()
+        first = MODULE.execute_set(request)
+        manifest = Path(first["checkpointSetManifestPath"])
+        previous = manifest.read_bytes()
+        for disk in request["disks"]:
+            Path(disk["output"]).unlink()
+        request["existingOnly"] = True
+        with mock.patch.object(MODULE, "create_overlay", side_effect=MODULE.CheckpointError("TEST", "failure")):
+            with self.assertRaises(MODULE.CheckpointError):
+                MODULE.execute_set(request)
+        self.assertEqual(previous, manifest.read_bytes())
+
     def checkpoint_set_request(self, disk_count=2):
         disks = []
         for index in range(disk_count):
