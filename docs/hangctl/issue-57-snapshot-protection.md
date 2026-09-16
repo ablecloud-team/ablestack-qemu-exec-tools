@@ -7,7 +7,8 @@
 destroy timeout 뒤 TERM/KILL로 승격하여 스냅샷과 VM을 종료한 것이 #57의 직접 원인이다.
 
 이번 변경은 hangctl 셸 코드만으로 이 경로를 차단하는 1차 수정이다.
-Mold Agent의 작업 lease 및 공통 잠금 연동은 포함하지 않는다. 외부 도구가 최종 검사
+Mold Agent의 작업 lease 및 공통 잠금 연동은
+[ablestack-cloud #1103](https://github.com/ablecloud-team/ablestack-cloud/issues/1103)에서 별도로 추적하며 이번 변경에 포함하지 않는다. 외부 도구가 최종 검사
 직후 새 작업을 시작하는 경쟁을 원자적으로 제거하려면 해당 후속 연동이 필요하다.
 이 PR 병합만으로 #57 전체 완료 또는 스냅샷 E2E 성공으로 간주하지 않는다.
 
