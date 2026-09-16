@@ -59,6 +59,16 @@ kill() {
     *) exit 1 ;;
   esac
 }
+# libvirt writes PID files without a newline on the deployed hosts.
+printf 1234 > "${TMP_DIR}/pid"
+[[ "$(hangctl_read_pidfile "${TMP_DIR}/pid")" == 1234 ]]
+printf '1234\n' > "${TMP_DIR}/pid"
+[[ "$(hangctl_read_pidfile "${TMP_DIR}/pid")" == 1234 ]]
+printf '1234\n9999' > "${TMP_DIR}/pid"
+if hangctl_read_pidfile "${TMP_DIR}/pid"; then exit 1; fi
+printf 0 > "${TMP_DIR}/pid"
+if hangctl_read_pidfile "${TMP_DIR}/pid"; then exit 1; fi
+
 reset_case() {
   DOM='paused (user)'; DOM_RC=0; JOB='Job type: None'; JOB_RC=0
   QMP=''; QMP_RC=143; FTCTL=0; IDENTITY='uuid:1234:1'; IDENTITY_FAIL=0

@@ -40,6 +40,13 @@ hangctl__is_active_domstate() {
   esac
 }
 
+hangctl_read_pidfile() {
+  local pid_text
+  pid_text="$(cat -- "${1}")" || return 1
+  [[ "${pid_text}" =~ ^[1-9][0-9]*$ ]] || return 1
+  printf '%s' "${pid_text}"
+}
+
 # Read libvirt's PID file, then bind it to the domain UUID and process start
 # time. Never select kill targets with an unanchored pgrep name expression.
 hangctl_qemu_identity() {
@@ -48,7 +55,8 @@ hangctl_qemu_identity() {
   LC_ALL=C hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" uuid_out uuid_err uuid_rc -- \
     -c qemu:///system domuuid "${vm}" || true
   [[ "${uuid_rc}" == 0 && "${uuid_out}" =~ ^[a-fA-F0-9-]{36}$ ]] || return 1
-  read -r pid < "/run/libvirt/qemu/${vm}.pid" || return 1
+  # libvirt pidfiles may have no trailing newline (read would return 1).
+  pid="$(hangctl_read_pidfile "/run/libvirt/qemu/${vm}.pid")" || return 1
   [[ "${pid}" =~ ^[1-9][0-9]*$ ]] || return 1
   exe="$(readlink "/proc/${pid}/exe")" || return 1
   [[ "${exe##*/}" == qemu* ]] || return 1
