@@ -544,3 +544,41 @@ hangctl_libvirtd_health_gate() {
   hangctl_libvirtd_backoff_set "${HANGCTL_LIBVIRTD_RESTART_BACKOFF_SEC:-3600}"
   return 3
 }
+
+# Shared with Cloud KvmVmOperationGuard (flock, not POSIX record locks).
+# Hold admission until the probe/action callback returns; never unlink lock files.
+hangctl_with_operation_lock() (
+  local vm="${1}" callback="${2}"; shift 2
+  local uuid='' err='' rc=0 root="${HANGCTL_OPERATION_ROOT:-/run/ablestack-vm-operations}"
+  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" uuid err rc -- -c qemu:///system domuuid "${vm}" || true
+  uuid="$(hangctl__trim_one_line "${uuid}")"
+  if [[ "${rc}" != 0 || ! "${uuid}" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+    hangctl_log_event detect vm.operation_guard skip "${vm}" '' '' 'reason=operation_identity_unknown'
+    return 0
+  fi
+  uuid="${uuid,,}"
+  if [[ "${HANGCTL_OPERATION_LOCK_UUID:-}" == "${uuid}" ]]; then
+    "${callback}" "${vm}" "$@"; return $?
+  fi
+  local dir
+  for dir in "${root}" "${root}/locks" "${root}/${uuid}"; do
+    [[ ! -L "${dir}" ]] || return 1
+    (umask 077; mkdir "${dir}" 2>/dev/null) || [[ -d "${dir}" ]] || return 1
+    [[ "$(stat -c '%u:%a' "${dir}")" == "${EUID}:700" ]] || return 1
+  done
+  [[ ! -L "${root}/locks/${uuid}.lock" ]] || return 1
+  exec {operation_fd}>"${root}/locks/${uuid}.lock" || return 1
+  if ! flock -n "${operation_fd}"; then
+    hangctl_state_observe_operation "${vm}" ACTIVE || true
+    hangctl_log_event detect vm.operation_guard skip "${vm}" '' '' 'reason=operation_lock_busy'
+    return 0
+  fi
+  # Any residual/partial/unknown lease is protection, even after its TTL expires.
+  if [[ -n "$(find "${root}/${uuid}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    hangctl_state_observe_operation "${vm}" UNKNOWN || true
+    hangctl_log_event detect vm.operation_guard skip "${vm}" '' '' 'reason=operation_lease attention_required=1'
+    return 0
+  fi
+  export HANGCTL_OPERATION_LOCK_UUID="${uuid}"
+  "${callback}" "${vm}" "$@"
+)
