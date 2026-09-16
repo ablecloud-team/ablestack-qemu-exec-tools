@@ -240,7 +240,7 @@ hangctl_state_touch_heartbeat() {
   now="$(date +%s)"
   
   # heartbeat ?œì ??blockstats??? ì??˜ê³  alive ?íƒœ?€ tsë§?ê°±ì‹ 
-  hangctl_state__write_kv_all "${path}" "domstate=alive" "last_change_ts=${now}" || true
+  hangctl_state__write_kv_all "${path}" "domstate=alive" "last_change_ts=${now}" "last_healthy_ts=${now}" "first_suspect_ts=0" || true
 }
 
 # ? ê·œ: ë¸”ë¡ ?µê³„(Read/Write Ops) ?€??
@@ -266,4 +266,41 @@ hangctl_state_get_prev_blockstats() {
 
   _rd="$(hangctl_state__read_kv "${path}" "prev_rd_ops" || echo "0")"
   _wr="$(hangctl_state__read_kv "${path}" "prev_wr_ops" || echo "0")"
+}
+
+
+# Old caches start a fresh window, never inheriting pre-snapshot heartbeat age.
+hangctl_state_observe_operation() {
+  local vm="${1}" observed="${2}" path previous now
+  path="$(hangctl_state__path "${vm}")"
+  previous="$(hangctl_state__read_kv "${path}" operation_state || true)"
+  now="$(date +%s)"
+  if [[ "${observed}" != NONE ]]; then
+    if [[ "${previous}" == NONE || -z "${previous}" ]]; then
+      hangctl_state__write_kv_all "${path}" "operation_started_ts=${now}" || return 1
+    fi
+    hangctl_state__write_kv_all "${path}" "operation_state=${observed}" "first_suspect_ts=0" || return 1
+    hangctl_state_reset_migration "${vm}"
+  elif [[ "${previous}" != NONE ]]; then
+    hangctl_state__write_kv_all "${path}" "operation_state=NONE" \
+      "operation_finished_ts=${now}" "first_suspect_ts=0" || return 1
+  fi
+}
+
+hangctl_state_begin_suspect() {
+  local path first
+  path="$(hangctl_state__path "${1}")"
+  first="$(hangctl_state__read_kv "${path}" first_suspect_ts || true)"
+  if [[ ! "${first}" =~ ^[1-9][0-9]*$ ]]; then
+    hangctl_state__write_kv_all "${path}" "first_suspect_ts=$(date +%s)" || return 1
+  fi
+}
+
+hangctl_state_suspect_duration() {
+  local first now
+  first="$(hangctl_state__read_kv "$(hangctl_state__path "${1}")" first_suspect_ts || true)"
+  now="$(date +%s)"
+  [[ "${first}" =~ ^[1-9][0-9]*$ ]] || first="${now}"
+  (( first <= now )) || first="${now}"
+  echo "$((now - first))"
 }

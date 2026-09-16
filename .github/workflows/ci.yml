@@ -21,6 +21,9 @@ jobs:
           echo "Running CI build (basic validation)"
           make all
 
+      - name: HANGCTL snapshot and action safety regression
+        run: bash tests/hangctl_snapshot_protection_smoke.sh
+
       - name: FTCTL release tombstone regression gate
         run: |
           tests/ftctl_dr_release_tombstone_smoke.sh

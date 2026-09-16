@@ -151,167 +151,56 @@ hangctl_apply_target_filters() {
 }
 
 hangctl_detect_probe_maybe_act_one_vm() {
-  # usage:
-  #    hangctl_detect_probe_maybe_act_one_vm <vm> <do_action:0|1>
-  local vm="${1-}"
-  local do_action="${2-0}"
+  local vm="${1}" do_action="${2:-0}"
+  local operation_state operation_detail domstate_full
+  hangctl_probe_operation "${vm}" operation_state operation_detail domstate_full
+  hangctl_state_observe_operation "${vm}" "${operation_state}" || return 1
+  if [[ "${operation_state}" != NONE ]]; then
+    local protected_since protected_sec attention=0 guard_result=skip
+    protected_since="$(hangctl_state__read_kv "$(hangctl_state__path "${vm}")" operation_started_ts || true)"
+    [[ "${protected_since}" =~ ^[0-9]+$ ]] || protected_since="$(date +%s)"
+    protected_sec=$(( $(date +%s) - protected_since ))
+    (( protected_sec >= 0 )) || protected_sec=0
+    if { [[ "${operation_state}" == UNKNOWN ]] && (( protected_sec >= HANGCTL_CONFIRM_WINDOW_SEC )); } ||
+       (( protected_sec >= HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC )); then
+      attention=1; guard_result=warn
+    fi
+    hangctl_log_event detect vm.operation_guard "${guard_result}" "${vm}" '' '' \
+      "reason=defer_${operation_state} protected_sec=${protected_sec} attention_required=${attention} ${operation_detail}"
+    return 0
+  fi
 
-  # --- [단계 1] VM 상태 수집 및 초기 분석 ---
-  local qmp_status qmp_rc qmp_result
-  qmp_status=""; qmp_rc=0
-  
-  # QMP 프로토콜 실행
+  local qmp_status='' qmp_rc=0 qmp_status_lc
   hangctl_probe_qmp_query_status "${vm}" qmp_status qmp_rc || true
-  qmp_result="$(hangctl__result_from_rc "${qmp_rc}")"
-
-  # QMP 상태의 문법 규칙
-  local qmp_status_lc
-  qmp_status_lc="$(echo "${qmp_status}" | tr '[:upper:]' '[:lower:]' | xargs)"
-
-  # 블록 I/O 계측 집계 Stall 감지
-  local curr_rd=0 curr_wr=0
-  hangctl_probe_blockstats "${vm}" curr_rd curr_wr || true
-  
-  local io_stall=1
-  # 0이면 Stall 의심, 1이면 정상 (이전 스캔 시점과 비교)
-  hangctl_detect_block_stall "${vm}" "${curr_rd}" "${curr_wr}" || io_stall=$?
-
-  # virsh를 통한 도메인 상태 확인
-  local dom_out dom_err dom_rc
-  dom_out=""; dom_err=""; dom_rc=0
-  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" dom_out dom_err dom_rc -- -c qemu:///system domstate --reason "${vm}" || true
-  
-  # 상태 문자열 파싱 (예: "paused (in-migration)")
-  local domstate_full
-  domstate_full="$(echo "${dom_out}" | head -n 1 | tr '[:upper:]' '[:lower:]' | xargs)"
-  local domstate="${domstate_full%% *}" 
-  [[ -z "${domstate}" ]] && domstate="unknown"
-
-  # --- [단계 2] 시간 초기화에 따른 적적 결정 (I/O Stall 반영) ---
-  if [[ "${qmp_rc}" == "0" && -n "${qmp_status_lc}" && "${qmp_status_lc}" != "unknown" && "${io_stall}" == "1" ]]; then
-      hangctl_state_touch_heartbeat "${vm}"
-      hangctl_log_event "detect" "vm.heartbeat" "ok" "${vm}" "" "" "reason=healthy status=${qmp_status_lc}"
-  else
-      # QMP 응답 실패 또는 Stall 감지 시 기존 heartbeat 타임스탬프 확인
-      local existing_ts
-      existing_ts="$(hangctl_state__read_kv "$(hangctl_state__path "${vm}")" "last_change_ts" || true)"
-      
-      local fail_type="qmp_issue"
-      [[ "${io_stall}" == "0" ]] && fail_type="io_stall_detected"
-
-      if [[ -z "${existing_ts}" ]]; then
-          hangctl_state_touch_heartbeat "${vm}"
-          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_start_detected type=${fail_type}"
-      else
-          hangctl_log_event "detect" "vm.heartbeat" "warn" "${vm}" "" "" "reason=failure_continuing type=${fail_type} status=${qmp_status_lc}"
-      fi
-  fi
-
-  # 마지막 heartbeat(또는 QMP/IO 실패 시작)로부터 경과 시간 계산
-  local duration_sec
-  duration_sec="$(hangctl_state_get_duration_sec "${vm}")"
-  local stuck_sec="${duration_sec}"
-
-  # --- [단계 3] 마이그레이션/백업 작업 인식 및 계측 결정 ---
-  local is_disk_error=0
-  [[ "${domstate_full}" == *"disk error"* ]] && is_disk_error=1
-
-  local job_out job_err job_rc job_type job_operation
-  job_out=""; job_err=""; job_rc=0
-  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" job_out job_err job_rc -- -c qemu:///system domjobinfo "${vm}" || true
-
-  local is_migration=0
-  local is_backup=0
-  hangctl_classify_domjobinfo "${domstate_full}" "${job_out}" job_type job_operation is_migration is_backup
-
-  local current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
-  if [[ "${is_migration}" -eq 1 || "${is_backup}" -eq 1 ]]; then
-    # 마이그레이션 또는 백업 중인 경우 용인 계측을 1800초로 용인하여 보호
-    current_window="${HANGCTL_MIGRATION_CONFIRM_WINDOW_SEC}"
-  elif [[ "${domstate}" == "paused" || "${is_disk_error}" -eq 1 ]]; then
-    # 일반 paused 상태에서 에러가 명시된 경우 별도 계측 적용
-    current_window="${HANGCTL_PAUSED_CONFIRM_WINDOW_SEC}"
-  fi
-
-  # --- [단계 4] 의심 상태(suspect) 1차 결정 ---
-  local decision="normal"
-  if [[ "${duration_sec}" -ge "${current_window}" ]]; then
-    decision="suspect"
-  fi
-
-  local job_operation_url="${job_operation// /%20}"
-  hangctl_log_event "detect" "vm.status_check" "ok" "${vm}" "" "" \
-    "domstate=${domstate_full} duration_sec=${duration_sec} decision=${decision} confirm_window=${current_window} job_type=${job_type} operation_url=${job_operation_url} is_migration=${is_migration} is_backup=${is_backup} io_stall=${io_stall}"
-
-  local migration_status=""
-  local migration_detail=""
-  if [[ "${is_migration}" -eq 1 ]]; then
-    hangctl_probe_migration_progress_evaluate "${vm}" "${job_out}" "${duration_sec}" migration_status migration_detail || true
-    hangctl_log_event "detect" "vm.migration_check" "ok" "${vm}" "" "" \
-      "${migration_detail} stuck_sec=${stuck_sec} job_type=${job_type} operation_url=${job_operation_url}"
-    if [[ "${migration_status}" != "zombie_no_progress" ]]; then
-      return 0
-    fi
-  fi
-
-  # Non-migration or confirmed zombie migration continues through normal suspect handling.
-  if [[ "${decision}" != "suspect" ]]; then
+  qmp_status_lc="$(hangctl__trim_one_line "${qmp_status}" | tr '[:upper:]' '[:lower:]')"
+  local domstate="${domstate_full%% *}"
+  # An idle, responsive running VM is healthy. No block I/O is not a hang.
+  if [[ "${qmp_rc}" == 0 && "${qmp_status_lc}" == running && "${domstate}" == running ]]; then
+    hangctl_state_touch_heartbeat "${vm}"
+    hangctl_log_event detect vm.heartbeat ok "${vm}" '' '' 'reason=healthy status=running'
     return 0
   fi
 
-  # --- [단계 6] 최종 결정 로직 ---
-  local final_decision="suspect"
-  local confirm_reason="domstate_stuck"
+  hangctl_state_begin_suspect "${vm}" || return 1
+  local duration_sec current_window="${HANGCTL_CONFIRM_WINDOW_SEC}"
+  duration_sec="$(hangctl_state_suspect_duration "${vm}")"
+  [[ "${domstate}" == paused ]] && current_window="${HANGCTL_PAUSED_CONFIRM_WINDOW_SEC}"
+  hangctl_log_event detect vm.status_check ok "${vm}" '' '' \
+    "${operation_detail} duration_sec=${duration_sec} confirm_window=${current_window} qmp_rc=${qmp_rc}"
+  (( duration_sec >= current_window )) || return 0
 
-  if [[ "${is_migration}" -eq 1 ]]; then
-    final_decision="confirmed"
-    confirm_reason="migration_zombie_no_progress"
-  elif [[ "${is_backup}" -eq 1 ]]; then
-    # 백업 시 계측 초과 시 결정 (이전 시간에 기록했으므로 애초에 단)
-    final_decision="confirmed"
-    confirm_reason="backup_stuck_over_threshold"
-  elif [[ "${is_disk_error}" -eq 1 ]]; then
-    final_decision="confirmed"
-    confirm_reason="libvirt_reported_disk_error"
-  elif [[ "${io_stall}" == "0" ]]; then
-    final_decision="confirmed"
-    confirm_reason="continuous_io_stall_detected"
-  elif [[ "${domstate}" == "paused" ]]; then
-    final_decision="confirmed"
-    confirm_reason="stuck_in_paused_state"
-  elif [[ "${qmp_rc}" == "124" || "${qmp_status_lc}" == "unknown" || -z "${qmp_status_lc}" ]]; then
-    final_decision="confirmed"
-    confirm_reason="qmp_no_response"
-  elif [[ "${qmp_status_lc}" == "running" ]]; then
-    final_decision="clear"
-    confirm_reason="qmp_responding_running"
-  elif [[ "${qmp_status_lc}" == "paused" ]]; then
-    final_decision="confirmed"
-    confirm_reason="qmp_status_paused_stuck"
-  else
-    final_decision="confirmed"
-    confirm_reason="qmp_fail_unknown"
-  fi
-
-  hangctl_log_event "detect" "vm.decision" "ok" "${vm}" "" "" \
-    "final=${final_decision} reason=${confirm_reason} domstate=${domstate_full} stuck_sec=${stuck_sec}"
-
-  if [[ "${final_decision}" == "confirmed" ]]; then
-    local guard_reason="" guard_detail=""
-    if hangctl_ftctl_guard_should_skip_action "${vm}" "${confirm_reason}" guard_reason guard_detail; then
-      hangctl_state_touch_heartbeat "${vm}"
-      hangctl_log_event "detect" "vm.action_guard" "skip" "${vm}" "" "" "reason=${guard_reason} ${guard_detail}"
-      return 0
-    fi
-  fi
-
-  # 최종 결정이 clear 또는 normal이면 조치 없이 종료
-  if [[ "${final_decision}" == "clear" || "${final_decision}" == "normal" ]]; then
+  local confirm_reason=qmp_no_response
+  if [[ "${domstate_full}" == 'paused (disk error)' ]]; then
+    confirm_reason=libvirt_reported_disk_error
+  elif [[ "${domstate}" == paused ]]; then
+    confirm_reason=stuck_in_paused_state
+  elif [[ "${qmp_rc}" == 0 && "${qmp_status_lc}" == running ]]; then
     return 0
   fi
-
-  if [[ "${do_action}" == "1" && "${final_decision}" == "confirmed" ]]; then
-    hangctl_action_handle_confirmed_vm "${vm}" "${confirm_reason}" "${domstate}" "${stuck_sec}" "${qmp_status}" || true
+  hangctl_log_event detect vm.decision ok "${vm}" '' '' \
+    "final=confirmed reason=${confirm_reason} stuck_sec=${duration_sec} ${operation_detail}"
+  if [[ "${do_action}" == 1 ]]; then
+    hangctl_action_handle_confirmed_vm "${vm}" "${confirm_reason}" "${domstate}" "${duration_sec}" "${qmp_status}" || true
   fi
 }
 
