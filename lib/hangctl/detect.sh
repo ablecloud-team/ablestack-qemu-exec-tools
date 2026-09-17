@@ -154,7 +154,7 @@ hangctl_classify_domjobinfo() {
 
   _job_type="$(hangctl__domjob_field "${job_out}" "Job type" | awk '{print $1}' | head -n 1)"
   _operation="$(hangctl__domjob_field "${job_out}" "Operation" | head -n 1)"
-  [[ -z "${_job_type}" ]] && _job_type="None"
+  [[ -z "${_job_type}" ]] && _job_type="Unknown"
 
   local dom_lc op_lc job_lc
   dom_lc="$(printf '%s' "${domstate_full}" | tr '[:upper:]' '[:lower:]')"
@@ -171,7 +171,7 @@ hangctl_classify_domjobinfo() {
   local job_type_lc
   job_type_lc="$(printf '%s' "${_job_type}" | tr '[:upper:]' '[:lower:]')"
   _is_backup=0
-  if [[ "${_is_migration}" -eq 0 && -n "${_job_type}" && "${job_type_lc}" != "none" && "${job_type_lc}" != "completed" ]]; then
+  if [[ "${_is_migration}" -eq 0 && -n "${_job_type}" && "${job_type_lc}" != "none" && "${job_type_lc}" != "completed" && "${job_type_lc}" != "unknown" ]]; then
     _is_backup=1
   fi
 }
@@ -424,4 +424,45 @@ hangctl_detect_block_stall() {
   fi
 
   return 1
+}
+
+
+# A failed job query is not evidence that no management operation is active.
+# Output: NONE (explicit no-job), ACTIVE, or UNKNOWN. Always returns 0.
+hangctl_probe_operation() {
+  local op_vm="${1}"
+  local -n op_state_ref="${2}" op_detail_ref="${3}" op_dom_ref="${4}"
+  local op_dom_out='' op_dom_err='' op_dom_rc=0
+  local op_job_out='' op_job_err='' op_job_rc=0 op_type op_kind op_reason
+  LC_ALL=C hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" op_dom_out op_dom_err op_dom_rc -- \
+    -c qemu:///system domstate --reason "${op_vm}" || true
+  op_dom_ref="$(hangctl__trim_one_line "${op_dom_out}" | tr '[:upper:]' '[:lower:]')"
+  LC_ALL=C hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" op_job_out op_job_err op_job_rc -- \
+    -c qemu:///system domjobinfo "${op_vm}" || true
+  op_type="$(hangctl__domjob_field "${op_job_out}" 'Job type' | tr '[:upper:]' '[:lower:]')"
+  op_kind="$(hangctl__domjob_field "${op_job_out}" 'Operation' | tr '[:upper:]' '[:lower:]')"
+  op_reason="${op_dom_ref#* (}"; op_reason="${op_reason%)}"
+  [[ "${op_dom_ref}" == *' ('* ]] || op_reason=unspecified
+  op_state_ref=UNKNOWN
+  if [[ "${op_dom_rc}" == 0 ]]; then
+    case "${op_dom_ref}" in
+      'paused (saving)'|'paused (snapshot)'|'paused (restoring)'|'paused (dump)'|\
+      'paused (migration)'|'paused (in-migration)'|'paused (post-copy)'|\
+      'paused (post-copy failed)'|'inmigrate'*) op_state_ref=ACTIVE ;;
+      running*|paused*)
+        if [[ "${op_job_rc}" == 0 ]]; then
+          case "${op_type}" in
+            none) op_state_ref=NONE ;;
+            bounded|unbounded) op_state_ref=ACTIVE ;;
+          esac
+        fi ;;
+    esac
+  fi
+  # Operation text is stronger than a contradictory no-job response.
+  if [[ "${op_job_rc}" == 0 && -n "${op_kind}" && "${op_kind}" != none && "${op_kind}" != unknown ]]; then
+    op_state_ref=ACTIVE
+  fi
+  local op_err="${op_job_err:0:200}"
+  op_err="${op_err//$'\n'/%0A}"; op_err="${op_err//$'\r'/%0D}"; op_err="${op_err//$'\t'/%09}"
+  op_detail_ref="job_probe_state=${op_state_ref} job_probe_rc=${op_job_rc} job_probe_result=$(hangctl__result_from_rc "${op_job_rc}") domstate_rc=${op_dom_rc} domstate=${op_dom_ref%% *} domstate_reason=${op_reason// /%20} job_type=${op_type// /%20} operation=${op_kind// /%20} job_error=${op_err// /%20}"
 }

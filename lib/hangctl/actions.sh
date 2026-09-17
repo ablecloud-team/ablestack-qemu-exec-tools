@@ -40,56 +40,80 @@ hangctl__is_active_domstate() {
   esac
 }
 
-hangctl_find_qemu_pids() {
-  # usage: hangctl_find_qemu_pids <vm>
-  # Best-effort: libvirt qemu argv includes "-name guest=<VM>,..."
-  local vm="${1-}"
-  local pat1="-name guest=${vm},"
-  local pat2="-name guest=${vm}"
+hangctl_read_pidfile() {
+  local pid_text
+  pid_text="$(cat -- "${1}")" || return 1
+  [[ "${pid_text}" =~ ^[1-9][0-9]*$ ]] || return 1
+  printf '%s' "${pid_text}"
+}
 
-  if command -v pgrep >/dev/null 2>&1; then
-    # pgrep -f matches full command line
-    pgrep -f "qemu.*${pat1}" 2>/dev/null || pgrep -f "qemu.*${pat2}" 2>/dev/null || true
-    return 0
+# Read libvirt's PID file, then bind it to the domain UUID and process start
+# time. Never select kill targets with an unanchored pgrep name expression.
+hangctl_qemu_identity() {
+  local vm="${1}" uuid_out='' uuid_err='' uuid_rc=0 pid proc_stat exe i
+  [[ "${vm}" =~ ^[a-zA-Z0-9_.:-]+$ ]] || return 1
+  LC_ALL=C hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" uuid_out uuid_err uuid_rc -- \
+    -c qemu:///system domuuid "${vm}" || true
+  [[ "${uuid_rc}" == 0 && "${uuid_out}" =~ ^[a-fA-F0-9-]{36}$ ]] || return 1
+  # libvirt pidfiles may have no trailing newline (read would return 1).
+  pid="$(hangctl_read_pidfile "/run/libvirt/qemu/${vm}.pid")" || return 1
+  [[ "${pid}" =~ ^[1-9][0-9]*$ ]] || return 1
+  exe="$(readlink "/proc/${pid}/exe")" || return 1
+  [[ "${exe##*/}" == qemu* ]] || return 1
+  local -a argv=() fields=()
+  mapfile -d '' -t argv < "/proc/${pid}/cmdline" || return 1
+  local matched=0
+  for ((i=0; i+1<${#argv[@]}; i++)); do
+    if [[ "${argv[i]}" == -uuid && "${argv[i+1],,}" == "${uuid_out,,}" ]]; then
+      matched=1; break
+    fi
+  done
+  [[ "${matched}" == 1 ]] || return 1
+  proc_stat="$(cat "/proc/${pid}/stat")" || return 1
+  # Strip pid and (comm); starttime is field 22, index 19 after those fields.
+  read -r -a fields <<< "${proc_stat##*) }"
+  [[ "${fields[19]-}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s:%s:%s' "${uuid_out,,}" "${pid}" "${fields[19]}"
+}
+
+hangctl_action_gate() {
+  local vm="${1}" incident="${2}" phase="${3}" expected="${4}"
+  local observed detail domain actual guard_reason='' guard_detail='' verdict=ALLOW
+  hangctl_probe_operation "${vm}" observed detail domain
+  if [[ "${observed}" != NONE ]]; then
+    verdict="DEFER_${observed}"
+    hangctl_state_observe_operation "${vm}" "${observed}" || true
+  elif [[ -z "${expected}" ]] || ! actual="$(hangctl_qemu_identity "${vm}")" || [[ "${actual}" != "${expected}" ]]; then
+    verdict=STALE_IDENTITY
+  elif hangctl_ftctl_guard_should_skip_action "${vm}" action_gate guard_reason guard_detail; then
+    verdict=DEFER_FTCTL
+  elif [[ "${domain%% *}" != paused ]]; then
+    local fresh_status='' fresh_rc=0
+    hangctl_probe_qmp_query_status "${vm}" fresh_status fresh_rc || true
+    if [[ "${fresh_rc}" == 0 && "${fresh_status}" == running ]]; then
+      verdict=RECOVERED
+      hangctl_state_touch_heartbeat "${vm}"
+    fi
   fi
-
-  # Fallback: ps+grep
-  ps -eo pid,args | grep -E "qemu.*(${pat1}|${pat2})" | grep -v grep | awk '{print $1}' || true
+  hangctl_log_event action action.gate "$([[ "${verdict}" == ALLOW ]] && echo ok || echo skip)" \
+    "${vm}" "${incident}" '' "phase=${phase} verdict=${verdict} identity=${expected} ${detail} ftctl_reason=${guard_reason}"
+  [[ "${verdict}" == ALLOW ]]
 }
 
 hangctl_kill_escalation() {
-  # usage: hangctl_kill_escalation <vm> <incident_id>
-  local vm="${1-}"
-  local incident_id="${2-}"
-
-  local pids
-  pids="$(hangctl_find_qemu_pids "${vm}")"
-  pids="$(echo "${pids}" | xargs)"
-
-  if [[ -z "${pids}" ]]; then
-    hangctl_log_event "action" "action.kill" "skip" "${vm}" "${incident_id}" "" "reason=no_pid"
-    return 0
-  fi
-
-  # TERM
-  hangctl_log_event "action" "action.kill.term" "ok" "${vm}" "${incident_id}" "" "pids=${pids}"
-  kill -TERM ${pids} 2>/dev/null || true
+  local vm="${1}" incident_id="${2}" expected="${3-}" pid
+  [[ "${HANGCTL_DRY_RUN:-0}" != 1 && -n "${expected}" ]] || return 1
+  pid="${expected#*:}"; pid="${pid%%:*}"
+  [[ "${pid}" =~ ^[1-9][0-9]*$ ]] || return 1
+  hangctl_action_gate "${vm}" "${incident_id}" term "${expected}" || return 1
+  hangctl_log_event action action.kill.term ok "${vm}" "${incident_id}" '' "pids=${pid}"
+  kill -TERM "${pid}" 2>/dev/null || return 1
   sleep "${HANGCTL_KILL_GRACE_SEC}"
-
-  # KILL any remaining
-  local still=""
-  local pid
-  for pid in ${pids}; do
-    if kill -0 "${pid}" 2>/dev/null; then
-      still+="${pid} "
-    fi
-  done
-  still="$(echo "${still}" | xargs)"
-  if [[ -n "${still}" ]]; then
-    hangctl_log_event "action" "action.kill.k9" "ok" "${vm}" "${incident_id}" "" "pids=${still}"
-    kill -KILL ${still} 2>/dev/null || true
+  if kill -0 "${pid}" 2>/dev/null; then
+    hangctl_action_gate "${vm}" "${incident_id}" kill "${expected}" || return 1
+    hangctl_log_event action action.kill.k9 ok "${vm}" "${incident_id}" '' "pids=${pid}"
+    kill -KILL "${pid}" 2>/dev/null || return 1
   fi
-  return 0
 }
 
 hangctl_verify_vm_stopped() {
@@ -104,10 +128,10 @@ hangctl_verify_vm_stopped() {
   result="$(hangctl__result_from_rc "${rc}")"
 
   if [[ "${result}" != "ok" ]]; then
-    # If domstate itself fails (e.g., domain vanished), treat as stopped.
-    hangctl_log_event "verify" "verify.domstate" "ok" "${vm}" "${incident_id}" "${rc}" \
-      "note=domstate_failed_treat_stopped"
-    return 0
+    # Failure to observe the domain is not proof of a successful stop.
+    hangctl_log_event "verify" "verify.domstate" "fail" "${vm}" "${incident_id}" "${rc}" \
+      "note=domstate_unknown"
+    return 1
   fi
 
   local st
@@ -126,79 +150,56 @@ hangctl_verify_vm_stopped() {
 }
 
 hangctl_action_handle_confirmed_vm() {
-  # usage:
-  #   hangctl_action_handle_confirmed_vm <vm> <reason> <domstate> <stuck_sec> <qmp_status>
-  local vm="${1-}"
-  local reason="${2-}"
-  local domstate="${3-}"
-  local stuck_sec="${4-}"
-  local qmp_status="${5-}"
-
-  local guard_reason="" guard_detail=""
+  local vm="${1}" reason="${2}" domstate="${3}" stuck_sec="${4}" qmp_status="${5}"
+  local incident_id expected='' guard_reason='' guard_detail=''
+  incident_id="$(hangctl_new_incident_id)"
   if hangctl_ftctl_guard_should_skip_action "${vm}" "${reason}" guard_reason guard_detail; then
-    hangctl_log_event "action" "action.skip" "ok" "${vm}" "" "" "reason=${guard_reason} ${guard_detail}"
-    hangctl_log_event "action" "incident.end" "ok" "${vm}" "" "" "result=skipped reason=${guard_reason}"
+    hangctl_log_event action action.skip ok "${vm}" "${incident_id}" '' "reason=${guard_reason} ${guard_detail}"
     return 0
   fi
-
-  local incident_id
-  incident_id="$(hangctl_new_incident_id)"
-
-  hangctl_log_event "action" "incident.start" "ok" "${vm}" "${incident_id}" "" \
-    "reason=${reason} domstate=${domstate} stuck_sec=${stuck_sec} qmp_status=${qmp_status} policy=${HANGCTL_POLICY} dry_run=${HANGCTL_DRY_RUN}"
-
+  # A dry run must not dump memory (including crash-mode dumps) or remediate
+  # storage. The detector has already recorded the decision.
+  if [[ "${HANGCTL_DRY_RUN}" == 1 ]]; then
+    hangctl_log_event action incident.end ok "${vm}" "${incident_id}" '' 'result=dry_run'
+    return 0
+  fi
+  expected="$(hangctl_qemu_identity "${vm}")" || true
+  hangctl_action_gate "${vm}" "${incident_id}" pre_action "${expected}" || return 0
+  hangctl_log_event action incident.start ok "${vm}" "${incident_id}" '' \
+    "reason=${reason} domstate=${domstate} stuck_sec=${stuck_sec} qmp_status=${qmp_status} identity=${expected}"
   hangctl_storage_guard_vm_volumes "${vm}" "${incident_id}" "${reason}" || true
-
-  # Commit 09: pre-action evidence + memory dump + analysis (soft-gated)
   hangctl_collect_evidence_pre_action "${vm}" "${incident_id}" "${reason}" "${domstate}" "${stuck_sec}" "${qmp_status}" || true
-
-  local dump_path dump_sha dump_bytes
-  dump_path=""; dump_sha=""; dump_bytes="0"
-
-  # hangctl_action_handle_confirmed_vm 함수 호출 부분 개선 방안
-  hangctl_collect_dump_pre_action "${vm}" "${incident_id}" dump_path dump_sha dump_bytes || {
-      hangctl_log_event "evidence" "dump.skip" "warn" "${vm}" "${incident_id}" "" "reason=dump_failed_proceeding_to_action"
-  }
-
-  # If dump_path is unexpectedly empty, recover it from evidence pointer (observed in field logs)
-  if [[ -z "${dump_path}" ]]; then
-    local edir pointer
-    edir="$(hangctl_evidence_dir "${vm}" "${incident_id}")"
-    pointer="${edir}/dump.pointer"
-    if [[ -r "${pointer}" ]]; then
-      dump_path="$(awk -F= '/^dump_path=/{print $2}' "${pointer}" | head -n 1)"
-      if [[ -n "${dump_path}" ]]; then
-        # analysis removed: handled by external process
-        hangctl_log_event "analysis" "analysis.start" "skip" "${vm}" "${HANGCTL_INCIDENT_ID-}" "" \
-            "reason=disabled"
-      fi
+  if ! hangctl_action_gate "${vm}" "${incident_id}" dump "${expected}"; then
+    hangctl_log_event action incident.end ok "${vm}" "${incident_id}" '' 'result=deferred phase=dump'
+    return 0
+  fi
+  local dump_path='' dump_sha='' dump_bytes=0
+  hangctl_collect_dump_pre_action "${vm}" "${incident_id}" dump_path dump_sha dump_bytes || true
+  if ! hangctl_action_gate "${vm}" "${incident_id}" destroy "${expected}"; then
+    hangctl_log_event action incident.end ok "${vm}" "${incident_id}" '' 'result=deferred phase=destroy'
+    return 0
+  fi
+  local destroy_out='' destroy_err='' destroy_rc=0 destroy_result
+  hangctl_virsh "${HANGCTL_VIRSH_TIMEOUT_SEC}" destroy_out destroy_err destroy_rc -- \
+    -c qemu:///system destroy "${vm}" || true
+  destroy_result="$(hangctl__result_from_rc "${destroy_rc}")"
+  hangctl_log_event action action.destroy "${destroy_result}" "${vm}" "${incident_id}" "${destroy_rc}" \
+    "timeout_sec=${HANGCTL_VIRSH_TIMEOUT_SEC} identity=${expected}"
+  if [[ "${destroy_result}" == timeout ]]; then
+    # A timed-out destroy may still be queued behind a snapshot. Never turn
+    # monitor contention into permission to bypass libvirt with a signal.
+    hangctl_log_event action incident.end warn "${vm}" "${incident_id}" '' 'result=deferred reason=destroy_timeout'
+    return 0
+  elif [[ "${destroy_result}" != ok ]]; then
+    if ! hangctl_kill_escalation "${vm}" "${incident_id}" "${expected}"; then
+      hangctl_log_event action incident.end warn "${vm}" "${incident_id}" '' 'result=deferred phase=signal'
+      return 0
     fi
   fi
- 
-  if [[ "${HANGCTL_DRY_RUN}" == "1" ]]; then
-    hangctl_log_event "action" "action.destroy" "skip" "${vm}" "${incident_id}" "" "reason=dry_run"
-    hangctl_log_event "verify" "verify.domstate" "skip" "${vm}" "${incident_id}" "" "reason=dry_run"
-    hangctl_log_event "action" "incident.end" "ok" "${vm}" "${incident_id}" "" "result=dry_run"
-    return 0
-  fi
-
-  # Default action: destroy
-  local rc=0
-  hangctl_virsh_event "action" "action.destroy" "${HANGCTL_VIRSH_TIMEOUT_SEC}" -- -c qemu:///system destroy "${vm}" || rc=$?
-  local destroy_result
-  destroy_result="$(hangctl__result_from_rc "${rc}")"
-
-  if [[ "${destroy_result}" != "ok" ]]; then
-    # Escalate to kill
-    hangctl_kill_escalation "${vm}" "${incident_id}" || true
-  fi
-
-  # Verify
   if hangctl_verify_vm_stopped "${vm}" "${incident_id}"; then
-    hangctl_log_event "action" "incident.end" "ok" "${vm}" "${incident_id}" "" "result=stopped"
-    return 0
+    hangctl_log_event action incident.end ok "${vm}" "${incident_id}" '' 'result=stopped'
+  else
+    hangctl_log_event action incident.end fail "${vm}" "${incident_id}" '' 'result=stop_unconfirmed'
+    return 1
   fi
-
-  hangctl_log_event "action" "incident.end" "fail" "${vm}" "${incident_id}" "" "result=still_active"
-  return 1
 }
