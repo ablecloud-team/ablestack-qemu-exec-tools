@@ -150,6 +150,11 @@ hangctl_verify_vm_stopped() {
 }
 
 hangctl_action_handle_confirmed_vm() {
+  local vm="$1"; shift
+  hangctl_with_operation_lock "$vm" hangctl_action_handle_confirmed_vm_guarded "$@"
+}
+
+hangctl_action_handle_confirmed_vm_guarded() {
   local vm="${1}" reason="${2}" domstate="${3}" stuck_sec="${4}" qmp_status="${5}"
   local incident_id expected='' guard_reason='' guard_detail=''
   incident_id="$(hangctl_new_incident_id)"

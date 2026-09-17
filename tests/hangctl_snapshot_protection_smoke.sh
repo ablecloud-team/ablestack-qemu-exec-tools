@@ -11,6 +11,7 @@ source "${ROOT_DIR}/lib/hangctl/libvirt_wrap.sh"
 # Load the real detector without executing the CLI or loading host libraries.
 source <(sed -n '/^hangctl_detect_probe_maybe_act_one_vm() {/,/^cmd_scan() {/p' "${ROOT_DIR}/bin/ablestack_vm_hangctl.sh" | sed '$d')
 hangctl_config_init_defaults
+HANGCTL_OPERATION_ROOT="${TMP_DIR}/operations"
 HANGCTL_STATE_DIR="${TMP_DIR}/state"
 mkdir -p "${HANGCTL_STATE_DIR}"
 HANGCTL_KILL_GRACE_SEC=0
@@ -34,6 +35,7 @@ hangctl_virsh() {
   local -n mock_out="$2" mock_err="$3" mock_rc="$4"
   mock_out=''; mock_err=''; mock_rc=0
   case "$*" in
+    *domuuid*) mock_out="11111111-1111-1111-1111-111111111111" ;;
     *domjobinfo*) mock_out="${JOB}"; mock_rc="${JOB_RC}" ;;
     *domstate*) mock_out="${DOM}"; mock_rc="${DOM_RC}" ;;
     *destroy*)

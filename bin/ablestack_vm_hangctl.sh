@@ -151,6 +151,10 @@ hangctl_apply_target_filters() {
 }
 
 hangctl_detect_probe_maybe_act_one_vm() {
+  hangctl_with_operation_lock "$1" hangctl_detect_probe_maybe_act_one_vm_guarded "${2:-0}"
+}
+
+hangctl_detect_probe_maybe_act_one_vm_guarded() {
   local vm="${1}" do_action="${2:-0}"
   local operation_state operation_detail domstate_full
   hangctl_probe_operation "${vm}" operation_state operation_detail domstate_full
