@@ -25,6 +25,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 Requires:       bash
+Requires:       python3 >= 3.9
 Requires:       jq
 Requires:       libvirt-client
 Requires:       cloud-init

@@ -1,0 +1,35 @@
+name: VM exec transport contract
+on:
+  pull_request:
+    paths:
+      - 'bin/vm_exec.sh'
+      - 'lib/vm_exec.py'
+      - 'tests/vm_exec*'
+      - 'rpm/ablestack-qemu-exec-tools.spec'
+      - 'deb/control'
+      - '.github/workflows/vm-exec-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  transport:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell validation
+        run: |
+          bash -n bin/vm_exec.sh
+          shellcheck bin/vm_exec.sh
+      - name: Bounded transport regression
+        run: python3 tests/vm_exec_test.py
+      - name: Fetch immutable Cloud C1 contract
+        uses: actions/checkout@v4
+        with:
+          repository: dhslove/ablestack-cloud
+          ref: 31c3b36768a9a12d588dbd7a01f5217a5b026090
+          path: .contract
+          sparse-checkout: docs/design/vm-process-contract
+      - name: Shared C1 request and response fixtures
+        run: |
+          python3 -m pip install -r .contract/docs/design/vm-process-contract/requirements.txt
+          python3 tests/vm_exec_contract_test.py --contract-dir .contract/docs/design/vm-process-contract
