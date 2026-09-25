@@ -23,6 +23,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The repair profile is deliberately independent of legacy full/cloud-init setup.
+previous=""
+for argument in "$@"; do
+    if [[ "$previous" == --policy && "$argument" == process-management ]]; then
+        for helper in "$SCRIPT_DIR/../lib/agent_policy/process_policy.py" \
+                      /usr/libexec/ablestack-qemu-exec-tools/agent_policy/process_policy.py; do
+            if [[ -f "$helper" ]]; then
+                exec python3 "$helper" "$@"
+            fi
+        done
+        echo '{"schemaVersion":1,"status":"CHECK_FAILED","featureReady":false,"error":"Process policy helper missing"}'
+        exit 4
+    fi
+    previous="$argument"
+done
 INSTALLED_LIBDIR="/usr/libexec/ablestack-qemu-exec-tools"
 SOURCE_LIBDIR=""
 if cd "$SCRIPT_DIR/../lib" 2>/dev/null; then
@@ -54,6 +69,7 @@ usage() {
     cat <<'EOF'
 Usage:
   agent_policy_fix [--policy full] (--check|--apply) [--json]
+  agent_policy_fix --policy process-management (--check|--apply|--restore BACKUP_ID) [--json]
   agent_policy_fix --check-profile cloud-network-observability [--json]
 
 With no options, the command applies the full qemu-ga RPC policy.

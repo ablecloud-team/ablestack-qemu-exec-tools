@@ -1412,6 +1412,10 @@ jobs:
           #!/usr/bin/env bash
           set -e
           ISO_MNT="$(cd "$(dirname "$0")" && pwd -P)"
+          if [[ "${1:-}" == --mode && "${2:-}" == process-management ]]; then
+            shift 2
+            exec bash "$ISO_MNT/process-management/install-linux.sh" "$@"
+          fi
 
           echo "[INFO] ABLESTACK QEMU Exec Tools Installer"
           echo "[INFO] Detecting distribution..."
@@ -2010,6 +2014,7 @@ jobs:
             if [[ -d release/bin ]]; then
               cp -a release/bin/. "${rocky_staging}/bin/"
             fi
+            bash scripts/stage-process-repair.sh "${rocky_staging}"
             cp -a release/install-linux.sh "${rocky_staging}/"
             cp -a release/uninstall-linux.sh "${rocky_staging}/"
 
@@ -2024,6 +2029,7 @@ jobs:
           if [[ -d release/completions ]]; then
             cp -a release/completions/. build/iso-staging/ubuntu/completions/
           fi
+          bash scripts/stage-process-repair.sh build/iso-staging/ubuntu
           cp -a release/install-linux.sh build/iso-staging/ubuntu/
           cp -a release/uninstall-linux.sh build/iso-staging/ubuntu/
 

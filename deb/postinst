@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Process repair must not initialize cloud-init, DHCP or guest credentials.
+if [ "${ABLESTACK_TOOLS_MODE:-}" = "process-management" ]; then
+    /usr/bin/agent_policy_fix --policy process-management --apply --json
+    exit $?
+fi
+
 echo "Running post-install tasks for ablestack-qemu-exec-tools..."
 
 if [ -x /usr/bin/agent_policy_fix ]; then
