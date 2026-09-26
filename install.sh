@@ -18,6 +18,11 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "--mode" && "${2:-}" == "process-management" ]]; then
+  shift 2
+  exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/process-management/install-linux.sh" "$@"
+fi
+
 INSTALL_PREFIX="/usr/local"
 BIN_DIR="${INSTALL_PREFIX}/bin"
 LIB_TARGET="${INSTALL_PREFIX}/lib/ablestack-qemu-exec-tools"

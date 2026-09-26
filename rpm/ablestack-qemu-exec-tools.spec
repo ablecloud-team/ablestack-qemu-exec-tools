@@ -86,6 +86,12 @@ cp -a rpm/dhcp.py.fixed %{buildroot}/usr/share/ablestack-qemu-exec-tools/ 2>/dev
 - Git hash: %{githash}
 
 %post
+# Process repair must not initialize cloud-init, DHCP or guest credentials.
+if [ "${ABLESTACK_TOOLS_MODE:-}" = "process-management" ]; then
+    /usr/bin/agent_policy_fix --policy process-management --apply --json
+    exit $?
+fi
+
 echo "[INFO] Running post-install tasks for %{name}..."
 
 _is_ablestack_host() {
