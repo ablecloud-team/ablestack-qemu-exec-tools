@@ -32,7 +32,9 @@ jobs:
           $payload=Join-Path $PWD 'build/windows-process-payload'
           New-Item -ItemType Directory -Force $payload | Out-Null
           Copy-Item windows/process-management/*.ps1,windows/process-management/*.psm1 $payload
-          Copy-Item lib/process/ProcessList.ps1 $payload
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /out:lib/process/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.cs
+          if ($LASTEXITCODE) { throw 'Native helper build failed' }
+          Copy-Item lib/process/ProcessList.ps1,lib/process/AbleProcessIdentity.dll $payload
           git rev-parse HEAD | Set-Content "$payload/SOURCE_COMMIT" -Encoding ascii
           wix build windows/process-management/ProcessTools.wxs -arch x64 -d "Payload=$payload" -o "$payload/ABLESTACK-ProcessTools.msi"
           if ($LASTEXITCODE) { throw 'MSI build failed' }
@@ -41,7 +43,7 @@ jobs:
           7z x -y -obuild/vendor build/virtio-win.iso 'guest-agent/qemu-ga-x86_64.msi'
           if ($LASTEXITCODE) { throw 'QGA MSI extraction failed' }
           Copy-Item build/vendor/guest-agent/qemu-ga-x86_64.msi $payload
-          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi') | ForEach-Object {
+          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi') | ForEach-Object {
             @{name=$_;sha256=(Get-FileHash "$payload/$_" -Algorithm SHA256).Hash.ToLowerInvariant()}
           }
           @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.0.0';vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8

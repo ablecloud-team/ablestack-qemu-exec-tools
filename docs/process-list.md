@@ -37,6 +37,7 @@ PID를 받기 전 전송 결과가 불명확하면 재부팅 또는 별도 종�
 
 Linux process repair ISO staging에 `process_list_linux.py`를 포함하고 설치 스크립트가
 `/usr/libexec/ablestack-qemu-exec-tools/process/`에 배치한다.
+Windows native GetProcessTimes/owner SID 보조 DLL은 GitHub Actions에서 .NET Framework csc로 미리 빌드한다. 조회 시 C# 컴파일을 수행하지 않는다. 호스트가 PS1(LF 정규화)과 DLL SHA256을 각각 검사한다.
 Windows MSI는 `C:\Program Files\ABLESTACK Process Tools\ProcessList.ps1`를 배치한다.
 호스트 lib 디렉터리의 collector와 게스트 collector가 일치해야 실행한다.
 프로세스 수집을 위해 SELinux/AppArmor 정책을 넓히거나 QGA allowlist를 덮어쓰지 않는다.

@@ -101,8 +101,9 @@ def run(request, transport):
             script="import hashlib,runpy,sys;p='/usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py';assert hashlib.sha256(open(p,'rb').read()).hexdigest()=='"+expected+"';sys.argv=[p,'--request-base64','"+encoded+"'];runpy.run_path(p,run_name='__main__')"
             command=['/usr/bin/python3','-I','-c',script]
         else:
-            expected=hashlib.sha256((payload/'ProcessList.ps1').read_bytes()).hexdigest()
-            script="$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$p='C:\\Program Files\\ABLESTACK Process Tools\\ProcessList.ps1';if((Get-FileHash -LiteralPath $p).Hash -ne '"+expected+"'){exit 3};& $p -RequestBase64 '"+encoded+"'"
+            native=hashlib.sha256((payload/'AbleProcessIdentity.dll').read_bytes()).hexdigest()
+            expected=hashlib.sha256((payload/'ProcessList.ps1').read_bytes().replace(b'\r\n',b'\n')).hexdigest()
+            script="$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$p='C:\\Program Files\\ABLESTACK Process Tools\\ProcessList.ps1';$sha=[Security.Cryptography.SHA256]::Create();try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.File]::ReadAllText($p).Replace([string][char]13+[char]10,[string][char]10))))).Replace('-','')}finally{$sha.Dispose()};if($hash -ne '"+expected+"'){exit 3};if((Get-FileHash -LiteralPath (Join-Path (Split-Path $p) 'AbleProcessIdentity.dll')).Hash -ne '"+native+"'){exit 3};& $p -RequestBase64 '"+encoded+"'"
             command=['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         options={'mode':'-l','timeout':remaining,'rpc_timeout':3,'max_output':1048576,'headers':None,'out':'','csv':False,'table':False}
         # Persist before dispatch: host crash or ambiguous guest-exec must block

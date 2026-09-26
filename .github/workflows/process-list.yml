@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   linux:
+    needs: windows
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -16,6 +17,10 @@ jobs:
           ref: 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf
           path: cloud-contract
           sparse-checkout: docs/design/vm-process-contract
+      - uses: actions/download-artifact@v4
+        with:
+          name: process-list-native
+          path: lib/process
       - run: |
           python3 -m pip install -r cloud-contract/docs/design/vm-process-contract/requirements.txt
           python3 tests/vm_exec_test.py
@@ -41,6 +46,15 @@ jobs:
           ref: 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf
           path: cloud-contract
           sparse-checkout: docs/design/vm-process-contract
+      - name: Build native process identity helper
+        shell: powershell
+        run: |
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /out:lib/process/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.cs
+          if($LASTEXITCODE){throw 'Native helper build failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-list-native
+          path: lib/process/AbleProcessIdentity.dll
       - name: Windows PowerShell native identity and shared service mapping
         shell: powershell
         run: tests/process_list_windows_test.ps1
@@ -54,7 +68,7 @@ jobs:
           if ($LASTEXITCODE) { throw 'WiX install failed' }
           New-Item -ItemType Directory -Force build/payload | Out-Null
           Copy-Item windows/process-management/*.ps1,windows/process-management/*.psm1 build/payload
-          Copy-Item lib/process/ProcessList.ps1 build/payload
+          Copy-Item lib/process/ProcessList.ps1,lib/process/AbleProcessIdentity.dll build/payload
           git rev-parse HEAD | Set-Content build/payload/SOURCE_COMMIT -Encoding ascii
           wix build windows/process-management/ProcessTools.wxs -arch x64 -d "Payload=$PWD/build/payload" -o build/ABLESTACK-ProcessTools.msi
           if ($LASTEXITCODE) { throw 'WiX build failed' }
