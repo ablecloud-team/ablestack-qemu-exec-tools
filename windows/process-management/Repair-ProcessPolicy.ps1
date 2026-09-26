@@ -11,13 +11,18 @@ try {
     $os=Get-CimInstance Win32_OperatingSystem
     if ($os.ProductType -eq 1 -or [int]$os.BuildNumber -notin @(20348,26100)) { throw 'Supported targets are Windows Server 2022/2025' }
     Set-PrivateDirectory $root
+    Assert-RegularStateFile (Join-Path $root 'policy.lock')
+    Assert-RegularStateFile (Join-Path $root 'last-result.json')
     $lock=[IO.File]::Open((Join-Path $root 'policy.lock'),'OpenOrCreate','ReadWrite','None')
     $result.rebootRequired=Test-PendingReboot
     if ($Mode -eq 'Restore') {
         if ($BackupId -notmatch '^backup-[a-f0-9]{32}$') { throw 'Invalid backup identifier' }
+        Assert-RegularStateFile (Join-Path $root "$BackupId.json")
         $saved=Get-Content -LiteralPath (Join-Path $root "$BackupId.json") -Raw | ConvertFrom-Json
         if ($saved.Name -notmatch '^[A-Za-z0-9_-]+$' -or $saved.Key -ne ('HKLM:\SYSTEM\CurrentControlSet\Services\'+$saved.Name)) { throw 'Invalid backup service' }
         $null=Split-QgaCommand $saved.Before; $null=Split-QgaCommand $saved.After
+        $current=Get-CimInstance Win32_Service -Filter "Name='$($saved.Name)'"
+        Assert-IndependentSession $current.ProcessId
         $result.changed=$null; $result.restartPerformed=$null
         Set-QgaCommand $saved $saved.After $saved.Before
         $result.status='RESTORED_PENDING_HOST_VERIFY'; $result.changed=$true; $result.restartPerformed=$true; $code=0
@@ -31,12 +36,7 @@ try {
                 Set-PrivateDirectory (Join-Path $root 'probe')
                 if ($policy.Before -cne $policy.After) {
                     # Reject invoking restart from QGA's own child process.
-                    $ancestor=$PID
-                    for ($n=0; $n -lt 32 -and $ancestor -gt 0; $n++) {
-                        if ($ancestor -eq $policy.ProcessId) { throw 'Use an independent administrator session to restart QGA' }
-                        $process=Get-CimInstance Win32_Process -Filter "ProcessId=$ancestor"
-                        if (-not $process) { break }; $ancestor=$process.ParentProcessId
-                    }
+                    Assert-IndependentSession $policy.ProcessId
                     $result.backupId='backup-'+[guid]::NewGuid().ToString('N')
                     $policy | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root ($result.backupId+'.json')) -Encoding UTF8
                     $result.changed=$null; $result.restartPerformed=$null

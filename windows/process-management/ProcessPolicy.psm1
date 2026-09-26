@@ -110,6 +110,24 @@ function Set-PrivateDirectory([string]$Path) {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
+function Assert-IndependentSession([int]$QgaPid) {
+    $ancestor=$PID
+    for ($n=0; $n -lt 32 -and $ancestor -gt 0; $n++) {
+        if ($ancestor -eq $QgaPid) { throw 'Use an independent administrator session to restart QGA' }
+        $process=Get-CimInstance Win32_Process -Filter "ProcessId=$ancestor"
+        if (-not $process) { return }
+        $ancestor=$process.ParentProcessId
+    }
+    if ($ancestor -gt 0) { throw 'Unable to establish independent process ancestry' }
+}
+
+function Assert-RegularStateFile([string]$Path) {
+    if (Test-Path -LiteralPath $Path) {
+        $item=Get-Item -LiteralPath $Path -Force
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe policy state file' }
+    }
+}
+
 function Restart-Qga([string]$Name) {
     $service=Get-Service -Name $Name
     if ($service.Status -ne 'Stopped') { $service.Stop(); $service.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(15)) }
