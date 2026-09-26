@@ -3,7 +3,7 @@ Version: ${VERSION}-${RELEASE}
 Section: utils
 Priority: optional
 Architecture: all
-Depends: bash, jq, libvirt-clients, qemu-guest-agent, cloud-init
+Depends: bash, python3, jq, libvirt-clients, qemu-guest-agent, cloud-init
 Maintainer: ABLECLOUD <dev@ablecloud.io>
 Description: QEMU guest-agent ê¸°ë°˜ VM ëª…ë ¹ ?¤í–‰ ë°??•ì±… ?ë™???„êµ¬
  QEMU/libvirt ?˜ê²½?ì„œ qemu-guest-agentë¥??´ìš©??VM ëª…ë ¹ ?¤í–‰, ?•ì±… ?ë™??bash ?¤í¬ë¦½íŠ¸ ?„êµ¬ ?¸íŠ¸.
