@@ -870,8 +870,13 @@ jobs:
   # ======================================================================
   # 4) RELEASE + ISO CREATION (VirtIO ???? ????
   # ======================================================================
+  build-process-tools:
+    uses: ./.github/workflows/windows-process-repair.yml
+    with:
+      source_ref: ${{ inputs.source_ref || github.sha }}
+
   release:
-    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm]
+    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm, build-process-tools]
     runs-on: ubuntu-latest
     # The official path deliberately skips this reusable workflow's build-winpe
     # job because the caller already produced it. Use always() to prevent that
@@ -1173,8 +1178,14 @@ jobs:
         run: |
           cat > release/install.ps1 << 'PS1'
           Param(
-            [switch]$Silent
+            [switch]$Silent,
+            [ValidateSet('Full','ProcessManagement')][string]$Mode='Full',
+            [switch]$InstallQga
           )
+          if ($Mode -eq 'ProcessManagement') {
+            & (Join-Path $PSScriptRoot 'process-management\install.ps1') -InstallQga:$InstallQga
+            exit $LASTEXITCODE
+          }
 
           # Force default = false if not provided
           if (-not $PSBoundParameters.ContainsKey('Silent')) {
@@ -1341,7 +1352,7 @@ jobs:
           @echo off
           setlocal
           rem Always run non-silent mode by default
-          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
           if errorlevel 1 (
             echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
             exit /b 1
@@ -2042,6 +2053,13 @@ jobs:
           fi
           cp -a release/install.bat build/iso-staging/windows/
           cp -a release/install.ps1 build/iso-staging/windows/
+          PROCESS_PAYLOAD=$(find dist -type d -name windows-process-payload | head -n 1)
+          if [[ -z "$PROCESS_PAYLOAD" ]]; then
+            echo 'Windows process payload missing; build/download matching windows-process-repair artifact first' >&2
+            exit 2
+          fi
+          test "$(cat "$PROCESS_PAYLOAD/SOURCE_COMMIT")" = "$(git rev-parse HEAD)"
+          cp -a "$PROCESS_PAYLOAD" build/iso-staging/windows/process-management
 
           mkisofs -o "build/iso/ubuntu/ABLESTACK-Tools-ubuntu-${VERSION}.iso" \
             -V "ABLESTACK-Ubuntu" \

@@ -1,0 +1,74 @@
+name: Windows process Tools MSI and ISO
+on:
+  push:
+    branches: [codex/issue-62-windows-policy]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_ref:
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+      - name: Policy parsing and concurrent-change guard (Windows PowerShell 5.1)
+        shell: powershell
+        run: windows/process-management/ProcessPolicy.Tests.ps1
+      - name: Policy parsing and concurrent-change guard (PowerShell 7)
+        shell: pwsh
+        run: windows/process-management/ProcessPolicy.Tests.ps1
+      - name: Build isolated process MSI and offline payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet tool install --global wix --version 4.0.6
+          if ($LASTEXITCODE) { throw 'WiX installation failed' }
+          $payload=Join-Path $PWD 'build/windows-process-payload'
+          New-Item -ItemType Directory -Force $payload | Out-Null
+          Copy-Item windows/process-management/*.ps1,windows/process-management/*.psm1 $payload
+          git rev-parse HEAD | Set-Content "$payload/SOURCE_COMMIT" -Encoding ascii
+          wix build windows/process-management/ProcessTools.wxs -arch x64 -d "Payload=$payload" -o "$payload/ABLESTACK-ProcessTools.msi"
+          if ($LASTEXITCODE) { throw 'MSI build failed' }
+          curl.exe --fail --location --retry 3 --output build/virtio-win.iso https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
+          if ($LASTEXITCODE) { throw 'Vendor ISO download failed' }
+          7z x -y -obuild/vendor build/virtio-win.iso 'guest-agent/qemu-ga-x86_64.msi'
+          if ($LASTEXITCODE) { throw 'QGA MSI extraction failed' }
+          Copy-Item build/vendor/guest-agent/qemu-ga-x86_64.msi $payload
+          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi') | ForEach-Object {
+            @{name=$_;sha256=(Get-FileHash "$payload/$_" -Algorithm SHA256).Hash.ToLowerInvariant()}
+          }
+          @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.0.0';vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8
+          '@echo off', 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*', 'exit /b %ERRORLEVEL%' | Set-Content "$payload/install.bat" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-process-payload
+          path: build/windows-process-payload/
+          if-no-files-found: error
+  iso:
+    needs: windows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-process-payload
+          path: payload
+      - name: Generate ISO and manifest checksum
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y genisoimage
+          mkdir -p output
+          (cd payload && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          genisoimage -quiet -r -J -V ABLESTACK-PROCESS-WIN -o output/ABLESTACK-Tools-windows-process.iso payload
+          (cd output && sha256sum *.iso > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-process-iso
+          path: output/*
+          if-no-files-found: error

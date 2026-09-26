@@ -89,9 +89,30 @@ class Verifier:
         if primary_error: raise primary_error
 
 
+class WindowsVerifier(Verifier):
+    def __init__(self, vm):
+        super().__init__(vm)
+        self.path = 'C:\\ProgramData\\ABLESTACK-ProcessPolicy\\probe\\' + uuid.uuid4().hex + '.tmp'
+
+    def execute(self, executable, args):
+        # Only internally generated probe operations; never evaluate caller commands.
+        if executable == '/usr/bin/printf':
+            if not args[1].startswith('ablestack-process-') or not args[1].replace('-', '').isalnum():
+                raise ValueError('Invalid marker')
+            script = "[Console]::Write('" + args[1] + "')"
+        elif executable == '/usr/bin/rm' and args == ['-f', '--', self.path]:
+            script = "$ErrorActionPreference='Stop'; if(Test-Path -LiteralPath '" + self.path + "'){Remove-Item -LiteralPath '" + self.path + "' -Force}"
+        else:
+            raise ValueError('Unsupported Windows probe')
+        encoded = base64.b64encode(script.encode('utf-16le')).decode()
+        return super().execute('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+                               ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('vm', help='Current libvirt domain name')
+    parser.add_argument('--guest-os', choices=['linux', 'windows'], default='linux')
     args = parser.parse_args()
     result = {'schemaVersion': 1, 'status': 'CHECK_FAILED', 'featureReady': False, 'fileCleaned': None}
     lock = None
@@ -99,7 +120,7 @@ def main():
     code = 3
     try:
         if os.geteuid() != 0: raise RuntimeError('Host root is required')
-        verifier = Verifier(args.vm)
+        verifier = (WindowsVerifier if args.guest_os == 'windows' else Verifier)(args.vm)
         root = Path('/run/ablestack-vm-operations')
         locks = root / 'locks'
         for directory in (root, locks):
