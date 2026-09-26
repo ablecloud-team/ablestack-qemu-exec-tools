@@ -162,7 +162,7 @@ def plan(args, config):
     filters = any(x.split('=')[0] in ('-a', '-b', '--allow-rpcs', '--block-rpcs') for x in args)
     if filters:
         source = Path('/etc/sysconfig/qemu-ga')
-        if '/etc/sysconfig/qemu-ga' not in unit or '$FILTER_RPC_ARGS' not in unit:
+        if '/etc/sysconfig/qemu-ga' not in unit or not any(token in unit for token in ('$FILTER_RPC_ARGS', '${FILTER_RPC_ARGS}')):
             raise RuntimeError('Custom ExecStart filter requires administrator review')
         regular(source)
         before = source.read_text()

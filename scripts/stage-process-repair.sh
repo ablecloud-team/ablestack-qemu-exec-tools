@@ -7,3 +7,5 @@ mkdir -p "$target"
 install -m 0755 "$repo/process-management/install-linux.sh" "$target/install-linux.sh"
 install -m 0755 "$repo/lib/agent_policy/process_policy.py" "$target/process_policy.py"
 install -m 0755 "$repo/bin/vm_process_verify.py" "$target/vm_process_verify.py"
+
+install -m 0644 "$repo/process-management/ablestack_qga_probe.cil" "$target/ablestack_qga_probe.cil"

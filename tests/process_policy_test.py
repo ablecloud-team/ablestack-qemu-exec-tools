@@ -72,6 +72,13 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'ROLLBACK_REQUIRED'):
                     p.apply({config: b'repaired'})
 
+    def test_rocky_braced_environment_reference(self):
+        from unittest.mock import mock_open
+        unit = 'EnvironmentFile=/etc/sysconfig/qemu-ga\nExecStart=/usr/bin/qemu-ga ${FILTER_RPC_ARGS}'
+        with patch.object(p, 'run', return_value=unit), patch.object(p, 'regular'), patch.object(Path, 'read_text', return_value='FILTER_RPC_ARGS="--block-rpcs=guest-exec"\n'):
+            changes = p.plan(['--block-rpcs=guest-exec'], None)
+            self.assertIn(Path('/etc/sysconfig/qemu-ga'), changes)
+
     def test_custom_execstart_is_not_overwritten(self):
         with patch.object(p, 'run', return_value='[Service]\nExecStart=/usr/bin/qemu-ga --allow-rpcs=guest-ping\n'):
             with self.assertRaisesRegex(RuntimeError, 'administrator review'):

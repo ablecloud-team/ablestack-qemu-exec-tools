@@ -35,7 +35,21 @@ install -d -m 0755 "$TARGET"
 [[ ! -L "$TARGET/process_policy.py" ]] || fail 'Symlinked policy helper'
 install -m 0755 "$HELPER" "$TARGET/process_policy.py"
 install -d -m 0700 /var/lib/qemu-ga/ablestack-process-probe
-if command -v restorecon >/dev/null; then
-    restorecon -R /var/lib/qemu-ga/ablestack-process-probe "$TARGET"
+if command -v getenforce >/dev/null && [[ "$(getenforce)" != Disabled ]]; then
+    for tool in semodule semanage restorecon; do
+        command -v "$tool" >/dev/null || fail "OFFLINE_PREREQUISITE_MISSING: $tool"
+    done
+    policy="$SOURCE/ablestack_qga_probe.cil"
+    [[ -f "$policy" ]] || fail 'SELinux probe policy missing'
+    semodule -i "$policy" || fail 'SELinux probe policy installation failed'
+    pattern='/var/lib/qemu-ga/ablestack-process-probe(/.*)?'
+    # Existing administrator mapping must agree; never overwrite a conflicting one.
+    mapping=$(semanage fcontext -l -C | awk -v p="$pattern" '$1 == p {print $NF}')
+    if [[ -z "$mapping" ]]; then
+        semanage fcontext -a -t ablestack_qga_probe_t "$pattern" || fail 'SELinux probe mapping failed'
+    elif [[ "$mapping" != *:ablestack_qga_probe_t:* ]]; then
+        fail 'Conflicting administrator SELinux mapping'
+    fi
+    restorecon -R /var/lib/qemu-ga/ablestack-process-probe || fail 'SELinux probe labeling failed'
 fi
 exec python3 "$TARGET/process_policy.py" --policy process-management --apply --json
