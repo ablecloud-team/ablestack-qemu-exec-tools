@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import stat
 import time
 import uuid
 
@@ -30,7 +31,8 @@ class Verifier:
         environment = dict(os.environ, LC_ALL='C')
         result = subprocess.run(['virsh', '-c', 'qemu:///system', *args],
                                 capture_output=True, text=True, timeout=budget, env=environment)
-        if result.returncode or len(result.stdout) > 1048576: raise RuntimeError('Host RPC failed')
+        if result.returncode: raise RuntimeError('Host RPC failed: ' + result.stderr.strip()[:180])
+        if len(result.stdout) > 1048576: raise RuntimeError('Host response exceeded size limit')
         return result.stdout
 
     def rpc(self, command, arguments=None):
@@ -105,9 +107,10 @@ def main():
             if directory.is_symlink() or directory.stat().st_uid != 0 or directory.stat().st_mode & 0o077:
                 raise RuntimeError('Unsafe host operation directory')
         path = locks / (verifier.vm + '.lock')
-        lock = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        lock = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if os.fstat(lock).st_uid != 0 or os.fstat(lock).st_mode & 0o077:
+        metadata = os.fstat(lock)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != 0 or metadata.st_mode & 0o022:
             raise RuntimeError('Unsafe VM operation lock')
         lease = root / verifier.vm
         if lease.is_symlink() or (lease.exists() and any(lease.iterdir())): raise RuntimeError('VM operation lease is active or unresolved')
