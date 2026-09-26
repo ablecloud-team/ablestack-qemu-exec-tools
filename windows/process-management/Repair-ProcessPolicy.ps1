@@ -61,6 +61,7 @@ try {
 finally {
     if ($lock) {
         try { $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $root 'last-result.json') -Encoding UTF8 }
+        catch { $result.status='CHECK_FAILED'; $result.error='Unable to persist policy result'; $code=4 }
         finally { $lock.Dispose() }
     }
 }

@@ -2,6 +2,7 @@
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'ProcessPolicy.psm1') -Force
 $count=0
+if ((Get-RpcSet 'guest-shutdown,guest-exec') -cne (Get-RpcSet 'guest-exec,guest-shutdown')) { throw 'QGA reordered filter mismatch' }
 function Assert($Condition,[string]$Message) { if (-not $Condition) { throw $Message }; $script:count++ }
 $base='"C:\Program Files\Qemu-ga\qemu-ga.exe" -d --retry-path'
 Assert ((Repair-QgaCommand $base) -ceq $base) 'Default policy changed'

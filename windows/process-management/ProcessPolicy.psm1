@@ -60,6 +60,12 @@ function Invoke-QgaDump([string]$Binary, [string[]]$Tokens) {
     } finally { $process.Dispose() }
 }
 
+function Get-RpcSet([string]$Value) {
+    $items=@($Value -split ',' | Where-Object { $_ })
+    foreach ($item in $items) { if ($item -cnotmatch '^guest-[a-z0-9-]+$') { throw 'Unsupported effective RPC filter' } }
+    (@($items | Sort-Object -Unique) -join ',')
+}
+
 function Get-QgaPolicy {
     $services=@(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match 'qemu-ga\.exe' })
     if ($services.Count -ne 1) { throw 'Exactly one installed QGA service is required' }
@@ -90,7 +96,7 @@ function Get-QgaPolicy {
     foreach ($kind in @('allow','block')) {
         $filter=@($parsed.Tokens | Where-Object { $_.StartsWith("--$kind-rpcs=") })
         $expected=if ($filter.Count) { $filter[0].Split('=',2)[1] } else { '' }
-        if ($values["$kind-rpcs"] -cne $expected) { throw 'QGA effective filter has an unsupported configuration source' }
+        if ((Get-RpcSet $values["$kind-rpcs"]) -cne (Get-RpcSet $expected)) { throw 'QGA effective filter has an unsupported configuration source' }
     }
     [pscustomobject]@{Name=$svc.Name; Key=$key; Before=$raw; After=(Repair-QgaCommand $raw); ProcessId=$svc.ProcessId; Binary=$parsed.Binary}
 }
@@ -116,6 +122,8 @@ function Assert-IndependentSession([int]$QgaPid) {
         if ($ancestor -eq $QgaPid) { throw 'Use an independent administrator session to restart QGA' }
         $process=Get-CimInstance Win32_Process -Filter "ProcessId=$ancestor"
         if (-not $process) { return }
+        $parent=Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)"
+        if (-not $parent -or $parent.CreationDate -gt $process.CreationDate) { return }
         $ancestor=$process.ParentProcessId
     }
     if ($ancestor -gt 0) { throw 'Unable to establish independent process ancestry' }

@@ -20,6 +20,10 @@ try {
     if ($services.Count -gt 1) { throw 'Multiple QGA services require administrator review' }
     if ($services.Count -eq 0 -and -not $InstallQga) { throw 'QGA_MISSING: explicit -InstallQga required for offline installation' }
     if ($InstallQga) {
+        if ($services.Count -eq 1) {
+            Import-Module (Join-Path $PSScriptRoot 'ProcessPolicy.psm1') -Force
+            Assert-IndependentSession $services[0].ProcessId
+        }
         $msi=Join-Path $PSScriptRoot 'qemu-ga-x86_64.msi'
         $p=Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart REBOOT=ReallySuppress" -Wait -PassThru -WindowStyle Hidden
         if ($p.ExitCode -eq 3010) { $result.status='REBOOT_REQUIRED'; $result.rebootRequired=$true; $result | ConvertTo-Json -Compress; exit 3010 }
