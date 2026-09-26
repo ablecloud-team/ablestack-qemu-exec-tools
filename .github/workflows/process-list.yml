@@ -1,0 +1,65 @@
+name: Process list adapters
+on:
+  push:
+    branches: [codex/issue-63-process-list]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: dhslove/ablestack-cloud
+          ref: 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf
+          path: cloud-contract
+          sparse-checkout: docs/design/vm-process-contract
+      - run: |
+          python3 -m pip install -r cloud-contract/docs/design/vm-process-contract/requirements.txt
+          python3 tests/vm_exec_test.py
+          sudo python3 tests/process_policy_test.py
+          sudo python3 tests/process_list_test.py
+          python3 tests/vm_exec_contract_test.py --contract-dir cloud-contract/docs/design/vm-process-contract
+          bash -n process-management/install-linux.sh scripts/stage-process-repair.sh
+          mkdir -p build
+          tar czf build/process-list-source.tgz bin/vm_exec.sh lib/vm_exec.py lib/process_list_host.py lib/process process-management scripts/stage-process-repair.sh
+          sha256sum build/process-list-source.tgz > build/SHA256SUMS
+          git rev-parse HEAD > build/SOURCE_COMMIT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-list-source
+          path: build/
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: dhslove/ablestack-cloud
+          ref: 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf
+          path: cloud-contract
+          sparse-checkout: docs/design/vm-process-contract
+      - name: Windows PowerShell native identity and shared service mapping
+        shell: powershell
+        run: tests/process_list_windows_test.ps1
+      - run: |
+          python -m pip install -r cloud-contract/docs/design/vm-process-contract/requirements.txt
+          python cloud-contract/docs/design/vm-process-contract/verify.py --file build/windows-snapshot.json
+      - name: Build collector MSI
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.6
+          if ($LASTEXITCODE) { throw 'WiX install failed' }
+          New-Item -ItemType Directory -Force build/payload | Out-Null
+          Copy-Item windows/process-management/*.ps1,windows/process-management/*.psm1 build/payload
+          Copy-Item lib/process/ProcessList.ps1 build/payload
+          git rev-parse HEAD | Set-Content build/payload/SOURCE_COMMIT -Encoding ascii
+          wix build windows/process-management/ProcessTools.wxs -arch x64 -d "Payload=$PWD/build/payload" -o build/ABLESTACK-ProcessTools.msi
+          if ($LASTEXITCODE) { throw 'WiX build failed' }
+          Get-FileHash build/ABLESTACK-ProcessTools.msi | Format-List | Out-File build/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-list-windows
+          path: build/

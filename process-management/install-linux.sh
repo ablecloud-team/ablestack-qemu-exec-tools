@@ -27,7 +27,7 @@ fi
 [[ -f "$HELPER" ]] || fail 'Policy payload missing'
 TARGET=/usr/libexec/ablestack-qemu-exec-tools/agent_policy
 # Refuse symlinked administrator destinations instead of replacing their targets.
-for directory in /usr/libexec/ablestack-qemu-exec-tools "$TARGET" /var/lib/qemu-ga /var/lib/qemu-ga/ablestack-process-probe; do
+for directory in /usr/libexec/ablestack-qemu-exec-tools "$TARGET" /usr/libexec/ablestack-qemu-exec-tools/process /var/lib/qemu-ga /var/lib/qemu-ga/ablestack-process-probe; do
     [[ ! -L "$directory" ]] || fail 'Symlinked installation directory'
     [[ ! -e "$directory" || -d "$directory" ]] || fail 'Invalid installation directory'
 done
@@ -52,4 +52,10 @@ if command -v getenforce >/dev/null && [[ "$(getenforce)" != Disabled ]]; then
     fi
     restorecon -R /var/lib/qemu-ga/ablestack-process-probe || fail 'SELinux probe labeling failed'
 fi
+collector="$SOURCE/process_list_linux.py"
+[[ -f "$collector" ]] || collector="$SOURCE/../lib/process/process_list_linux.py"
+[[ -f "$collector" ]] || fail 'Linux process collector missing'
+install -d -m 0755 /usr/libexec/ablestack-qemu-exec-tools/process
+[[ ! -L /usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py ]] || fail 'Symlinked collector'
+install -m 0644 "$collector" /usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py
 exec python3 "$TARGET/process_policy.py" --policy process-management --apply --json

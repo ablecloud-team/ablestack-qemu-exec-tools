@@ -9,3 +9,5 @@ install -m 0755 "$repo/lib/agent_policy/process_policy.py" "$target/process_poli
 install -m 0755 "$repo/bin/vm_process_verify.py" "$target/vm_process_verify.py"
 
 install -m 0644 "$repo/process-management/ablestack_qga_probe.cil" "$target/ablestack_qga_probe.cil"
+
+install -m 0644 "$repo/lib/process/process_list_linux.py" "$target/process_list_linux.py"
