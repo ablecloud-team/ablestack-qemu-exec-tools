@@ -40,6 +40,7 @@ Linux process repair ISO staging에 `process_list_linux.py`를 포함하고 설�
 Windows native GetProcessTimes/owner SID 보조 DLL은 GitHub Actions에서 .NET Framework csc로 미리 빌드한다. 조회 시 C# 컴파일을 수행하지 않는다. 호스트가 PS1(LF 정규화)과 DLL SHA256을 각각 검사한다.
 Windows MSI는 `C:\Program Files\ABLESTACK Process Tools\ProcessList.ps1`를 배치한다.
 호스트 lib 디렉터리의 collector와 게스트 collector가 일치해야 실행한다.
+Windows 도구 MSI 설치는 REINSTALLMODE=amus로 패키지 소유 파일을 갱신한다. QGA vendor MSI에는 이 옵션을 적용하지 않는다.
 프로세스 수집을 위해 SELinux/AppArmor 정책을 넓히거나 QGA allowlist를 덮어쓰지 않는다.
 
 ## 검증

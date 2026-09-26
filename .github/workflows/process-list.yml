@@ -29,8 +29,8 @@ jobs:
           python3 tests/vm_exec_contract_test.py --contract-dir cloud-contract/docs/design/vm-process-contract
           bash -n process-management/install-linux.sh scripts/stage-process-repair.sh
           mkdir -p build
-          tar czf build/process-list-source.tgz bin/vm_exec.sh lib/vm_exec.py lib/process_list_host.py lib/process process-management scripts/stage-process-repair.sh
-          sha256sum build/process-list-source.tgz > build/SHA256SUMS
+          tar --exclude=__pycache__ -czf build/process-list-source.tgz bin/vm_exec.sh lib/vm_exec.py lib/process_list_host.py lib/process process-management scripts/stage-process-repair.sh
+          (cd build && sha256sum process-list-source.tgz > SHA256SUMS)
           git rev-parse HEAD > build/SOURCE_COMMIT
       - uses: actions/upload-artifact@v4
         with:

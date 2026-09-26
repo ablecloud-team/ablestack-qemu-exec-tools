@@ -34,7 +34,7 @@ try {
     }
     if ($Mode -eq 'Apply') {
         $msi=Join-Path $PSScriptRoot 'ABLESTACK-ProcessTools.msi'
-        $p=Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart REBOOT=ReallySuppress" -Wait -PassThru -WindowStyle Hidden
+        $p=Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart REBOOT=ReallySuppress REINSTALLMODE=amus" -Wait -PassThru -WindowStyle Hidden
         if ($p.ExitCode -eq 3010) { $result.status='REBOOT_REQUIRED'; $result.rebootRequired=$true; $result | ConvertTo-Json -Compress; exit 3010 }
         if ($p.ExitCode -ne 0) { throw "Process Tools MSI installation failed: $($p.ExitCode)" }
     }
