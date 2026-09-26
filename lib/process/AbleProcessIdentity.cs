@@ -1,8 +1,31 @@
 // Copyright 2026 ABLECLOUD. Apache-2.0.
 using System;
+using System.Text;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 public static class AbleProcessIdentity {
+public static string JsonString(string value) {
+ var b=new StringBuilder("\"");
+ foreach(char c in value) {
+  switch(c) {
+   case '"': b.Append("\\\""); break;
+   case '\\': b.Append("\\\\"); break;
+   case '\b': b.Append("\\b"); break;
+   case '\f': b.Append("\\f"); break;
+   case '\n': b.Append("\\n"); break;
+   case '\r': b.Append("\\r"); break;
+   case '\t': b.Append("\\t"); break;
+   default: if(c<32) b.Append("\\u"+((int)c).ToString("x4")); else b.Append(c); break;
+  }
+ }
+ return b.Append('"').ToString();
+}
+public static string CanonicalService(string account,bool canStart,bool canStop,string command,string[] requires) {
+ Array.Sort(requires,StringComparer.Ordinal);
+ var dependencies=new List<string>(); foreach(string value in requires) dependencies.Add(JsonString(value));
+ return "{\"account\":"+JsonString(account)+",\"canStart\":"+(canStart?"true":"false")+",\"canStop\":"+(canStop?"true":"false")+",\"command\":"+JsonString(command)+",\"requires\":["+String.Join(",",dependencies)+"],\"wants\":[]}";
+}
 private static System.Threading.Timer watchdog;
 public static void StartDeadline(int ms) { watchdog=new System.Threading.Timer(_=>Environment.Exit(3),null,Math.Max(1,ms),System.Threading.Timeout.Infinite); }
 public static void StopDeadline() { if(watchdog!=null) watchdog.Dispose(); }

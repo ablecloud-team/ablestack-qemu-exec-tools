@@ -2,6 +2,10 @@
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 New-Item -ItemType Directory -Force "$root/build" | Out-Null
+Add-Type -Path "$root/lib/process/AbleProcessIdentity.dll"
+$canonical=[AbleProcessIdentity]::CanonicalService("a'b",$true,$false,('x'+[char]960),[string[]]@('z','A'))
+$expected='{"account":"a''b","canStart":true,"canStop":false,"command":"x'+[char]960+'","requires":["A","z"],"wants":[]}'
+if($canonical -cne $expected){throw 'Noncanonical service configuration JSON'}
 $request=@{schemaVersion='1.0';kind='readRequest';requestId=[guid]::NewGuid().ToString();authority=@{vmUuid=[guid]::NewGuid().ToString();hostUuid=[guid]::NewGuid().ToString();placementGeneration='1'};operation='process.list';operationId=$null;budgetMs=10000}
 $b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Compress)))
 # Separate child scope: collector watchdog and native handles cannot affect test runner.

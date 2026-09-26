@@ -23,9 +23,9 @@ try {
             if($svc.ProcessId -le 0){continue}
             # Ordered keys match Unicode code-point sorting. Never expose the command itself.
             $dependencies=@((Get-Service -Name $svc.Name).ServicesDependedOn | ForEach-Object {$_.Name} | Sort-Object)
-            $config=[ordered]@{account=[string]$svc.StartName;canStart=($svc.StartMode -ne 'Disabled');canStop=[bool]$svc.AcceptStop;command=[string]$svc.PathName;requires=$dependencies;wants=@()}
+            $config=[AbleProcessIdentity]::CanonicalService([string]$svc.StartName,($svc.StartMode -ne 'Disabled'),[bool]$svc.AcceptStop,[string]$svc.PathName,[string[]]$dependencies)
             $sha=[Security.Cryptography.SHA256]::Create()
-            try {$digest=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($config | ConvertTo-Json -Depth 5 -Compress))))).Replace('-','').ToLowerInvariant()}
+            try {$digest=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($config)))).Replace('-','').ToLowerInvariant()}
             finally {$sha.Dispose()}
             $key=[string]$svc.ProcessId
             if(-not $services.ContainsKey($key)){$services[$key]=New-Object 'System.Collections.Generic.List[object]'}
