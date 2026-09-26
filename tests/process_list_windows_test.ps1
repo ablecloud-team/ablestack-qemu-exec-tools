@@ -9,8 +9,14 @@ if($canonical -cne $expected){throw 'Noncanonical service configuration JSON'}
 $request=@{schemaVersion='1.0';kind='readRequest';requestId=[guid]::NewGuid().ToString();authority=@{vmUuid=[guid]::NewGuid().ToString();hostUuid=[guid]::NewGuid().ToString();placementGeneration='1'};operation='process.list';operationId=$null;budgetMs=10000}
 $b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Compress)))
 # Separate child scope: collector watchdog and native handles cannot affect test runner.
-$wire=& powershell.exe -NoProfile -NonInteractive -File "$root/lib/process/ProcessList.ps1" -RequestBase64 $b64
-if($LASTEXITCODE){throw "Collector exit $LASTEXITCODE"}
+for($attempt=0;$attempt -lt 2;$attempt++){
+ $wire=& powershell.exe -NoProfile -NonInteractive -File "$root/lib/process/ProcessList.ps1" -RequestBase64 $b64
+ # Cold WMI/module loading can exhaust the fixed observation budget. Retry
+ # only after this local child is confirmed exited; never retry UNKNOWN QGA.
+ if($LASTEXITCODE -eq 3 -and $attempt -eq 0){Write-Host 'Cold observation budget exhausted; child exit confirmed; testing a new read';continue}
+ if($LASTEXITCODE){throw "Collector exit $LASTEXITCODE"}
+ break
+}
 [IO.File]::WriteAllText("$root/build/windows-snapshot.json",($wire -join "`n"),(New-Object Text.UTF8Encoding($false)))
 $snapshot=$wire|ConvertFrom-Json
 if($snapshot.kind -ne 'snapshot' -or $snapshot.processes.Count -lt 5){throw 'Missing process snapshot'}

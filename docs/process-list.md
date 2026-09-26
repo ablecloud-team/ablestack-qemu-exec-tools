@@ -48,6 +48,7 @@ Windows 도구 MSI 설치는 REINSTALLMODE=amus로 패키지 소유 파일을 �
 `tests/process_list_test.py`: PID 재사용, Unicode, 종료/권한 거부, 서비스 조회 실패,
 서비스 hash 안정성, 대량/출력 상한, 잘못된 VM/중복 identity, 명령문·action 유출 거부.
 `tests/process_list_windows_test.ps1`: 독립 부모 PID의 native startTicks와 SCM 매핑을 대조한다.
+Windows CI는 cold WMI 초기화로 예산이 끝나면 자식 exit=3 확인 후 새 조회를 한 번만 검증한다. UNKNOWN QGA 실행을 자동 재시도하지 않는다.
 GitHub Actions `process-list.yml`에서 선행 테스트와 C1 fixture, Windows 실제 수집/스키마,
 소스 아카이브와 Windows MSI 빌드를 수행한다. 전체 Cloud 빌드는 수행하지 않는다.
 
