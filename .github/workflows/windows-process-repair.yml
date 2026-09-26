@@ -32,7 +32,7 @@ jobs:
           $payload=Join-Path $PWD 'build/windows-process-payload'
           New-Item -ItemType Directory -Force $payload | Out-Null
           Copy-Item windows/process-management/*.ps1,windows/process-management/*.psm1 $payload
-          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /out:lib/process/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.cs
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /out:.\lib\process\AbleProcessIdentity.dll .\lib\process\AbleProcessIdentity.cs
           if ($LASTEXITCODE) { throw 'Native helper build failed' }
           Copy-Item lib/process/ProcessList.ps1,lib/process/AbleProcessIdentity.dll $payload
           git rev-parse HEAD | Set-Content "$payload/SOURCE_COMMIT" -Encoding ascii

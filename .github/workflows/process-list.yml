@@ -49,7 +49,7 @@ jobs:
       - name: Build native process identity helper
         shell: powershell
         run: |
-          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /out:lib/process/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.cs
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /out:.\lib\process\AbleProcessIdentity.dll .\lib\process\AbleProcessIdentity.cs
           if($LASTEXITCODE){throw 'Native helper build failed'}
       - uses: actions/upload-artifact@v4
         with:
