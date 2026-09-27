@@ -1,0 +1,30 @@
+name: Confined Linux process reader
+on:
+  push:
+    branches: [codex/issue-63-rocky-read-policy]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build fixed static entrypoint
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools genisoimage
+          mkdir -p build
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
+          file build/process-read-launcher
+          test "$(build/process-read-launcher --bad 2>/dev/null; echo $?)" = 2
+          sudo python3 tests/process_list_test.py
+          python3 tests/vm_exec_test.py
+          sudo python3 tests/process_policy_test.py
+          cp process-management/ablestack_process_read.cil build/
+          git rev-parse HEAD > build/SOURCE_COMMIT
+          (cd build && sha256sum process-read-launcher ablestack_process_read.cil > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: confined-process-reader
+          path: build/
