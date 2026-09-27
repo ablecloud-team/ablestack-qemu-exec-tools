@@ -17,7 +17,7 @@ $fixture=Join-Path $root 'build/AbleProcessQ5Fixture.exe'
 $p=Start-Process -FilePath $fixture -PassThru -WindowStyle Hidden
 try{
  Start-Sleep -Milliseconds 100
- $r=Request $p;$bad=Request $p;$bad.identity.startTicks='1'
+ $r=Request $p;$r.observedAt='2000-01-01T00:00:00Z';$bad=Request $p;$bad.identity.startTicks='1'
  $denied=Invoke-Action $bad;if($denied.error.code -ne 'STALE_IDENTITY' -or $p.HasExited){throw 'stale identity accepted'}
  $result=Invoke-Action $r;if($result.state -ne 'SUCCEEDED' -or $result.postcondition -ne 'TARGET_EXITED'){throw ($result|ConvertTo-Json -Depth 10)}
  $p.WaitForExit();$again=Invoke-Action $r;if($again.state -ne 'SUCCEEDED' -or $again.completedAt -ne $result.completedAt){throw 'duplicate replay'}

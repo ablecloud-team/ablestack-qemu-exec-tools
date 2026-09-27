@@ -234,9 +234,8 @@ def run(r,root=ROOT):
             return reconcile(old,persist)
         if any(x['result']['requestId']==r['requestId'] for x in records.values()):return failure(r,'REQUEST_CONFLICT')
         if len(records)>=4096 or any(x['result']['state'] in ('ACCEPTED','RUNNING','UNKNOWN') for x in records.values()):return failure(r,'BUSY')
-        observed=dt.datetime.fromisoformat(r['observedAt'].replace('Z','+00:00'))
-        age=(dt.datetime.now(dt.timezone.utc)-observed).total_seconds()
-        if not 0<=age<=10:return failure(r,'STALE_SNAPSHOT')
+        # Snapshot freshness is checked by Cloud monotonic time and the host
+        # reservation. Guest and host wall clocks are not a shared clock.
         record={'digest':digest,'stage':'reserved','result':result(r)};records[r['operationId']]=record;persist()
         try:action(r,record,persist,time.monotonic()+r['budgetMs']/1000)
         except (Rejected,OSError,ValueError,TimeoutError,subprocess.SubprocessError) as error:

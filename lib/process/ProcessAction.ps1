@@ -80,8 +80,8 @@ function Main {
         if($old){if($old.digest -cne $digest -or $old.result.requestId -cne $r.requestId){return Failure 'REQUEST_CONFLICT'};return Reconcile $old}
         foreach($entry in $records.Values){if($entry.result.requestId -ceq $r.requestId){return Failure 'REQUEST_CONFLICT'}}
         if($records.Count -ge 4096 -or @($records.Values | Where-Object {$_.result.state -in @('ACCEPTED','RUNNING','UNKNOWN')}).Count -gt 0){return Failure 'BUSY'}
-        $age=([DateTime]::UtcNow-[DateTime]::Parse($r.observedAt).ToUniversalTime()).TotalSeconds
-        if($age -lt 0 -or $age -gt 10){return Failure 'STALE_SNAPSHOT'}
+        # Cloud snapshot monotonic TTL and host reservation enforce freshness.
+        # Do not compare the host observation timestamp with a guest wall clock.
         $value=@{schemaVersion='1.0';kind='actionResult';requestId=$r.requestId;authority=$r.authority;operationId=$r.operationId;action=$r.action;identity=$r.identity;service=$r.service;state='ACCEPTED';effect='NOT_STARTED';submittedAt=(Utc);completedAt=$null;guestExecPid=$null;guestExitCode=$null;postcondition='NOT_CHECKED';error=$null}
         $record=@{digest=$digest;stage='reserved';result=$value};$records[$r.operationId]=$record;Persist
         $target=$null

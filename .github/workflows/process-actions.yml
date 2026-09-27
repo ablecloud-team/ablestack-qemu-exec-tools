@@ -1,7 +1,7 @@
 name: Process action adapters
 on:
   push:
-    branches: [codex/issue-64-process-actions]
+    branches: [codex/issue-64-process-actions, codex/issue-1175-action-clock-fix]
   workflow_dispatch:
 permissions:
   contents: read

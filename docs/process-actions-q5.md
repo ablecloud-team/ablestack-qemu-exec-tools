@@ -49,3 +49,7 @@ Windows MSI 1.1.0에 실행 스크립트와 DLL을 포함한다. journal은 MSI 
 Rocky 최초 재시작 시 EL10 system:stop 거부로 UNKNOWN이 남았다. 실패 journal은 /root/q64-actions/first-test-journal.original.json에 보존하고 해당 시험 fixture의 상태만 분리한 뒤 수정 정책으로 재검증했다. 운영용 UNKNOWN 자동 해제 기능으로 처리한 것이 아니다.
 
 Windows 게스트 시각과 호스트 시각의 차이를 관측했다. C5는 snapshot 수신 시점의 monotonic freshness를 함께 보장해야 하며 guest observedAt을 host wall clock과 직접 비교해 안전성을 추론하면 안 된다.
+
+## C5 시계 경계 보완
+
+Cloud/호스트가 snapshot observedAt을 정규화하므로 guest wall clock과 비교해서는 안 된다. C5는 snapshot cache의 monotonic TTL과 전송 직전 배치 재검사를 수행하고, 호스트는 root Agent reservation의 monotonic deadline을 검증한다. guest adapter는 observedAt 형식과 멱등 digest를 보존하지만 guest wall clock으로 재판정하지 않는다. 시계가 다른 Windows VM의 실제 Cloud API 검증에서 발견한 STALE_SNAPSHOT 오거부를 해소한다. PID/boot/시작 신원 검사는 그대로 유지한다.

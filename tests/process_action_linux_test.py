@@ -52,8 +52,8 @@ class Actions(unittest.TestCase):
  def test_symlink_journal_denied(self):
   (self.root/'journal.json').symlink_to('/etc/passwd')
   with self.assertRaises(OSError):a.run(self.request(self.child()),self.root)
- def test_stale_snapshot(self):
-  r=self.request(self.child());r['observedAt']='2000-01-01T00:00:00Z';self.assertEqual(a.run(r,self.root)['error']['code'],'STALE_SNAPSHOT')
+ def test_guest_clock_is_not_snapshot_authority(self):
+  r=self.request(self.child());r['observedAt']='2000-01-01T00:00:00Z';self.assertEqual(a.run(r,self.root)['state'],'SUCCEEDED')
  def test_strict_input(self):
   with self.assertRaises(ValueError):a.strict('{"a":1,"a":2}')
   r=self.request(self.child());r['identity']['startTicks']=123
