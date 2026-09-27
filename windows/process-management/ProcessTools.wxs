@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2026 ABLECLOUD. Apache-2.0. Files only; no Cloudbase-init or reboot tasks. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="ABLESTACK Process Tools" Manufacturer="ABLECLOUD" Version="1.0.0" Scope="perMachine" UpgradeCode="B1FA73B7-38D9-4D35-9088-9D191CC8AB67">
+  <Package Name="ABLESTACK Process Tools" Manufacturer="ABLECLOUD" Version="1.1.0" Scope="perMachine" UpgradeCode="B1FA73B7-38D9-4D35-9088-9D191CC8AB67">
     <MediaTemplate EmbedCab="yes" />
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer Process Tools package is installed." />
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -10,11 +10,13 @@
         <Component Id="PolicyEntry" Guid="*"><File Source="$(var.Payload)\Repair-ProcessPolicy.ps1" KeyPath="yes" /></Component>
         <Component Id="ProcessCollector" Guid="*"><File Source="$(var.Payload)\ProcessList.ps1" KeyPath="yes" /></Component>
         <Component Id="NativeIdentity" Guid="*"><File Source="$(var.Payload)\AbleProcessIdentity.dll" KeyPath="yes" /></Component>
+        <Component Id="ProcessAction" Guid="*"><File Source="$(var.Payload)\ProcessAction.ps1" KeyPath="yes" /></Component>
+        <Component Id="NativeAction" Guid="*"><File Source="$(var.Payload)\AbleProcessAction.dll" KeyPath="yes" /></Component>
         <Component Id="BuildIdentity" Guid="*"><File Source="$(var.Payload)\SOURCE_COMMIT" KeyPath="yes" /></Component>
       </Directory>
     </StandardDirectory>
     <Feature Id="ProcessPolicy" Title="QGA process policy repair" Level="1">
-      <ComponentRef Id="PolicyModule" /><ComponentRef Id="PolicyEntry" /><ComponentRef Id="BuildIdentity" /><ComponentRef Id="ProcessCollector" /><ComponentRef Id="NativeIdentity" />
+      <ComponentRef Id="PolicyModule" /><ComponentRef Id="PolicyEntry" /><ComponentRef Id="BuildIdentity" /><ComponentRef Id="ProcessCollector" /><ComponentRef Id="NativeIdentity" /><ComponentRef Id="ProcessAction" /><ComponentRef Id="NativeAction" />
     </Feature>
   </Package>
 </Wix>

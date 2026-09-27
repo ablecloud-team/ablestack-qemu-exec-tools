@@ -31,8 +31,9 @@ with tempfile.TemporaryDirectory() as directory:
             assert run.returncode == 0, (case["name"], run.stderr)
             result = json.loads(run.stdout)
             contract.validate(result)
-            assert result["error"]["code"] == ("HOST_TOOL_MISSING" if case["valid"] else "UNSUPPORTED_VERSION")
+            expected = "UNSUPPORTED_VERSION" if not case["valid"] else ("PERMISSION_DENIED" if request["kind"] == "actionRequest" or request.get("operation") == "operation.get" else "HOST_TOOL_MISSING")
+            assert result["error"]["code"] == expected, (case["name"], result)
         else:
             assert run.returncode == 2, (case["name"], run.stdout, run.stderr)
         count += 1
-print("PASS: %d C1 request fixtures; responses conform; Q4/Q5 remain disabled" % count)
+print("PASS: %d C1 request fixtures; responses conform; unreserved actions remain disabled" % count)

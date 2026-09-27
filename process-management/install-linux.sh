@@ -69,4 +69,7 @@ else
     install -m 0755 "$SOURCE/process-read-launcher" /usr/libexec/ablestack-qemu-exec-tools/process/process-read-launcher
     install -m 0644 "$collector" /usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py
 fi
+if [[ -f "$SOURCE/install-actions-linux.sh" ]]; then
+    bash "$SOURCE/install-actions-linux.sh"
+fi
 exec python3 "$TARGET/process_policy.py" --policy process-management --apply --json

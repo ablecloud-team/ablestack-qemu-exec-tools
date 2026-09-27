@@ -350,6 +350,10 @@ def canonical_uuid(value):
 
 def process_protocol(args):
     cloud_guard = None
+    action_context = None
+    if len(args) == 8 and args[4] == "--cloud-action-context" and args[6:] == ["--cloud-action-guard-fd", "9"]:
+        action_context = args[5]
+        args = args[:4]
     if len(args) == 6 and args[4:] == ["--cloud-read-guard-fd", "9"]:
         cloud_guard = 9
         args = args[:4]
@@ -431,6 +435,10 @@ def process_protocol(args):
     if args[1] == '1.0' and request.get('schemaVersion') == '1.0' and kind == 'readRequest' and request['operation'] == 'process.list':
         import process_list_host
         print(dumps(process_list_host.run(request, sys.modules[__name__], cloud_guard)))
+        return 0
+    if args[1] == '1.0' and request.get('schemaVersion') == '1.0' and (kind == 'actionRequest' or request.get('operation') == 'operation.get'):
+        import process_action_host
+        print(dumps(process_action_host.run(request, sys.modules[__name__], action_context)))
         return 0
     code = "UNSUPPORTED_VERSION" if args[1] != "1.0" or request.get("schemaVersion") != "1.0" else "HOST_TOOL_MISSING"
     print(dumps({"schemaVersion": "1.0", "kind": "failure", "requestId": request["requestId"],
