@@ -94,7 +94,7 @@ def expired(deadline):
     if time.monotonic()>=deadline:raise TimeoutError('deadline')
 def props(unit,deadline):
     expired(deadline)
-    names='Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf'
+    names='Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf,Transient'
     # Output is bounded while reading, without temporary files or unbounded communicate().
     import selectors
     p=subprocess.Popen(['/usr/bin/systemctl','show','--no-pager','--property='+names,'--',unit],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},start_new_session=True)
@@ -122,6 +122,7 @@ def service_check(r,deadline):
     if UNIT_DENY.match(unit):raise Rejected('PROTECTED_TARGET')
     p=props(unit,deadline)
     if p.get('Id')!=unit or p.get('MainPID')!=str(r['identity']['pid']) or config_hash(p)!=r['service']['configurationHash']:raise Rejected('STALE_IDENTITY')
+    if p.get('Transient')=='yes':raise Rejected('UNSUPPORTED_ACTION')
     if p.get('Type') not in ('simple','exec','forking','notify') or p.get('ActiveState')!='active' or p.get('CanStart')!='yes' or p.get('CanStop')!='yes' or not p.get('InvocationID'):raise Rejected('UNSUPPORTED_ACTION')
     # Conservative: dependencies requiring this service or automatic triggers can
     # restart/stop other workloads. Do not infer an impact boundary.

@@ -58,6 +58,22 @@ class Actions(unittest.TestCase):
   with self.assertRaises(ValueError):a.strict('{"a":1,"a":2}')
   r=self.request(self.child());r['identity']['startTicks']=123
   with self.assertRaises(ValueError):a.validate(r)
+ def test_lost_response_reopen_journal_does_not_dispatch(self):
+  p=self.child();r=self.request(p);a.run(r,self.root)
+  reopened=importlib.util.module_from_spec(spec);spec.loader.exec_module(reopened)
+  with patch.object(reopened.signal,'pidfd_send_signal',side_effect=AssertionError('replayed')):self.assertEqual(reopened.run(r,self.root)['state'],'SUCCEEDED')
+ def test_reboot_cannot_reconcile_unknown(self):
+  p=self.child(True);r=self.request(p,'process.terminate',100);self.assertEqual(a.run(r,self.root)['state'],'UNKNOWN');p.kill();p.wait()
+  q={k:r[k] for k in ('schemaVersion','requestId','authority','operationId','budgetMs')};q.update(kind='readRequest',operation='operation.get')
+  with patch.object(a,'boot',return_value='linux:'+str(uuid.uuid4())):self.assertEqual(a.run(q,self.root)['state'],'UNKNOWN')
+ def test_query_persists_new_epoch(self):
+  p=self.child();r=self.request(p);a.run(r,self.root)
+  q={k:copy.deepcopy(r[k]) for k in ('schemaVersion','requestId','authority','operationId','budgetMs')};q.update(kind='readRequest',operation='operation.get');q['authority']['placementGeneration']='43';a.run(q,self.root)
+  self.assertEqual(a.run(r,self.root)['error']['code'],'STALE_AUTHORITY')
+ def test_service_transient_rejected_before_control(self):
+  p=self.child();r=self.request(p,'service.restart');r['service']={'manager':'systemd','name':'fixture.service','configurationHash':'0'*64}
+  props={'Id':'fixture.service','MainPID':str(p.pid),'Transient':'yes'}
+  with patch.object(a,'props',return_value=props),patch.object(a,'config_hash',return_value='0'*64):self.assertEqual(a.run(r,self.root)['error']['code'],'UNSUPPORTED_ACTION')
  def test_unknown_operation_is_not_execution_proof(self):
   r=self.request(self.child());q={k:r[k] for k in ('schemaVersion','requestId','authority','operationId','budgetMs')};q.update(kind='readRequest',operation='operation.get');self.assertEqual(a.run(q,self.root)['error']['code'],'NOT_FOUND')
 if __name__=='__main__':unittest.main()

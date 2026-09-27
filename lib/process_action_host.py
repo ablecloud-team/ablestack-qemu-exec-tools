@@ -122,7 +122,7 @@ def run(request,transport,reservation=None):
                 digest=hashlib.sha256((payload/name).read_bytes()).hexdigest()
                 checks+="if((Get-FileHash -LiteralPath (Join-Path $p '"+name+"')).Hash -ne '"+digest+"'){exit 3};"
             script="$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';"+checks+"& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
-            command=['C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
+            command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         if action:
             context(request,reservation)
             fd=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)

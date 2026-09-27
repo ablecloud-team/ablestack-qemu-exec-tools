@@ -11,6 +11,11 @@ class Guards(unittest.TestCase):
  def test_standalone_never_dispatches(self):
   r={'kind':'actionRequest','schemaVersion':'1.0','requestId':'x','authority':{}}
   with patch.object(os,'geteuid',return_value=0):self.assertEqual(host.run(r,None)['error']['code'],'PERMISSION_DENIED')
+ def test_windows_path_has_no_control_characters(self):
+  import ast
+  tree=ast.parse((ROOT/'lib/process_action_host.py').read_text())
+  paths=[n.value for n in ast.walk(tree) if isinstance(n,ast.Constant) and isinstance(n.value,str) and 'powershell.exe' in n.value]
+  self.assertEqual(len(paths),1);self.assertFalse(any(ord(c)<32 for c in paths[0]))
  def test_reservation_symlink_rejected(self):
   with tempfile.TemporaryDirectory() as tmp:
    p=Path(tmp)/'context';p.symlink_to('/etc/passwd')
