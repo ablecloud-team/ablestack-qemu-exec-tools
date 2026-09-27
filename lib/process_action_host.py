@@ -32,6 +32,33 @@ def unknown(request):
     now=dt.datetime.now(dt.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
     return dict(schemaVersion='1.0',kind='actionResult',requestId=request['requestId'],authority=request['authority'],operationId=request['operationId'],action=request['action'],identity=request['identity'],service=request['service'],state='UNKNOWN',effect='MAY_HAVE_RUN',submittedAt=now,completedAt=None,guestExecPid=None,guestExitCode=None,postcondition='NOT_CHECKED',error=dict(code='RESULT_UNKNOWN',message='Action completion unknown; query only',retryMode='READ_ONLY'))
 
+def validate_result(value,request):
+    if not isinstance(value,dict) or value.get('schemaVersion')!='1.0' or value.get('authority',{}).get('vmUuid')!=request['authority']['vmUuid']:raise ValueError('guest identity')
+    if value.get('kind')=='failure':
+        if set(value)!={'schemaVersion','kind','requestId','authority','error'} or value['requestId']!=request['requestId'] or value['authority']!=request['authority']:raise ValueError('failure identity')
+        error=value['error']
+        if set(error)!={'code','message','retryMode'} or error['code'] not in ('PERMISSION_DENIED','STALE_AUTHORITY','REQUEST_CONFLICT','BUSY','STALE_SNAPSHOT','NOT_FOUND','CHECK_FAILED'):raise ValueError('failure')
+        return
+    fields={'schemaVersion','kind','requestId','authority','operationId','action','identity','service','state','effect','submittedAt','completedAt','guestExecPid','guestExitCode','postcondition','error'}
+    if set(value)!=fields or value['kind']!='actionResult' or value['operationId']!=request['operationId']:raise ValueError('action result')
+    if request['kind']=='actionRequest' and any(value[k]!=request[k] for k in ('requestId','authority','action','identity','service')):raise ValueError('request mismatch')
+    state=value['state'];error=value['error']
+    if state=='SUCCEEDED':
+        expected='SERVICE_RESTART_VERIFIED' if value['action']=='service.restart' else 'TARGET_EXITED'
+        if value['effect']!='VERIFIED' or value['postcondition']!=expected or error is not None or value['guestExitCode'] not in (None,0) or value['completedAt'] is None:raise ValueError('unverified success')
+    elif state=='UNKNOWN':
+        if value['effect']!='MAY_HAVE_RUN' or value['postcondition']!='NOT_CHECKED' or value['completedAt'] is not None or not error or error.get('code')!='RESULT_UNKNOWN' or error.get('retryMode')!='READ_ONLY':raise ValueError('unsafe unknown')
+    elif state=='FAILED':
+        if value['effect'] not in ('NOT_STARTED','MAY_HAVE_RUN') or value['postcondition']!='NOT_CHECKED' or value['completedAt'] is None or not error:raise ValueError('failure evidence')
+    else:raise ValueError('unexpected pending reply')
+    i=value['identity']
+    if set(i)!={'vmUuid','bootId','pid','startTicks'} or i['vmUuid']!=request['authority']['vmUuid'] or type(i['pid']) is not int or not 1<=i['pid']<=4294967295 or not isinstance(i['startTicks'],str) or not i['startTicks'].isascii() or not i['startTicks'].isdigit() or len(i['startTicks'])>20:raise ValueError('target identity')
+    for name in ('submittedAt','completedAt'):
+        if value[name] is not None:
+            if not isinstance(value[name],str) or not value[name].endswith('Z'):raise ValueError('timestamp')
+            dt.datetime.fromisoformat(value[name].replace('Z','+00:00'))
+
+
 def run(request,transport,reservation=None):
     if os.geteuid()!=0:return failure(request,'PERMISSION_DENIED','Root execution context required')
     action=request['kind']=='actionRequest'
@@ -95,12 +122,14 @@ def run(request,transport,reservation=None):
             context(request,reservation)
             fd=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
             with os.fdopen(fd,'w') as out:out.write(transport.dumps({'operationId':request['operationId'],'authority':request['authority'],'requestId':request['requestId']}));out.flush();os.fsync(out.fileno())
+            directory=os.open(lease,os.O_RDONLY|os.O_DIRECTORY);os.fsync(directory);os.close(directory)
             dispatched=True
         options={'mode':'-l','timeout':max(.001,deadline-time.monotonic()),'rpc_timeout':3,'max_output':1048576,'headers':None,'out':'','csv':False,'table':False}
         reply=transport.execute(domain,command,options)
         if reply['state']!='SUCCEEDED' or reply['exit_code']!=0 or reply['encoding_loss'] or reply['out_truncated']:return unknown(request) if action else failure(request,'CHECK_FAILED','Journal query unavailable')
         value=transport.strict_json(reply['stdout_raw'])
-        if value.get('schemaVersion')!='1.0' or value.get('authority',{}).get('vmUuid')!=vm:raise ValueError('guest result identity')
+        validate_result(value,request)
+        if host('domuuid',domain)!=vm or host('domstate',domain)!='running':return unknown(request) if action else failure(request,'STALE_AUTHORITY','Domain changed')
         if value.get('kind')=='actionResult':
             if value.get('operationId')!=request['operationId'] or action and any(value.get(k)!=request[k] for k in ('requestId','authority','action','identity','service')):raise ValueError('guest result mismatch')
             if value.get('state') in ('SUCCEEDED','FAILED') and marker.exists():marker.unlink()

@@ -196,11 +196,14 @@ def reconcile(record,persist):
             exited=ticks!=value['identity']['startTicks'] or state in ('Z','X')
         except FileNotFoundError:exited=True
         if exited:success(value);record['stage']='complete'
-    if value['state']=='UNKNOWN' and value['identity']['bootId']==boot() and record.get('newIdentity') and record['stage']=='start-returned':
+    if value['state']=='UNKNOWN' and value['identity']['bootId']==boot() and record['stage']=='start-returned':
         try:
             p=props(value['service']['name'],time.monotonic()+2)
-            new=record['newIdentity']
-            if p.get('ActiveState')=='active' and p.get('InvocationID')==new['invocation'] and p.get('MainPID')==str(new['pid']) and identity(new['pid'])[1]==new['startTicks']:success(value);record['stage']='complete'
+            newpid=int(p.get('MainPID','0'))
+            if newpid>0:
+                _,ticks,_,_=identity(newpid)
+                if p.get('ActiveState')=='active' and p.get('InvocationID') and p['InvocationID']!=record.get('oldInvocation') and (newpid,ticks)!=(value['identity']['pid'],value['identity']['startTicks']) and config_hash(p)==value['service']['configurationHash']:
+                    success(value);record['stage']='complete'
         except (OSError,ValueError,TimeoutError,subprocess.SubprocessError):pass
     persist();return value
 
@@ -219,7 +222,7 @@ def run(r,root=ROOT):
         else:state={'vmUuid':r['authority']['vmUuid'],'generation':'0','records':{}}
         def persist():save(journal,state)
         if state['vmUuid']!=r['authority']['vmUuid'] or int(r['authority']['placementGeneration'])<int(state['generation']):return failure(r,'STALE_AUTHORITY')
-        state['generation']=r['authority']['placementGeneration']
+        state['generation']=r['authority']['placementGeneration'];persist()
         records=state['records'];old=records.get(r['operationId'])
         if r['kind']=='readRequest':
             if old is None:return failure(r,'NOT_FOUND')

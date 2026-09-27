@@ -33,6 +33,7 @@ jobs:
           mkdir -p build
           musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
           musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-action-launcher lib/process/process_action_launcher.c
+          cp build/process-action-launcher lib/process/
           bash scripts/stage-process-repair.sh build/iso
           git rev-parse HEAD > build/iso/SOURCE_COMMIT
           genisoimage -quiet -r -J -V ABLESTACK-PROCESS -o build/ABLESTACK-Tools-process-actions.iso build/iso

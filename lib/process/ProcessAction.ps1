@@ -47,6 +47,15 @@ function Reconcile($record){
             $present=Get-CimInstance Win32_Process -Filter ('ProcessId='+$value.identity.pid) -OperationTimeoutSec 2
             if(-not $present -or ($current -and $current.Start -cne $value.identity.startTicks)){Success $value;$record.stage='complete'}
         }
+        if($value.state -eq 'UNKNOWN' -and $value.identity.bootId -ceq (Boot) -and $record.stage -eq 'start-returned'){
+            try{
+                $info=ServiceInfo $value.service.name
+                $current=[AbleProcessIdentity]::Read([uint32]$info.svc.ProcessId)
+                if($info.svc.State -eq 'Running' -and $current -and $info.hash -ceq $value.service.configurationHash -and ($info.svc.ProcessId -ne $value.identity.pid -or $current.Start -cne $value.identity.startTicks)){
+                    Success $value;$record.stage='complete'
+                }
+            }catch{}
+        }
         Persist
     }
     return $value
@@ -62,7 +71,7 @@ function Main {
         if(Test-Path -LiteralPath $journal){[AbleProcessAction]::CheckPath($journal,$false);if((Get-Item -LiteralPath $journal).Length -gt 16777216){throw 'journal limit'};$script:state=[AbleProcessAction]::Parse([IO.File]::ReadAllText($journal))}
         else{$script:state=@{vmUuid=$r.authority.vmUuid;generation='0';records=@{}}}
         if($state.vmUuid -cne $r.authority.vmUuid -or [decimal]$r.authority.placementGeneration -lt [decimal]$state.generation){return Failure 'STALE_AUTHORITY'}
-        $state.generation=$r.authority.placementGeneration
+        $state.generation=$r.authority.placementGeneration;Persist
         $records=$state.records;$old=$records[$r.operationId]
         if($r.kind -eq 'readRequest'){if(-not $old){return Failure 'NOT_FOUND'};return Reconcile $old}
         $service=$null

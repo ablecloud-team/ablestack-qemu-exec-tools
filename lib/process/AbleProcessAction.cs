@@ -46,6 +46,8 @@ public static class AbleProcessAction {
  public static void CheckPath(string path,bool directory) {
   if((File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0)throw new IOException("Reparse point denied");
   FileSystemSecurity acl=directory?(FileSystemSecurity)Directory.GetAccessControl(path):(FileSystemSecurity)File.GetAccessControl(path);
+  string owner=acl.GetOwner(typeof(SecurityIdentifier)).Value;
+  if(owner!="S-1-5-18" && owner!="S-1-5-32-544")throw new IOException("Unsafe journal owner");
   foreach(FileSystemAccessRule rule in acl.GetAccessRules(true,true,typeof(SecurityIdentifier))) {
    string sid=rule.IdentityReference.Value;
    if(rule.AccessControlType==AccessControlType.Allow && sid!="S-1-5-18" && sid!="S-1-5-32-544" && (rule.FileSystemRights&(FileSystemRights.Write|FileSystemRights.Modify|FileSystemRights.FullControl))!=0)throw new IOException("Unsafe journal ACL");

@@ -43,6 +43,9 @@ def save(path,data,mode=0o600):
     try:
         with os.fdopen(fd,'wb') as out:out.write(data);out.flush();os.fsync(out.fileno())
         os.chmod(name,mode);os.replace(name,path)
+        directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
     finally:
         if os.path.exists(name):os.unlink(name)
 
@@ -99,6 +102,12 @@ def apply(payload):
             for name,(_,label) in FILES.items():
                 if ':'+label+':' not in known.get(mapping(name),''):raise RuntimeError('Managed mapping changed; administrator review required')
                 run('restorecon',str(TARGET/name))
+            journal=Path('/var/lib/ablestack-process-actions')
+            secure(journal,True)
+            if journal.stat().st_mode&0o077:raise RuntimeError('Unsafe action journal directory')
+            pattern=re.escape(str(journal))+'(/.*)?'
+            if ':ablestack_process_action_state_t:' not in known.get(pattern,''):raise RuntimeError('Managed journal mapping changed')
+            run('restorecon','-R',str(journal))
             return 'UNCHANGED'
         restore(old)
     known=local_mappings()
