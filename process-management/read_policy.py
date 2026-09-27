@@ -20,7 +20,7 @@ FILES={'process-read-launcher':(0o755,'ablestack_process_read_exec_t'),
        'process_list_linux.py':(0o644,'ablestack_process_read_data_t')}
 
 def run(*args):
-    result=subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=90)
+    result=subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=90,env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C.UTF-8'})
     if result.returncode: raise RuntimeError('Policy command failed: '+args[0]+' '+result.stderr[:512])
     return result.stdout
 
@@ -32,10 +32,10 @@ def secure(path,directory=False):
         raise RuntimeError('Unsafe administrator path: '+str(path))
     return info
 
-def parents(path):
-    for parent in reversed(path.parents):
+def ensure_directory(path,mode):
+    for parent in reversed((path,*path.parents)):
+        if not parent.exists() and not parent.is_symlink():parent.mkdir(mode=mode if parent==path else 0o755)
         secure(parent,True)
-    secure(path,True)
 
 def save(path,data,mode=0o600):
     if path.exists() or path.is_symlink():secure(path)
@@ -128,9 +128,9 @@ def main():
     parser.add_argument('--payload',type=Path,default=Path(__file__).resolve().parent)
     args=parser.parse_args()
     if os.geteuid()!=0:raise RuntimeError('Root required')
-    ROOT.mkdir(mode=0o700,exist_ok=True);parents(ROOT)
+    ensure_directory(ROOT,0o700)
     if ROOT.stat().st_mode&0o077:raise RuntimeError('Unsafe state directory')
-    TARGET.mkdir(mode=0o755,parents=True,exist_ok=True);parents(TARGET)
+    ensure_directory(TARGET,0o755)
     fd=os.open(ROOT/'install.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
     try:
         secure(ROOT/'install.lock');fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)

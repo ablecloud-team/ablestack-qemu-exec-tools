@@ -52,6 +52,20 @@ class InstallTests(unittest.TestCase):
         self.mappings[p.mapping('process-read-launcher')]='admin_t'
         with self.assertRaisesRegex(RuntimeError,'administrator mapping'):p.apply(self.payload)
         self.assertFalse(self.modules)
+    def test_broader_administrator_mapping_rejected(self):
+        self.mappings[str(self.target)+r'(/.*)?']='admin_t'
+        with self.assertRaisesRegex(RuntimeError,'administrator mapping'):p.apply(self.payload)
+    def test_unsafe_parent_checked_before_creating_child(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);outside=base/'outside';outside.mkdir();link=base/'link';link.symlink_to(outside)
+            # Exercise the path walker with an isolated safe ancestry in this unit test.
+            original=p.secure
+            def secure(path,directory=False):
+                if path==Path('/tmp'):return path.lstat()
+                return original(path,directory)
+            with patch.object(p,'secure',secure),self.assertRaisesRegex(RuntimeError,'Unsafe'):
+                p.ensure_directory(link/'child',0o700)
+            self.assertFalse((outside/'child').exists())
     def test_symlink_rejected(self):
         self.original.unlink();self.original.symlink_to(self.payload/'process_list_linux.py')
         with self.assertRaisesRegex(RuntimeError,'Unsafe'):p.apply(self.payload)

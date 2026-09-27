@@ -38,10 +38,11 @@ jobs:
   policy-compile:
     runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         rocky: ['9', '10']
     steps:
       - uses: actions/checkout@v4
       - name: Compile against distribution policy without loading host policy
         run: |
-          docker run --rm -v "$PWD:/src:ro" rockylinux:${{ matrix.rocky }} bash -c 'dnf -y install selinux-policy-targeted policycoreutils && semodule -N -i /src/process-management/ablestack_process_read.cil'
+          docker run --rm -v "$PWD:/src:ro" rockylinux/rockylinux:${{ matrix.rocky }} bash -c 'dnf -y install selinux-policy-targeted policycoreutils && semodule -N -i /src/process-management/ablestack_process_read.cil'
