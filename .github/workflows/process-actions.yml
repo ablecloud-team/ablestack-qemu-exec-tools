@@ -21,6 +21,10 @@ jobs:
         with:
           name: process-list-native
           path: lib/process
+      - uses: actions/download-artifact@v4
+        with:
+          name: process-list-windows
+          path: build/windows-stage
       - run: |
           python3 -m pip install -r cloud-contract/docs/design/vm-process-contract/requirements.txt
           python3 tests/vm_exec_test.py
@@ -36,6 +40,8 @@ jobs:
           musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-action-launcher lib/process/process_action_launcher.c
           cp build/process-action-launcher lib/process/
           bash scripts/stage-process-repair.sh build/iso
+          mkdir -p build/iso/windows
+          install -m 0644 build/windows-stage/ABLESTACK-ProcessTools.msi build/iso/windows/ABLESTACK-ProcessTools.msi
           git rev-parse HEAD > build/iso/SOURCE_COMMIT
           genisoimage -quiet -r -J -V ABLESTACK-PROCESS -o build/ABLESTACK-Tools-process-actions.iso build/iso
           python3 tests/vm_exec_contract_test.py --contract-dir cloud-contract/docs/design/vm-process-contract

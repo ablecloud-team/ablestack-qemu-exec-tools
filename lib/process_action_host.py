@@ -121,7 +121,7 @@ def run(request,transport,reservation=None):
             for name in ('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll'):
                 digest=hashlib.sha256((payload/name).read_bytes()).hexdigest()
                 checks+="if((Get-FileHash -LiteralPath (Join-Path $p '"+name+"')).Hash -ne '"+digest+"'){exit 3};"
-            script="$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';"+checks+"& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
+            script=r"$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';"+checks+"& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
             command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         if action:
             context(request,reservation)
