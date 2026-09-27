@@ -1,4 +1,4 @@
-"""Standalone, root-only process.list bridge. Cloud parent-guard integration belongs to C4."""
+"""Bounded root-only process.list bridge with standalone or inherited Cloud read guard."""
 # Copyright 2026 ABLECLOUD. Apache-2.0.
 import base64
 import datetime as dt
@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import select
 from pathlib import Path
 import stat
 import time
@@ -61,11 +62,35 @@ def validate_snapshot(result, request):
     if result['totalKnown'] is not None and (type(result['totalKnown']) is not int or result['totalKnown']<len(seen)): raise ValueError('invalid total')
 
 
-def run(request, transport):
-    if os.geteuid()!=0: return failure(request,'HOST_TOOL_MISSING','Root standalone collector required; Cloud C4 integration pending')
+def parent_alive():
+    if not stat.S_ISFIFO(os.fstat(0).st_mode): raise ValueError('Cloud parent pipe required')
+    poller=select.poll(); poller.register(0,select.POLLHUP|select.POLLERR|select.POLLIN)
+    if poller.poll(0): raise ValueError('Cloud parent channel closed or unexpected input')
+
+
+def inherited_guard(fd, path):
+    if fd != 9 or os.geteuid()!=0: raise ValueError('Invalid Cloud guard')
+    parent_alive()
+    info=os.fstat(fd); actual=path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022 or info.st_nlink!=1 or (info.st_dev,info.st_ino)!=(actual.st_dev,actual.st_ino): raise ValueError('Invalid guard descriptor')
+    # A separate open must conflict, while this inherited open-file description
+    # must already own the lock. Environment variables cannot bypass the guard.
+    probe=os.open(path,os.O_RDWR|os.O_NOFOLLOW)
+    try:
+        try: fcntl.flock(probe,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError: pass
+        else: raise ValueError('Parent guard is not held')
+        fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    finally: os.close(probe)
+    return os.dup(fd)
+
+
+def run(request, transport, cloud_guard=None):
+    if os.geteuid()!=0: return failure(request,'HOST_TOOL_MISSING','Root process collector required')
     deadline=time.monotonic()+min(5,request['budgetMs']/1000)
     vm=request['authority']['vmUuid']; lock=None
     def host(*args):
+        if cloud_guard is not None: parent_alive()
         return transport.bounded_process(['virsh','-c','qemu:///system',*args],deadline,65536,lock).decode().strip()
     try:
         root=RUNTIME_ROOT; locks=root/'locks'
@@ -73,7 +98,7 @@ def run(request, transport):
             path.mkdir(mode=0o700,exist_ok=True)
             info=path.lstat()
             if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode&0o077: raise ValueError('unsafe guard directory')
-        lock=os.open(locks/(vm+'.lock'),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+        lock=inherited_guard(cloud_guard,locks/(vm+'.lock')) if cloud_guard is not None else os.open(locks/(vm+'.lock'),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
         info=os.fstat(lock)
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022 or info.st_nlink!=1: raise ValueError('unsafe guard lock')
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -91,6 +116,18 @@ def run(request, transport):
         linux=(family=='rocky' and version in ('9.6','9.7','9.8','10.2')) or (family=='ubuntu' and version in ('22.04','24.04','26.04'))
         windows=family in ('mswindows','windows') and any(v in osinfo.get('pretty-name','') for v in ('2022','2025'))
         if arch not in ('x86_64','x86-64','amd64') or not (linux or windows): return failure(request,'TOOLS_REQUIRED','OS adapter unsupported')
+        if cloud_guard is not None:
+            parent_alive()
+            rates=root/'read-rate';rates.mkdir(mode=0o700,exist_ok=True)
+            info=rates.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode&0o077: raise ValueError('unsafe rate directory')
+            rate=rates/(vm+'.json')
+            if rate.exists():
+                if rate.is_symlink() or not stat.S_ISREG(rate.lstat().st_mode): raise ValueError('unsafe rate file')
+                last=float(rate.read_text())
+                if 0 <= time.monotonic()-last < 5: return failure(request,'BUSY','VM read rate limit')
+            fd=os.open(rate,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o600)
+            with os.fdopen(fd,'w') as handle: handle.write(str(time.monotonic()))
         remaining=deadline-time.monotonic()
         if remaining<0.5: return failure(request,'CHECK_FAILED','Observation budget exhausted')
         guest=dict(request,budgetMs=max(1,min(3000,int((remaining-0.3)*1000))))
@@ -121,6 +158,7 @@ def run(request, transport):
         with os.fdopen(marker_fd,'w') as handle:
             json.dump({'kind':'q4-read-lease','requestId':request['requestId'],'vmUuid':vm,'guestExecPid':None},handle)
             handle.flush();os.fsync(handle.fileno())
+        if cloud_guard is not None: parent_alive()
         result=transport.execute(domain,command,options)
         if result['state']=='UNKNOWN':
             with marker.open('w') as handle:

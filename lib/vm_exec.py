@@ -349,7 +349,10 @@ def canonical_uuid(value):
 
 
 def process_protocol(args):
-    # Only root standalone process.list is enabled; C4 owns Cloud parent guard/admission.
+    cloud_guard = None
+    if len(args) == 6 and args[4:] == ["--cloud-read-guard-fd", "9"]:
+        cloud_guard = 9
+        args = args[:4]
     if len(args) != 4 or args[0] != "--process-protocol" or args[2] != "--request-json":
         raise ValueError("expected --process-protocol VERSION --request-json PRIVATE_FILE")
     fd = os.open(args[3], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -427,7 +430,7 @@ def process_protocol(args):
         raise ValueError("invalid budget")
     if args[1] == '1.0' and request.get('schemaVersion') == '1.0' and kind == 'readRequest' and request['operation'] == 'process.list':
         import process_list_host
-        print(dumps(process_list_host.run(request, sys.modules[__name__])))
+        print(dumps(process_list_host.run(request, sys.modules[__name__], cloud_guard)))
         return 0
     code = "UNSUPPORTED_VERSION" if args[1] != "1.0" or request.get("schemaVersion") != "1.0" else "HOST_TOOL_MISSING"
     print(dumps({"schemaVersion": "1.0", "kind": "failure", "requestId": request["requestId"],
