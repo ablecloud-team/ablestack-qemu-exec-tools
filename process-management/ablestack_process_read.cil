@@ -41,6 +41,8 @@
 (allow ablestack_process_read_t init_t (unix_stream_socket (connectto)))
 (allow ablestack_process_read_t init_t (lnk_file (getattr read)))
 ; systemd still enforces service-class permissions on the caller context.
+; EL9 manager queries use service:status; EL10 uses system:status.
+(allow ablestack_process_read_t init_t (service (status)))
 (optional ablestack_process_read_system_status
   (allow ablestack_process_read_t init_t (system (status))))
 (allow ablestack_process_read_t systemd_unit_file_type (service (status)))
