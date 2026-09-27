@@ -109,12 +109,12 @@ def service_map(deadline):
 
 
 def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
-    boot = 'linux:' + str(uuid.UUID((proc / 'sys/kernel/random/boot_id').read_text().strip()))
+    boot = 'linux:' + str(uuid.UUID((proc / 'sys/kernel/random/boot_id').read_bytes().decode().strip()))
     snapshot = new_snapshot(request, boot)
     deadline = time.monotonic() + min(request['budgetMs'], 3000) / 1000
     owners = {}
     try:
-        for line in Path('/etc/passwd').read_text().splitlines():
+        for line in Path('/etc/passwd').read_bytes().decode().splitlines():
             fields = line.split(':')
             if len(fields) == 7: owners[int(fields[2])] = fields[0]
     except (OSError, ValueError): pass
@@ -130,10 +130,10 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
                 snapshot.update(status='PARTIAL', truncated=True); break
             path = proc / str(pid)
             try:
-                first = stat_record((path / 'stat').read_text(errors='replace'))
+                first = stat_record((path / 'stat').read_bytes().decode(errors='replace'))
                 uid = path.stat().st_uid
                 owner = owners.get(uid, str(uid))[:256]
-                second = stat_record((path / 'stat').read_text(errors='replace'))
+                second = stat_record((path / 'stat').read_bytes().decode(errors='replace'))
                 if first[0] != pid or first[4] != second[4]:
                     snapshot['status'] = 'PARTIAL'; continue
                 mapping = services.get(pid, [])
@@ -146,7 +146,7 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
                 if not fits: break
             except (OSError, ValueError, IndexError): snapshot['status'] = 'PARTIAL'
         if snapshot['status'] == 'OK': snapshot['totalKnown'] = len(snapshot['processes'])
-        if 'linux:' + (proc / 'sys/kernel/random/boot_id').read_text().strip() != boot: raise ValueError('boot changed')
+        if 'linux:' + (proc / 'sys/kernel/random/boot_id').read_bytes().decode().strip() != boot: raise ValueError('boot changed')
     except Deadline:
         snapshot.update(status='PARTIAL', truncated=True, totalKnown=None)
     return snapshot

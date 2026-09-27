@@ -57,5 +57,14 @@ collector="$SOURCE/process_list_linux.py"
 [[ -f "$collector" ]] || fail 'Linux process collector missing'
 install -d -m 0755 /usr/libexec/ablestack-qemu-exec-tools/process
 [[ ! -L /usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py ]] || fail 'Symlinked collector'
-install -m 0644 "$collector" /usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py
+if command -v getenforce >/dev/null && [[ "$(getenforce)" != Disabled ]]; then
+    [[ ! -L "$TARGET/read_policy.py" ]] || fail 'Symlinked collector policy installer'
+    install -m 0755 "$SOURCE/read_policy.py" "$TARGET/read_policy.py"
+    if ! read_result=$(python3 "$TARGET/read_policy.py" --apply --payload "$SOURCE"); then
+        printf '%s\n' "$read_result"
+        exit 4
+    fi
+else
+    install -m 0644 "$collector" /usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py
+fi
 exec python3 "$TARGET/process_policy.py" --policy process-management --apply --json

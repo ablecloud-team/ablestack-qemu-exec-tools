@@ -18,13 +18,30 @@ jobs:
           musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
           file build/process-read-launcher
           test "$(build/process-read-launcher --bad 2>/dev/null; echo $?)" = 2
+          sudo python3 tests/process_read_policy_test.py
           sudo python3 tests/process_list_test.py
           python3 tests/vm_exec_test.py
           sudo python3 tests/process_policy_test.py
           cp process-management/ablestack_process_read.cil build/
+          mkdir -p build/iso
+          bash scripts/stage-process-repair.sh build/iso
+          git rev-parse HEAD > build/iso/SOURCE_COMMIT
+          (cd build/iso && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          genisoimage -quiet -r -J -V ABLESTACK-PROCESS -o build/ABLESTACK-Tools-process-read.iso build/iso
+          tar --exclude=__pycache__ -czf build/process-read-source.tgz lib/process_list_host.py lib/process/process_list_linux.py process-management scripts/stage-process-repair.sh
           git rev-parse HEAD > build/SOURCE_COMMIT
-          (cd build && sha256sum process-read-launcher ablestack_process_read.cil > SHA256SUMS)
+          (cd build && sha256sum process-read-launcher ablestack_process_read.cil ABLESTACK-Tools-process-read.iso process-read-source.tgz > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
           name: confined-process-reader
           path: build/
+  policy-compile:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        rocky: ['9', '10']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile against distribution policy without loading host policy
+        run: |
+          docker run --rm -v "$PWD:/src:ro" rockylinux:${{ matrix.rocky }} bash -c 'dnf -y install selinux-policy-targeted policycoreutils && semodule -N -i /src/process-management/ablestack_process_read.cil'

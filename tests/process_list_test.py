@@ -66,11 +66,11 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(value['status'],'PARTIAL');self.assertIsNone(value['totalKnown']);self.assertEqual(len(value['processes']),1)
     def test_reused_pid_excluded(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path=Path(tmp);self.fixture(path);original=Path.read_text;reads=[]
+            path=Path(tmp);self.fixture(path);original=Path.read_bytes;reads=[]
             def read(p,*a,**kw):
-                if p.name=='stat': reads.append(1);return proc_stat(ticks=str(len(reads)))
+                if p.name=='stat': reads.append(1);return proc_stat(ticks=str(len(reads))).encode()
                 return original(p,*a,**kw)
-            with patch.object(Path,'read_text',read): value=guest.collect(REQUEST,path,{})
+            with patch.object(Path,'read_bytes',read): value=guest.collect(REQUEST,path,{})
             self.assertEqual(value['processes'],[]);self.assertEqual(value['status'],'PARTIAL')
     def test_output_bound_preserves_complete_json(self):
         with tempfile.TemporaryDirectory() as tmp:

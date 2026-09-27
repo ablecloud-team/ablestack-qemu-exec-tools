@@ -37,8 +37,9 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y genisoimage
+          sudo apt-get install -y genisoimage musl-tools
           mkdir -p build/process-repair/iso build/process-repair/artifacts
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
           bash scripts/stage-process-repair.sh build/process-repair/iso
           cp docs/process-management-linux-repair.md build/process-repair/iso/README.md
           cat > build/process-repair/iso/install-linux.sh <<'SH'

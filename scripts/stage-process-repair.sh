@@ -11,3 +11,7 @@ install -m 0755 "$repo/bin/vm_process_verify.py" "$target/vm_process_verify.py"
 install -m 0644 "$repo/process-management/ablestack_qga_probe.cil" "$target/ablestack_qga_probe.cil"
 
 install -m 0644 "$repo/lib/process/process_list_linux.py" "$target/process_list_linux.py"
+
+install -m 0755 "$repo/build/process-read-launcher" "$target/process-read-launcher"
+install -m 0644 "$repo/process-management/ablestack_process_read.cil" "$target/ablestack_process_read.cil"
+install -m 0755 "$repo/process-management/read_policy.py" "$target/read_policy.py"

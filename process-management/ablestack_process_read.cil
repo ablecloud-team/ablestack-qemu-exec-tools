@@ -39,8 +39,11 @@
 (allow ablestack_process_read_t self (unix_stream_socket (create connect read write getattr getopt setopt shutdown)))
 (allow ablestack_process_read_t init_var_run_t (sock_file (write)))
 (allow ablestack_process_read_t init_t (unix_stream_socket (connectto)))
+(allow ablestack_process_read_t init_t (lnk_file (getattr read)))
 ; systemd still enforces service-class permissions on the caller context.
-(allow ablestack_process_read_t service_type (service (status)))
+(optional ablestack_process_read_system_status
+  (allow ablestack_process_read_t init_t (system (status))))
+(allow ablestack_process_read_t systemd_unit_file_type (service (status)))
 (allow ablestack_process_read_t security_t (dir (getattr search)))
 (allow ablestack_process_read_t security_t (file (getattr open read map)))
 (allow ablestack_process_read_t device_t (dir (getattr search)))

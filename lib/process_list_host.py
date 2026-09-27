@@ -98,7 +98,14 @@ def run(request, transport):
         payload=Path(__file__).parent/'process'
         if linux:
             expected=hashlib.sha256((payload/'process_list_linux.py').read_bytes()).hexdigest()
-            script="import hashlib,runpy,sys;p='/usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py';assert hashlib.sha256(open(p,'rb').read()).hexdigest()=='"+expected+"';sys.argv=[p,'--request-base64','"+encoded+"'];runpy.run_path(p,run_name='__main__')"
+            script="import hashlib,runpy,sys,os;p='/usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py';assert hashlib.sha256(open(p,'rb').read()).hexdigest()=='"+expected+"';"
+            if family=='rocky':
+                launcher=payload/'process-read-launcher'
+                if not launcher.is_file():return failure(request,'TOOLS_REQUIRED','Confined collector launcher is not installed on host')
+                launcher_hash=hashlib.sha256(launcher.read_bytes()).hexdigest()
+                script+="x='/usr/libexec/ablestack-qemu-exec-tools/process/process-read-launcher';assert hashlib.sha256(open(x,'rb').read()).hexdigest()=='"+launcher_hash+"';os.execv(x,[x,'--request-base64','"+encoded+"'])"
+            else:
+                script+="sys.argv=[p,'--request-base64','"+encoded+"'];runpy.run_path(p,run_name='__main__')"
             command=['/usr/bin/python3','-I','-c',script]
         else:
             native=hashlib.sha256((payload/'AbleProcessIdentity.dll').read_bytes()).hexdigest()

@@ -930,7 +930,7 @@ jobs:
       - name: Install packaging tools (genisoimage, 7zip)
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y genisoimage p7zip-full python3-pip
+          sudo apt-get install -y genisoimage p7zip-full python3-pip musl-tools
 
       - name: Collect artifacts into structured dirs
         run: |
@@ -1966,6 +1966,8 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG}"
+          mkdir -p build
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
 
           mkdir -p build/iso/rocky build/iso/ubuntu build/iso/windows
           rm -rf build/iso-staging
