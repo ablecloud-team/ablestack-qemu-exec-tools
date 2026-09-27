@@ -80,6 +80,8 @@ def run(request,transport,reservation=None):
         lease=root/vm
         if lease.is_symlink():raise ValueError('unsafe lease')
         lease.mkdir(mode=0o700,exist_ok=True)
+        info=lease.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode&0o077:raise ValueError('unsafe lease')
         marker=lease/('q5-'+request['operationId']+'.json')
         # C5 keeps its own durable reservation outside this directory. Only this
         # operation's unresolved marker may be queried under the exclusive lock.
@@ -91,12 +93,15 @@ def run(request,transport,reservation=None):
         domain=matches[0]
         if host('domuuid',domain)!=vm or host('domstate',domain)!='running':return failure(request,'STALE_AUTHORITY','Domain changed')
         if host('domjobinfo',domain).split()!=['Job','type:','None'] or transport.strict_json(host('qemu-monitor-command',domain,'{"execute":"query-block-jobs"}')).get('return')!=[]:return failure(request,'BUSY','Domain job active or unknown')
-        # Four host action slots. Held through completion and inherited by probes.
+        # Four active host action slots. Unresolved VM markers survive process exit.
         if action:
             capacity=root/'action-slots';os.close(transport.secure_directory(capacity))
             for index in range(4):
                 fd=os.open(capacity/str(index),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
-                try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);slot=fd;break
+                try:
+                    info=os.fstat(fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o077 or info.st_nlink!=1:os.close(fd);raise ValueError('unsafe slot')
+                    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);slot=fd;break
                 except BlockingIOError:os.close(fd)
             if slot is None:return failure(request,'BUSY','Action capacity exhausted')
         with transport.Admission() as admission:osinfo=transport.rpc(domain,{'execute':'guest-get-osinfo'},deadline,3,admission.fd,65536)

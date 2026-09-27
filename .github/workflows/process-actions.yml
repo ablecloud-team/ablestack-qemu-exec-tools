@@ -27,6 +27,7 @@ jobs:
           sudo python3 tests/process_policy_test.py
           sudo python3 tests/process_list_test.py
           sudo python3 tests/process_action_linux_test.py
+          sudo python3 tests/process_action_host_test.py
           sudo python3 tests/process_cloud_guard_test.py
           sudo apt-get update -qq
           sudo apt-get install -y musl-tools genisoimage

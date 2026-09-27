@@ -26,3 +26,23 @@ try{
  try{[AbleProcessAction]::ValidateJson('{"x":1,"x":2}');throw 'duplicate accepted'}catch{if($_.Exception.Message -eq 'duplicate accepted'){throw}}
  Write-Output 'PASS: Windows native identity, kill, durable replay, conflict and strict JSON'
 }finally{if(-not $p.HasExited){$p.Kill()};$p.Dispose()}
+
+$name='AbleProcessQ5Fixture'
+try {
+ New-Service -Name $name -BinaryPathName ('"'+$fixture+'" service') -StartupType Manual | Out-Null
+ Start-Service $name
+ $svc=Get-CimInstance Win32_Service -Filter "Name='$name'"
+ $p=Get-Process -Id $svc.ProcessId
+ $r=Request $p 'service.restart'
+ $controller=Get-Service $name
+ $deps=[string[]]@($controller.ServicesDependedOn|ForEach-Object {$_.Name})
+ $canonical=[AbleProcessIdentity]::CanonicalService([string]$svc.StartName,($svc.StartMode -ne 'Disabled'),[bool]$svc.AcceptStop,[string]$svc.PathName,$deps)
+ $sha=[Security.Cryptography.SHA256]::Create()
+ $hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace('-','').ToLowerInvariant()
+ $r.service=@{manager='scm';name=$name;configurationHash=$hash}
+ $value=Invoke-Action $r
+ $value|ConvertTo-Json -Depth 12 -Compress
+ if($value.state -ne 'SUCCEEDED'){throw 'service restart not verified'}
+ $again=Invoke-Action $r;if($again.completedAt -ne $value.completedAt){throw 'service replay'}
+ Write-Output 'PASS: service restart and durable duplicate'
+}finally{Stop-Service $name -ErrorAction SilentlyContinue; & sc.exe delete $name | Out-Null}
