@@ -35,13 +35,21 @@ public static void StopDeadline() { if(watchdog!=null) watchdog.Dispose(); }
  [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr h,out uint code);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
  [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int cls,IntPtr info,int length,out int needed);
- public sealed class Observation { public string Start; public string Owner; }
+ public sealed class Observation { public string Start; public string Owner; public long Cpu100ns; public long SampleStamp; }
+ public static Observation ReadCpu(uint pid) {
+  IntPtr h=OpenProcess(0x1000,false,pid); if(h==IntPtr.Zero) return null;
+  try {
+   long creation,exit,kernel,user; uint code;
+   if(!GetProcessTimes(h,out creation,out exit,out kernel,out user)||!GetExitCodeProcess(h,out code)||code!=259) return null;
+   return new Observation { Start=creation.ToString(System.Globalization.CultureInfo.InvariantCulture), Cpu100ns=checked(kernel+user), SampleStamp=System.Diagnostics.Stopwatch.GetTimestamp() };
+  } finally { CloseHandle(h); }
+ }
  public static Observation Read(uint pid) {
   IntPtr h=OpenProcess(0x1000,false,pid); if(h==IntPtr.Zero) return null;
   try {
    long creation,exit,kernel,user; uint code;
    if(!GetProcessTimes(h,out creation,out exit,out kernel,out user)||!GetExitCodeProcess(h,out code)||code!=259) return null;
-   var result=new Observation { Start=creation.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+   var result=new Observation { Start=creation.ToString(System.Globalization.CultureInfo.InvariantCulture), Cpu100ns=checked(kernel+user), SampleStamp=System.Diagnostics.Stopwatch.GetTimestamp() };
    IntPtr token;
    if(OpenProcessToken(h,8,out token)) {
     try { int needed; GetTokenInformation(token,1,IntPtr.Zero,0,out needed);

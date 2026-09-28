@@ -5,6 +5,7 @@ import datetime as dt
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import select
@@ -47,7 +48,9 @@ def validate_snapshot(result, request):
         key=identity['pid']
         if key in seen: raise ValueError('duplicate identity')
         seen.add(key)
-        if row['allowedActions'] != [] or row['cpuPercent'] is not None: raise ValueError('unimplemented action/CPU advertised')
+        if row['allowedActions'] != []: raise ValueError('unimplemented action advertised')
+        cpu = row['cpuPercent']
+        if cpu is not None and (type(cpu) not in (int, float) or not math.isfinite(cpu) or cpu < 0): raise ValueError('invalid CPU percent')
         for name in ('name','state'):
             if not isinstance(row[name],str) or not 1<=len(row[name])<=256: raise ValueError('invalid text')
         if row['owner'] is not None and (not isinstance(row['owner'],str) or len(row['owner'])>256): raise ValueError('invalid owner')

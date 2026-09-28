@@ -17,8 +17,9 @@ host=module('host',ROOT/'lib/process_list_host.py')
 REQUEST={'schemaVersion':'1.0','kind':'readRequest','requestId':'33333333-3333-4333-8333-333333333333','authority':{'vmUuid':'11111111-1111-4111-8111-111111111111','hostUuid':'22222222-2222-4222-8222-222222222222','placementGeneration':'3'},'operation':'process.list','operationId':None,'budgetMs':3000}
 BOOT='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
-def proc_stat(pid=42,ticks='9007199254740993',name='worker (한글)'):
+def proc_stat(pid=42,ticks='9007199254740993',name='worker (한글)',cpu_ticks=0):
     fields=['S','1']+['0']*17+[ticks,'0','5']
+    fields[11]=str(cpu_ticks)
     return str(pid)+' ('+name+') '+' '.join(fields)
 
 class CollectorTests(unittest.TestCase):
@@ -56,9 +57,44 @@ class CollectorTests(unittest.TestCase):
             services={42:[{'manager':'systemd','name':'worker.service','configurationHash':'a'*64}]}
             value=guest.collect(REQUEST,path,services)
             self.assertEqual(value['status'],'OK');self.assertEqual(value['totalKnown'],1)
-            row=value['processes'][0];self.assertEqual(row['allowedActions'],[]);self.assertIsNone(row['cpuPercent'])
+            row=value['processes'][0];self.assertEqual(row['allowedActions'],[]);self.assertEqual(row['cpuPercent'],0.0)
             self.assertEqual(row['services'],services[42]);self.assertNotIn('commandLine',row)
             host.validate_snapshot(value,REQUEST)
+    def test_cpu_delta_uses_same_pid_start_and_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp);self.fixture(path);original=Path.read_bytes;reads=[]
+            def read(p,*a,**kw):
+                if p.name=='stat':
+                    reads.append(1)
+                    return proc_stat(cpu_ticks=0 if len(reads)==1 else 20).encode()
+                return original(p,*a,**kw)
+            with patch.object(Path,'read_bytes',read): value=guest.collect(REQUEST,path,{})
+            cpu=value['processes'][0]['cpuPercent']
+            self.assertIsNotNone(cpu);self.assertGreater(cpu,0)
+            host.validate_snapshot(value,REQUEST)
+
+    def test_first_missing_cpu_sample_is_null(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp);self.fixture(path);original=Path.read_bytes;reads=[]
+            def read(p,*a,**kw):
+                if p.name=='stat':
+                    reads.append(1)
+                    if len(reads)==1: raise FileNotFoundError()
+                return original(p,*a,**kw)
+            with patch.object(Path,'read_bytes',read): value=guest.collect(REQUEST,path,{})
+            self.assertIsNone(value['processes'][0]['cpuPercent'])
+            host.validate_snapshot(value,REQUEST)
+
+    def test_host_cpu_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp);self.fixture(path);value=guest.collect(REQUEST,path,{})
+            for cpu in (None,0,0.0,1.25,250.5):
+                good=copy.deepcopy(value);good['processes'][0]['cpuPercent']=cpu
+                host.validate_snapshot(good,REQUEST)
+            for cpu in (True,False,-0.1,float('nan'),float('inf'),'1.25',[],{}):
+                bad=copy.deepcopy(value);bad['processes'][0]['cpuPercent']=cpu
+                with self.assertRaises(ValueError):host.validate_snapshot(bad,REQUEST)
+
     def test_vanished_or_denied_process_is_partial(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp);self.fixture(path);(path/'43').mkdir()

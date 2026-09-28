@@ -25,7 +25,7 @@ def compact(value):
 def stat_record(text):
     start, end = text.index('('), text.rindex(')')
     fields = text[end + 2:].split()
-    return int(text[:start].strip()), text[start + 1:end], fields[0], int(fields[1]), fields[19], max(0, int(fields[21]))
+    return int(text[:start].strip()), text[start + 1:end], fields[0], int(fields[1]), fields[19], max(0, int(fields[21])), int(fields[11]) + int(fields[12])
 
 
 def utc(value):
@@ -119,11 +119,24 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
             if len(fields) == 7: owners[int(fields[2])] = fields[0]
     except (OSError, ValueError): pass
     try:
+        pids = sorted(int(p.name) for p in proc.iterdir() if p.name.isascii() and p.name.isdigit() and int(p.name) > 0)
+        # Sample once before service discovery, then compare only the same PID/start identity.
+        first_cpu = {}
+        for pid in pids:
+            if time.monotonic() >= deadline - 0.15: break
+            try:
+                record = stat_record((proc / str(pid) / 'stat').read_bytes().decode(errors='replace'))
+                if record[0] == pid: first_cpu[pid] = (record[4], record[6], time.monotonic())
+            except (OSError, ValueError, IndexError): pass
         if services is None:
             try: services = service_map(deadline)
             except (OSError, ValueError, Deadline, subprocess.TimeoutExpired):
                 services = {}; snapshot['status'] = 'PARTIAL'
-        pids = sorted(int(p.name) for p in proc.iterdir() if p.name.isascii() and p.name.isdigit() and int(p.name) > 0)
+        # A short interval makes an idle process report zero while preserving the 3s budget.
+        if first_cpu and time.monotonic() < deadline - 0.15:
+            earliest = min(sample[2] for sample in first_cpu.values())
+            time.sleep(min(max(0, 0.1 - (time.monotonic() - earliest)), max(0, deadline - time.monotonic() - 0.15)))
+        clock_ticks = os.sysconf('SC_CLK_TCK')
         size = len(compact(snapshot).encode())
         for pid in pids:
             if time.monotonic() >= deadline:
@@ -136,12 +149,18 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
                 second = stat_record((path / 'stat').read_bytes().decode(errors='replace'))
                 if first[0] != pid or first[4] != second[4]:
                     snapshot['status'] = 'PARTIAL'; continue
+                cpu = None
+                sample = first_cpu.get(pid)
+                if sample and sample[0] == second[4] and second[6] >= sample[1] and clock_ticks > 0:
+                    elapsed = time.monotonic() - sample[2]
+                    if elapsed >= 0.1:
+                        cpu = round((second[6] - sample[1]) * 100.0 / (clock_ticks * elapsed), 2)
                 mapping = services.get(pid, [])
                 if len(mapping) > 128: snapshot['status'] = 'PARTIAL'
                 row = {'identity': {'vmUuid': request['authority']['vmUuid'], 'bootId': boot, 'pid': pid, 'startTicks': first[4]},
                        'ppid': first[3], 'name': first[1][:256] or '?', 'owner': owner, 'state': first[2],
                        'memoryBytes': min(first[5] * os.sysconf('SC_PAGE_SIZE'), 9007199254740991),
-                       'cpuPercent': None, 'services': mapping[:128], 'allowedActions': []}
+                       'cpuPercent': cpu, 'services': mapping[:128], 'allowedActions': []}
                 size, fits = add_row(snapshot, row, size, max_wire)
                 if not fits: break
             except (OSError, ValueError, IndexError): snapshot['status'] = 'PARTIAL'

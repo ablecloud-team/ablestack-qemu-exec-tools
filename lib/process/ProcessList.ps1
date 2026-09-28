@@ -15,6 +15,12 @@ try {
     $now=[DateTime]::UtcNow
     $snapshot=[ordered]@{schemaVersion='1.0';kind='snapshot';requestId=$request.requestId;authority=$request.authority;snapshotId=[guid]::NewGuid().ToString();bootId=$boot;observedAt=$now.ToString('yyyy-MM-ddTHH:mm:ss.fffZ');expiresAt=$now.AddSeconds(10).ToString('yyyy-MM-ddTHH:mm:ss.fffZ');status='OK';truncated=$false;totalKnown=$null;processes=@()}
     $rows=New-Object 'System.Collections.Generic.List[object]'
+    $processes=Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CreationDate,WorkingSetSize -OperationTimeoutSec 1
+    $firstCpu=@{}
+    foreach($item in $processes) {
+        if($watch.ElapsedMilliseconds -ge $budget-150){break}
+        if($item.ProcessId -gt 0){$sample=[AbleProcessIdentity]::ReadCpu([uint32]$item.ProcessId);if($null -ne $sample){$firstCpu[[string]$item.ProcessId]=$sample}}
+    }
     $services=@{}
     try {
         $scm=Get-CimInstance Win32_Service -OperationTimeoutSec 1
@@ -32,7 +38,12 @@ try {
             $services[$key].Add([ordered]@{manager='scm';name=[string]$svc.Name;configurationHash=$digest})
         }
     } catch {$snapshot.status='PARTIAL'}
-    $processes=Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CreationDate,WorkingSetSize -OperationTimeoutSec 1
+    if($firstCpu.Count -gt 0 -and $watch.ElapsedMilliseconds -lt $budget-150){
+        $earliest=($firstCpu.Values | Measure-Object -Property SampleStamp -Minimum).Minimum
+        $elapsedMs=1000.0*([Diagnostics.Stopwatch]::GetTimestamp()-$earliest)/[Diagnostics.Stopwatch]::Frequency
+        $waitMs=[Math]::Min([Math]::Max(0,100-$elapsedMs),[Math]::Max(0,$budget-$watch.ElapsedMilliseconds-150))
+        if($waitMs -ge 1){[Threading.Thread]::Sleep([int]$waitMs)}
+    }
     $size=1024
     foreach($item in ($processes | Sort-Object ProcessId)) {
         if($item.ProcessId -le 0){continue}
@@ -43,10 +54,18 @@ try {
         $cimTicks=$item.CreationDate.ToUniversalTime().ToFileTimeUtc()
         if([decimal]::Floor([decimal]$identity.Start/10) -ne [decimal]::Floor([decimal]$cimTicks/10)){$snapshot.status='PARTIAL';continue}
         $mapped=@();$key=[string]$item.ProcessId
+        $cpu=$null
+        if($firstCpu.ContainsKey($key)) {
+            $sample=$firstCpu[$key]
+            $elapsed=([double]($identity.SampleStamp-$sample.SampleStamp))/[Diagnostics.Stopwatch]::Frequency
+            if($identity.Start -eq $sample.Start -and $identity.Cpu100ns -ge $sample.Cpu100ns -and $elapsed -ge 0.1) {
+                $cpu=[Math]::Round((($identity.Cpu100ns-$sample.Cpu100ns)/10000000.0)/$elapsed*100.0,2)
+            }
+        }
         if($services.ContainsKey($key)){$mapped=@($services[$key].ToArray() | Select-Object -First 128);if($services[$key].Count -gt 128){$snapshot.status='PARTIAL'}}
         if(-not $identity.Owner){$snapshot.status='PARTIAL'}
         $name=[string]$item.Name;if($name.Length -gt 256){$name=$name.Substring(0,256)};if(-not $name){$name='?'}
-        $row=[ordered]@{identity=[ordered]@{vmUuid=$request.authority.vmUuid;bootId=$boot;pid=[long]$item.ProcessId;startTicks=$identity.Start};ppid=[long]$item.ParentProcessId;name=$name;owner=$identity.Owner;state='Running';memoryBytes=[long]$item.WorkingSetSize;cpuPercent=$null;services=$mapped;allowedActions=@()}
+        $row=[ordered]@{identity=[ordered]@{vmUuid=$request.authority.vmUuid;bootId=$boot;pid=[long]$item.ProcessId;startTicks=$identity.Start};ppid=[long]$item.ParentProcessId;name=$name;owner=$identity.Owner;state='Running';memoryBytes=[long]$item.WorkingSetSize;cpuPercent=$cpu;services=$mapped;allowedActions=@()}
         $length=[Text.Encoding]::UTF8.GetByteCount(($row | ConvertTo-Json -Depth 8 -Compress))+1
         if($rows.Count -ge 10000 -or $size+$length -gt 1047552){$snapshot.status='PARTIAL';$snapshot.truncated=$true;break}
         $rows.Add($row);$size+=$length
