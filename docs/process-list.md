@@ -10,7 +10,7 @@ C1 계약: Cloud 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf.
 `readRequest/process.list`만 활성화한다. 임의 명령/추가 요청 키는 거부한다.
 VM UUID에서 도메인 이름을 찾고 UUID를 재확인한다. VM별 flock, 기존 lease,
 libvirt job/block job을 검사한 뒤 고정 경로의 설치 수집기 SHA256을 확인하고 QGA로 실행한다.
-응답의 VM/boot/PID/startTicks와 허용 필드를 다시 확인한다. CPU는 동일 PID/start identity의 최소 250ms 간격의 두 CPU 시간 샘플 차분을 실제 관측 시간으로 나눈 한 코어 100% 기준 값이다. 새 프로세스·관측 부족·카운터 감소는 null이다. allowedActions는 항상 빈 배열이다.
+응답의 VM/boot/PID/startTicks와 허용 필드를 다시 확인한다. CPU는 동일 PID/start identity의 서비스 매핑 이후 최소 250ms 간격의 두 CPU 시간 샘플 차분을 실제 관측 시간으로 나눈 한 코어 100% 기준 값이다. 새 프로세스·관측 부족·카운터 감소는 null이다. allowedActions는 항상 빈 배열이다.
 종료/재시작은 Q5, Cloud 배치 세대 검증·부모 guard FD·공유 admission·API 연결은 C4 범위다.
 현재 hostUuid/placementGeneration은 루트 호출자가 제공한 문맥이다. Cloud의 신뢰 가능한 최신 배치 검증으로 해석하면 안 된다.
 capability READY를 활성화하지 않으며 Q1의 다른 요청은 계속 fail closed다.

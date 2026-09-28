@@ -119,8 +119,12 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
             if len(fields) == 7: owners[int(fields[2])] = fields[0]
     except (OSError, ValueError): pass
     try:
+        if services is None:
+            try: services = service_map(deadline)
+            except (OSError, ValueError, Deadline, subprocess.TimeoutExpired):
+                services = {}; snapshot['status'] = 'PARTIAL'
         pids = sorted(int(p.name) for p in proc.iterdir() if p.name.isascii() and p.name.isdigit() and int(p.name) > 0)
-        # Sample once before service discovery, then compare only the same PID/start identity.
+        # Keep service discovery outside the CPU interval and match PID/start identity.
         first_cpu = {}
         for pid in pids:
             if time.monotonic() >= deadline - 0.3: break
@@ -128,14 +132,10 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
                 record = stat_record((proc / str(pid) / 'stat').read_bytes().decode(errors='replace'))
                 if record[0] == pid: first_cpu[pid] = (record[4], record[6], time.monotonic())
             except (OSError, ValueError, IndexError): pass
-        if services is None:
-            try: services = service_map(deadline)
-            except (OSError, ValueError, Deadline, subprocess.TimeoutExpired):
-                services = {}; snapshot['status'] = 'PARTIAL'
         # A short interval makes an idle process report zero while preserving the 3s budget.
         if first_cpu and time.monotonic() < deadline - 0.3:
             earliest = min(sample[2] for sample in first_cpu.values())
-            time.sleep(min(max(0, 0.25 - (time.monotonic() - earliest)), max(0, deadline - time.monotonic() - 0.3)))
+            time.sleep(min(max(0, 0.5 - (time.monotonic() - earliest)), max(0, deadline - time.monotonic() - 0.3)))
         clock_ticks = os.sysconf('SC_CLK_TCK')
         size = len(compact(snapshot).encode())
         for pid in pids:
