@@ -2081,7 +2081,7 @@ jobs:
             echo 'Windows process payload missing; build/download matching windows-process-repair artifact first' >&2
             exit 2
           fi
-          test "$(cat "$PROCESS_PAYLOAD/SOURCE_COMMIT")" = "$(git rev-parse HEAD)"
+          test "$(tr -d '\r\n' < "$PROCESS_PAYLOAD/SOURCE_COMMIT")" = "$(git rev-parse HEAD)"
           cp -a "$PROCESS_PAYLOAD" build/iso-staging/windows/process-management
 
           mkisofs -o "build/iso/ubuntu/ABLESTACK-Tools-ubuntu-${VERSION}.iso" \

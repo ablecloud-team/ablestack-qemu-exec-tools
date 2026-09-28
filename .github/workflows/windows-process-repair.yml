@@ -37,7 +37,7 @@ jobs:
           & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /reference:System.Web.Extensions.dll /out:.\lib\process\AbleProcessAction.dll .\lib\process\AbleProcessAction.cs
           if ($LASTEXITCODE) { throw 'Native action helper build failed' }
           Copy-Item lib/process/ProcessList.ps1,lib/process/ProcessAction.ps1,lib/process/AbleProcessIdentity.dll,lib/process/AbleProcessAction.dll $payload
-          git rev-parse HEAD | Set-Content "$payload/SOURCE_COMMIT" -Encoding ascii
+          git rev-parse HEAD | Set-Content "$payload/SOURCE_COMMIT" -Encoding ascii -NoNewline
           wix build windows/process-management/ProcessTools.wxs -arch x64 -d "Payload=$payload" -o "$payload/ABLESTACK-ProcessTools.msi"
           if ($LASTEXITCODE) { throw 'MSI build failed' }
           curl.exe --fail --location --retry 3 --output build/virtio-win.iso https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
