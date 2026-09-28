@@ -18,7 +18,7 @@ try {
     $processes=Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CreationDate,WorkingSetSize -OperationTimeoutSec 1
     $firstCpu=@{}
     foreach($item in $processes) {
-        if($watch.ElapsedMilliseconds -ge $budget-150){break}
+        if($watch.ElapsedMilliseconds -ge $budget-300){break}
         if($item.ProcessId -gt 0){$sample=[AbleProcessIdentity]::ReadCpu([uint32]$item.ProcessId);if($null -ne $sample){$firstCpu[[string]$item.ProcessId]=$sample}}
     }
     $services=@{}
@@ -38,10 +38,10 @@ try {
             $services[$key].Add([ordered]@{manager='scm';name=[string]$svc.Name;configurationHash=$digest})
         }
     } catch {$snapshot.status='PARTIAL'}
-    if($firstCpu.Count -gt 0 -and $watch.ElapsedMilliseconds -lt $budget-150){
+    if($firstCpu.Count -gt 0 -and $watch.ElapsedMilliseconds -lt $budget-300){
         $earliest=($firstCpu.Values | Measure-Object -Property SampleStamp -Minimum).Minimum
         $elapsedMs=1000.0*([Diagnostics.Stopwatch]::GetTimestamp()-$earliest)/[Diagnostics.Stopwatch]::Frequency
-        $waitMs=[Math]::Min([Math]::Max(0,100-$elapsedMs),[Math]::Max(0,$budget-$watch.ElapsedMilliseconds-150))
+        $waitMs=[Math]::Min([Math]::Max(0,250-$elapsedMs),[Math]::Max(0,$budget-$watch.ElapsedMilliseconds-150))
         if($waitMs -ge 1){[Threading.Thread]::Sleep([int]$waitMs)}
     }
     $size=1024
@@ -58,7 +58,7 @@ try {
         if($firstCpu.ContainsKey($key)) {
             $sample=$firstCpu[$key]
             $elapsed=([double]($identity.SampleStamp-$sample.SampleStamp))/[Diagnostics.Stopwatch]::Frequency
-            if($identity.Start -eq $sample.Start -and $identity.Cpu100ns -ge $sample.Cpu100ns -and $elapsed -ge 0.1) {
+            if($identity.Start -eq $sample.Start -and $identity.Cpu100ns -ge $sample.Cpu100ns -and $elapsed -ge 0.25) {
                 $cpu=[Math]::Round((($identity.Cpu100ns-$sample.Cpu100ns)/10000000.0)/$elapsed*100.0,2)
             }
         }

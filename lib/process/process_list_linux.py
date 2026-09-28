@@ -123,7 +123,7 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
         # Sample once before service discovery, then compare only the same PID/start identity.
         first_cpu = {}
         for pid in pids:
-            if time.monotonic() >= deadline - 0.15: break
+            if time.monotonic() >= deadline - 0.3: break
             try:
                 record = stat_record((proc / str(pid) / 'stat').read_bytes().decode(errors='replace'))
                 if record[0] == pid: first_cpu[pid] = (record[4], record[6], time.monotonic())
@@ -133,9 +133,9 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
             except (OSError, ValueError, Deadline, subprocess.TimeoutExpired):
                 services = {}; snapshot['status'] = 'PARTIAL'
         # A short interval makes an idle process report zero while preserving the 3s budget.
-        if first_cpu and time.monotonic() < deadline - 0.15:
+        if first_cpu and time.monotonic() < deadline - 0.3:
             earliest = min(sample[2] for sample in first_cpu.values())
-            time.sleep(min(max(0, 0.1 - (time.monotonic() - earliest)), max(0, deadline - time.monotonic() - 0.15)))
+            time.sleep(min(max(0, 0.25 - (time.monotonic() - earliest)), max(0, deadline - time.monotonic() - 0.3)))
         clock_ticks = os.sysconf('SC_CLK_TCK')
         size = len(compact(snapshot).encode())
         for pid in pids:
@@ -153,7 +153,7 @@ def collect(request, proc=Path('/proc'), services=None, max_wire=MAX_WIRE):
                 sample = first_cpu.get(pid)
                 if sample and sample[0] == second[4] and second[6] >= sample[1] and clock_ticks > 0:
                     elapsed = time.monotonic() - sample[2]
-                    if elapsed >= 0.1:
+                    if elapsed >= 0.25:
                         cpu = round((second[6] - sample[1]) * 100.0 / (clock_ticks * elapsed), 2)
                 mapping = services.get(pid, [])
                 if len(mapping) > 128: snapshot['status'] = 'PARTIAL'
