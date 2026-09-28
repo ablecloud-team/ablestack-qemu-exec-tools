@@ -88,7 +88,7 @@ class CollectorTests(unittest.TestCase):
     def test_host_cpu_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp);self.fixture(path);value=guest.collect(REQUEST,path,{})
-            for cpu in (None,0,0.0,1.25,250.5):
+            for cpu in (None,0,0.0,1.25,250.5,10**1000):
                 good=copy.deepcopy(value);good['processes'][0]['cpuPercent']=cpu
                 host.validate_snapshot(good,REQUEST)
             for cpu in (True,False,-0.1,float('nan'),float('inf'),'1.25',[],{}):

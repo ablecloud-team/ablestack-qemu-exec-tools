@@ -50,7 +50,7 @@ def validate_snapshot(result, request):
         seen.add(key)
         if row['allowedActions'] != []: raise ValueError('unimplemented action advertised')
         cpu = row['cpuPercent']
-        if cpu is not None and (type(cpu) not in (int, float) or not math.isfinite(cpu) or cpu < 0): raise ValueError('invalid CPU percent')
+        if cpu is not None and (type(cpu) not in (int, float) or cpu < 0 or (type(cpu) is float and not math.isfinite(cpu))): raise ValueError('invalid CPU percent')
         for name in ('name','state'):
             if not isinstance(row[name],str) or not 1<=len(row[name])<=256: raise ValueError('invalid text')
         if row['owner'] is not None and (not isinstance(row['owner'],str) or len(row['owner'])>256): raise ValueError('invalid owner')
