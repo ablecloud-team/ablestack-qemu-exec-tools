@@ -244,7 +244,7 @@ def run(r,root=ROOT):
             if record['stage']=='reserved':
                 code=(str(error) if isinstance(error,Rejected) else
                       'PERMISSION_DENIED' if isinstance(error,PermissionError) else
-                      'STALE_IDENTITY' if isinstance(error,FileNotFoundError) else 'CHECK_FAILED')
+                      'STALE_IDENTITY' if isinstance(error,(FileNotFoundError,ProcessLookupError)) else 'CHECK_FAILED')
                 failed(record['result'],code)
             else:unknown(record['result'])
             persist()

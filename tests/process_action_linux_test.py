@@ -45,6 +45,9 @@ class Actions(unittest.TestCase):
    value=a.run(r,self.root)
   self.assertEqual(value['error']['code'],'PERMISSION_DENIED')
   self.assertIsNone(p.poll())
+ def test_exited_process_is_stale_identity(self):
+  p=self.child();r=self.request(p);p.terminate();p.wait()
+  self.assertEqual(a.run(r,self.root)['error']['code'],'STALE_IDENTITY')
  def test_stale_ticks_never_signal(self):
   p=self.child();r=self.request(p);r['identity']['startTicks']='1';self.assertEqual(a.run(r,self.root)['error']['code'],'STALE_IDENTITY');self.assertIsNone(p.poll())
  def test_protected_pid_one(self):
