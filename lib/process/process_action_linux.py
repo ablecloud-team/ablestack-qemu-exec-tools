@@ -141,11 +141,13 @@ def target(r):
     fd=os.pidfd_open(pid,0)
     try:
         name,ticks,_,state=identity(pid)
-        executable=Path('/proc',str(pid),'exe').resolve(strict=True).name
+        # /proc/<pid>/exe readlink requires ptrace permission for another
+        # SELinux domain. The confined helper must not gain that broad right.
         arguments=Path('/proc',str(pid),'cmdline').read_bytes().split(b'\0')
+        command=Path(os.fsdecode(arguments[0])).name if arguments and arguments[0] else ''
         if any(Path(os.fsdecode(arg)).name in ('process_list_linux.py','process_action_linux.py','process-read-launcher','process-action-launcher') for arg in arguments if arg):raise Rejected('PROTECTED_TARGET')
         if ticks!=i['startTicks'] or state in ('Z','X'):raise Rejected('STALE_IDENTITY')
-        if name in PROTECTED or executable in PROTECTED or executable.startswith(('systemd-','qemu-ga')):raise Rejected('PROTECTED_TARGET')
+        if name in PROTECTED or command in PROTECTED or name.startswith(('systemd-','qemu-ga')) or command.startswith(('systemd-','qemu-ga')):raise Rejected('PROTECTED_TARGET')
         if select.select([fd],[],[],0)[0]:raise Rejected('STALE_IDENTITY')
         return fd
     except BaseException:os.close(fd);raise
@@ -239,7 +241,11 @@ def run(r,root=ROOT):
         record={'digest':digest,'stage':'reserved','result':result(r)};records[r['operationId']]=record;persist()
         try:action(r,record,persist,time.monotonic()+r['budgetMs']/1000)
         except (Rejected,OSError,ValueError,TimeoutError,subprocess.SubprocessError) as error:
-            if record['stage']=='reserved':failed(record['result'],str(error) if isinstance(error,Rejected) else 'STALE_IDENTITY')
+            if record['stage']=='reserved':
+                code=(str(error) if isinstance(error,Rejected) else
+                      'PERMISSION_DENIED' if isinstance(error,PermissionError) else
+                      'STALE_IDENTITY' if isinstance(error,FileNotFoundError) else 'CHECK_FAILED')
+                failed(record['result'],code)
             else:unknown(record['result'])
             persist()
         return record['result']

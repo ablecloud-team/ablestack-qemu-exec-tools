@@ -27,6 +27,24 @@ class Actions(unittest.TestCase):
   with patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('replayed')):self.assertEqual(a.run(r,self.root),first)
  def test_normal_term(self):
   p=self.child();self.assertEqual(a.run(self.request(p,'process.terminate'),self.root)['postcondition'],'TARGET_EXITED')
+ def test_proc_exe_readlink_is_not_required(self):
+  p=self.child();r=self.request(p)
+  with patch.object(a.Path,'resolve',side_effect=PermissionError('ptrace denied')):
+   self.assertEqual(a.run(r,self.root)['state'],'SUCCEEDED')
+ def test_protected_process_name_still_blocks_signal(self):
+  p=self.child();r=self.request(p);original=a.identity
+  def protected(pid):
+   value=original(pid)
+   return ('qemu-ga',*value[1:]) if pid==p.pid else value
+  with patch.object(a,'identity',side_effect=protected):
+   self.assertEqual(a.run(r,self.root)['error']['code'],'PROTECTED_TARGET')
+  self.assertIsNone(p.poll())
+ def test_pre_dispatch_access_denial_is_not_stale_identity(self):
+  p=self.child();r=self.request(p)
+  with patch.object(a,'identity',side_effect=PermissionError('proc denied')):
+   value=a.run(r,self.root)
+  self.assertEqual(value['error']['code'],'PERMISSION_DENIED')
+  self.assertIsNone(p.poll())
  def test_stale_ticks_never_signal(self):
   p=self.child();r=self.request(p);r['identity']['startTicks']='1';self.assertEqual(a.run(r,self.root)['error']['code'],'STALE_IDENTITY');self.assertIsNone(p.poll())
  def test_protected_pid_one(self):
