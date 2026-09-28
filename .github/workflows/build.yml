@@ -888,6 +888,7 @@ jobs:
         needs['build-rpm'].result == 'success' &&
         needs['build-hangctl-rpm'].result == 'success' &&
         needs['build-ftctl-rpm'].result == 'success' &&
+        needs['build-process-tools'].result == 'success' &&
         needs['build-deb'].result == 'success' &&
         needs['build-windows'].result == 'success' &&
         needs['build-v2k-rpm'].result == 'success' &&
@@ -1968,6 +1969,7 @@ jobs:
           VERSION="${RELEASE_TAG}"
           mkdir -p build
           musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-action-launcher lib/process/process_action_launcher.c
 
           mkdir -p build/iso/rocky build/iso/ubuntu build/iso/windows
           rm -rf build/iso-staging
@@ -2037,6 +2039,25 @@ jobs:
               -r -J "${rocky_staging}"
           done
 
+          # Rocky 10.2 guest support is a process-only repair media. Its host
+          # package repository is intentionally not taken from Rocky 9.
+          rocky10_staging="build/iso-staging/rocky10.2"
+          mkdir -p "$rocky10_staging"
+          bash scripts/stage-process-repair.sh "$rocky10_staging"
+          cp docs/process-management-linux-repair.md "$rocky10_staging/README.md"
+          cat > "$rocky10_staging/install-linux.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" != --mode || "${2:-}" != process-management ]]; then
+            echo 'Usage: bash install-linux.sh --mode process-management' >&2
+            exit 2
+          fi
+          exec bash "$(cd "$(dirname "$0")" && pwd -P)/process-management/install-linux.sh"
+          SH
+          chmod 0755 "$rocky10_staging/install-linux.sh"
+          mkisofs -o "build/iso/rocky/ABLESTACK-Tools-rocky10.2-${VERSION}.iso" \
+            -V "ABLESTACK-Rocky102" -r -J "$rocky10_staging"
+
           mkdir -p build/iso-staging/ubuntu/deb build/iso-staging/ubuntu/completions
           cp -a release/deb/. build/iso-staging/ubuntu/deb/
           if [[ -d release/completions ]]; then
@@ -2072,6 +2093,19 @@ jobs:
             -r -J build/iso-staging/windows
 
           find build/iso -type f -name '*.iso' -ls
+
+      - name: Record and verify process artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p process_artifact_manifest_test.py -v
+          python3 scripts/process_artifact_manifest.py \
+            --root build/iso --source-commit "$(git rev-parse HEAD)" \
+            --workflow-run-id "$GITHUB_RUN_ID" --version "$RELEASE_TAG" --packages-root release
+          (cd build/iso && sha256sum -c SHA256SUMS)
+          for iso in build/iso/rocky/*.iso build/iso/ubuntu/*.iso build/iso/windows/*.iso; do
+            isoinfo -i "$iso" -R -f | grep -q '/process-management/install-linux.sh\|/process-management/install.ps1'
+          done
 
       - name: Upload release build validation artifacts
         if: ${{ env.RELEASE_PUBLISH != 'true' }}
