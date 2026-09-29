@@ -3,6 +3,20 @@
 param([ValidateSet('Check','Apply','Restore')][string]$Mode='Apply',[string]$BackupId,[switch]$InstallQga,[switch]$InstallDrivers)
 $ErrorActionPreference='Stop'
 $result=[ordered]@{schemaVersion=1;profile='process-management';status='CHECK_FAILED';featureReady=$false;hostVerificationRequired=$true;rebootRequired=$false}
+function Test-InstalledMsi([string]$Path) {
+    $installer=New-Object -ComObject WindowsInstaller.Installer
+    $database=$installer.OpenDatabase($Path,0)
+    $view=$database.OpenView('SELECT * FROM Property')
+    $productCode=$null
+    try {
+        $view.Execute()
+        while ($record=$view.Fetch()) {
+            if ($record.StringData(1) -eq 'ProductCode') { $productCode=$record.StringData(2); break }
+        }
+    } finally { $view.Close() }
+    if (-not $productCode) { throw "MSI product identity missing: $Path" }
+    return ($installer.ProductState($productCode) -eq 5)
+}
 try {
     $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this installer from an elevated administrator session' }
@@ -27,22 +41,26 @@ try {
     if ($services.Count -eq 0 -and -not $InstallQga) { throw 'QGA_MISSING: explicit -InstallQga required for offline installation' }
     if ($InstallDrivers) {
         $msi=Join-Path $PSScriptRoot 'virtio-win-gt-x64.msi'
-        $p=Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart ADDLOCAL=ALL REBOOT=ReallySuppress" -Wait -PassThru -WindowStyle Hidden
-        if ($p.ExitCode -eq 3010) { $result.status='REBOOT_REQUIRED'; $result.rebootRequired=$true; $result | ConvertTo-Json -Compress; exit 3010 }
-        if ($p.ExitCode -ne 0) { throw "VirtIO driver MSI installation failed: $($p.ExitCode)" }
+        if (-not (Test-InstalledMsi $msi)) {
+            $p=Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart ADDLOCAL=ALL REBOOT=ReallySuppress" -Wait -PassThru -WindowStyle Hidden
+            if ($p.ExitCode -eq 3010) { $result.status='REBOOT_REQUIRED'; $result.rebootRequired=$true; $result | ConvertTo-Json -Compress; exit 3010 }
+            if ($p.ExitCode -ne 0) { throw "VirtIO driver MSI installation failed: $($p.ExitCode)" }
+        }
     }
     if ($InstallQga) {
         if ($services.Count -eq 1) {
             Import-Module (Join-Path $PSScriptRoot 'ProcessPolicy.psm1') -Force
             Assert-IndependentSession $services[0].ProcessId
         }
-        $msi=Join-Path $PSScriptRoot 'qemu-ga-x86_64.msi'
-        $p=Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart REBOOT=ReallySuppress" -Wait -PassThru -WindowStyle Hidden
-        if ($p.ExitCode -eq 3010) { $result.status='REBOOT_REQUIRED'; $result.rebootRequired=$true; $result | ConvertTo-Json -Compress; exit 3010 }
-        if ($p.ExitCode -ne 0) { throw "QGA MSI installation failed: $($p.ExitCode)" }
+        if ($services.Count -eq 0) {
+            $msi=Join-Path $PSScriptRoot 'qemu-ga-x86_64.msi'
+            $p=Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart REBOOT=ReallySuppress" -Wait -PassThru -WindowStyle Hidden
+            if ($p.ExitCode -eq 3010) { $result.status='REBOOT_REQUIRED'; $result.rebootRequired=$true; $result | ConvertTo-Json -Compress; exit 3010 }
+            if ($p.ExitCode -ne 0) { throw "QGA MSI installation failed: $($p.ExitCode)" }
+        }
         $svc=@(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match 'qemu-ga\.exe' })
         if ($svc.Count -ne 1) { throw 'QGA service absent after installation' }
-        Start-Service $svc[0].Name
+        if ($svc[0].State -ne 'Running') { Start-Service $svc[0].Name }
     }
     if ($Mode -eq 'Apply') {
         $msi=Join-Path $PSScriptRoot 'ABLESTACK-ProcessTools.msi'
