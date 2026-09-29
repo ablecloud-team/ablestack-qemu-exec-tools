@@ -146,6 +146,7 @@ jobs:
       - name: Stage matching Windows process adapters
         run: |
           set -euo pipefail
+          git config --global --add safe.directory "$PWD"
           test "$(tr -d '\r\n' < process-payload/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
           cmp lib/process/ProcessList.ps1 process-payload/ProcessList.ps1
           cmp lib/process/ProcessAction.ps1 process-payload/ProcessAction.ps1
