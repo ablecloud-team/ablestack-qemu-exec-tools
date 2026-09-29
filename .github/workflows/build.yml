@@ -95,6 +95,9 @@ jobs:
       image: rockylinux/rockylinux:9
       options: --user 0
     steps:
+      - name: Install Git for source checkout
+        run: dnf -y install git
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -104,15 +107,6 @@ jobs:
         with:
           name: windows-process-payload
           path: process-payload
-
-      - name: Stage matching Windows process adapters
-        run: |
-          set -euo pipefail
-          test "$(tr -d '\r\n' < process-payload/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
-          cmp lib/process/ProcessList.ps1 process-payload/ProcessList.ps1
-          cmp lib/process/ProcessAction.ps1 process-payload/ProcessAction.ps1
-          install -m 0644 process-payload/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.dll
-          install -m 0644 process-payload/AbleProcessAction.dll lib/process/AbleProcessAction.dll
 
       - name: Install build deps (Rocky ${{ matrix.host_os_minor }})
         run: |
@@ -148,6 +142,15 @@ jobs:
           dnf clean all
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" makecache
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install make rpm-build tar git dnf-plugins-core createrepo_c gcc cpio
+
+      - name: Stage matching Windows process adapters
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < process-payload/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          cmp lib/process/ProcessList.ps1 process-payload/ProcessList.ps1
+          cmp lib/process/ProcessAction.ps1 process-payload/ProcessAction.ps1
+          install -m 0644 process-payload/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.dll
+          install -m 0644 process-payload/AbleProcessAction.dll lib/process/AbleProcessAction.dll
 
       - name: Build Linux process launchers
         run: |
