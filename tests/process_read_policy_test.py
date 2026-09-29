@@ -74,6 +74,24 @@ class InstallTests(unittest.TestCase):
         p.apply(self.payload);(self.payload/'process_list_linux.py').write_bytes(b'updated')
         p.apply(self.payload);self.assertEqual(self.original.read_bytes(),b'updated')
         p.restore(self.state_data());self.assertEqual(self.original.read_bytes(),b'original')
+    def test_upgrade_accepts_only_exact_staged_payload(self):
+        p.apply(self.payload)
+        (self.payload/'process_list_linux.py').write_bytes(b'updated')
+        self.original.write_bytes(b'updated')
+        self.assertEqual(p.apply(self.payload),'INSTALLED')
+        self.assertEqual(self.original.read_bytes(),b'updated')
+        p.restore(self.state_data())
+        self.assertEqual(self.original.read_bytes(),b'original')
+
+    def test_upgrade_still_rejects_unrelated_administrator_edit(self):
+        p.apply(self.payload)
+        (self.payload/'process_list_linux.py').write_bytes(b'updated')
+        self.original.write_bytes(b'custom-admin-edit')
+        with self.assertRaisesRegex(RuntimeError,'administrator edit'):
+            p.apply(self.payload)
+        self.assertEqual(self.original.read_bytes(),b'custom-admin-edit')
+        self.assertIn(p.MODULE,self.modules)
+
     def test_pending_install_can_restore_original_bytes(self):
         p.apply(self.payload);state=self.state_data();state['phase']='installing';self.original.write_bytes(b'original')
         p.restore(state);self.assertEqual(self.original.read_bytes(),b'original')

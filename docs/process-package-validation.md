@@ -21,4 +21,6 @@ Cloud #1173 / Qemu #65. 산출물은 GitHub Actions의 `build.yml`에서 생성�
 4. 게스트 콘솔에서 오프라인 설치/복구를 실행한다. QGA 실행이 막힌 경우 QGA 자체 guest-exec로 설치하지 않는다. 재부팅 요청을 따르고 Cloud에서 RPC 8개, 프로세스 목록, 종료·서비스 재시작을 각각 재검증한다.
 5. 실패 시 게스트 Linux는 `agent_policy_fix --policy process-management --restore BACKUP_ID` 또는 설치 도구의 백업/복구 안내를 따른다. Windows는 `Repair-ProcessPolicy.ps1 -Mode Restore -BackupId ...`를 관리자 셸에서 사용한다. 호스트 패키지는 설치 전 보관한 버전으로 되돌리고 서비스 상태를 재확인한다.
 
+Linux 복구 정책은 이전 설치 상태와 다른 관리자 파일을 기본적으로 보존한다. 다만 업그레이드 시 현재 파일이 새 ISO payload와 바이트 단위로 완전히 일치하면 해당 파일만 신뢰하고 기존 복구 지점을 거쳐 새 버전을 적용한다. 다른 관리자 수정은 계속 거부하며, 수동 `--restore`에는 이 예외를 적용하지 않는다.
+
 `manifest.json`은 산출물 추적 자료이며 단독으로 실환경 PASS를 의미하지 않는다. 지원 매트릭스의 실제 PASS/FAIL은 Actions 결과와 각 VM의 설치·RPC·프로세스 작업 증거를 함께 기록한다.

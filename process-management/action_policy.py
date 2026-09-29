@@ -58,7 +58,7 @@ def modules():return {line.split()[0] for line in run('semodule','-l').splitline
 
 def write_state(state):save(ROOT/'state.json',json.dumps(state,sort_keys=True).encode())
 
-def restore(state):
+def restore(state, trusted_current=None):
     if set(state.get('files',{}))!=set(FILES):raise RuntimeError('Invalid recovery state')
     # Never overwrite edits made after installation. Pending operations also
     # permit the original bytes, since an interrupted install may be partial.
@@ -68,6 +68,9 @@ def restore(state):
             secure(p)
             allowed={entry['installedHash']}
             if state['phase']!='installed' and entry['original'] is not None:allowed.add(digest(base64.b64decode(entry['original'])))
+            # An interrupted or manually staged upgrade may already contain the
+            # exact trusted payload. Arbitrary administrator edits stay protected.
+            if trusted_current is not None:allowed.add(digest(trusted_current[name]))
             if digest(p.read_bytes()) not in allowed:raise RuntimeError('Newer administrator edit: '+name)
     state['phase']='restoring';write_state(state)
     known=local_mappings()
@@ -109,7 +112,7 @@ def apply(payload):
             if ':ablestack_process_action_state_t:' not in known.get(pattern,''):raise RuntimeError('Managed journal mapping changed')
             run('restorecon','-R',str(journal))
             return 'UNCHANGED'
-        restore(old)
+        restore(old, inputs)
     known=local_mappings()
     if MODULE in modules() and not state_path.exists() and not (ROOT/(MODULE+'.cil')).exists():raise RuntimeError('Existing unmanaged policy module')
     if any(re.fullmatch(pattern,str(TARGET/n)) for pattern in known for n in FILES):raise RuntimeError('Existing administrator mapping')
