@@ -48,13 +48,25 @@ if [[ "$family" == rocky ]]; then
     fi
     if (( ${#packages[@]} )); then
         [[ -f "$repo/repodata/repomd.xml" ]] || fail 'Offline RPM repository metadata missing'
+        key_file="/etc/pki/rpm-gpg/RPM-GPG-KEY-Rocky-$version"
+        [[ -r "$key_file" ]] || fail 'Rocky signing key missing'
+        command -v gpg >/dev/null || fail 'Rocky signing key verification requires gpg'
+        case $version in
+            8) key_fingerprint=7051C470A929F454CEBE37B715AF5DAC6D745A60 ;;
+            9) key_fingerprint=21CB256AE16FC54C6E652949702D426D350D275D ;;
+            10) key_fingerprint=FC226859C0860BF0DDB95B085B106C736FEDFC85 ;;
+        esac
+        actual_fingerprint=$(gpg --quiet --batch --show-keys --with-colons "$key_file" 2>/dev/null | awk -F: '$1 == "fpr" { print toupper($10); exit }')
+        [[ $actual_fingerprint == "$key_fingerprint" ]] || fail 'Unexpected Rocky signing key'
+        rpmkeys --import "$key_file" || fail 'Rocky signing key import failed'
         for rpm in "$repo"/*.rpm; do
             [[ -f "$rpm" ]] || fail 'Offline RPM package missing'
             rpmkeys --checksig "$rpm" >/dev/null || fail "RPM signature invalid: $(basename "$rpm")"
         done
         dnf --disablerepo='*' --repofrompath=ablestack-tools,"file://$repo" \
             --enablerepo=ablestack-tools --setopt=install_weak_deps=False \
-            --setopt=ablestack-tools.gpgcheck=1 install -y "${packages[@]}" \
+            --setopt=ablestack-tools.gpgcheck=1 \
+            --setopt=ablestack-tools.gpgkey="file://$key_file" install -y "${packages[@]}" \
             || fail 'Offline RPM installation failed'
     fi
 else
@@ -67,13 +79,15 @@ else
         lists=$(mktemp -d /tmp/ablestack-apt-lists.XXXXXX)
         trap 'rm -rf "$lists"' EXIT
         mkdir -p "$lists/partial"
+        chmod 755 "$lists"
         sources=$(mktemp /tmp/ablestack-apt-sources.XXXXXX)
         trap 'rm -rf "$lists"; rm -f "$sources"' EXIT
         printf 'deb [trusted=yes] file:%s ./\n' "$repo" > "$sources"
+        chmod 644 "$sources"
         apt_options=(-o "Dir::Etc::sourcelist=$sources" -o 'Dir::Etc::sourceparts=-'
                      -o "Dir::State::lists=$lists" -o 'Acquire::Languages=none')
         apt-get "${apt_options[@]}" update -qq || fail 'Offline DEB index failed'
-        apt-get "${apt_options[@]}" install --no-download --no-install-recommends -y "${packages[@]}" \
+        apt-get "${apt_options[@]}" install --no-install-recommends -y "${packages[@]}" \
             || fail 'Offline DEB installation failed'
     fi
 fi

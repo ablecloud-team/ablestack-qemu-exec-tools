@@ -214,9 +214,11 @@ def restart():
 
 
 def private_directory(path):
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if path.parent.is_symlink() or path.parent.stat().st_uid != 0 or path.parent.stat().st_mode & 0o022:
+    parent = path.parent
+    parent.mkdir(mode=0o755, exist_ok=True)
+    if parent.is_symlink() or parent.stat().st_uid != 0 or parent.stat().st_mode & 0o022:
         raise RuntimeError('Unsafe policy parent directory')
+    path.mkdir(mode=0o700, exist_ok=True)
     if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o077:
         raise RuntimeError('Unsafe policy state directory')
 

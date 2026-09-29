@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 ABLECLOUD. Apache-2.0.
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,6 +14,17 @@ spec.loader.exec_module(p)
 
 
 class PolicyTests(unittest.TestCase):
+    def test_new_state_parent_is_secure_under_group_umask(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'ablestack-qemu-exec-tools' / 'process-policy'
+            old_umask = os.umask(0o002)
+            try:
+                p.private_directory(path)
+            finally:
+                os.umask(old_umask)
+            self.assertEqual(0o755, path.parent.stat().st_mode & 0o777)
+            self.assertEqual(0o700, path.stat().st_mode & 0o777)
+
     def test_manual_allowlist_byte_identical(self):
         text = '# administrator policy\nFILTER_RPC_ARGS="--allow-rpcs=guest-shutdown,' + ','.join(p.REQUIRED) + '" # retain\nOTHER=value\n'
         self.assertEqual(text, p.rewrite_environment(text)[0])
