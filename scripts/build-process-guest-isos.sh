@@ -36,11 +36,13 @@ cat > "$root/README.txt" <<'EOF'
 ABLESTACK Tools offline Windows installer
 Run install.bat from the ISO. Approve the Windows administrator prompt.
 The installer configures VirtIO drivers, QEMU Guest Agent, and ABLESTACK Process Tools.
+VirtIO driver license and redistribution notice: process-management/virtio-win_license.txt
 Exit code 3010 means installation completed and Windows must be restarted.
 Installation and MSI logs are saved under C:\ProgramData\ABLESTACK-Tools.
 EOF
 for required in install.bat install.ps1 process-management/install.ps1 \
     process-management/virtio-win-gt-x64.msi \
+    process-management/virtio-win_license.txt \
     process-management/qemu-ga-x86_64.msi \
     process-management/ABLESTACK-ProcessTools.msi; do
     test -s "$root/$required" || { echo "Windows installer payload missing: $required" >&2; exit 2; }

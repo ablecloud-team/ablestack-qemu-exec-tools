@@ -48,6 +48,9 @@ jobs:
           7z x -y -obuild/vendor build/virtio-win.iso 'virtio-win-gt-x64.msi'
           if ($LASTEXITCODE) { throw 'VirtIO driver MSI extraction failed' }
           Copy-Item build/vendor/virtio-win-gt-x64.msi $payload
+          7z x -y -obuild/vendor build/virtio-win.iso 'virtio-win_license.txt'
+          if ($LASTEXITCODE) { throw 'VirtIO license notice extraction failed' }
+          Copy-Item build/vendor/virtio-win_license.txt $payload
           $driverNames=@{NetKVM='netkvm';vioserial='vioser';Balloon='balloon'}
           foreach ($component in @('NetKVM','vioserial','Balloon')) {
             foreach ($variant in @('2k19','2k22','2k25','w11')) {
@@ -65,7 +68,7 @@ jobs:
               }
             }
           }
-          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi') | ForEach-Object {
+          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi','virtio-win_license.txt') | ForEach-Object {
             @{name=$_;sha256=(Get-FileHash "$payload/$_" -Algorithm SHA256).Hash.ToLowerInvariant()}
           }
           $driverFiles=Get-ChildItem -LiteralPath "$payload/drivers" -Recurse -File | ForEach-Object {

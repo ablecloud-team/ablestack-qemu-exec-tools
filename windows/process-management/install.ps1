@@ -86,7 +86,7 @@ try {
     $driverVariant=Get-DriverVariant $build $os.ProductType
     $manifest=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
     if ($manifest.schemaVersion -ne 1) { throw 'Unsupported manifest' }
-    $expected=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi')
+    $expected=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi','virtio-win_license.txt')
     foreach ($name in $expected) {
         $entry=@($manifest.files | Where-Object { $_.name -ceq $name })
         if ($entry.Count -ne 1 -or $entry[0].sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw "Missing manifest entry: $name" }
