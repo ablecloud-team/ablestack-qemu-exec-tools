@@ -10,7 +10,10 @@ Add-Type -Path (Join-Path $PSScriptRoot 'AbleProcessIdentity.dll')
 [AbleProcessIdentity]::StartDeadline([Math]::Max(1,$budget-$watch.ElapsedMilliseconds+200))
 try {
     $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 1
-    if($os.ProductType -eq 1 -or [int]$os.BuildNumber -notin @(20348,26100)){throw 'unsupported OS'}
+    $build=[int]$os.BuildNumber
+    $supportedClient=($os.ProductType -eq 1 -and $build -ge 22000 -and $build -lt 30000)
+    $supportedServer=($os.ProductType -ne 1 -and $build -in @(17763,20348,26100))
+    if(-not ($supportedClient -or $supportedServer)){throw 'unsupported OS'}
     $boot='windows:'+$os.LastBootUpTime.ToUniversalTime().ToFileTimeUtc().ToString()
     $now=[DateTime]::UtcNow
     $snapshot=[ordered]@{schemaVersion='1.0';kind='snapshot';requestId=$request.requestId;authority=$request.authority;snapshotId=[guid]::NewGuid().ToString();bootId=$boot;observedAt=$now.ToString('yyyy-MM-ddTHH:mm:ss.fffZ');expiresAt=$now.AddSeconds(10).ToString('yyyy-MM-ddTHH:mm:ss.fffZ');status='OK';truncated=$false;totalKnown=$null;processes=@()}
