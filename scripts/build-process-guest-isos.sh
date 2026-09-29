@@ -32,7 +32,19 @@ cp -a "$windows/." "$root/process-management/"
 install -m 0644 "$repo/windows/process-management/install-iso.ps1" "$root/install.ps1"
 install -m 0644 "$repo/windows/process-management/install-iso.bat" "$root/install.bat"
 printf 'windows\n' > "$root/FAMILY"
-printf 'ABLESTACK Tools offline Windows installer. Run install.bat as Administrator.\n' > "$root/README.txt"
+cat > "$root/README.txt" <<'EOF'
+ABLESTACK Tools offline Windows installer
+Run install.bat from the ISO. Approve the Windows administrator prompt.
+The installer configures VirtIO drivers, QEMU Guest Agent, and ABLESTACK Process Tools.
+Exit code 3010 means installation completed and Windows must be restarted.
+Installation and MSI logs are saved under C:\ProgramData\ABLESTACK-Tools.
+EOF
+for required in install.bat install.ps1 process-management/install.ps1 \
+    process-management/virtio-win-gt-x64.msi \
+    process-management/qemu-ga-x86_64.msi \
+    process-management/ABLESTACK-ProcessTools.msi; do
+    test -s "$root/$required" || { echo "Windows installer payload missing: $required" >&2; exit 2; }
+done
 (cd "$root" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$stage/checksums-windows"
 mv "$stage/checksums-windows" "$root/SHA256SUMS"
 genisoimage -quiet -r -J -V ABLESTACK-WINDOWS \
