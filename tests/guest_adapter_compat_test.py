@@ -27,6 +27,13 @@ class GuestAdapterCompatibilityTests(unittest.TestCase):
         self.assertIn(('1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be',
                        'efff2affe6776ee4049793e7e2d27ea94cc7afab93352d05ad747fad0cd5651b',
                        installed[1]), action)
+        repaired = ('e8f7b6f69a7d245753055ac4776559a254f2e0a2f03517a22220a74acd323d05',
+                    '2ba9e15e797eebe6ff6f7242a62c8d7fcff7f6eb379005e364241be3b475ffb2')
+        self.assertIn(repaired, read)
+        self.assertNotIn((repaired[0], installed[1]), read)
+        self.assertIn(('1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be',
+                       '1cacad12dbc8c25f85d874a6c8e3ba4c0351198201b5ec3f811cf04749a1d565',
+                       repaired[1]), action)
 
     def test_linux_families_and_action_have_approved_bundles(self):
         self.assertTrue(approved('rocky-read'))
