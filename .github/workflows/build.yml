@@ -83,10 +83,35 @@ jobs:
       retention_days: "14"
       test_mode: false
 
+  # One static launcher payload is shared byte-for-byte by every host
+  # package and guest ISO. Host vm_exec verifies these guest bytes.
+  build-process-launchers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.WORKFLOW_SOURCE_REF }}
+      - name: Compile static Linux process launchers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y musl-tools
+          mkdir -p process-launchers
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o process-launchers/process-read-launcher lib/process/process_read_launcher.c
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o process-launchers/process-action-launcher lib/process/process_action_launcher.c
+          git rev-parse HEAD > process-launchers/SOURCE_COMMIT
+          file process-launchers/process-*-launcher
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-process-launchers
+          path: process-launchers/
+          if-no-files-found: error
+
   # 1) RPM BUILD (Rocky 9.6 / 9.7 / 9.8)
   # ======================================================================
   build-rpm:
-    needs: build-process-tools
+    needs: [build-process-tools, build-process-launchers]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -107,6 +132,11 @@ jobs:
         with:
           name: windows-process-payload
           path: process-payload
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-process-launchers
+          path: process-launchers
 
       - name: Install build deps (Rocky ${{ matrix.host_os_minor }})
         run: |
@@ -153,11 +183,12 @@ jobs:
           install -m 0644 process-payload/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.dll
           install -m 0644 process-payload/AbleProcessAction.dll lib/process/AbleProcessAction.dll
 
-      - name: Build Linux process launchers
+      - name: Stage canonical Linux process launchers
         run: |
           set -euo pipefail
-          gcc -O2 -Wall -Wextra -o lib/process/process-read-launcher lib/process/process_read_launcher.c
-          gcc -O2 -Wall -Wextra -o lib/process/process-action-launcher lib/process/process_action_launcher.c
+          test "$(tr -d '\r\n' < process-launchers/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          install -m 0755 process-launchers/process-read-launcher lib/process/process-read-launcher
+          install -m 0755 process-launchers/process-action-launcher lib/process/process-action-launcher
 
       - name: Build RPM
         run: make rpm
@@ -172,6 +203,8 @@ jobs:
           installed=process-package-check/usr/libexec/ablestack-qemu-exec-tools/process
           cmp process-payload/AbleProcessIdentity.dll "$installed/AbleProcessIdentity.dll"
           cmp process-payload/AbleProcessAction.dll "$installed/AbleProcessAction.dll"
+          cmp process-launchers/process-read-launcher "$installed/process-read-launcher"
+          cmp process-launchers/process-action-launcher "$installed/process-action-launcher"
           test -x "$installed/process-read-launcher"
           test -x "$installed/process-action-launcher"
 
@@ -793,7 +826,7 @@ jobs:
   # 2) DEB BUILD (Ubuntu 22.04 / 24.04 / 26.04)
   # ======================================================================
   build-deb:
-    needs: build-process-tools
+    needs: [build-process-tools, build-process-launchers]
     strategy:
       matrix:
         os_version: [22.04, 24.04, 26.04]
@@ -809,6 +842,11 @@ jobs:
           name: windows-process-payload
           path: process-payload
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-process-launchers
+          path: process-launchers
+
       - name: Stage matching Windows process adapters
         run: |
           set -euo pipefail
@@ -823,11 +861,12 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y build-essential make dpkg-dev debhelper git apt-utils
 
-      - name: Build Linux process launchers
+      - name: Stage canonical Linux process launchers
         run: |
           set -euo pipefail
-          gcc -O2 -Wall -Wextra -o lib/process/process-read-launcher lib/process/process_read_launcher.c
-          gcc -O2 -Wall -Wextra -o lib/process/process-action-launcher lib/process/process_action_launcher.c
+          test "$(tr -d '\r\n' < process-launchers/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          install -m 0755 process-launchers/process-read-launcher lib/process/process-read-launcher
+          install -m 0755 process-launchers/process-action-launcher lib/process/process-action-launcher
 
       - name: Build DEB
         run: make deb
@@ -842,6 +881,8 @@ jobs:
           installed=process-package-check/usr/libexec/ablestack-qemu-exec-tools/process
           cmp process-payload/AbleProcessIdentity.dll "$installed/AbleProcessIdentity.dll"
           cmp process-payload/AbleProcessAction.dll "$installed/AbleProcessAction.dll"
+          cmp process-launchers/process-read-launcher "$installed/process-read-launcher"
+          cmp process-launchers/process-action-launcher "$installed/process-action-launcher"
           test -x "$installed/process-read-launcher"
           test -x "$installed/process-action-launcher"
 
@@ -948,7 +989,7 @@ jobs:
       source_ref: ${{ inputs.source_ref || github.sha }}
 
   release:
-    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm, build-process-tools]
+    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm, build-process-tools, build-process-launchers]
     runs-on: ubuntu-latest
     # The official path deliberately skips this reusable workflow's build-winpe
     # job because the caller already produced it. Use always() to prevent that
@@ -961,6 +1002,7 @@ jobs:
         needs['build-hangctl-rpm'].result == 'success' &&
         needs['build-ftctl-rpm'].result == 'success' &&
         needs['build-process-tools'].result == 'success' &&
+        needs['build-process-launchers'].result == 'success' &&
         needs['build-deb'].result == 'success' &&
         needs['build-windows'].result == 'success' &&
         needs['build-v2k-rpm'].result == 'success' &&
@@ -2040,8 +2082,9 @@ jobs:
           set -euo pipefail
           VERSION="${RELEASE_TAG}"
           mkdir -p build
-          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
-          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-action-launcher lib/process/process_action_launcher.c
+          test "$(tr -d '\r\n' < dist/linux-process-launchers/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          install -m 0755 dist/linux-process-launchers/process-read-launcher build/process-read-launcher
+          install -m 0755 dist/linux-process-launchers/process-action-launcher build/process-action-launcher
 
           mkdir -p build/iso/rocky build/iso/ubuntu build/iso/windows
           rm -rf build/iso-staging

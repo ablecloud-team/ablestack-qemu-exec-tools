@@ -11,7 +11,7 @@ Cloud #1173 / Qemu #65. 산출물은 GitHub Actions의 `build.yml`에서 생성�
 | Ubuntu 22.04/24.04/26.04 x86_64 | `ABLESTACK-Tools-ubuntu-*.iso` | 동일한 Linux 설치 명령 |
 | Windows Server 2022/2025 x86_64 | `ABLESTACK-Tools-windows-*.iso` | 관리자 PowerShell에서 `install.bat -Mode Apply` (프로세스 전용 ISO 루트) |
 
-호스트 패키지는 Rocky 9.6/9.7/9.8 RPM, Ubuntu 22.04/24.04/26.04 DEB, Windows MSI를 동일 Actions run에서 만든다. Linux 호스트 RPM/DEB는 동일 run의 Windows 프로세스 payload에서 빌드된 `AbleProcessIdentity.dll`과 `AbleProcessAction.dll`, Linux 읽기·작업 launcher 바이너리를 포함해야 한다. Actions에서 패키지를 풀어 DLL 바이트와 launcher 실행 권한을 검사한다. 프로세스 전용 Windows MSI는 `windows-process-payload`에 들어 있고, `ProcessAction.ps1`/`AbleProcessAction.dll`까지 해시 manifest에 포함한다. 패키지 설치와 ISO 게스트 복구는 별개이다. 게스트 QGA가 없으면 Linux 전용 repair ISO만으로 QGA 패키지를 설치할 수 없다.
+호스트 패키지는 Rocky 9.6/9.7/9.8 RPM, Ubuntu 22.04/24.04/26.04 DEB, Windows MSI를 동일 Actions run에서 만든다. Linux 호스트 RPM/DEB는 동일 run의 Windows 프로세스 payload에서 빌드된 `AbleProcessIdentity.dll`과 `AbleProcessAction.dll`을 포함해야 한다. Linux 읽기·작업 launcher는 Actions가 정적 바이너리로 한 번만 빌드하고 RPM·DEB·ISO에 동일 바이트를 배치한다. 호스트의 게스트 launcher 해시 검증이 컴파일 환경 차이로 실패하지 않도록 Actions가 각 패키지를 풀어 DLL·launcher 바이트를 대조한다. 프로세스 전용 Windows MSI는 `windows-process-payload`에 들어 있고, `ProcessAction.ps1`/`AbleProcessAction.dll`까지 해시 manifest에 포함한다. 패키지 설치와 ISO 게스트 복구는 별개이다. 게스트 QGA가 없으면 Linux 전용 repair ISO만으로 QGA 패키지를 설치할 수 없다.
 
 ## 설치·복구·롤백
 
