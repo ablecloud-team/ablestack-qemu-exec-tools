@@ -24,6 +24,12 @@ URL:            https://github.com/ablecloud-team/ablestack-qemu-exec-tools
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      x86_64
+# vm_exec checks the exact guest launcher bytes from the matching ISO.
+# Preserve the shared static launcher artifact during RPM post-processing.
+%global __brp_strip /bin/true
+%global __brp_strip_comment_note /bin/true
+%global __brp_strip_lto /bin/true
+%global __brp_strip_static_archive /bin/true
 Requires:       bash
 Requires:       python3 >= 3.9
 Requires:       jq
