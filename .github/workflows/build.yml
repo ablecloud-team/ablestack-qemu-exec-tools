@@ -194,9 +194,9 @@ jobs:
         run: |
           set -euo pipefail
           id="host-${GITHUB_SHA::12}-${GITHUB_RUN_ID}"
-          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
-          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
-          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.guest_adapter_compat_test
 
       - name: Build RPM
@@ -881,9 +881,9 @@ jobs:
         run: |
           set -euo pipefail
           id="host-${GITHUB_SHA::12}-${GITHUB_RUN_ID}"
-          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
-          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
-          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.guest_adapter_compat_test
 
       - name: Build DEB

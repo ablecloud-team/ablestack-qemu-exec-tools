@@ -46,6 +46,9 @@ class GuestAdapterCompatibilityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 approved('windows-read', target)
             os.chmod(target, 0o600)
+            target.write_text(CATALOG.read_text().replace('"schemaVersion": 1,', '"schemaVersion": 1, "schemaVersion": 1,', 1))
+            with self.assertRaises(ValueError):
+                approved('windows-read', target)
             target.unlink()
             target.symlink_to(CATALOG)
             with self.assertRaises(OSError):

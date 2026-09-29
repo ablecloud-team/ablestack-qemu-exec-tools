@@ -30,7 +30,7 @@ C1 계약 기준: Cloud 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf.
 
 context 필드는 schemaVersion, authority, requestId, operationId, lifecycleFenceHeld=true, ownerPid, ownerStartTicks, hostBootId, expiresMonotonicNs다. root 소유 단일 링크 파일, 살아 있는 root ancestor 신원, host boot, monotonic 유효기간(최대 95초), FD 9 VM flock와 부모 채널을 검사한다. 이 파일 자체가 분산 lifecycle fence를 만들지는 않는다. C5가 Cloud DB 예약/현재 배치/권한/펜스를 먼저 보장해야 한다.
 
-호스트는 도메인 UUID/실행 상태/job/block job을 확인하고 고정 helper hash를 검사한다. 작업 전 VM별 marker를 남기며 응답 불명일 때 유지한다. 4개 active action slot과 Q1 transport admission을 사용한다. UNKNOWN guest 작업의 전역 admission 및 이동/재부팅/Cloud 장애 복구는 C5 통합 검증 대상이다.
+호스트는 도메인 UUID/실행 상태/job/block job을 확인하고 작업용 스크립트와 helper의 SHA256 전체 묶음을 승인 카탈로그와 대조한다. 서로 다른 ISO 버전의 파일을 섞거나 미등록 묶음을 실행하지 않는다. 작업 전 VM별 marker를 남기며 응답 불명일 때 유지한다. 4개 active action slot과 Q1 transport admission을 사용한다. UNKNOWN guest 작업의 전역 admission 및 이동/재부팅/Cloud 장애 복구는 C5 통합 검증 대상이다.
 
 Cloud global `vm.process.management.enabled=false` 및 allowedActions=[]는 그대로 유지된다. 이번 PR은 Cloud 변경 API/UI 활성화를 제공하지 않는다.
 
