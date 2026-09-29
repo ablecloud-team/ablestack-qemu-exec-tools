@@ -184,7 +184,7 @@ rpm:
 
 	# Collect build artifacts
 	mkdir -p build/rpm
-	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
+	cp rpmbuild/RPMS/x86_64/*.rpm build/rpm/
 	@echo "RPM package created: build/rpm/"
 
 hangctl-rpm:
