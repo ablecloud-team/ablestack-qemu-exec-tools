@@ -23,7 +23,7 @@ License:        Apache-2.0
 URL:            https://github.com/ablecloud-team/ablestack-qemu-exec-tools
 Source0:        %{name}-%{version}.tar.gz
 
-BuildArch:      noarch
+BuildArch:      x86_64
 Requires:       bash
 Requires:       python3 >= 3.9
 Requires:       jq

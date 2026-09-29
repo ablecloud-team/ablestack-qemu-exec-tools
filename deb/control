@@ -2,7 +2,7 @@ Package: ablestack-qemu-exec-tools
 Version: ${VERSION}-${RELEASE}
 Section: utils
 Priority: optional
-Architecture: all
+Architecture: amd64
 Depends: bash, python3 (>= 3.9), jq, libvirt-clients, qemu-guest-agent, cloud-init
 Maintainer: ABLECLOUD <dev@ablecloud.io>
 Description: QEMU guest-agent ê¸°ë°˜ VM ëª…ë ¹ ?¤í–‰ ë°??•ì±… ?ë™???„êµ¬
