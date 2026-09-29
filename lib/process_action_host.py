@@ -120,7 +120,7 @@ def run(request,transport,reservation=None):
             bundles=approved('windows-action')
             choices='@('+','.join("'"+':'.join(pair)+"'" for pair in bundles)+')'
             script=r"$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';$h=@('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
-            command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
+            command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         if action:
             context(request,reservation)
             fd=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)

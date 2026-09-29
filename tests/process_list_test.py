@@ -182,6 +182,7 @@ class HostGuardTests(unittest.TestCase):
                 self.assertEqual(host.run(REQUEST,transport)['error']['code'],'CHECK_FAILED')
                 self.assertEqual(len(commands),1)
                 if family=='mswindows':
+                    self.assertEqual(commands[0][3:5],['-ExecutionPolicy','Bypass'])
                     script=__import__('base64').b64decode(commands[0][-1]).decode('utf-16le')
                     self.assertIn('ef2e96391d0973ff56d0bbf9ad0ea573eb0049aef9b59cf47d73846103f0324a',script)
                     self.assertIn('e9e405c166eb95b2b6d529b3e66c06a5a0806e9a6464646771c2547b0cbee32f',script)
