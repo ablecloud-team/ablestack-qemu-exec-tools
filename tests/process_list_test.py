@@ -185,6 +185,8 @@ class HostGuardTests(unittest.TestCase):
                     script=__import__('base64').b64decode(commands[0][-1]).decode('utf-16le')
                     self.assertIn('ef2e96391d0973ff56d0bbf9ad0ea573eb0049aef9b59cf47d73846103f0324a',script)
                     self.assertIn('e9e405c166eb95b2b6d529b3e66c06a5a0806e9a6464646771c2547b0cbee32f',script)
+                    self.assertIn("Get-FileHash -LiteralPath $p",script)
+                    self.assertIn("$approved -notcontains ($raw+':'+$native)",script)
                     self.assertIn('-notcontains',script)
                 else:
                     self.assertIn(' in ((',commands[0][-1])
