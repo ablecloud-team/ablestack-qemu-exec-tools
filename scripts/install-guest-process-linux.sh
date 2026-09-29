@@ -63,11 +63,14 @@ if [[ "$family" == rocky ]]; then
             [[ -f "$rpm" ]] || fail 'Offline RPM package missing'
             rpmkeys --checksig "$rpm" >/dev/null || fail "RPM signature invalid: $(basename "$rpm")"
         done
+        repo_options=()
+        # Rocky 8 Python 3.9 RPMs are modular; this signed offline repo has no module stream metadata.
+        if [[ $version == 8 ]]; then repo_options+=(--setopt=ablestack-tools.module_hotfixes=1); fi
         dnf --disablerepo='*' --repofrompath=ablestack-tools,"file://$repo" \
             --enablerepo=ablestack-tools --setopt=install_weak_deps=False \
             --setopt=ablestack-tools.gpgcheck=1 \
-            --setopt=ablestack-tools.gpgkey="file://$key_file" install -y "${packages[@]}" \
-            || fail 'Offline RPM installation failed'
+            --setopt=ablestack-tools.gpgkey="file://$key_file" "${repo_options[@]}" \
+            install -y "${packages[@]}" || fail 'Offline RPM installation failed'
     fi
 else
     dpkg-query -W -f='${Status}' qemu-guest-agent 2>/dev/null | grep -q 'install ok installed' || need_qga=true
