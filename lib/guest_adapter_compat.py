@@ -19,6 +19,24 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}\Z")
 
 
+def supported_windows(osinfo):
+    """Accept the Windows releases carried by the multi-OS guest ISO."""
+    if osinfo.get("id") not in ("mswindows", "windows"):
+        return False
+    version = osinfo.get("version-id")
+    variant = osinfo.get("variant-id")
+    pretty = osinfo.get("pretty-name", "")
+    if variant == "server" or "Windows Server" in pretty:
+        return version in ("2019", "2022", "2025") or (
+            version in (None, "10.0") and any(
+                "Windows Server " + release in pretty for release in ("2019", "2022", "2025")
+            )
+        )
+    if variant in ("client", "desktop", "workstation") or "Windows 11" in pretty:
+        return version == "11" or (version in (None, "10.0") and "Windows 11" in pretty)
+    return False
+
+
 def _unique_pairs(pairs):
     result = []
     for pair in pairs:

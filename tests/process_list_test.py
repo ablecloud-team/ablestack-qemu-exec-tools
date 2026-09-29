@@ -168,8 +168,11 @@ class HostGuardTests(unittest.TestCase):
     def test_read_command_uses_approved_bundles_independent_of_host_payload(self):
         for family,version,pretty in [('rocky','10.2','Rocky Linux 10.2'),
                                       ('ubuntu','26.04','Ubuntu 26.04'),
-                                      ('mswindows','10.0','Microsoft Windows Server 2022')]:
-            with self.subTest(family=family),tempfile.TemporaryDirectory() as tmp,patch.object(host,'RUNTIME_ROOT',Path(tmp)):
+                                      ('mswindows','11','Windows 11 Pro'),
+                                      ('mswindows','2019','Windows Server 2019 Standard'),
+                                      ('mswindows','10.0','Microsoft Windows Server 2022'),
+                                      ('mswindows','2025','Windows Server 2025 Standard')]:
+            with self.subTest(family=family,version=version),tempfile.TemporaryDirectory() as tmp,patch.object(host,'RUNTIME_ROOT',Path(tmp)):
                 transport=self.transport('FAILED');commands=[]
                 transport.rpc=lambda *args:{'id':family,'version-id':version,'machine':'x86_64','pretty-name':pretty}
                 def execute(domain,command,options):

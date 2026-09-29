@@ -12,7 +12,7 @@ from pathlib import Path
 import stat
 import time
 import uuid
-from guest_adapter_compat import approved
+from guest_adapter_compat import approved, supported_windows
 
 
 RUNTIME_ROOT=Path('/run/ablestack-vm-operations')
@@ -117,7 +117,7 @@ def run(request, transport, cloud_guard=None):
             osinfo=transport.rpc(domain,{'execute':'guest-get-osinfo'},deadline,3,slot.fd,65536)
         family=osinfo.get('id',''); version=osinfo.get('version-id',''); arch=osinfo.get('machine','')
         linux=(family=='rocky' and version in ('9.6','9.7','9.8','10.2')) or (family=='ubuntu' and version in ('22.04','24.04','26.04'))
-        windows=family in ('mswindows','windows') and any(v in osinfo.get('pretty-name','') for v in ('2022','2025'))
+        windows=supported_windows(osinfo)
         if arch not in ('x86_64','x86-64','amd64') or not (linux or windows): return failure(request,'TOOLS_REQUIRED','OS adapter unsupported')
         if cloud_guard is not None:
             parent_alive()

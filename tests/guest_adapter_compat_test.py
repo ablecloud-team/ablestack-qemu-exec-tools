@@ -9,10 +9,38 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
-from guest_adapter_compat import CATALOG, approved
+from guest_adapter_compat import CATALOG, approved, supported_windows
 
 
 class GuestAdapterCompatibilityTests(unittest.TestCase):
+    def test_windows_multi_os_host_gate(self):
+        supported = (
+            ('11', 'client', 'Windows 11 Pro'),
+            ('2019', 'server', 'Windows Server 2019 Standard Evaluation'),
+            ('2022', 'server', 'Windows Server 2022 Standard'),
+            ('2025', 'server', 'Windows Server 2025 Standard'),
+        )
+        for version, variant, pretty in supported:
+            with self.subTest(version=version):
+                self.assertTrue(supported_windows({
+                    'id': 'mswindows', 'version-id': version,
+                    'variant-id': variant, 'pretty-name': pretty,
+                }))
+        self.assertTrue(supported_windows({
+            'id': 'mswindows', 'version-id': '10.0',
+            'pretty-name': 'Microsoft Windows Server 2022',
+        }))
+        for version, variant, pretty in (
+            ('10', 'client', 'Windows 10 Pro'),
+            ('2016', 'server', 'Windows Server 2016'),
+            ('11', 'server', 'Windows Server 2019'),
+        ):
+            with self.subTest(unsupported=pretty):
+                self.assertFalse(supported_windows({
+                    'id': 'mswindows', 'version-id': version,
+                    'variant-id': variant, 'pretty-name': pretty,
+                }))
+
     def test_old_and_new_windows_bundle_are_approved_as_complete_pairs(self):
         read = approved('windows-read')
         action = approved('windows-action')
