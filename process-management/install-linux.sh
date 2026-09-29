@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright 2026 ABLECLOUD. Apache-2.0.
-# Offline guest repair only. No package repositories, cloud-init or network changes.
+# Offline guest policy setup. Package installation is handled by the ISO entry point.
 set -euo pipefail
 SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 fail() {
@@ -9,13 +9,18 @@ fail() {
 }
 [[ $# == 0 ]] || fail 'No options accepted by the repair payload'
 [[ $EUID == 0 ]] || fail 'Root privileges are required'
-command -v python3 >/dev/null || fail 'OFFLINE_PREREQUISITE_MISSING: python3'
 command -v systemctl >/dev/null || fail 'OFFLINE_PREREQUISITE_MISSING: systemd'
+PYTHON=python3
+if ! command -v "$PYTHON" >/dev/null || ! "$PYTHON" -c 'import sys; assert sys.version_info >= (3, 8)' 2>/dev/null; then
+    PYTHON=python3.9
+    command -v "$PYTHON" >/dev/null || fail 'OFFLINE_PREREQUISITE_MISSING: Python 3.8+'
+fi
 [[ -r /etc/os-release ]] || fail 'OS identity unavailable'
 # Root-owned distribution metadata, not an ISO-supplied script.
+# shellcheck source=/dev/null
 source /etc/os-release
 case "${ID:-}:${VERSION_ID:-}" in
-    rocky:9*|rocky:10*|ubuntu:22.04|ubuntu:24.04|ubuntu:26.04) ;;
+    rocky:8*|rocky:9*|rocky:10*|ubuntu:22.04|ubuntu:24.04|ubuntu:26.04|debian:12|debian:13) ;;
     *) fail 'Unsupported Linux repair target' ;;
 esac
 systemctl is-active --quiet qemu-guest-agent || fail 'QGA must already be installed and running; use distribution offline media first'
@@ -61,7 +66,7 @@ install -d -m 0755 /usr/libexec/ablestack-qemu-exec-tools/process
 if command -v getenforce >/dev/null && [[ "$(getenforce)" != Disabled ]]; then
     [[ ! -L "$TARGET/read_policy.py" ]] || fail 'Symlinked collector policy installer'
     install -m 0755 "$SOURCE/read_policy.py" "$TARGET/read_policy.py"
-    if ! read_result=$(python3 "$TARGET/read_policy.py" --apply --payload "$SOURCE"); then
+    if ! read_result=$("$PYTHON" "$TARGET/read_policy.py" --apply --payload "$SOURCE"); then
         printf '%s\n' "$read_result"
         exit 4
     fi
@@ -70,6 +75,6 @@ else
     install -m 0644 "$collector" /usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py
 fi
 if [[ -f "$SOURCE/install-actions-linux.sh" ]]; then
-    bash "$SOURCE/install-actions-linux.sh"
+    PROCESS_PYTHON="$PYTHON" bash "$SOURCE/install-actions-linux.sh"
 fi
-exec python3 "$TARGET/process_policy.py" --policy process-management --apply --json
+exec "$PYTHON" "$TARGET/process_policy.py" --policy process-management --apply --json

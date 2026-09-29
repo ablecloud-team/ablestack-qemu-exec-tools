@@ -45,7 +45,10 @@ jobs:
           7z x -y -obuild/vendor build/virtio-win.iso 'guest-agent/qemu-ga-x86_64.msi'
           if ($LASTEXITCODE) { throw 'QGA MSI extraction failed' }
           Copy-Item build/vendor/guest-agent/qemu-ga-x86_64.msi $payload
-          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi') | ForEach-Object {
+          7z x -y -obuild/vendor build/virtio-win.iso 'virtio-win-gt-x64.msi'
+          if ($LASTEXITCODE) { throw 'VirtIO driver MSI extraction failed' }
+          Copy-Item build/vendor/virtio-win-gt-x64.msi $payload
+          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi') | ForEach-Object {
             @{name=$_;sha256=(Get-FileHash "$payload/$_" -Algorithm SHA256).Hash.ToLowerInvariant()}
           }
           @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.1.0';workflowRunId=$env:GITHUB_RUN_ID;vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8

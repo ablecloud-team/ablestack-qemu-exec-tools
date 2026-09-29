@@ -3,11 +3,13 @@
 set -euo pipefail
 [ "$(id -u)" = 0 ] || exit 2
 here="$(cd "$(dirname "$0")" && pwd -P)"
+# shellcheck source=/dev/null
 . /etc/os-release
-case "$ID:$VERSION_ID:$(uname -m)" in rocky:9.[678]:x86_64|rocky:10.2:x86_64|ubuntu:22.04:x86_64|ubuntu:24.04:x86_64|ubuntu:26.04:x86_64) ;; *) echo unsupported >&2; exit 2;; esac
+case "$ID:$VERSION_ID:$(uname -m)" in rocky:8.*:x86_64|rocky:9.*:x86_64|rocky:10.*:x86_64|ubuntu:22.04:x86_64|ubuntu:24.04:x86_64|ubuntu:26.04:x86_64|debian:12:x86_64|debian:13:x86_64) ;; *) echo unsupported >&2; exit 2;; esac
+python="${PROCESS_PYTHON:-python3}"
 if command -v selinuxenabled >/dev/null && selinuxenabled; then
-  python3 "$here/action_policy.py" --apply --payload "$here"
+  "$python" "$here/action_policy.py" --apply --payload "$here"
 else
   # The same root-owned package transaction is used without SELinux operations.
-  python3 "$here/action_policy_plain.py" "$here"
+  "$python" "$here/action_policy_plain.py" "$here"
 fi

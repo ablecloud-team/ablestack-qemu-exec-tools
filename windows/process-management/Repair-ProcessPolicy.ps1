@@ -9,7 +9,10 @@ try {
     $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Administrator privileges required' }
     $os=Get-CimInstance Win32_OperatingSystem
-    if ($os.ProductType -eq 1 -or [int]$os.BuildNumber -notin @(20348,26100)) { throw 'Supported targets are Windows Server 2022/2025' }
+    $build=[int]$os.BuildNumber
+    $isWindows11=($os.ProductType -eq 1 -and $build -ge 22000 -and $build -lt 30000)
+    $isServer=($os.ProductType -ne 1 -and $build -in @(17763,20348,26100))
+    if (-not ($isWindows11 -or $isServer)) { throw 'Supported targets are Windows 11 and Server 2019/2022/2025' }
     Set-PrivateDirectory $root
     Assert-RegularStateFile (Join-Path $root 'policy.lock')
     Assert-RegularStateFile (Join-Path $root 'last-result.json')
