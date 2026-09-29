@@ -70,14 +70,16 @@ try {
             $msi=Join-Path $PSScriptRoot 'qemu-ga-x86_64.msi'
             Install-Msi $msi 'QEMU Guest Agent' '' 'qga-install.log'
         }
-        $svc=@(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match 'qemu-ga\.exe' })
-        if ($svc.Count -ne 1) { throw 'QGA service absent after installation' }
-        if ($svc[0].State -ne 'Running') { Start-Service $svc[0].Name }
-        Write-Host '[OK] QEMU Guest Agent service running'
     }
     if ($Mode -eq 'Apply') {
         $msi=Join-Path $PSScriptRoot 'ABLESTACK-ProcessTools.msi'
         Install-Msi $msi 'ABLESTACK Process Tools' 'REINSTALLMODE=amus' 'process-tools-install.log'
+    }
+    if ($InstallQga) {
+        $svc=@(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match 'qemu-ga\.exe' })
+        if ($svc.Count -ne 1) { throw 'QGA service absent after installation' }
+        if ($svc[0].State -ne 'Running') { Start-Service $svc[0].Name }
+        Write-Host '[OK] QEMU Guest Agent service running'
     }
     Write-Host '[CONFIGURE] QGA process execution policy'
     & (Join-Path $PSScriptRoot 'Repair-ProcessPolicy.ps1') -Mode $Mode -BackupId $BackupId
