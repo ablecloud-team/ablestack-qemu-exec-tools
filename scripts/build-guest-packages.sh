@@ -15,7 +15,7 @@ for major in 8 9 10; do
         bash -euo pipefail -c '
           dnf -y install dnf-plugins-core createrepo_c
           dnf download --resolve --alldeps --destdir=/out "$@"
-          test -n "$(find /out -maxdepth 1 -name "qemu-guest-agent-*.rpm" -print -quit)"
+          ls /out/qemu-guest-agent-*.rpm >/dev/null
           createrepo_c /out
         ' bash "${packages[@]}"
 done
@@ -32,7 +32,7 @@ for spec in ubuntu:22.04 ubuntu:24.04 ubuntu:26.04 debian:12 debian:13; do
       apt-get clean
       apt-get --download-only install -y --reinstall qemu-guest-agent python3
       cp /var/cache/apt/archives/*.deb /out/
-      test -n "$(find /out -maxdepth 1 -name "qemu-guest-agent_*.deb" -print -quit)"
+      ls /out/qemu-guest-agent_*.deb >/dev/null
       cd /out
       dpkg-scanpackages . /dev/null | gzip -9 > Packages.gz
     '
