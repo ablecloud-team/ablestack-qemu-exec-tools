@@ -80,6 +80,11 @@ fi
 
 python_ready || fail 'Python 3.8+ unavailable after installation'
 command -v qemu-ga >/dev/null || [[ -x /usr/sbin/qemu-ga ]] || fail 'QGA binary missing after installation'
-systemctl enable --now qemu-guest-agent || fail 'QGA service failed to start'
+qga_unit_state=$(systemctl is-enabled qemu-guest-agent 2>/dev/null || true)
+case $qga_unit_state in
+    enabled|static|indirect) ;;
+    *) systemctl enable qemu-guest-agent || fail "QGA service enablement failed" ;;
+esac
+systemctl start qemu-guest-agent || fail "QGA service failed to start"
 systemctl is-active --quiet qemu-guest-agent || fail 'QGA service is not running'
 exec bash "$here/process-management/install-linux.sh"
