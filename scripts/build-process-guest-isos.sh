@@ -45,6 +45,18 @@ for required in install.bat install.ps1 process-management/install.ps1 \
     process-management/ABLESTACK-ProcessTools.msi; do
     test -s "$root/$required" || { echo "Windows installer payload missing: $required" >&2; exit 2; }
 done
+for variant in 2k19 2k22 2k25 w11; do
+    for spec in NetKVM:netkvm vioserial:vioser Balloon:balloon; do
+        component=${spec%%:*}
+        stem=${spec#*:}
+        for extension in inf cat sys; do
+            test -s "$root/process-management/drivers/$component/$variant/amd64/$stem.$extension" || {
+                echo "Signed Windows driver missing: $component/$variant/$stem.$extension" >&2
+                exit 2
+            }
+        done
+    done
+done
 (cd "$root" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$stage/checksums-windows"
 mv "$stage/checksums-windows" "$root/SHA256SUMS"
 genisoimage -quiet -r -J -V ABLESTACK-WINDOWS \

@@ -33,7 +33,7 @@ try {
     & $installer -Mode Apply -InstallQga -InstallDrivers:(-not $SkipDrivers)
     $code=$LASTEXITCODE
     if ($code -eq 0) {
-        Write-Host '[COMPLETE] All components and QGA policy configured'
+        Write-Host '[COMPLETE] Present VirtIO devices, QGA service, and process policy verified; host-side QGA verification remains'
     } elseif ($code -eq 3010) {
         Write-Host '[REBOOT] Installation completed; restart Windows before using the tools'
     } else {

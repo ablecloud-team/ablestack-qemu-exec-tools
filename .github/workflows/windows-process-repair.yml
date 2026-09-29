@@ -48,10 +48,30 @@ jobs:
           7z x -y -obuild/vendor build/virtio-win.iso 'virtio-win-gt-x64.msi'
           if ($LASTEXITCODE) { throw 'VirtIO driver MSI extraction failed' }
           Copy-Item build/vendor/virtio-win-gt-x64.msi $payload
+          $driverNames=@{NetKVM='netkvm';vioserial='vioser';Balloon='balloon'}
+          foreach ($component in @('NetKVM','vioserial','Balloon')) {
+            foreach ($variant in @('2k19','2k22','2k25','w11')) {
+              $archivePath="$component/$variant/amd64/*"
+              7z x -y -obuild/vendor build/virtio-win.iso $archivePath
+              if ($LASTEXITCODE) { throw "VirtIO driver extraction failed: $archivePath" }
+              $source=Join-Path build/vendor "$component/$variant/amd64"
+              $destination=Join-Path $payload "drivers/$component/$variant/amd64"
+              New-Item -ItemType Directory -Force $destination | Out-Null
+              Get-ChildItem -LiteralPath $source -File | Where-Object { $_.Extension -in @('.inf','.cat','.sys','.exe','.dll') } | Copy-Item -Destination $destination
+              foreach ($extension in @('.inf','.cat','.sys')) {
+                if (-not (Test-Path (Join-Path $destination ($driverNames[$component]+$extension)))) {
+                  throw "Signed VirtIO driver payload missing: $component/$variant$extension"
+                }
+              }
+            }
+          }
           $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi') | ForEach-Object {
             @{name=$_;sha256=(Get-FileHash "$payload/$_" -Algorithm SHA256).Hash.ToLowerInvariant()}
           }
-          @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.1.0';workflowRunId=$env:GITHUB_RUN_ID;vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8
+          $driverFiles=Get-ChildItem -LiteralPath "$payload/drivers" -Recurse -File | ForEach-Object {
+            @{name=$_.FullName.Substring($payload.Length+1).Replace('\','/');sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          }
+          @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.1.0';workflowRunId=$env:GITHUB_RUN_ID;vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files);driverFiles=@($driverFiles)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8
           '@echo off', 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*', 'exit /b %ERRORLEVEL%' | Set-Content "$payload/install.bat" -Encoding ascii
       - uses: actions/upload-artifact@v4
         with:

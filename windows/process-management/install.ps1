@@ -32,6 +32,47 @@ function Install-Msi([string]$Path,[string]$Label,[string]$Properties,[string]$L
     } else { Write-Host "[OK] $Label installed" }
 }
 
+function Get-DriverVariant([int]$Build,[int]$ProductType) {
+    if ($ProductType -eq 1 -and $Build -ge 22000 -and $Build -lt 30000) { return 'w11' }
+    switch ($Build) {
+        17763 { return '2k19' }
+        20348 { return '2k22' }
+        26100 { return '2k25' }
+        default { throw "Unsupported Windows build for VirtIO drivers: $Build" }
+    }
+}
+
+function Get-VirtioDevices([string]$DevicePattern) {
+    return @(Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPDeviceID -match $DevicePattern })
+}
+
+function Install-VirtioDriver([string]$Variant,[string]$Component,[string]$InfName,[string]$DevicePattern) {
+    $devices=@(Get-VirtioDevices $DevicePattern)
+    if ($devices.Count -eq 0) {
+        Write-Host "[SKIP] $Component hardware is not present"
+        return
+    }
+    if (@($devices | Where-Object { $_.ConfigManagerErrorCode -ne 0 }).Count -eq 0) {
+        Write-Host "[OK] $Component device driver is active"
+        return
+    }
+    $inf=Join-Path $PSScriptRoot "drivers\$Component\$Variant\amd64\$InfName"
+    if (-not (Test-Path -LiteralPath $inf -PathType Leaf)) { throw "Signed driver payload missing: $inf" }
+    $log=Join-Path $logDirectory "driver-$Component.log"
+    Write-Host "[INSTALL] Binding $Component to present VirtIO hardware"
+    $process=Start-Process pnputil.exe -ArgumentList "/add-driver `"$inf`" /install" -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $log
+    if ($process.ExitCode -notin @(0,3010)) { throw "$Component driver installation failed: $($process.ExitCode). See $log" }
+    if ($process.ExitCode -eq 3010) { $result.rebootRequired=$true }
+    $devices=@(Get-VirtioDevices $DevicePattern)
+    $failed=@($devices | Where-Object { $_.ConfigManagerErrorCode -notin @(0,14) })
+    if ($failed.Count -gt 0) {
+        $codes=($failed | ForEach-Object { $_.ConfigManagerErrorCode }) -join ','
+        throw "$Component device driver is not active after installation (PnP code: $codes). See $log"
+    }
+    if (@($devices | Where-Object { $_.ConfigManagerErrorCode -eq 14 }).Count -gt 0) { $result.rebootRequired=$true }
+    Write-Host "[OK] $Component device driver bound"
+}
+
 try {
     $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this installer from an elevated administrator session' }
@@ -42,6 +83,7 @@ try {
     $isWindows11=($os.ProductType -eq 1 -and $build -ge 22000 -and $build -lt 30000)
     $isServer=($os.ProductType -ne 1 -and $build -in @(17763,20348,26100))
     if (-not ($isWindows11 -or $isServer)) { throw 'Unsupported Windows version' }
+    $driverVariant=Get-DriverVariant $build $os.ProductType
     $manifest=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
     if ($manifest.schemaVersion -ne 1) { throw 'Unsupported manifest' }
     $expected=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi')
@@ -51,6 +93,15 @@ try {
         $hash=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name) -Algorithm SHA256).Hash
         if ($hash -ne $entry[0].sha256) { throw "Payload hash mismatch: $name" }
     }
+    $driverRoot=Join-Path $PSScriptRoot 'drivers'
+    $driverFiles=@(Get-ChildItem -LiteralPath $driverRoot -Recurse -File)
+    if ($driverFiles.Count -eq 0 -or $manifest.driverFiles.Count -ne $driverFiles.Count) { throw 'VirtIO driver manifest is incomplete' }
+    foreach ($file in $driverFiles) {
+        $name=$file.FullName.Substring($PSScriptRoot.Length+1).Replace('\','/')
+        $entry=@($manifest.driverFiles | Where-Object { $_.name -ceq $name })
+        if ($entry.Count -ne 1 -or $entry[0].sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw "Missing driver manifest entry: $name" }
+        if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne $entry[0].sha256) { throw "Driver payload hash mismatch: $name" }
+    }
     New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
     Write-Host '[OK] Windows compatibility and ISO payload verified'
     $services=@(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match 'qemu-ga\.exe' })
@@ -58,8 +109,11 @@ try {
     if ($services.Count -eq 0 -and -not $InstallQga) { throw 'QGA_MISSING: explicit -InstallQga required for offline installation' }
     if ($InstallDrivers) {
         $msi=Join-Path $PSScriptRoot 'virtio-win-gt-x64.msi'
-        if (Test-InstalledMsi $msi) { Write-Host '[SKIP] VirtIO drivers already installed' }
+        if (Test-InstalledMsi $msi) { Write-Host '[SKIP] VirtIO MSI registered; checking device bindings' }
         else { Install-Msi $msi 'VirtIO drivers' 'ADDLOCAL=ALL' 'virtio-install.log' }
+        Install-VirtioDriver $driverVariant 'NetKVM' 'netkvm.inf' '^PCI\\VEN_1AF4&DEV_(1000|1041)'
+        Install-VirtioDriver $driverVariant 'vioserial' 'vioser.inf' '^PCI\\VEN_1AF4&DEV_(1003|1043)'
+        Install-VirtioDriver $driverVariant 'Balloon' 'balloon.inf' '^PCI\\VEN_1AF4&DEV_(1002|1045)'
     }
     if ($InstallQga) {
         if ($services.Count -eq 1) {
