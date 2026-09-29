@@ -194,6 +194,23 @@
       "sha256": {
         "process_list_linux.py": "c804df891698339f213ec8c99e0c63b62caebc70858dbdda84a8ac64c8609b6e"
       }
+    },
+    {
+      "id": "windows-multi-os-license-56b6236-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "b64869b5fe0ca9084100c80eea91ed72ab2944f5f8a4b87ec9358b18aefe7c3e",
+        "AbleProcessIdentity.dll": "ac3a2928f5d8d14262ce1e12f480cefee2d272d87ef3802f43f8d5c8529659f1"
+      }
+    },
+    {
+      "id": "windows-multi-os-license-56b6236-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "c008ac98c5bc8a7cb390dd655ff1546ea6104e54e51c8c78018c0b1a09ab358e",
+        "AbleProcessIdentity.dll": "ac3a2928f5d8d14262ce1e12f480cefee2d272d87ef3802f43f8d5c8529659f1"
+      }
     }
   ]
 }

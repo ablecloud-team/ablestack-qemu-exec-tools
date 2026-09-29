@@ -34,8 +34,8 @@ def hashes(source, profile, directory=False):
     result = {}
     for name in FILES[profile]:
         data = (source / name).read_bytes() if directory else iso_file(source, name)
-        if name == "ProcessList.ps1":
-            data = data.replace(b"\r\n", b"\n")
+        # New approvals bind exact ISO bytes. The host retains normalized
+        # line-ending checks only for previously approved guest bundles.
         result[name] = hashlib.sha256(data).hexdigest()
     return result
 

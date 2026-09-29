@@ -2,6 +2,7 @@
 # Copyright 2026 ABLECLOUD. Apache-2.0.
 """An upgrade or migration may change hosts, but never approve mixed payloads."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -10,9 +11,20 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
 from guest_adapter_compat import CATALOG, approved, supported_windows
+from scripts.append_guest_adapter_compat import hashes
 
 
 class GuestAdapterCompatibilityTests(unittest.TestCase):
+    def test_new_windows_catalog_entry_hashes_exact_script_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            script=b"Write-Output 'test'\r\n"
+            (root/'ProcessList.ps1').write_bytes(script)
+            (root/'AbleProcessIdentity.dll').write_bytes(b'native')
+            value=hashes(root,'windows-read',directory=True)
+            self.assertEqual(value['ProcessList.ps1'],hashlib.sha256(script).hexdigest())
+            self.assertNotEqual(value['ProcessList.ps1'],hashlib.sha256(script.replace(b'\r\n',b'\n')).hexdigest())
+
     def test_windows_multi_os_host_gate(self):
         supported = (
             ('11', 'client', 'Windows 11 Pro'),
@@ -69,6 +81,12 @@ class GuestAdapterCompatibilityTests(unittest.TestCase):
         self.assertIn(('1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be',
                        '4c26bc5fe03c692aed77a35922f325e89f727f0625d60babfba6145473590a36',
                        multi_os[1]), action)
+        notice_iso = (multi_os[0], 'ac3a2928f5d8d14262ce1e12f480cefee2d272d87ef3802f43f8d5c8529659f1')
+        self.assertIn(notice_iso, read)
+        self.assertNotIn((notice_iso[0], repaired[1]), read)
+        self.assertIn(('1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be',
+                       'c008ac98c5bc8a7cb390dd655ff1546ea6104e54e51c8c78018c0b1a09ab358e',
+                       notice_iso[1]), action)
 
     def test_linux_families_and_action_have_approved_bundles(self):
         self.assertTrue(approved('rocky-read'))
