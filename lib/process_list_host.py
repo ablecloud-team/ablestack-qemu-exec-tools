@@ -3,7 +3,6 @@
 import base64
 import datetime as dt
 import fcntl
-import hashlib
 import json
 import math
 import os
@@ -13,6 +12,7 @@ from pathlib import Path
 import stat
 import time
 import uuid
+from guest_adapter_compat import approved
 
 
 RUNTIME_ROOT=Path('/run/ablestack-vm-operations')
@@ -135,22 +135,19 @@ def run(request, transport, cloud_guard=None):
         if remaining<0.5: return failure(request,'CHECK_FAILED','Observation budget exhausted')
         guest=dict(request,budgetMs=max(1,min(3000,int((remaining-0.3)*1000))))
         encoded=base64.b64encode(transport.dumps(guest).encode()).decode()
-        payload=Path(__file__).parent/'process'
         if linux:
-            expected=hashlib.sha256((payload/'process_list_linux.py').read_bytes()).hexdigest()
-            script="import hashlib,runpy,sys,os;p='/usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py';assert hashlib.sha256(open(p,'rb').read()).hexdigest()=='"+expected+"';"
+            profile='rocky-read' if family=='rocky' else 'ubuntu-read'
+            bundles=approved(profile)
+            script="import hashlib,runpy,sys,os;p='/usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py';h=hashlib.sha256(open(p,'rb').read()).hexdigest();"
             if family=='rocky':
-                launcher=payload/'process-read-launcher'
-                if not launcher.is_file():return failure(request,'TOOLS_REQUIRED','Confined collector launcher is not installed on host')
-                launcher_hash=hashlib.sha256(launcher.read_bytes()).hexdigest()
-                script+="x='/usr/libexec/ablestack-qemu-exec-tools/process/process-read-launcher';assert hashlib.sha256(open(x,'rb').read()).hexdigest()=='"+launcher_hash+"';os.execv(x,[x,'--request-base64','"+encoded+"'])"
+                script+="x='/usr/libexec/ablestack-qemu-exec-tools/process/process-read-launcher';y=hashlib.sha256(open(x,'rb').read()).hexdigest();(h,y) in "+repr(bundles)+" or sys.exit(3);os.execv(x,[x,'--request-base64','"+encoded+"'])"
             else:
-                script+="sys.argv=[p,'--request-base64','"+encoded+"'];runpy.run_path(p,run_name='__main__')"
+                script+="(h,) in "+repr(bundles)+" or sys.exit(3);sys.argv=[p,'--request-base64','"+encoded+"'];runpy.run_path(p,run_name='__main__')"
             command=['/usr/bin/python3','-I','-c',script]
         else:
-            native=hashlib.sha256((payload/'AbleProcessIdentity.dll').read_bytes()).hexdigest()
-            expected=hashlib.sha256((payload/'ProcessList.ps1').read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-            script="$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$p='C:\\Program Files\\ABLESTACK Process Tools\\ProcessList.ps1';$sha=[Security.Cryptography.SHA256]::Create();try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.File]::ReadAllText($p).Replace([string][char]13+[char]10,[string][char]10))))).Replace('-','')}finally{$sha.Dispose()};if($hash -ne '"+expected+"'){exit 3};if((Get-FileHash -LiteralPath (Join-Path (Split-Path $p) 'AbleProcessIdentity.dll')).Hash -ne '"+native+"'){exit 3};& $p -RequestBase64 '"+encoded+"'"
+            bundles=approved('windows-read')
+            choices='@('+','.join("'"+':'.join(pair)+"'" for pair in bundles)+')'
+            script="$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$p='C:\\Program Files\\ABLESTACK Process Tools\\ProcessList.ps1';$sha=[Security.Cryptography.SHA256]::Create();try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.File]::ReadAllText($p).Replace([string][char]13+[char]10,[string][char]10))))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()};$native=(Get-FileHash -LiteralPath (Join-Path (Split-Path $p) 'AbleProcessIdentity.dll')).Hash.ToLowerInvariant();$approved="+choices+";if($approved -notcontains ($hash+':'+$native)){exit 3};& $p -RequestBase64 '"+encoded+"'"
             command=['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         options={'mode':'-l','timeout':remaining,'rpc_timeout':3,'max_output':1048576,'headers':None,'out':'','csv':False,'table':False}
         # Persist before dispatch: host crash or ambiguous guest-exec must block

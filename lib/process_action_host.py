@@ -1,8 +1,9 @@
 """Cloud-reserved action transport. No standalone mutation of Cloud VMs."""
 # Copyright 2026 ABLECLOUD. Apache-2.0.
-import base64,datetime as dt,fcntl,hashlib,json,os,stat,time,uuid
+import base64,datetime as dt,fcntl,json,os,stat,time,uuid
 from pathlib import Path
 from process_list_host import RUNTIME_ROOT,inherited_guard,parent_alive,failure
+from guest_adapter_compat import approved
 
 def context(request,path):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -105,23 +106,20 @@ def run(request,transport,reservation=None):
                 except BlockingIOError:os.close(fd)
             if slot is None:return failure(request,'BUSY','Action capacity exhausted')
         with transport.Admission() as admission:osinfo=transport.rpc(domain,{'execute':'guest-get-osinfo'},deadline,3,admission.fd,65536)
-        payload=Path(__file__).parent/'process';guest=dict(request,budgetMs=max(1,int((deadline-time.monotonic())*1000)-300))
+        guest=dict(request,budgetMs=max(1,int((deadline-time.monotonic())*1000)-300))
         encoded=base64.b64encode(transport.dumps(guest).encode()).decode()
         family=osinfo.get('id');version=osinfo.get('version-id');arch=osinfo.get('machine')
         linux=(family=='rocky' and version in ('9.6','9.7','9.8','10.2')) or (family=='ubuntu' and version in ('22.04','24.04','26.04'))
         windows=family in ('mswindows','windows') and any(v in osinfo.get('pretty-name','') for v in ('2022','2025'))
         if arch not in ('x86_64','x86-64','amd64') or not (linux or windows):return failure(request,'TOOLS_REQUIRED','OS unsupported')
         if linux:
-            digest=hashlib.sha256((payload/'process_action_linux.py').read_bytes()).hexdigest()
-            launcher=hashlib.sha256((payload/'process-action-launcher').read_bytes()).hexdigest()
-            script="import os,hashlib;p='/usr/libexec/ablestack-qemu-exec-tools/process/';assert hashlib.sha256(open(p+'process_action_linux.py','rb').read()).hexdigest()=='"+digest+"';x=p+'process-action-launcher';assert hashlib.sha256(open(x,'rb').read()).hexdigest()=='"+launcher+"';os.execv(x,[x,'--request-base64','"+encoded+"'])"
+            bundles=approved('linux-action')
+            script="import os,hashlib,sys;p='/usr/libexec/ablestack-qemu-exec-tools/process/';h=hashlib.sha256(open(p+'process_action_linux.py','rb').read()).hexdigest();x=p+'process-action-launcher';y=hashlib.sha256(open(x,'rb').read()).hexdigest();(h,y) in "+repr(bundles)+" or sys.exit(3);os.execv(x,[x,'--request-base64','"+encoded+"'])"
             command=['/usr/bin/python3','-I','-c',script]
         else:
-            checks=''
-            for name in ('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll'):
-                digest=hashlib.sha256((payload/name).read_bytes()).hexdigest()
-                checks+="if((Get-FileHash -LiteralPath (Join-Path $p '"+name+"')).Hash -ne '"+digest+"'){exit 3};"
-            script=r"$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';"+checks+"& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
+            bundles=approved('windows-action')
+            choices='@('+','.join("'"+':'.join(pair)+"'" for pair in bundles)+')'
+            script=r"$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';$h=@('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
             command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         if action:
             context(request,reservation)

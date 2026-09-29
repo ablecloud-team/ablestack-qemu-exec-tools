@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 import os
+import sys
 import types
 from pathlib import Path
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'lib'))
 def module(name,path):
     spec=importlib.util.spec_from_file_location(name,path); value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
 guest=module('guest',ROOT/'lib/process/process_list_linux.py')
@@ -162,5 +164,27 @@ class HostGuardTests(unittest.TestCase):
             with (locks/(REQUEST['authority']['vmUuid']+'.lock')).open('w') as handle:
                 host.fcntl.flock(handle,host.fcntl.LOCK_EX|host.fcntl.LOCK_NB)
                 self.assertEqual(host.run(REQUEST,self.transport())['error']['code'],'BUSY')
+
+    def test_read_command_uses_approved_bundles_independent_of_host_payload(self):
+        for family,version,pretty in [('rocky','10.2','Rocky Linux 10.2'),
+                                      ('ubuntu','26.04','Ubuntu 26.04'),
+                                      ('mswindows','10.0','Microsoft Windows Server 2022')]:
+            with self.subTest(family=family),tempfile.TemporaryDirectory() as tmp,patch.object(host,'RUNTIME_ROOT',Path(tmp)):
+                transport=self.transport('FAILED');commands=[]
+                transport.rpc=lambda *args:{'id':family,'version-id':version,'machine':'x86_64','pretty-name':pretty}
+                def execute(domain,command,options):
+                    commands.append(command)
+                    return {'state':'FAILED','exit_code':3,'encoding_loss':False,'out_truncated':False}
+                transport.execute=execute
+                self.assertEqual(host.run(REQUEST,transport)['error']['code'],'CHECK_FAILED')
+                self.assertEqual(len(commands),1)
+                if family=='mswindows':
+                    script=__import__('base64').b64decode(commands[0][-1]).decode('utf-16le')
+                    self.assertIn('ef2e96391d0973ff56d0bbf9ad0ea573eb0049aef9b59cf47d73846103f0324a',script)
+                    self.assertIn('e9e405c166eb95b2b6d529b3e66c06a5a0806e9a6464646771c2547b0cbee32f',script)
+                    self.assertIn('-notcontains',script)
+                else:
+                    self.assertIn(' in ((',commands[0][-1])
+                    self.assertIn('sys.exit(3)',commands[0][-1])
 
 if __name__=='__main__':unittest.main()

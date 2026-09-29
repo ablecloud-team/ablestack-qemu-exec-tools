@@ -43,3 +43,27 @@ Some Linux VMs already have QGA. Use their actual state for repair/upgrade
 evidence; collect fresh-install evidence only from a VM observed without QGA.
 Windows driver installation may disrupt networking or require a reboot, so
 preserve console access and verify recovery before proceeding to the next VM.
+
+## Host/guest adapter compatibility during upgrades and migration
+
+The host still verifies SHA-256 for every guest adapter before QGA executes it.
+It now accepts only **complete, reviewed file bundles** from
+`lib/process/guest_adapter_compat.json`, rather than requiring the guest files
+to equal the binaries in the host's current package. Read and action bundles
+are separate. Mixing a script or DLL from two approved versions is rejected.
+The catalog includes the previously released Q6 Windows and issue #79 Windows,
+Rocky and Ubuntu ISO payloads; the RPM/DEB build also adds its own exact
+adapter files. Unknown, modified, or partially installed guest files fail
+closed until a reviewed ISO bundle is added to the catalog.
+
+To approve a later guest ISO, check its Actions provenance and ISO SHA-256,
+then run `python3 scripts/append_guest_adapter_compat.py --iso <ISO> --family
+windows|rocky|ubuntu --id <release-id>` in the source tree, review the added
+whole-file hashes, and build/release a new host package. Distribute that same
+catalog to **every eligible migration target host before** upgrading a guest
+from that ISO or moving it. During a rolling host upgrade, a target whose
+catalog lacks the guest bundle must reject execution; the catalog is not
+implicitly expanded from whatever happens to be installed inside a VM.
+After deployment, compare catalog SHA-256 on all migration hosts and test a
+process read on both sides of a VM migration. Removing an older approved
+bundle is an explicit compatibility change requiring guest inventory review.

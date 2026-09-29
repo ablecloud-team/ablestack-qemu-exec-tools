@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "1.0",
+  "bundles": [
+    {
+      "id": "q6-windows-process-iso-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "410674d0d998f09bed94754b7113e6aaad82a0ce0332b06ccc772b0c785cbb79"
+      }
+    },
+    {
+      "id": "q6-windows-process-iso-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "82602a98ce59482e92a3ee871199411d22916878e12ac80e8653a03a54e558dd",
+        "AbleProcessIdentity.dll": "410674d0d998f09bed94754b7113e6aaad82a0ce0332b06ccc772b0c785cbb79"
+      }
+    },
+    {
+      "id": "q6-canonical-windows-iso-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "a9d79b1106eae7419f846f32988b59d80055c9e5798222952b3886962a9b7e5b"
+      }
+    },
+    {
+      "id": "q6-canonical-windows-iso-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "ca4bbb44535ec101364422c392c23c922a75c2904481159c5fbbe079e20c9838",
+        "AbleProcessIdentity.dll": "a9d79b1106eae7419f846f32988b59d80055c9e5798222952b3886962a9b7e5b"
+      }
+    },
+    {
+      "id": "q6-final-windows-iso-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "a2baa17f4229cfb4a5d4be569458fd8719429e5350547ef5f4c350d6ae7e70ce"
+      }
+    },
+    {
+      "id": "q6-final-windows-iso-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "f82b7989596e4ea48f743f5d673bae6223f792610141ac531e3416bfe7b4645a",
+        "AbleProcessIdentity.dll": "a2baa17f4229cfb4a5d4be569458fd8719429e5350547ef5f4c350d6ae7e70ce"
+      }
+    },
+    {
+      "id": "q6-latest-win-iso-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "ef2e96391d0973ff56d0bbf9ad0ea573eb0049aef9b59cf47d73846103f0324a"
+      }
+    },
+    {
+      "id": "q6-latest-win-iso-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "6f6d2cfb46989e5abe5b27c3dc0bb787e846f3a70ee008742b88934d7b77f668",
+        "AbleProcessIdentity.dll": "ef2e96391d0973ff56d0bbf9ad0ea573eb0049aef9b59cf47d73846103f0324a"
+      }
+    },
+    {
+      "id": "issue79-artifacts-final-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "e6d404963688bd08369350e0e4ae7ba3eef4a6d494ed9a8ff5e86ab515ea0897"
+      }
+    },
+    {
+      "id": "issue79-artifacts-final-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "2ef96db690508c1ae70d74c77e52572ac313de9eed3dd477ba76e7836dbd9806",
+        "AbleProcessIdentity.dll": "e6d404963688bd08369350e0e4ae7ba3eef4a6d494ed9a8ff5e86ab515ea0897"
+      }
+    },
+    {
+      "id": "issue79-artifacts-88ad6d9-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "f9040933557022f165aba3b8abd8c74bea73903b8bff571d3813326a8ffbcdd4"
+      }
+    },
+    {
+      "id": "issue79-artifacts-88ad6d9-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "ae04eec04322057f2a8796b1def882052c81c2d89625b97a91de2cf4287d968a",
+        "AbleProcessIdentity.dll": "f9040933557022f165aba3b8abd8c74bea73903b8bff571d3813326a8ffbcdd4"
+      }
+    },
+    {
+      "id": "issue79-artifacts-89806b1-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "c85da459b828bb595b6ea23d06929e711190c89a88ece7989d5fdd937554ff36"
+      }
+    },
+    {
+      "id": "issue79-artifacts-89806b1-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "5110991d86a6764f12053d3b8b4df85dd892d3b27a415a63057000bb49e74485",
+        "AbleProcessIdentity.dll": "c85da459b828bb595b6ea23d06929e711190c89a88ece7989d5fdd937554ff36"
+      }
+    },
+    {
+      "id": "issue79-artifacts-40d4807-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "8bc4ad8d2e1ab0e572c90c071f71d4b79de8d04cc75aea938a1daf235c37ef75",
+        "AbleProcessIdentity.dll": "e9e405c166eb95b2b6d529b3e66c06a5a0806e9a6464646771c2547b0cbee32f"
+      }
+    },
+    {
+      "id": "issue79-artifacts-40d4807-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "efff2affe6776ee4049793e7e2d27ea94cc7afab93352d05ad747fad0cd5651b",
+        "AbleProcessIdentity.dll": "e9e405c166eb95b2b6d529b3e66c06a5a0806e9a6464646771c2547b0cbee32f"
+      }
+    },
+    {
+      "id": "issue79-40d4807-rocky-rocky-read",
+      "profile": "rocky-read",
+      "sha256": {
+        "process_list_linux.py": "c804df891698339f213ec8c99e0c63b62caebc70858dbdda84a8ac64c8609b6e",
+        "process-read-launcher": "2e202dc05be052ab636799291092d3da46a4f42028fb466f34923791fe3b38a4"
+      }
+    },
+    {
+      "id": "issue79-40d4807-rocky-linux-action",
+      "profile": "linux-action",
+      "sha256": {
+        "process_action_linux.py": "9ce3220c1628c4e87aed738a2bc8d8b3dd8aa245cfcf6916d3dee5372cc39d43",
+        "process-action-launcher": "853e8989208afb57766d9b5389f9a51ba8922b8d207062fbc699497df6a73e17"
+      }
+    },
+    {
+      "id": "issue79-40d4807-ubuntu-ubuntu-read",
+      "profile": "ubuntu-read",
+      "sha256": {
+        "process_list_linux.py": "c804df891698339f213ec8c99e0c63b62caebc70858dbdda84a8ac64c8609b6e"
+      }
+    }
+  ]
+}

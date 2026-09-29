@@ -190,6 +190,15 @@ jobs:
           install -m 0755 process-launchers/process-read-launcher lib/process/process-read-launcher
           install -m 0755 process-launchers/process-action-launcher lib/process/process-action-launcher
 
+      - name: Approve exact adapters from this build
+        run: |
+          set -euo pipefail
+          id="host-${GITHUB_SHA::12}-${GITHUB_RUN_ID}"
+          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
+          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
+          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.guest_adapter_compat_test
+
       - name: Build RPM
         run: make rpm
 
@@ -867,6 +876,15 @@ jobs:
           test "$(tr -d '\r\n' < process-launchers/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
           install -m 0755 process-launchers/process-read-launcher lib/process/process-read-launcher
           install -m 0755 process-launchers/process-action-launcher lib/process/process-action-launcher
+
+      - name: Approve exact adapters from this build
+        run: |
+          set -euo pipefail
+          id="host-${GITHUB_SHA::12}-${GITHUB_RUN_ID}"
+          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
+          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
+          python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.guest_adapter_compat_test
 
       - name: Build DEB
         run: make deb
