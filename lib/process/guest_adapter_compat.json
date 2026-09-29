@@ -156,6 +156,23 @@
       }
     },
     {
+      "id": "windows-multi-os-process-1c4b091-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "b64869b5fe0ca9084100c80eea91ed72ab2944f5f8a4b87ec9358b18aefe7c3e",
+        "AbleProcessIdentity.dll": "0a97664f4a104872d4bf0c26cb9cd657e76a98a7bb649a51dbe050081705e391"
+      }
+    },
+    {
+      "id": "windows-multi-os-process-1c4b091-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "4c26bc5fe03c692aed77a35922f325e89f727f0625d60babfba6145473590a36",
+        "AbleProcessIdentity.dll": "0a97664f4a104872d4bf0c26cb9cd657e76a98a7bb649a51dbe050081705e391"
+      }
+    },
+    {
       "id": "issue79-40d4807-rocky-rocky-read",
       "profile": "rocky-read",
       "sha256": {
