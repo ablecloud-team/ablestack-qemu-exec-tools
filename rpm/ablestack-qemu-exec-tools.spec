@@ -23,8 +23,15 @@ License:        Apache-2.0
 URL:            https://github.com/ablecloud-team/ablestack-qemu-exec-tools
 Source0:        %{name}-%{version}.tar.gz
 
-BuildArch:      noarch
+BuildArch:      x86_64
+# vm_exec checks the exact guest launcher bytes from the matching ISO.
+# Preserve the shared static launcher artifact during RPM post-processing.
+%global __brp_strip /bin/true
+%global __brp_strip_comment_note /bin/true
+%global __brp_strip_lto /bin/true
+%global __brp_strip_static_archive /bin/true
 Requires:       bash
+Requires:       python3 >= 3.9
 Requires:       jq
 Requires:       libvirt-client
 Requires:       cloud-init
@@ -85,6 +92,12 @@ cp -a rpm/dhcp.py.fixed %{buildroot}/usr/share/ablestack-qemu-exec-tools/ 2>/dev
 - Git hash: %{githash}
 
 %post
+# Process repair must not initialize cloud-init, DHCP or guest credentials.
+if [ "${ABLESTACK_TOOLS_MODE:-}" = "process-management" ]; then
+    /usr/bin/agent_policy_fix --policy process-management --apply --json
+    exit $?
+fi
+
 echo "[INFO] Running post-install tasks for %{name}..."
 
 _is_ablestack_host() {

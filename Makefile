@@ -148,6 +148,8 @@ uninstall-keep-lib:
 
 
 rpm:
+	@test -s lib/process/AbleProcessIdentity.dll -a -s lib/process/AbleProcessAction.dll
+	@test -x lib/process/process-read-launcher -a -x lib/process/process-action-launcher
 	@echo "Building RPM..."
 	mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 	@TMP_TGZ="$$(mktemp /tmp/ablestack-qemu-exec-tools-$(VERSION).tar.gz.XXXXXX)"; \
@@ -162,6 +164,7 @@ rpm:
 		--exclude=./release \
 		--exclude=./repo \
 		--exclude=./dist \
+		--exclude=./process-payload \
 		--exclude=./.git \
 		--exclude=./assets \
 		--exclude=./windows \
@@ -181,7 +184,7 @@ rpm:
 
 	# Collect build artifacts
 	mkdir -p build/rpm
-	cp rpmbuild/RPMS/noarch/*.rpm build/rpm/
+	cp rpmbuild/RPMS/x86_64/*.rpm build/rpm/
 	@echo "RPM package created: build/rpm/"
 
 hangctl-rpm:
@@ -409,6 +412,8 @@ n2k-deb:
 	@echo "N2K DEB package created: build/deb-n2k/"
 
 deb:
+	@test -s lib/process/AbleProcessIdentity.dll -a -s lib/process/AbleProcessAction.dll
+	@test -x lib/process/process-read-launcher -a -x lib/process/process-action-launcher
 	@echo "Building DEB..."
 	rm -rf $(DEB_BUILD_DIR)
 	mkdir -p $(DEB_DEBIAN_DIR) $(DEB_BIN_DIR) $(DEB_LIB_DIR) $(DEB_DOC_DIR) $(DEB_SHARE_DIR)/selinux

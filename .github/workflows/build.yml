@@ -83,9 +83,35 @@ jobs:
       retention_days: "14"
       test_mode: false
 
+  # One static launcher payload is shared byte-for-byte by every host
+  # package and guest ISO. Host vm_exec verifies these guest bytes.
+  build-process-launchers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.WORKFLOW_SOURCE_REF }}
+      - name: Compile static Linux process launchers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y musl-tools
+          mkdir -p process-launchers
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o process-launchers/process-read-launcher lib/process/process_read_launcher.c
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o process-launchers/process-action-launcher lib/process/process_action_launcher.c
+          git rev-parse HEAD > process-launchers/SOURCE_COMMIT
+          file process-launchers/process-*-launcher
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-process-launchers
+          path: process-launchers/
+          if-no-files-found: error
+
   # 1) RPM BUILD (Rocky 9.6 / 9.7 / 9.8)
   # ======================================================================
   build-rpm:
+    needs: [build-process-tools, build-process-launchers]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -94,10 +120,23 @@ jobs:
       image: rockylinux/rockylinux:9
       options: --user 0
     steps:
+      - name: Install Git for source checkout
+        run: dnf -y install git
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ env.WORKFLOW_SOURCE_REF }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-process-payload
+          path: process-payload
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-process-launchers
+          path: process-launchers
 
       - name: Install build deps (Rocky ${{ matrix.host_os_minor }})
         run: |
@@ -132,10 +171,51 @@ jobs:
 
           dnf clean all
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" makecache
-          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install make rpm-build tar git dnf-plugins-core createrepo_c
+          dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install make rpm-build tar git dnf-plugins-core createrepo_c gcc cpio
+
+      - name: Stage matching Windows process adapters
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$PWD"
+          test "$(tr -d '\r\n' < process-payload/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          cmp lib/process/ProcessList.ps1 process-payload/ProcessList.ps1
+          cmp lib/process/ProcessAction.ps1 process-payload/ProcessAction.ps1
+          install -m 0644 process-payload/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.dll
+          install -m 0644 process-payload/AbleProcessAction.dll lib/process/AbleProcessAction.dll
+
+      - name: Stage canonical Linux process launchers
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < process-launchers/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          install -m 0755 process-launchers/process-read-launcher lib/process/process-read-launcher
+          install -m 0755 process-launchers/process-action-launcher lib/process/process-action-launcher
+
+      - name: Approve exact adapters from this build
+        run: |
+          set -euo pipefail
+          id="host-${GITHUB_SHA::12}-${GITHUB_RUN_ID}"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.guest_adapter_compat_test
 
       - name: Build RPM
         run: make rpm
+
+      - name: Verify packaged process adapters
+        run: |
+          set -euo pipefail
+          package=$(find build/rpm -maxdepth 1 -name 'ablestack-qemu-exec-tools-*.rpm' -print -quit)
+          test -n "$package"
+          mkdir -p process-package-check
+          (cd process-package-check && rpm2cpio "../$package" | cpio -id --quiet)
+          installed=process-package-check/usr/libexec/ablestack-qemu-exec-tools/process
+          cmp process-payload/AbleProcessIdentity.dll "$installed/AbleProcessIdentity.dll"
+          cmp process-payload/AbleProcessAction.dll "$installed/AbleProcessAction.dll"
+          cmp process-launchers/process-read-launcher "$installed/process-read-launcher"
+          cmp process-launchers/process-action-launcher "$installed/process-action-launcher"
+          test -x "$installed/process-read-launcher"
+          test -x "$installed/process-action-launcher"
 
       - name: Create RPM repo (with dependencies) for Rocky ${{ matrix.host_os_minor }}
         run: |
@@ -755,6 +835,7 @@ jobs:
   # 2) DEB BUILD (Ubuntu 22.04 / 24.04 / 26.04)
   # ======================================================================
   build-deb:
+    needs: [build-process-tools, build-process-launchers]
     strategy:
       matrix:
         os_version: [22.04, 24.04, 26.04]
@@ -765,13 +846,63 @@ jobs:
           fetch-depth: 0
           ref: ${{ env.WORKFLOW_SOURCE_REF }}
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-process-payload
+          path: process-payload
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-process-launchers
+          path: process-launchers
+
+      - name: Stage matching Windows process adapters
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < process-payload/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          cmp lib/process/ProcessList.ps1 process-payload/ProcessList.ps1
+          cmp lib/process/ProcessAction.ps1 process-payload/ProcessAction.ps1
+          install -m 0644 process-payload/AbleProcessIdentity.dll lib/process/AbleProcessIdentity.dll
+          install -m 0644 process-payload/AbleProcessAction.dll lib/process/AbleProcessAction.dll
+
       - name: Install build deps
         run: |
           sudo apt-get update -y
           sudo apt-get install -y build-essential make dpkg-dev debhelper git apt-utils
 
+      - name: Stage canonical Linux process launchers
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < process-launchers/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          install -m 0755 process-launchers/process-read-launcher lib/process/process-read-launcher
+          install -m 0755 process-launchers/process-action-launcher lib/process/process-action-launcher
+
+      - name: Approve exact adapters from this build
+        run: |
+          set -euo pipefail
+          id="host-${GITHUB_SHA::12}-${GITHUB_RUN_ID}"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family windows --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family rocky --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/append_guest_adapter_compat.py --directory lib/process --family ubuntu --id "$id"
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.guest_adapter_compat_test
+
       - name: Build DEB
         run: make deb
+
+      - name: Verify packaged process adapters
+        run: |
+          set -euo pipefail
+          package=$(find build/deb -maxdepth 1 -name 'ablestack-qemu-exec-tools*.deb' -print -quit)
+          test -n "$package"
+          mkdir -p process-package-check
+          dpkg-deb -x "$package" process-package-check
+          installed=process-package-check/usr/libexec/ablestack-qemu-exec-tools/process
+          cmp process-payload/AbleProcessIdentity.dll "$installed/AbleProcessIdentity.dll"
+          cmp process-payload/AbleProcessAction.dll "$installed/AbleProcessAction.dll"
+          cmp process-launchers/process-read-launcher "$installed/process-read-launcher"
+          cmp process-launchers/process-action-launcher "$installed/process-action-launcher"
+          test -x "$installed/process-read-launcher"
+          test -x "$installed/process-action-launcher"
 
       - name: Download dependencies and create APT repo
         run: |
@@ -870,8 +1001,13 @@ jobs:
   # ======================================================================
   # 4) RELEASE + ISO CREATION (VirtIO ???? ????
   # ======================================================================
+  build-process-tools:
+    uses: ./.github/workflows/windows-process-repair.yml
+    with:
+      source_ref: ${{ inputs.source_ref || github.sha }}
+
   release:
-    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm]
+    needs: [build-rpm, build-hangctl-rpm, build-ftctl-rpm, build-deb, build-windows, build-v2k-rpm, build-n2k-rpm, build-process-tools, build-process-launchers]
     runs-on: ubuntu-latest
     # The official path deliberately skips this reusable workflow's build-winpe
     # job because the caller already produced it. Use always() to prevent that
@@ -883,6 +1019,8 @@ jobs:
         needs['build-rpm'].result == 'success' &&
         needs['build-hangctl-rpm'].result == 'success' &&
         needs['build-ftctl-rpm'].result == 'success' &&
+        needs['build-process-tools'].result == 'success' &&
+        needs['build-process-launchers'].result == 'success' &&
         needs['build-deb'].result == 'success' &&
         needs['build-windows'].result == 'success' &&
         needs['build-v2k-rpm'].result == 'success' &&
@@ -925,7 +1063,7 @@ jobs:
       - name: Install packaging tools (genisoimage, 7zip)
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y genisoimage p7zip-full python3-pip
+          sudo apt-get install -y genisoimage p7zip-full python3-pip musl-tools
 
       - name: Collect artifacts into structured dirs
         run: |
@@ -1173,8 +1311,14 @@ jobs:
         run: |
           cat > release/install.ps1 << 'PS1'
           Param(
-            [switch]$Silent
+            [switch]$Silent,
+            [ValidateSet('Full','ProcessManagement')][string]$Mode='Full',
+            [switch]$InstallQga
           )
+          if ($Mode -eq 'ProcessManagement') {
+            & (Join-Path $PSScriptRoot 'process-management\install.ps1') -InstallQga:$InstallQga
+            exit $LASTEXITCODE
+          }
 
           # Force default = false if not provided
           if (-not $PSBoundParameters.ContainsKey('Silent')) {
@@ -1341,7 +1485,7 @@ jobs:
           @echo off
           setlocal
           rem Always run non-silent mode by default
-          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
           if errorlevel 1 (
             echo [ERROR] Install failed. See C:\Windows\Temp\ablestack-virtio-install.log
             exit /b 1
@@ -1412,6 +1556,10 @@ jobs:
           #!/usr/bin/env bash
           set -e
           ISO_MNT="$(cd "$(dirname "$0")" && pwd -P)"
+          if [[ "${1:-}" == --mode && "${2:-}" == process-management ]]; then
+            shift 2
+            exec bash "$ISO_MNT/process-management/install-linux.sh" "$@"
+          fi
 
           echo "[INFO] ABLESTACK QEMU Exec Tools Installer"
           echo "[INFO] Detecting distribution..."
@@ -1951,6 +2099,10 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG}"
+          mkdir -p build
+          test "$(tr -d '\r\n' < dist/linux-process-launchers/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          install -m 0755 dist/linux-process-launchers/process-read-launcher build/process-read-launcher
+          install -m 0755 dist/linux-process-launchers/process-action-launcher build/process-action-launcher
 
           mkdir -p build/iso/rocky build/iso/ubuntu build/iso/windows
           rm -rf build/iso-staging
@@ -2010,6 +2162,7 @@ jobs:
             if [[ -d release/bin ]]; then
               cp -a release/bin/. "${rocky_staging}/bin/"
             fi
+            bash scripts/stage-process-repair.sh "${rocky_staging}"
             cp -a release/install-linux.sh "${rocky_staging}/"
             cp -a release/uninstall-linux.sh "${rocky_staging}/"
 
@@ -2019,11 +2172,31 @@ jobs:
               -r -J "${rocky_staging}"
           done
 
+          # Rocky 10.2 guest support is a process-only repair media. Its host
+          # package repository is intentionally not taken from Rocky 9.
+          rocky10_staging="build/iso-staging/rocky10.2"
+          mkdir -p "$rocky10_staging"
+          bash scripts/stage-process-repair.sh "$rocky10_staging"
+          cp docs/process-management-linux-repair.md "$rocky10_staging/README.md"
+          cat > "$rocky10_staging/install-linux.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" != --mode || "${2:-}" != process-management ]]; then
+            echo 'Usage: bash install-linux.sh --mode process-management' >&2
+            exit 2
+          fi
+          exec bash "$(cd "$(dirname "$0")" && pwd -P)/process-management/install-linux.sh"
+          SH
+          chmod 0755 "$rocky10_staging/install-linux.sh"
+          mkisofs -o "build/iso/rocky/ABLESTACK-Tools-rocky10.2-${VERSION}.iso" \
+            -V "ABLESTACK-Rocky102" -r -J "$rocky10_staging"
+
           mkdir -p build/iso-staging/ubuntu/deb build/iso-staging/ubuntu/completions
           cp -a release/deb/. build/iso-staging/ubuntu/deb/
           if [[ -d release/completions ]]; then
             cp -a release/completions/. build/iso-staging/ubuntu/completions/
           fi
+          bash scripts/stage-process-repair.sh build/iso-staging/ubuntu
           cp -a release/install-linux.sh build/iso-staging/ubuntu/
           cp -a release/uninstall-linux.sh build/iso-staging/ubuntu/
 
@@ -2036,6 +2209,13 @@ jobs:
           fi
           cp -a release/install.bat build/iso-staging/windows/
           cp -a release/install.ps1 build/iso-staging/windows/
+          PROCESS_PAYLOAD=$(find dist -type d -name windows-process-payload | head -n 1)
+          if [[ -z "$PROCESS_PAYLOAD" ]]; then
+            echo 'Windows process payload missing; build/download matching windows-process-repair artifact first' >&2
+            exit 2
+          fi
+          test "$(tr -d '\r\n' < "$PROCESS_PAYLOAD/SOURCE_COMMIT")" = "$(git rev-parse HEAD)"
+          cp -a "$PROCESS_PAYLOAD" build/iso-staging/windows/process-management
 
           mkisofs -o "build/iso/ubuntu/ABLESTACK-Tools-ubuntu-${VERSION}.iso" \
             -V "ABLESTACK-Ubuntu" \
@@ -2046,6 +2226,19 @@ jobs:
             -r -J build/iso-staging/windows
 
           find build/iso -type f -name '*.iso' -ls
+
+      - name: Record and verify process artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p process_artifact_manifest_test.py -v
+          python3 scripts/process_artifact_manifest.py \
+            --root build/iso --source-commit "$(git rev-parse HEAD)" \
+            --workflow-run-id "$GITHUB_RUN_ID" --version "$RELEASE_TAG" --packages-root release
+          (cd build/iso && sha256sum -c SHA256SUMS)
+          for iso in build/iso/rocky/*.iso build/iso/ubuntu/*.iso build/iso/windows/*.iso; do
+            isoinfo -i "$iso" -R -f | grep -q '/process-management/install-linux.sh\|/process-management/install.ps1'
+          done
 
       - name: Upload release build validation artifacts
         if: ${{ env.RELEASE_PUBLISH != 'true' }}

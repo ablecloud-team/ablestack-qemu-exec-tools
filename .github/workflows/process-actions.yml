@@ -1,0 +1,116 @@
+name: Process action adapters
+on:
+  push:
+    branches: [codex/issue-64-process-actions, codex/issue-1175-action-clock-fix]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    needs: windows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: dhslove/ablestack-cloud
+          ref: 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf
+          path: cloud-contract
+          sparse-checkout: docs/design/vm-process-contract
+      - uses: actions/download-artifact@v4
+        with:
+          name: process-list-native
+          path: lib/process
+      - uses: actions/download-artifact@v4
+        with:
+          name: process-list-windows
+          path: build/windows-stage
+      - run: |
+          python3 -m pip install -r cloud-contract/docs/design/vm-process-contract/requirements.txt
+          python3 tests/vm_exec_test.py
+          sudo python3 tests/process_policy_test.py
+          sudo python3 tests/process_list_test.py
+          sudo python3 tests/process_action_linux_test.py
+          sudo python3 tests/process_action_host_test.py
+          sudo python3 tests/process_cloud_guard_test.py
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools genisoimage
+          mkdir -p build
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-action-launcher lib/process/process_action_launcher.c
+          cp build/process-action-launcher lib/process/
+          bash scripts/stage-process-repair.sh build/iso
+          mkdir -p build/iso/windows
+          install -m 0644 build/windows-stage/ABLESTACK-ProcessTools.msi build/iso/windows/ABLESTACK-ProcessTools.msi
+          git rev-parse HEAD > build/iso/SOURCE_COMMIT
+          genisoimage -quiet -r -J -V ABLESTACK-PROCESS -o build/ABLESTACK-Tools-process-actions.iso build/iso
+          python3 tests/vm_exec_contract_test.py --contract-dir cloud-contract/docs/design/vm-process-contract
+          bash -n process-management/install-linux.sh scripts/stage-process-repair.sh
+          mkdir -p build
+          tar --exclude=__pycache__ -czf build/process-list-source.tgz bin/vm_exec.sh lib/vm_exec.py lib/process_list_host.py lib/process_action_host.py lib/process process-management scripts/stage-process-repair.sh
+          (cd build && sha256sum process-list-source.tgz ABLESTACK-Tools-process-actions.iso process-action-launcher > SHA256SUMS)
+          git rev-parse HEAD > build/SOURCE_COMMIT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-list-source
+          path: build/
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: dhslove/ablestack-cloud
+          ref: 7573322eb7fe81fb7a42566e6e8ce4eb32e38acf
+          path: cloud-contract
+          sparse-checkout: docs/design/vm-process-contract
+      - name: Build native process identity helper
+        shell: powershell
+        run: |
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /out:.\lib\process\AbleProcessIdentity.dll .\lib\process\AbleProcessIdentity.cs
+          if($LASTEXITCODE){throw 'Native helper build failed'}
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /reference:System.Web.Extensions.dll /out:.\lib\process\AbleProcessAction.dll .\lib\process\AbleProcessAction.cs
+          if($LASTEXITCODE){throw 'Native action build failed'}
+          New-Item -ItemType Directory -Force build | Out-Null
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /reference:System.ServiceProcess.dll /out:.\build\AbleProcessQ5Fixture.exe .\tests\ProcessActionFixture.cs
+          if($LASTEXITCODE){throw 'Fixture build failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-list-native
+          path: lib/process/*.dll
+      - name: Windows PowerShell native identity and shared service mapping
+        shell: powershell
+        run: |
+          tests/process_list_windows_test.ps1
+          tests/process_action_windows_test.ps1
+      - run: |
+          python -m pip install -r cloud-contract/docs/design/vm-process-contract/requirements.txt
+          python cloud-contract/docs/design/vm-process-contract/verify.py --file build/windows-snapshot.json
+          python -c "from pathlib import Path; p=Path('build/windows-action.json'); p.write_text(p.read_text(encoding='utf-8-sig'),encoding='utf-8')"
+          python cloud-contract/docs/design/vm-process-contract/verify.py --file build/windows-action.json
+      - name: Build collector MSI
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.6
+          if ($LASTEXITCODE) { throw 'WiX install failed' }
+          New-Item -ItemType Directory -Force build/payload | Out-Null
+          Copy-Item windows/process-management/*.ps1,windows/process-management/*.psm1 build/payload
+          Copy-Item lib/process/ProcessList.ps1,lib/process/ProcessAction.ps1,lib/process/*.dll build/payload
+          git rev-parse HEAD | Set-Content build/payload/SOURCE_COMMIT -Encoding ascii
+          wix build windows/process-management/ProcessTools.wxs -arch x64 -d "Payload=$PWD/build/payload" -o build/ABLESTACK-ProcessTools.msi
+          if ($LASTEXITCODE) { throw 'WiX build failed' }
+          Get-FileHash build/ABLESTACK-ProcessTools.msi | Format-List | Out-File build/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-list-windows
+          path: build/
+
+  policy-compile:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rocky: ['9', '10']
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD:/src:ro" rockylinux/rockylinux:${{ matrix.rocky }} bash -c 'dnf -y install selinux-policy-targeted policycoreutils && semodule -N -i /src/process-management/ablestack_process_action.cil'

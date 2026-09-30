@@ -1,0 +1,49 @@
+name: Multi-OS ABLESTACK process Tools ISOs
+on:
+  push:
+    branches: [codex/issue-79-multi-os-guest-iso]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-payload:
+    uses: ./.github/workflows/windows-process-repair.yml
+    with:
+      source_ref: ${{ github.sha }}
+  guest-isos:
+    needs: windows-payload
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-process-payload
+          path: build/windows-process-payload
+      - name: Install ISO build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y genisoimage musl-tools
+      - name: Verify source and build Linux launchers
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < build/windows-process-payload/SOURCE_COMMIT)" = "$(git rev-parse HEAD)"
+          mkdir -p build
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-action-launcher lib/process/process_action_launcher.c
+          bash -n scripts/build-guest-packages.sh scripts/build-process-guest-isos.sh scripts/install-guest-process-linux.sh process-management/install-linux.sh process-management/install-actions-linux.sh
+          python3 -m unittest discover -s tests -p process_guest_iso_manifest_test.py -v
+      - name: Download signed OS packages into offline repos
+        run: bash scripts/build-guest-packages.sh build/guest-packages
+      - name: Assemble four family ISOs and manifest
+        run: |
+          set -euo pipefail
+          version="process-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          bash scripts/build-process-guest-isos.sh build/guest-packages build/windows-process-payload build/guest-isos "$version"
+          python3 scripts/process_guest_iso_manifest.py --root build/guest-isos --source-commit "$GITHUB_SHA" --workflow-run-id "$GITHUB_RUN_ID" --version "$version"
+          (cd build/guest-isos && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-guest-isos
+          path: build/guest-isos/*
+          if-no-files-found: error
+          retention-days: 14

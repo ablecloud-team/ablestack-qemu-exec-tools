@@ -1,0 +1,64 @@
+name: Linux process policy repair ISO
+on:
+  push:
+    branches: [codex/issue-61-linux-policy]
+  pull_request:
+    paths:
+      - 'lib/agent_policy/process_policy.py'
+      - 'process-management/**'
+      - 'bin/vm_process_verify.py'
+      - 'tests/process_policy_test.py'
+      - 'scripts/stage-process-repair.sh'
+      - '.github/workflows/process-repair.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ['3.9', '3.10', '3.12', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Configuration preservation and rollback tests
+        run: sudo "$(command -v python)" tests/process_policy_test.py -v
+      - name: Shell entry points
+        run: bash -n bin/agent_policy_fix.sh process-management/install-linux.sh scripts/stage-process-repair.sh deb/postinst install.sh
+  iso:
+    needs: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build repair-only ISO (existing Python 3 and QGA required)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y genisoimage musl-tools
+          mkdir -p build/process-repair/iso build/process-repair/artifacts
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/process-read-launcher lib/process/process_read_launcher.c
+          bash scripts/stage-process-repair.sh build/process-repair/iso
+          cp docs/process-management-linux-repair.md build/process-repair/iso/README.md
+          cat > build/process-repair/iso/install-linux.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" != --mode || "${2:-}" != process-management ]]; then
+            echo 'Usage: bash install-linux.sh --mode process-management' >&2
+            exit 2
+          fi
+          shift 2
+          exec bash "$(cd "$(dirname "$0")" && pwd -P)/process-management/install-linux.sh" "$@"
+          SH
+          printf '%s\n' "$GITHUB_SHA" > build/process-repair/iso/SOURCE_COMMIT
+          (cd build/process-repair/iso && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          genisoimage -quiet -r -J -V ABLESTACK-PROCESS -o build/process-repair/artifacts/ABLESTACK-Tools-process-repair.iso build/process-repair/iso
+          (cd build/process-repair/artifacts && sha256sum *.iso > SHA256SUMS)
+          isoinfo -i build/process-repair/artifacts/ABLESTACK-Tools-process-repair.iso -R -f
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-process-repair-iso
+          path: build/process-repair/artifacts/*
+          if-no-files-found: error

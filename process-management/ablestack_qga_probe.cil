@@ -1,0 +1,5 @@
+; Dedicated non-executable probe files only. Apache-2.0, ABLECLOUD 2026.
+(type ablestack_qga_probe_t)
+(typeattributeset file_type (ablestack_qga_probe_t))
+(allow virt_qemu_ga_t ablestack_qga_probe_t (dir (getattr search open read write add_name remove_name)))
+(allow virt_qemu_ga_t ablestack_qga_probe_t (file (create getattr open read write append setattr unlink lock ioctl)))
