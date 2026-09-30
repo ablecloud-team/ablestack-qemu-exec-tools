@@ -7,7 +7,22 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'lib'),str(ROOT/'process-management')]
 import process_action_host as host
 import action_policy_plain as installer
+import process_list_test as fixtures
 class Guards(unittest.TestCase):
+ def test_supported_linux_action_query_dispatch_and_unsupported_rejection(self):
+  request=dict(fixtures.REQUEST,kind='actionQuery',operationId='44444444-4444-4444-8444-444444444444')
+  for family,version,supported in [('rocky','8.10',True),('rocky','9.8',True),('rocky','10.2',True),('rhel','9.7',True),('debian','12',True),('debian','13',True),('ubuntu','24.04',True),('debian','11',False),('rocky','7.9',False)]:
+   with self.subTest(family=family,version=version),tempfile.TemporaryDirectory() as tmp,patch.object(host,'RUNTIME_ROOT',Path(tmp)):
+    transport=fixtures.HostGuardTests().transport('FAILED');commands=[]
+    transport.rpc=lambda *args:{'id':family,'version-id':version,'machine':'x86_64'}
+    def execute(domain,command,options):
+     commands.append(command)
+     return {'state':'FAILED','exit_code':3,'encoding_loss':False,'out_truncated':False}
+    transport.execute=execute
+    result=host.run(request,transport)
+    self.assertEqual('CHECK_FAILED' if supported else 'TOOLS_REQUIRED',result['error']['code'])
+    self.assertEqual(1 if supported else 0,len(commands))
+    if supported:self.assertIn('process-action-launcher',commands[0][-1])
  def test_standalone_never_dispatches(self):
   r={'kind':'actionRequest','schemaVersion':'1.0','requestId':'x','authority':{}}
   with patch.object(os,'geteuid',return_value=0):self.assertEqual(host.run(r,None)['error']['code'],'PERMISSION_DENIED')

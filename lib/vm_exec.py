@@ -433,17 +433,26 @@ def process_protocol(args):
     if type(request.get("budgetMs")) is not int or not 1 <= request["budgetMs"] <= (10000 if kind == "readRequest" else 90000):
         raise ValueError("invalid budget")
     if args[1] == '1.0' and request.get('schemaVersion') == '1.0' and kind == 'readRequest' and request['operation'] == 'process.list':
-        import process_list_host
-        print(dumps(process_list_host.run(request, sys.modules[__name__], cloud_guard)))
-        return 0
+        try:
+            import process_list_host
+        except ImportError:
+            pass
+        else:
+            print(dumps(process_list_host.run(request, sys.modules[__name__], cloud_guard)))
+            return 0
     if args[1] == '1.0' and request.get('schemaVersion') == '1.0' and (kind == 'actionRequest' or request.get('operation') == 'operation.get'):
-        import process_action_host
-        print(dumps(process_action_host.run(request, sys.modules[__name__], action_context)))
-        return 0
+        try:
+            import process_action_host
+        except ImportError:
+            pass
+        else:
+            print(dumps(process_action_host.run(request, sys.modules[__name__], action_context)))
+            return 0
     code = "UNSUPPORTED_VERSION" if args[1] != "1.0" or request.get("schemaVersion") != "1.0" else "HOST_TOOL_MISSING"
     print(dumps({"schemaVersion": "1.0", "kind": "failure", "requestId": request["requestId"],
                  "authority": authority, "error": {"code": code, "message":
-                 "process adapter and Cloud execution authority are not enabled in Q1", "retryMode": "NONE"}}))
+                 "Unsupported process protocol version" if code == "UNSUPPORTED_VERSION" else
+                 "Process adapter is missing from the host package", "retryMode": "NONE"}}))
     return 0
 
 

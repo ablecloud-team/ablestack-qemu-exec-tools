@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright 2026 ABLECLOUD. Apache-2.0.
 set -e
 
 # Process repair must not initialize cloud-init, DHCP or guest credentials.
@@ -8,6 +9,12 @@ if [ "${ABLESTACK_TOOLS_MODE:-}" = "process-management" ]; then
 fi
 
 echo "Running post-install tasks for ablestack-qemu-exec-tools..."
+
+# Match the RPM host path: host upgrades must not change guest networking.
+if [ -f /etc/os-release ] && grep -q '^PRETTY_NAME="ABLESTACK' /etc/os-release; then
+    echo "[INFO] ABLESTACK Host detected - skip guest cloud-init customization."
+    exit 0
+fi
 
 if [ -x /usr/bin/agent_policy_fix ]; then
     /usr/bin/agent_policy_fix --policy full --apply || echo "[WARN] agent_policy_fix failed"

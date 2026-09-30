@@ -166,7 +166,12 @@ class HostGuardTests(unittest.TestCase):
                 self.assertEqual(host.run(REQUEST,self.transport())['error']['code'],'BUSY')
 
     def test_read_command_uses_approved_bundles_independent_of_host_payload(self):
-        for family,version,pretty in [('rocky','10.2','Rocky Linux 10.2'),
+        for family,version,pretty in [('rocky','8.10','Rocky Linux 8.10'),
+                                      ('rocky','9.8','Rocky Linux 9.8'),
+                                      ('rhel','9.7','Red Hat Enterprise Linux 9.7'),
+                                      ('rocky','10.2','Rocky Linux 10.2'),
+                                      ('debian','12','Debian 12'),
+                                      ('debian','13','Debian 13'),
                                       ('ubuntu','26.04','Ubuntu 26.04'),
                                       ('mswindows','11','Windows 11 Pro'),
                                       ('mswindows','2019','Windows Server 2019 Standard'),

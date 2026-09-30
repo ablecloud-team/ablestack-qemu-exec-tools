@@ -12,7 +12,7 @@ from pathlib import Path
 import stat
 import time
 import uuid
-from guest_adapter_compat import approved, supported_windows
+from guest_adapter_compat import approved, linux_read_profile, supported_windows
 
 
 RUNTIME_ROOT=Path('/run/ablestack-vm-operations')
@@ -116,7 +116,8 @@ def run(request, transport, cloud_guard=None):
         with transport.Admission() as slot:
             osinfo=transport.rpc(domain,{'execute':'guest-get-osinfo'},deadline,3,slot.fd,65536)
         family=osinfo.get('id',''); version=osinfo.get('version-id',''); arch=osinfo.get('machine','')
-        linux=(family=='rocky' and version in ('9.6','9.7','9.8','10.2')) or (family=='ubuntu' and version in ('22.04','24.04','26.04'))
+        profile=linux_read_profile(osinfo)
+        linux=profile is not None
         windows=supported_windows(osinfo)
         if arch not in ('x86_64','x86-64','amd64') or not (linux or windows): return failure(request,'TOOLS_REQUIRED','OS adapter unsupported')
         if cloud_guard is not None:
@@ -136,10 +137,9 @@ def run(request, transport, cloud_guard=None):
         guest=dict(request,budgetMs=max(1,min(3000,int((remaining-0.3)*1000))))
         encoded=base64.b64encode(transport.dumps(guest).encode()).decode()
         if linux:
-            profile='rocky-read' if family=='rocky' else 'ubuntu-read'
             bundles=approved(profile)
             script="import hashlib,runpy,sys,os;p='/usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py';h=hashlib.sha256(open(p,'rb').read()).hexdigest();"
-            if family=='rocky':
+            if profile=='rocky-read':
                 script+="x='/usr/libexec/ablestack-qemu-exec-tools/process/process-read-launcher';y=hashlib.sha256(open(x,'rb').read()).hexdigest();(h,y) in "+repr(bundles)+" or sys.exit(3);os.execv(x,[x,'--request-base64','"+encoded+"'])"
             else:
                 script+="(h,) in "+repr(bundles)+" or sys.exit(3);sys.argv=[p,'--request-base64','"+encoded+"'];runpy.run_path(p,run_name='__main__')"

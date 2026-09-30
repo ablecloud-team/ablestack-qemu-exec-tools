@@ -10,11 +10,25 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
-from guest_adapter_compat import CATALOG, approved, supported_windows
+from guest_adapter_compat import CATALOG, approved, linux_read_profile, supported_windows
 from scripts.append_guest_adapter_compat import hashes
 
 
 class GuestAdapterCompatibilityTests(unittest.TestCase):
+    def test_linux_multi_os_profile_matches_support_matrix(self):
+        for family in ('rocky', 'rhel'):
+            for version in ('8', '8.10', '9', '9.6', '9.8', '10', '10.2', '10.3'):
+                with self.subTest(family=family, version=version):
+                    self.assertEqual('rocky-read', linux_read_profile({'id': family, 'version-id': version}))
+        for family, versions in (('ubuntu', ('22.04', '24.04', '26.04')), ('debian', ('12', '13'))):
+            for version in versions:
+                self.assertEqual('ubuntu-read', linux_read_profile({'id': family, 'version-id': version}))
+        for family, version in (('rocky', '7.9'), ('rocky', '11'), ('rocky', '8.'), ('rocky', '8x'),
+                                ('ubuntu', '20.04'), ('ubuntu', '24.10'), ('debian', '11'), ('debian', '14'),
+                                ('centos', '9'), ('rocky', 8), ('rocky', None)):
+            with self.subTest(family=family, version=version):
+                self.assertIsNone(linux_read_profile({'id': family, 'version-id': version, 'id-like': 'rhel debian'}))
+
     def test_new_windows_catalog_entry_hashes_exact_script_bytes(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
