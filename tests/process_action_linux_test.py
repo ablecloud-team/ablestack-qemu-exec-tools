@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright 2026 ABLECLOUD. Apache-2.0.
-import copy,importlib.util,json,os,signal,subprocess,tempfile,time,unittest,uuid
+import copy,errno,importlib.util,json,os,signal,subprocess,tempfile,time,unittest,uuid
 from pathlib import Path
 from unittest.mock import patch
 path=Path(__file__).resolve().parents[1]/'lib/process/process_action_linux.py'
@@ -27,6 +27,37 @@ class Actions(unittest.TestCase):
   with patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('replayed')):self.assertEqual(a.run(r,self.root),first)
  def test_normal_term(self):
   p=self.child();self.assertEqual(a.run(self.request(p,'process.terminate'),self.root)['postcondition'],'TARGET_EXITED')
+ def test_legacy_proc_pidfd_term_and_kill_are_verified(self):
+  for action in ('process.terminate','process.kill'):
+   p=self.child();r=self.request(p,action)
+   with patch.object(a.os,'pidfd_open',side_effect=OSError(errno.ENOSYS,'not backported')):
+    value=a.run(r,self.root)
+   self.assertEqual('SUCCEEDED',value['state']);p.wait()
+ def test_legacy_proc_pidfd_rejects_stale_ticks_without_dispatch(self):
+  p=self.child();r=self.request(p);r['identity']['startTicks']='1';real=a.signal.pidfd_send_signal;sent=[]
+  def send(fd,sig,*args):
+   sent.append(sig);return real(fd,sig,*args)
+  with patch.object(a.os,'pidfd_open',side_effect=OSError(errno.ENOSYS,'not backported')),patch.object(a.signal,'pidfd_send_signal',side_effect=send):
+   self.assertEqual('STALE_IDENTITY',a.run(r,self.root)['error']['code'])
+  self.assertEqual([0],sent);self.assertIsNone(p.poll())
+ def test_legacy_descriptor_does_not_follow_numeric_pid_reuse(self):
+  p=self.child()
+  with patch.object(a.os,'pidfd_open',side_effect=OSError(errno.ENOSYS,'not backported')):fd,pollable=a.open_target(p.pid)
+  try:
+   p.kill();p.wait()
+   # A missing pinned task is exited even if a numeric-PID reader claims a live replacement.
+   with patch.object(a,'identity',return_value=('replacement','999',1,'S')):
+    self.assertTrue(a.target_exited(fd,pollable))
+   with self.assertRaises(ProcessLookupError):a.signal.pidfd_send_signal(fd,signal.SIGTERM)
+  finally:os.close(fd)
+ def test_permission_denied_does_not_trigger_legacy_fallback(self):
+  with patch.object(a.os,'pidfd_open',side_effect=PermissionError),patch.object(a.os,'open',side_effect=AssertionError('unsafe fallback')):
+   with self.assertRaises(PermissionError):a.open_target(42)
+ def test_kernel_without_pidfd_signal_fails_closed(self):
+  p=self.child();r=self.request(p)
+  with patch.object(a.os,'pidfd_open',side_effect=OSError(errno.ENOSYS,'missing')),patch.object(a.signal,'pidfd_send_signal',side_effect=OSError(errno.ENOSYS,'missing')):
+   value=a.run(r,self.root)
+  self.assertEqual('UNSUPPORTED_ACTION',value['error']['code']);self.assertIsNone(p.poll())
  def test_proc_exe_readlink_is_not_required(self):
   p=self.child();r=self.request(p)
   with patch.object(a.Path,'resolve',side_effect=PermissionError('ptrace denied')):

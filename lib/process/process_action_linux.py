@@ -3,6 +3,7 @@
 # Copyright 2026 ABLECLOUD. Apache-2.0.
 import base64
 import datetime as dt
+import errno
 import fcntl
 import hashlib
 import json
@@ -90,6 +91,42 @@ def boot():return 'linux:'+Path('/proc/sys/kernel/random/boot_id').read_text().s
 def identity(pid):
     text=Path('/proc',str(pid),'stat').read_text();start=text.index('(');end=text.rindex(')');parts=text[end+2:].split()
     return text[start+1:end],parts[19],int(parts[1]),parts[0]
+
+def pinned_read(fd,name):
+    opened=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
+    try:
+        value=os.read(opened,65537)
+        if len(value)>65536:raise ValueError('process metadata limit')
+        return value
+    finally:os.close(opened)
+
+def pinned_identity(fd):
+    text=pinned_read(fd,'stat').decode();start=text.index('(');end=text.rindex(')');parts=text[end+2:].split()
+    return text[start+1:end],parts[19],int(parts[1]),parts[0]
+
+def open_target(pid):
+    if not hasattr(signal,'pidfd_send_signal'):raise Rejected('UNSUPPORTED_ACTION')
+    if hasattr(os,'pidfd_open'):
+        try:return os.pidfd_open(pid,0),True
+        except OSError as error:
+            if error.errno!=errno.ENOSYS:raise
+    # RHEL 8 backports pidfd_send_signal but not pidfd_open. The kernel also
+    # accepts an open /proc/PID directory as a PID file descriptor. Signals
+    # still refer to that pinned task, never a subsequently reused numeric PID.
+    fd=os.open('/proc/'+str(pid),os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        signal.pidfd_send_signal(fd,0)
+        return fd,False
+    except OSError as error:
+        os.close(fd)
+        if error.errno in (errno.ENOSYS,errno.EBADF,errno.EINVAL):raise Rejected('UNSUPPORTED_ACTION') from error
+        raise
+
+def target_exited(fd,pollable,timeout=0):
+    if pollable:return bool(select.select([fd],[],[],timeout)[0])
+    if timeout:time.sleep(timeout)
+    try:return pinned_identity(fd)[3] in ('Z','X')
+    except (FileNotFoundError,ProcessLookupError):return True
 def expired(deadline):
     if time.monotonic()>=deadline:raise TimeoutError('deadline')
 def props(unit,deadline):
@@ -137,23 +174,22 @@ def target(r):
     while ancestor>1:
         if ancestor==pid:raise Rejected('PROTECTED_TARGET')
         ancestor=identity(ancestor)[2]
-    if not hasattr(os,'pidfd_open') or not hasattr(signal,'pidfd_send_signal'):raise Rejected('UNSUPPORTED_ACTION')
-    fd=os.pidfd_open(pid,0)
+    fd,pollable=open_target(pid)
     try:
-        name,ticks,_,state=identity(pid)
+        name,ticks,_,state=identity(pid) if pollable else pinned_identity(fd)
         # /proc/<pid>/exe readlink requires ptrace permission for another
         # SELinux domain. The confined helper must not gain that broad right.
-        arguments=Path('/proc',str(pid),'cmdline').read_bytes().split(b'\0')
+        arguments=(Path('/proc',str(pid),'cmdline').read_bytes() if pollable else pinned_read(fd,'cmdline')).split(b'\0')
         command=Path(os.fsdecode(arguments[0])).name if arguments and arguments[0] else ''
         if any(Path(os.fsdecode(arg)).name in ('process_list_linux.py','process_action_linux.py','process-read-launcher','process-action-launcher') for arg in arguments if arg):raise Rejected('PROTECTED_TARGET')
         if ticks!=i['startTicks'] or state in ('Z','X'):raise Rejected('STALE_IDENTITY')
         if name in PROTECTED or command in PROTECTED or name.startswith(('systemd-','qemu-ga')) or command.startswith(('systemd-','qemu-ga')):raise Rejected('PROTECTED_TARGET')
-        if select.select([fd],[],[],0)[0]:raise Rejected('STALE_IDENTITY')
-        return fd
+        if target_exited(fd,pollable):raise Rejected('STALE_IDENTITY')
+        return fd,pollable
     except BaseException:os.close(fd);raise
 
 def action(r,record,persist,deadline):
-    fd=target(r)
+    fd,pollable=target(r)
     try:
         old=service_check(r,deadline) if r['action']=='service.restart' else None
         expired(deadline)
@@ -161,7 +197,7 @@ def action(r,record,persist,deadline):
         if old is None:
             signal.pidfd_send_signal(fd,signal.SIGTERM if r['action']=='process.terminate' else signal.SIGKILL)
             record['stage']='signal-returned';persist()
-            while not select.select([fd],[],[],min(.05,max(0,deadline-time.monotonic())))[0]:expired(deadline)
+            while not target_exited(fd,pollable,min(.05,max(0,deadline-time.monotonic()))):expired(deadline)
         else:
             unit=r['service']['name']
             # Repeat the configuration/generation check directly before control.
@@ -171,7 +207,7 @@ def action(r,record,persist,deadline):
             subprocess.run(['/usr/bin/systemctl','stop','--no-block','--',unit],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=min(3,max(.01,deadline-time.monotonic())),check=True)
             while True:
                 expired(deadline);p=props(unit,deadline)
-                if p.get('ActiveState')=='inactive' and select.select([fd],[],[],0)[0]:break
+                if p.get('ActiveState')=='inactive' and target_exited(fd,pollable):break
                 time.sleep(.05)
             record['stage']='stopped';persist()
             if config_hash(p)!=r['service']['configurationHash']:raise Rejected('STALE_IDENTITY')
