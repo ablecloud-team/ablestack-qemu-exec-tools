@@ -119,7 +119,11 @@ def run(request,transport,reservation=None):
         else:
             bundles=approved('windows-action')
             choices='@('+','.join("'"+':'.join(pair)+"'" for pair in bundles)+')'
-            script=r"$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';$h=@('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
+            # Module auto-loading during Get-FileHash can emit localized CLIXML
+            # progress to stderr before the adapter sets its stream preferences.
+            # Establish the wire format first; retain strict UTF-8 validation of
+            # both streams instead of accepting a lossy transport result.
+            script=r"$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);$p='C:\Program Files\ABLESTACK Process Tools';$h=@('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
             command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         if action:
             context(request,reservation)

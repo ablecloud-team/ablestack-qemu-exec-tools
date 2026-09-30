@@ -9,6 +9,28 @@ import process_action_host as host
 import action_policy_plain as installer
 import process_list_test as fixtures
 class Guards(unittest.TestCase):
+ def test_windows_durable_success_query_releases_only_its_marker(self):
+  self.windows_query(False)
+ def test_lossy_windows_reply_preserves_unresolved_marker(self):
+  self.windows_query(True)
+ def windows_query(self,lossy):
+  request=dict(fixtures.REQUEST,operation='operation.get',operationId='44444444-4444-4444-8444-444444444444',budgetMs=10000)
+  result=dict(schemaVersion='1.0',kind='actionResult',requestId='55555555-5555-4555-8555-555555555555',authority=request['authority'],operationId=request['operationId'],action='process.kill',identity=dict(vmUuid=request['authority']['vmUuid'],bootId='windows:134352288555000000',pid=42,startTicks='134352291027798853'),service=None,state='SUCCEEDED',effect='VERIFIED',submittedAt='2026-09-30T08:05:14.778Z',completedAt='2026-09-30T08:05:15.135Z',guestExecPid=None,guestExitCode=0,postcondition='TARGET_EXITED',error=None)
+  with tempfile.TemporaryDirectory() as tmp,patch.object(host,'RUNTIME_ROOT',Path(tmp)):
+   lease=Path(tmp)/request['authority']['vmUuid'];lease.mkdir(mode=0o700)
+   marker=lease/('q5-'+request['operationId']+'.json');marker.write_text(json.dumps(dict(operationId=request['operationId'],authority=request['authority'],requestId=result['requestId'])));marker.chmod(0o600)
+   transport=fixtures.HostGuardTests().transport();transport.rpc=lambda *args:dict(id='mswindows',**{'version-id':'11','machine':'x86_64','pretty-name':'Windows 11 Pro'})
+   def execute(domain,command,options):
+    script=__import__('base64').b64decode(command[-1]).decode('utf-16le')
+    # Get-FileHash auto-loads a module. Wire settings must precede it, not
+    # merely exist in the adapter invoked after hash verification.
+    self.assertLess(script.index("$ProgressPreference='SilentlyContinue'"),script.index('Get-FileHash'))
+    self.assertLess(script.index('[Console]::OutputEncoding='),script.index('Get-FileHash'))
+    return dict(state='SUCCEEDED',exit_code=0,encoding_loss=lossy,out_truncated=False,stdout_raw=json.dumps(result))
+   transport.execute=execute
+   reply=host.run(request,transport)
+   if lossy:self.assertEqual('CHECK_FAILED',reply['error']['code']);self.assertTrue(marker.exists())
+   else:self.assertEqual(result,reply);self.assertFalse(marker.exists())
  def test_supported_linux_action_query_dispatch_and_unsupported_rejection(self):
   request=dict(fixtures.REQUEST,kind='actionQuery',operationId='44444444-4444-4444-8444-444444444444')
   for family,version,supported in [('rocky','8.10',True),('rocky','9.8',True),('rocky','10.2',True),('rhel','9.7',True),('debian','12',True),('debian','13',True),('ubuntu','24.04',True),('debian','11',False),('rocky','7.9',False)]:
