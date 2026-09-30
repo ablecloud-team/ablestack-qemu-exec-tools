@@ -1,0 +1,9 @@
+{
+  "stdout_raw": "{\"error\":null,\"guestExitCode\":0,\"service\":null,\"completedAt\":\"2026-09-30T08:05:15.135Z\",\"identity\":{\"vmUuid\":\"c51bcc9c-e045-40d7-b215-e319b36c1d45\",\"bootId\":\"windows:134352288555000000\",\"pid\":2616,\"startTicks\":\"134352291027798853\"},\"authority\":{\"hostUuid\":\"159baf9a-89ad-4a94-91dc-e7395a670bf4\",\"vmUuid\":\"c51bcc9c-e045-40d7-b215-e319b36c1d45\",\"placementGeneration\":\"3\"},\"kind\":\"actionResult\",\"schemaVersion\":\"1.0\",\"effect\":\"VERIFIED\",\"action\":\"process.kill\",\"postcondition\":\"TARGET_EXITED\",\"operationId\":\"8d535caa-0488-4e43-ac02-4a579b6926ef\",\"requestId\":\"72caff35-cfab-472e-b659-398dbe63df9e\",\"state\":\"SUCCEEDED\",\"guestExecPid\":null,\"submittedAt\":\"2026-09-30T08:05:14.778Z\"}\r\n",
+  "stderr": "",
+  "exit_code": 0,
+  "state": "SUCCEEDED",
+  "encoding_loss": false,
+  "out_truncated": false,
+  "err_truncated": false
+}

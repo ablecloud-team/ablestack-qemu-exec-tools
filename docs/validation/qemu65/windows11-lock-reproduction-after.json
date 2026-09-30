@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0",
+  "requestId": "c1db7663-b9e9-4b61-9a83-ccfed1aeed95",
+  "authority": {
+    "hostUuid": "159baf9a-89ad-4a94-91dc-e7395a670bf4",
+    "placementGeneration": "3",
+    "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45"
+  },
+  "kind": "failure",
+  "error": {
+    "code": "BUSY",
+    "retryMode": "NONE",
+    "message": "Host VM operation lock unavailable before dispatch"
+  }
+}

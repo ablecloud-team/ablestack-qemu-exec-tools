@@ -1,0 +1,92 @@
+[
+  {
+    "case": "protected-init",
+    "result": {
+      "action": "process.kill",
+      "authority": {
+        "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+      },
+      "completedAt": "2026-09-30T08:29:20.001Z",
+      "effect": "NOT_STARTED",
+      "error": {
+        "retryMode": "NONE",
+        "code": "PROTECTED_TARGET",
+        "message": "Process action could not be verified"
+      },
+      "guestExecPid": null,
+      "guestExitCode": null,
+      "identity": {
+        "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+        "pid": 1,
+        "startTicks": "4",
+        "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+      },
+      "kind": "actionResult",
+      "operationId": "22ed3766-2f0b-4076-a818-014d1f7c037d",
+      "postcondition": "NOT_CHECKED",
+      "requestId": "eeeeeb1a-f0d6-4422-b9f3-fcbd573338a4",
+      "schemaVersion": "1.0",
+      "service": null,
+      "state": "FAILED",
+      "submittedAt": "2026-09-30T08:29:20.000Z"
+    }
+  },
+  {
+    "case": "exited-target",
+    "result": {
+      "action": "process.kill",
+      "authority": {
+        "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+      },
+      "completedAt": "2026-09-30T08:29:26.916Z",
+      "effect": "NOT_STARTED",
+      "error": {
+        "retryMode": "NONE",
+        "code": "STALE_IDENTITY",
+        "message": "Process action could not be verified"
+      },
+      "guestExecPid": null,
+      "guestExitCode": null,
+      "identity": {
+        "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+        "pid": 10848,
+        "startTicks": "9442081",
+        "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+      },
+      "kind": "actionResult",
+      "operationId": "fafe13c8-0613-47c6-852a-c9597ed741d2",
+      "postcondition": "NOT_CHECKED",
+      "requestId": "9e8d1132-a46e-4995-974f-6acf7cb5dc78",
+      "schemaVersion": "1.0",
+      "service": null,
+      "state": "FAILED",
+      "submittedAt": "2026-09-30T08:29:26.913Z"
+    }
+  },
+  {
+    "case": "duplicate-completed-request",
+    "result": {
+      "action": "process.kill",
+      "authority": {
+        "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+      },
+      "completedAt": "2026-09-30T08:25:39.630Z",
+      "effect": "VERIFIED",
+      "guestExitCode": 0.0,
+      "identity": {
+        "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+        "pid": 10737.0,
+        "startTicks": "9419409",
+        "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+      },
+      "kind": "actionResult",
+      "operationId": "89c9cb98-2e64-428a-974b-7ec62530c048",
+      "postcondition": "TARGET_EXITED",
+      "requestId": "328c3c94-78dc-4594-bdc9-0fd379852ed7",
+      "schemaVersion": "1.0",
+      "state": "SUCCEEDED",
+      "submittedAt": "2026-09-30T08:25:39.556Z"
+    },
+    "originalOperationId": "89c9cb98-2e64-428a-974b-7ec62530c048"
+  }
+]

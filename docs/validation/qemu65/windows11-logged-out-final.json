@@ -1,0 +1,102 @@
+{
+  "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+  "loggedOutState": {
+    "fixtureServices": 0,
+    "user": null,
+    "qga": {
+      "account": "LocalSystem",
+      "pid": 3272,
+      "startMode": "Auto",
+      "session": 0,
+      "state": "Running"
+    },
+    "bootId": "windows:134352288555000000"
+  },
+  "processCount": 87,
+  "snapshotStatus": "OK",
+  "actions": [
+    {
+      "command": "killVirtualMachineProcess",
+      "snapshotId": "49e3cc1a-da5e-4bf0-af73-e987a2d43ee4",
+      "identity": {
+        "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+        "bootId": "windows:134352288555000000",
+        "pid": 2236,
+        "startTicks": "134352314344833168"
+      },
+      "service": [],
+      "result": {
+        "guestExitCode": 0.0,
+        "completedAt": "2026-09-30T08:43:58.126Z",
+        "identity": {
+          "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+          "bootId": "windows:134352288555000000",
+          "pid": 2236.0,
+          "startTicks": "134352314344833168"
+        },
+        "authority": {
+          "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45"
+        },
+        "kind": "actionResult",
+        "schemaVersion": "1.0",
+        "effect": "VERIFIED",
+        "action": "process.kill",
+        "postcondition": "TARGET_EXITED",
+        "operationId": "ddf31e40-611d-4843-95da-9993291811a6",
+        "requestId": "9220fb44-db68-480f-90f9-88d6e336c8b4",
+        "state": "SUCCEEDED",
+        "submittedAt": "2026-09-30T08:43:57.827Z"
+      },
+      "guestPostconditionVerified": true
+    },
+    {
+      "command": "restartVirtualMachineService",
+      "snapshotId": "c7e74fd5-18c2-402d-9fb5-b3dd0befad13",
+      "identity": {
+        "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+        "bootId": "windows:134352288555000000",
+        "pid": 1020,
+        "startTicks": "134352314413833993"
+      },
+      "service": [
+        {
+          "manager": "scm",
+          "name": "AbleProcessQ5Fixture",
+          "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+        }
+      ],
+      "result": {
+        "guestExitCode": 0.0,
+        "service": {
+          "manager": "scm",
+          "name": "AbleProcessQ5Fixture",
+          "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+        },
+        "completedAt": "2026-09-30T08:44:08.026Z",
+        "identity": {
+          "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+          "bootId": "windows:134352288555000000",
+          "pid": 1020.0,
+          "startTicks": "134352314413833993"
+        },
+        "authority": {
+          "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45"
+        },
+        "kind": "actionResult",
+        "schemaVersion": "1.0",
+        "effect": "VERIFIED",
+        "action": "service.restart",
+        "postcondition": "SERVICE_RESTART_VERIFIED",
+        "operationId": "b851adc8-c6bb-4e74-b9f8-c4f4fe6756c7",
+        "requestId": "eef2ac03-97b4-4798-843e-84364936c833",
+        "state": "SUCCEEDED",
+        "submittedAt": "2026-09-30T08:44:06.951Z"
+      },
+      "guestAfter": {
+        "state": "Running",
+        "pid": 3636
+      },
+      "guestPostconditionVerified": true
+    }
+  ]
+}
