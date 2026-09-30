@@ -75,7 +75,7 @@ def service_map(deadline):
     # Temporary output is not used: bounded pipe reader aborts at 256 KiB.
     import selectors
     process = subprocess.Popen(['/usr/bin/systemctl', 'show', '--all', '--type=service',
-                                '--property=' + properties, '--no-pager'],
+                                '--property=' + properties, '--no-pager', '*.service'],
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}, start_new_session=True)
     selector = selectors.DefaultSelector()

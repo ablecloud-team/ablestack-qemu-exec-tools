@@ -5,6 +5,8 @@ import json
 import os
 import sys
 import types
+import subprocess
+import time
 from pathlib import Path
 import tempfile
 import unittest
@@ -25,6 +27,20 @@ def proc_stat(pid=42,ticks='9007199254740993',name='worker (한글)',cpu_ticks=0
     return str(pid)+' ('+name+') '+' '.join(fields)
 
 class CollectorTests(unittest.TestCase):
+    def test_service_map_selects_units_instead_of_manager_properties(self):
+        original=subprocess.Popen
+        seen=[]
+        def child(argv,**options):
+            seen.append(argv)
+            output='Id=worker.service\nMainPID=42\nExecStart=/usr/bin/worker\nCanStart=yes\nCanStop=yes\n\nId=inactive.service\nMainPID=0\n' if argv[-1]=='*.service' else 'Version=239\n'
+            return original([sys.executable,'-c','print('+repr(output)+')'],**options)
+        with patch.object(guest.subprocess,'Popen',side_effect=child):
+            mapping=guest.service_map(time.monotonic()+3)
+        self.assertEqual('worker.service',mapping[42][0]['name'])
+        self.assertEqual('systemd',mapping[42][0]['manager'])
+        self.assertRegex(mapping[42][0]['configurationHash'],r'^[a-f0-9]{64}$')
+        self.assertEqual([42],list(mapping))
+
     def fixture(self,path):
         (path/'sys/kernel/random').mkdir(parents=True)
         (path/'sys/kernel/random/boot_id').write_text(BOOT)
