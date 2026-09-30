@@ -20,7 +20,7 @@
 (allow ablestack_process_action_t self (process (fork sigchld signal sigkill signull getpgid setpgid)))
 (allow ablestack_process_action_t self (fifo_file (create getattr open read write ioctl)))
 ; procfs uses each target process domain as the file/dir label.
-(allow ablestack_process_action_t domain (dir (getattr search)))
+(allow ablestack_process_action_t domain (dir (getattr search open read)))
 (allow ablestack_process_action_t domain (file (getattr open read)))
 (allow ablestack_process_action_t proc_t (dir (getattr open read search)))
 (allow ablestack_process_action_t proc_t (file (getattr open read)))

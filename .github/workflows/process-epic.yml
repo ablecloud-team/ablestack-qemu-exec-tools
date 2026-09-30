@@ -67,6 +67,7 @@ jobs:
       - name: Build only the host execution RPM and verify packaged runtime
         run: |
           set -eu
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           test "$(tr -d '\r\n' < lib/process/SOURCE_COMMIT)" = "$GITHUB_SHA"
           chmod 0755 lib/process/process-*-launcher
           (cd lib/process && sha256sum -c SHA256SUMS)
