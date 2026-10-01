@@ -34,6 +34,16 @@ function TaskInfo([string]$name) {
     if($xml.Length -gt 65536){throw 'PROFILE_CHANGED'}
     return @{task=$task;hash=(Hash $xml)}
 }
+function ProfileEnvironment([string]$path) {
+    ProfileRegular $path $true
+    if((Get-Item -LiteralPath $path).Length -gt 65536){throw 'PROFILE_CHANGED'}
+    $raw=[IO.File]::ReadAllText($path);[AbleProcessAction]::ValidateJson($raw);$environment=[AbleProcessAction]::Parse($raw)
+    if($environment.Count -gt 64){throw 'PROFILE_CHANGED'}
+    foreach($name in $environment.Keys) {
+        if($name -cnotmatch '^[A-Za-z_][A-Za-z0-9_]{0,63}$' -or $environment[$name] -isnot [string] -or $environment[$name].Length -gt 4096 -or $environment[$name].Contains([char]0)){throw 'PROFILE_CHANGED'}
+    }
+    return $environment
+}
 function ProfileLoad([string]$id,[string]$vm) {
     $paths=ProfilePaths $id;ProfileRegular $paths[0];ProfileRegular $paths[1]
     if((Get-Item -LiteralPath $paths[0]).Length -gt 65536 -or (Get-Item -LiteralPath $paths[1]).Length -gt 1024){throw 'PROFILE_CHANGED'}
@@ -44,7 +54,7 @@ function ProfileLoad([string]$id,[string]$vm) {
     foreach($arg in $p.argv){if($arg -isnot [string] -or $arg.Length -gt 1024 -or $arg -match '[\x00-\x1f]'){throw 'PROFILE_CHANGED'}}
     ProfileRegular $p.executable
     if((Get-FileHash -LiteralPath $p.executable).Hash.ToLowerInvariant() -cne $p.executableHash -or -not [IO.Path]::IsPathRooted($p.cwd) -or -not (Test-Path -LiteralPath $p.cwd -PathType Container)){throw 'PROFILE_CHANGED'}
-    if($null -ne $p.environmentRef){ProfileRegular $p.environmentRef $true;if((Get-Item -LiteralPath $p.environmentRef).Length -gt 65536){throw 'PROFILE_CHANGED'}}
+    if($null -ne $p.environmentRef){$null=ProfileEnvironment $p.environmentRef}
     [AbleProcessAction]::CheckPath($p.cwd,$true)
     Fields $p.supervisor 'manager name configurationHash'
     if($p.supervisor.manager -cne 'taskScheduler' -or $p.supervisor.name -cne $id){throw 'PROFILE_CHANGED'}

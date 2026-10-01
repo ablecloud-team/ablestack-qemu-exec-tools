@@ -19,12 +19,8 @@ $start=New-Object Diagnostics.ProcessStartInfo
 $start.FileName=$p.executable;$start.Arguments=@($p.argv | ForEach-Object {[AbleProcessAction]::QuoteArgument($_)}) -join ' '
 $start.WorkingDirectory=$p.cwd;$start.UseShellExecute=$false;$start.CreateNoWindow=$true
 if($null -ne $p.environmentRef) {
-    ProfileRegular $p.environmentRef $true
-    $rawEnvironment=[IO.File]::ReadAllText($p.environmentRef);[AbleProcessAction]::ValidateJson($rawEnvironment)
-    $environment=[AbleProcessAction]::Parse($rawEnvironment)
-    if($environment.Count -gt 64){throw 'environment reference capacity'}
+    $environment=ProfileEnvironment $p.environmentRef
     foreach($name in $environment.Keys) {
-        if($name -cnotmatch '^[A-Za-z_][A-Za-z0-9_]{0,63}$' -or $environment[$name] -isnot [string] -or $environment[$name].Length -gt 4096 -or $environment[$name].Contains([char]0)){throw 'environment reference format'}
         $start.EnvironmentVariables[$name]=$environment[$name]
     }
 }

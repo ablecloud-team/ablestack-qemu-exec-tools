@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2026 ABLECLOUD. Apache-2.0. Files only; no Cloudbase-init or reboot tasks. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="ABLESTACK Process Tools" Manufacturer="ABLECLOUD" Version="1.1.0" Scope="perMachine" UpgradeCode="B1FA73B7-38D9-4D35-9088-9D191CC8AB67">
+  <Package Name="ABLESTACK Process Tools" Manufacturer="ABLECLOUD" Version="1.2.0" Scope="perMachine" UpgradeCode="B1FA73B7-38D9-4D35-9088-9D191CC8AB67">
     <MediaTemplate EmbedCab="yes" />
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer Process Tools package is installed." />
     <StandardDirectory Id="ProgramFiles64Folder">

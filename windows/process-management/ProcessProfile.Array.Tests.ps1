@@ -19,3 +19,21 @@ $scheduler=New-Object -ComObject Schedule.Service;$scheduler.Connect()
 # TASK_VALIDATE_ONLY checks the actual product XML without registering or running.
 $null=$scheduler.GetFolder('\').RegisterTask('ABLESTACK-profile-schema-validation',$xml,1,'SYSTEM',$null,5)
 Write-Output 'Actual LocalSystem profile task XML validation passed'
+
+$fn=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'ProfileEnvironment'},$true)
+Invoke-Expression $fn.Extent.Text
+function ProfileRegular{}
+$environmentFile=[IO.Path]::GetTempFileName()
+try {
+    [IO.File]::WriteAllText($environmentFile,'{"PROFILE_SECRET":"reference"}')
+    if((ProfileEnvironment $environmentFile)['PROFILE_SECRET'] -cne 'reference'){throw 'Valid environment reference rejected'}
+    foreach($invalid in @('{"1invalid":"value"}','{"PROFILE_SECRET":12}','{"PROFILE_SECRET":["value"]}')) {
+        [IO.File]::WriteAllText($environmentFile,$invalid);$rejected=$false
+        try{$null=ProfileEnvironment $environmentFile}catch{$rejected=$true}
+        if(-not $rejected){throw 'Invalid environment reference accepted'}
+    }
+} finally {
+    if([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($environmentFile)) -cne [IO.Path]::GetTempPath().TrimEnd('\')){throw 'Unexpected temporary file path'}
+    [IO.File]::Delete($environmentFile)
+}
+Write-Output 'Private environment reference content validation passed'
