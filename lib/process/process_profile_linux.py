@@ -132,7 +132,10 @@ def duplicates(p,exclude):
 def check_supervision(p,pid):
     raw=Path('/proc',str(pid),'cgroup').read_text()
     if len(raw)>65536:raise ValueError('cgroup capacity')
-    units=[part for line in raw.splitlines() for part in line.split(':',2)[-1].split('/') if part.endswith('.service')]
+    hierarchy=[line.split(':',2) for line in raw.splitlines()]
+    tracked=[item[2] for item in hierarchy if len(item)==3 and (item[:2]==['0',''] or 'name=systemd' in item[1].split(','))]
+    if not tracked:raise ValueError('systemd process supervision unavailable')
+    units=[part for path in tracked for part in path.split('/') if part.endswith('.service')]
     if units and units[-1]!='ableprofile-'+p['id']+'.service':raise adapter().Rejected('PROTECTED_TARGET')
 
 def checked(r):

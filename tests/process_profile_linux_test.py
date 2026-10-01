@@ -33,6 +33,11 @@ class Profiles(unittest.TestCase):
   data=b'[Service]\nType=simple\n';path=self.base/'raw.service'
   p.save_bytes(path,data);self.assertEqual(path.read_bytes(),data);self.assertEqual(path.stat().st_mode&0o777,0o600)
   p.save_bytes(path,b'KEY=value\n');self.assertEqual(path.read_bytes(),b'KEY=value\n')
+ def test_cgroup_v1_tracks_systemd_hierarchy_not_resource_controller(self):
+  with patch.object(p.Path,'read_text',return_value='1:name=systemd:/system.slice/workload.scope\n2:cpu,cpuacct:/system.slice/sshd.service'):
+   p.check_supervision({'id':self.id},self.binding['pid'])
+  with patch.object(p.Path,'read_text',return_value='1:name=systemd:/system.slice/external.service\n2:cpu,cpuacct:/'):
+   with self.assertRaises(a.Rejected):p.check_supervision({'id':self.id},self.binding['pid'])
  def test_unloaded_environment_reference_rejected_before_signal(self):
   self.definition['environmentRef']=str(self.base/'env');p.save_bytes(self.base/'env',b'A=secret\n');a.save(self.directory/(self.id+'.json'),self.definition)
   with patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
