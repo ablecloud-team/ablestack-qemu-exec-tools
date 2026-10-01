@@ -2,7 +2,7 @@
 name: Process Epic packages and runtime gates
 on:
   push:
-    branches: [codex/process-epic-1170]
+    branches: [codex/process-epic-1170, codex/process-profile-epic1199]
     paths-ignore: ['docs/**']
   workflow_dispatch:
 permissions:
@@ -28,7 +28,8 @@ jobs:
           sudo apt-get install -y musl-tools
           test "$(tr -d '\r\n' < build/windows-process-payload/SOURCE_COMMIT)" = "$GITHUB_SHA"
           cp build/windows-process-payload/AbleProcess*.dll lib/process/
-          cp build/windows-process-payload/ProcessList.ps1 build/windows-process-payload/ProcessAction.ps1 lib/process/
+          cp build/windows-process-payload/ProcessList.ps1 build/windows-process-payload/ProcessAction.ps1 build/windows-process-payload/ProcessProfile.ps1 build/windows-process-payload/Start-ProcessProfile.ps1 lib/process/
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o build/ProcessProfileFixture tests/ProcessProfileFixture.c
           musl-gcc -static -O2 -Wall -Wextra -Werror -o lib/process/process-read-launcher lib/process/process_read_launcher.c
           musl-gcc -static -O2 -Wall -Wextra -Werror -o lib/process/process-action-launcher lib/process/process_action_launcher.c
           for family in rocky ubuntu windows; do
@@ -40,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           export PYTHONPATH=.
-          for test in vm_exec process_policy guest_adapter_compat process_list process_action_linux process_action_host process_cloud_guard process_guest_iso_manifest; do
+          for test in vm_exec process_policy guest_adapter_compat process_list process_action_linux process_action_host process_profile_linux process_cloud_guard process_guest_iso_manifest; do
             sudo env PYTHONPATH=. python3 "tests/${test}_test.py"
           done
           bash tests/hangctl_snapshot_protection_smoke.sh
@@ -51,6 +52,11 @@ jobs:
         with:
           name: process-canonical-runtime
           path: lib/process/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-profile-linux-fixture
+          path: build/ProcessProfileFixture
           if-no-files-found: error
   rpm:
     needs: runtime

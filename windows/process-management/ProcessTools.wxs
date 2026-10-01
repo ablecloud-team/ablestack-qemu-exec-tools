@@ -11,12 +11,15 @@
         <Component Id="ProcessCollector" Guid="*"><File Source="$(var.Payload)\ProcessList.ps1" KeyPath="yes" /></Component>
         <Component Id="NativeIdentity" Guid="*"><File Source="$(var.Payload)\AbleProcessIdentity.dll" KeyPath="yes" /></Component>
         <Component Id="ProcessAction" Guid="*"><File Source="$(var.Payload)\ProcessAction.ps1" KeyPath="yes" /></Component>
+        <Component Id="ProcessProfile" Guid="*"><File Source="$(var.Payload)\ProcessProfile.ps1" KeyPath="yes" /></Component>
+        <Component Id="ProfileStarter" Guid="*"><File Source="$(var.Payload)\Start-ProcessProfile.ps1" KeyPath="yes" /></Component>
+        <Component Id="ProfileRegistrar" Guid="*"><File Source="$(var.Payload)\Register-ProcessProfile.ps1" KeyPath="yes" /></Component>
         <Component Id="NativeAction" Guid="*"><File Source="$(var.Payload)\AbleProcessAction.dll" KeyPath="yes" /></Component>
         <Component Id="BuildIdentity" Guid="*"><File Source="$(var.Payload)\SOURCE_COMMIT" KeyPath="yes" /></Component>
       </Directory>
     </StandardDirectory>
     <Feature Id="ProcessPolicy" Title="QGA process policy repair" Level="1">
-      <ComponentRef Id="PolicyModule" /><ComponentRef Id="PolicyEntry" /><ComponentRef Id="BuildIdentity" /><ComponentRef Id="ProcessCollector" /><ComponentRef Id="NativeIdentity" /><ComponentRef Id="ProcessAction" /><ComponentRef Id="NativeAction" />
+      <ComponentRef Id="PolicyModule" /><ComponentRef Id="PolicyEntry" /><ComponentRef Id="BuildIdentity" /><ComponentRef Id="ProcessCollector" /><ComponentRef Id="NativeIdentity" /><ComponentRef Id="ProcessAction" /><ComponentRef Id="NativeAction" /><ComponentRef Id="ProcessProfile" /><ComponentRef Id="ProfileRegistrar" /><ComponentRef Id="ProfileStarter" />
     </Feature>
   </Package>
 </Wix>

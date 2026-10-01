@@ -39,8 +39,15 @@ def canonical(value):
     if not isinstance(value,str) or str(uuid.UUID(value))!=value:raise ValueError('UUID')
 def fields(value,names):
     if not isinstance(value,dict) or set(value)!=set(names.split()):raise ValueError('fields')
+def profile_adapter():
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('fixed_profile',str(Path(__file__).with_name('process_profile_linux.py')))
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    from types import SimpleNamespace
+    module.ACTION=SimpleNamespace(**globals());return module
+
 def validate(r):
-    if r.get('schemaVersion')!='1.0':raise ValueError('version')
+    if r.get('schemaVersion') not in ('1.0','1.1'):raise ValueError('version')
     fields(r['authority'],'vmUuid hostUuid placementGeneration')
     for value in (r['requestId'],r['authority']['vmUuid'],r['authority']['hostUuid']):canonical(value)
     gen=r['authority']['placementGeneration']
@@ -48,10 +55,18 @@ def validate(r):
     if type(r['budgetMs']) is not int or not 1<=r['budgetMs']<=90000:raise ValueError('budget')
     if r['kind']=='readRequest':
         fields(r,'schemaVersion kind requestId authority operation operationId budgetMs')
-        if r['operation']!='operation.get' or r['budgetMs']>10000:raise ValueError('operation')
-        canonical(r['operationId']);return
-    fields(r,'schemaVersion kind requestId authority operationId action identity snapshotId observedAt service budgetMs')
-    if r['kind']!='actionRequest' or r['action'] not in ('process.terminate','process.kill','service.restart'):raise ValueError('action')
+        if r['operation'] not in ('operation.get','profile.list') or r['budgetMs']>10000:raise ValueError('operation')
+        if r['operation']=='profile.list':
+            if r['schemaVersion']!='1.1' or r['operationId'] is not None:raise ValueError('profile query')
+        else:canonical(r['operationId'])
+        return
+    fields(r,'schemaVersion kind requestId authority operationId action identity snapshotId observedAt service budgetMs'+(' profile' if r['schemaVersion']=='1.1' else ''))
+    if r['kind']!='actionRequest' or r['action'] not in ('process.terminate','process.kill','service.restart','process.restart'):raise ValueError('action')
+    if r['schemaVersion']=='1.1':
+        if r['action']!='process.restart':raise ValueError('extension action')
+        fields(r['profile'],'id version definitionHash');canonical(r['profile']['id'])
+        if type(r['profile']['version']) is not int or not 1<=r['profile']['version']<=2147483647 or not re.fullmatch('[a-f0-9]{64}',r['profile']['definitionHash']):raise ValueError('profile')
+    elif r['action']=='process.restart':raise ValueError('extension required')
     canonical(r['operationId']);canonical(r['snapshotId']);fields(r['identity'],'vmUuid bootId pid startTicks')
     i=r['identity']
     if i['vmUuid']!=r['authority']['vmUuid'] or not isinstance(i['bootId'],str) or not i['bootId'].startswith('linux:'):raise ValueError('identity')
@@ -62,10 +77,13 @@ def validate(r):
     if r['action']=='service.restart':
         fields(r['service'],'manager name configurationHash');s=r['service']
         if s['manager']!='systemd' or not isinstance(s['name'],str) or not re.fullmatch('[A-Za-z0-9_@.:-]{1,248}\.service',s['name']) or s['name'].startswith('-') or not re.fullmatch('[a-f0-9]{64}',s['configurationHash']):raise ValueError('service')
-    elif r['service'] is not None or r['budgetMs']>15000:raise ValueError('action fields')
-def failure(r,code):return dict(schemaVersion='1.0',kind='failure',requestId=r['requestId'],authority=r['authority'],error=dict(code=code,message='Process operation unavailable',retryMode='READ_ONLY' if code in ('BUSY','NOT_FOUND') else 'NONE'))
+    elif r['service'] is not None or r['action']!='process.restart' and r['budgetMs']>15000:raise ValueError('action fields')
+def failure(r,code):return dict(schemaVersion=r['schemaVersion'],kind='failure',requestId=r['requestId'],authority=r['authority'],error=dict(code=code,message='Process operation unavailable',retryMode='READ_ONLY' if code in ('BUSY','NOT_FOUND') else 'NONE'))
 def result(r):
-    return dict(schemaVersion='1.0',kind='actionResult',requestId=r['requestId'],authority=r['authority'],operationId=r['operationId'],action=r['action'],identity=r['identity'],service=r['service'],state='ACCEPTED',effect='NOT_STARTED',submittedAt=stamp(),completedAt=None,guestExecPid=None,guestExitCode=None,postcondition='NOT_CHECKED',error=None)
+    value=dict(schemaVersion=r['schemaVersion'],kind='actionResult',requestId=r['requestId'],authority=r['authority'],operationId=r['operationId'],action=r['action'],identity=r['identity'],service=r['service'],state='ACCEPTED',effect='NOT_STARTED',submittedAt=stamp(),completedAt=None,guestExecPid=None,guestExitCode=None,postcondition='NOT_CHECKED',error=None)
+    if r['schemaVersion']=='1.1':
+        value['profile']=r['profile'];value['progress']=dict(oldProcess='NOT_CHECKED',newProcess='NOT_ATTEMPTED',newIdentity=None)
+    return value
 def failed(value,code):
     value.update(state='FAILED',effect='NOT_STARTED',completedAt=stamp(),error=dict(code=code,message='Process action rejected',retryMode='NONE'));return value
 def unknown(value):
@@ -131,7 +149,7 @@ def expired(deadline):
     if time.monotonic()>=deadline:raise TimeoutError('deadline')
 def props(unit,deadline):
     expired(deadline)
-    names='Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf,Transient'
+    names='Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,WorkingDirectory,EnvironmentFiles,Environment,Restart,KillMode,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf,Transient'
     # Output is bounded while reading, without temporary files or unbounded communicate().
     import selectors
     p=subprocess.Popen(['/usr/bin/systemctl','show','--no-pager','--property='+names,'--',unit],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},start_new_session=True)
@@ -189,6 +207,7 @@ def target(r):
     except BaseException:os.close(fd);raise
 
 def action(r,record,persist,deadline):
+    if r['action']=='process.restart':return profile_adapter().run(r,record,persist,deadline)
     fd,pollable=target(r)
     try:
         old=service_check(r,deadline) if r['action']=='service.restart' else None
@@ -227,6 +246,7 @@ def action(r,record,persist,deadline):
 def reconcile(record,persist):
     value=record['result']
     if value['state'] not in ('ACCEPTED','RUNNING','UNKNOWN'):return value
+    if value['action']=='process.restart':return profile_adapter().reconcile(record,persist)
     unknown(value)
     # A reboot or a missing dispatch confirmation cannot certify an action.
     if value['identity']['bootId']==boot() and record['stage']=='signal-returned':
@@ -249,6 +269,7 @@ def reconcile(record,persist):
 def run(r,root=ROOT):
     validate(r)
     if os.geteuid()!=0:return failure(r,'PERMISSION_DENIED')
+    if r.get('operation')=='profile.list':return profile_adapter().list_profiles(r)
     root.mkdir(mode=0o700,parents=False,exist_ok=True);secure(root,True)
     lock=os.open(root/'lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
     try:
@@ -266,7 +287,7 @@ def run(r,root=ROOT):
         if r['kind']=='readRequest':
             if old is None:return failure(r,'NOT_FOUND')
             return reconcile(old,persist)
-        digest=hashlib.sha256(compact({k:r[k] for k in ('action','identity','service','snapshotId','observedAt')}).encode()).hexdigest()
+        digest=hashlib.sha256(compact({k:r[k] for k in ('action','identity','service','snapshotId','observedAt')+ (('profile',) if r['schemaVersion']=='1.1' else ())}).encode()).hexdigest()
         if old:
             if old['digest']!=digest or old['result']['requestId']!=r['requestId']:return failure(r,'REQUEST_CONFLICT')
             return reconcile(old,persist)

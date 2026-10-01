@@ -17,7 +17,8 @@ ROOT=Path('/var/lib/ablestack-process-action-policy')
 TARGET=Path('/usr/libexec/ablestack-qemu-exec-tools/process')
 MODULE='ablestack_process_action'
 FILES={'process-action-launcher':(0o755,'ablestack_process_action_exec_t'),
-       'process_action_linux.py':(0o644,'ablestack_process_action_data_t')}
+       'process_action_linux.py':(0o644,'ablestack_process_action_data_t'),
+       'process_profile_linux.py':(0o644,'ablestack_process_action_data_t')}
 
 def run(*args):
     result=subprocess.run(args,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=90,env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C.UTF-8'})
@@ -59,7 +60,7 @@ def modules():return {line.split()[0] for line in run('semodule','-l').splitline
 def write_state(state):save(ROOT/'state.json',json.dumps(state,sort_keys=True).encode())
 
 def restore(state, trusted_current=None):
-    if set(state.get('files',{}))!=set(FILES):raise RuntimeError('Invalid recovery state')
+    if set(state.get('files',{})) not in (set(FILES),{'process-action-launcher','process_action_linux.py'}):raise RuntimeError('Invalid recovery state')
     # Never overwrite edits made after installation. Pending operations also
     # permit the original bytes, since an interrupted install may be partial.
     for name,entry in state['files'].items():
@@ -74,7 +75,8 @@ def restore(state, trusted_current=None):
             if digest(p.read_bytes()) not in allowed:raise RuntimeError('Newer administrator edit: '+name)
     state['phase']='restoring';write_state(state)
     known=local_mappings()
-    for name,(_,label) in FILES.items():
+    for name in state['files']:
+        label=FILES[name][1]
         pattern=mapping(name)
         if pattern in known:
             if ':'+label+':' not in known[pattern]:raise RuntimeError('Conflicting administrator mapping')
@@ -95,7 +97,7 @@ def apply(payload):
     state_path=ROOT/'state.json'
     if state_path.exists():
         secure(state_path);old=json.loads(state_path.read_bytes())
-        same=old['phase']=='installed' and old['policyHash']==digest(policy) and all(old['files'][n]['installedHash']==digest(inputs[n]) for n in FILES)
+        same=old['phase']=='installed' and old['policyHash']==digest(policy) and all(n in old['files'] and old['files'][n]['installedHash']==digest(inputs[n]) for n in FILES)
         if same:
             for name in FILES:
                 secure(TARGET/name)

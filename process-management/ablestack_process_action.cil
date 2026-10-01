@@ -62,3 +62,6 @@
 (allow ablestack_process_action_t ablestack_process_action_state_t (dir (getattr search open read write add_name remove_name)))
 (allow ablestack_process_action_t ablestack_process_action_state_t (file (create getattr open read write lock rename unlink setattr ioctl)))
 (typetransition ablestack_process_action_t ablestack_process_action_state_t file ablestack_process_action_state_t)
+
+; Registered profiles verify fixed supervisor files; QGA gains no write/execute rights.
+(allow ablestack_process_action_t systemd_unit_file_type (file (getattr open read)))

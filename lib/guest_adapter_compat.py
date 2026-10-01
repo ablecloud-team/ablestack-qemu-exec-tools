@@ -9,6 +9,8 @@ import stat
 
 CATALOG = Path(__file__).parent / "process" / "guest_adapter_compat.json"
 FILES = {
+    "linux-profile": ("process_action_linux.py", "process-action-launcher", "process_profile_linux.py"),
+    "windows-profile": ("ProcessAction.ps1", "AbleProcessAction.dll", "AbleProcessIdentity.dll", "ProcessProfile.ps1", "Start-ProcessProfile.ps1"),
     "windows-read": ("ProcessList.ps1", "AbleProcessIdentity.dll"),
     "windows-action": ("ProcessAction.ps1", "AbleProcessAction.dll", "AbleProcessIdentity.dll"),
     "rocky-read": ("process_list_linux.py", "process-read-launcher"),

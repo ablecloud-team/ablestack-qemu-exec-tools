@@ -19,6 +19,7 @@ import io
 import json
 import math
 import os
+import re
 import selectors
 import shlex
 import signal
@@ -383,7 +384,7 @@ def process_protocol(args):
     kind = request.get("kind")
     if kind == "readRequest":
         expected = base | {"operation", "operationId"}
-        if request.get("operation") not in ("capability.get", "process.list", "operation.get"):
+        if request.get("operation") not in ("capability.get", "process.list", "operation.get", "profile.list"):
             raise ValueError("unsupported read operation")
         if request["operation"] == "operation.get":
             canonical_uuid(request.get("operationId"))
@@ -394,7 +395,7 @@ def process_protocol(args):
         canonical_uuid(request.get("operationId"))
         canonical_uuid(request.get("snapshotId"))
         action = request.get("action")
-        if action not in ("process.terminate", "process.kill", "service.restart"):
+        if action not in ("process.terminate", "process.kill", "service.restart", "process.restart"):
             raise ValueError("unsupported action")
         identity = request.get("identity")
         if not isinstance(identity, dict) or set(identity) != {"vmUuid", "bootId", "pid", "startTicks"}:
@@ -424,10 +425,19 @@ def process_protocol(args):
                 raise ValueError("invalid service configuration hash")
         elif service is not None:
             raise ValueError("unexpected service target")
-        if action != "service.restart" and type(request.get("budgetMs")) is int and request["budgetMs"] > 15000:
+        if action not in ("service.restart", "process.restart") and type(request.get("budgetMs")) is int and request["budgetMs"] > 15000:
             raise ValueError("termination budget exceeds 15 seconds")
     else:
         raise ValueError("unsupported request kind")
+    if request.get('schemaVersion')=='1.1':
+        if kind=='actionRequest':
+            expected|={'profile'}
+            p=request.get('profile')
+            if action!='process.restart' or not isinstance(p,dict) or set(p)!={'id','version','definitionHash'}:raise ValueError('fixed profile required')
+            canonical_uuid(p['id'])
+            if type(p['version']) is not int or not 1<=p['version']<=2147483647 or not isinstance(p['definitionHash'],str) or not re.fullmatch('[a-f0-9]{64}',p['definitionHash']):raise ValueError('profile version/hash')
+        elif request.get('operation') not in ('profile.list','operation.get'):raise ValueError('profile extension read')
+    elif request.get('action')=='process.restart' or request.get('operation')=='profile.list':raise ValueError('profile extension required')
     if set(request) != expected:
         raise ValueError("unexpected or missing request fields")
     if type(request.get("budgetMs")) is not int or not 1 <= request["budgetMs"] <= (10000 if kind == "readRequest" else 90000):
@@ -440,7 +450,7 @@ def process_protocol(args):
         else:
             print(dumps(process_list_host.run(request, sys.modules[__name__], cloud_guard)))
             return 0
-    if args[1] == '1.0' and request.get('schemaVersion') == '1.0' and (kind == 'actionRequest' or request.get('operation') == 'operation.get'):
+    if args[1] in ('1.0','1.1') and request.get('schemaVersion') == args[1] and (kind == 'actionRequest' or request.get('operation') in ('operation.get','profile.list')):
         try:
             import process_action_host
         except ImportError:

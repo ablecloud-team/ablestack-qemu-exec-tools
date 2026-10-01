@@ -19,6 +19,7 @@ install -m 0755 "$repo/process-management/read_policy.py" "$target/read_policy.p
 if [[ -f "$repo/build/process-action-launcher" ]]; then
   install -m 0755 "$repo/build/process-action-launcher" "$target/process-action-launcher"
   install -m 0644 "$repo/lib/process/process_action_linux.py" "$target/process_action_linux.py"
+  install -m 0644 "$repo/lib/process/process_profile_linux.py" "$target/process_profile_linux.py"
   install -m 0644 "$repo/process-management/ablestack_process_action.cil" "$target/ablestack_process_action.cil"
   install -m 0755 "$repo/process-management/"{action_policy.py,action_policy_plain.py,install-actions-linux.sh} "$target/"
 fi

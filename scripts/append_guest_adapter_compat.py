@@ -13,9 +13,9 @@ from guest_adapter_compat import CATALOG, FILES, IDENTIFIER
 
 
 PROFILES = {
-    "windows": ("windows-read", "windows-action"),
-    "rocky": ("rocky-read", "linux-action"),
-    "ubuntu": ("ubuntu-read", "linux-action"),
+    "windows": ("windows-read", "windows-action", "windows-profile"),
+    "rocky": ("rocky-read", "linux-action", "linux-profile"),
+    "ubuntu": ("ubuntu-read", "linux-action", "linux-profile"),
 }
 
 
