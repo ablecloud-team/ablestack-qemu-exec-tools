@@ -4,6 +4,9 @@ import base64,datetime as dt,fcntl,json,os,stat,time,uuid
 from pathlib import Path
 from process_list_host import RUNTIME_ROOT,inherited_guard,parent_alive,failure
 from guest_adapter_compat import approved, linux_read_profile, supported_windows
+from process_list_host import failure as read_failure
+def failure(request,*args):
+    value=read_failure(request,*args);value["schemaVersion"]=request["schemaVersion"];return value
 
 def context(request,path):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -15,7 +18,7 @@ def context(request,path):
     import vm_exec
     value=vm_exec.strict_json(raw.decode())
     if set(value)!={'schemaVersion','authority','requestId','operationId','lifecycleFenceHeld','ownerPid','ownerStartTicks','hostBootId','expiresMonotonicNs'}:raise ValueError('reservation fields')
-    if value['schemaVersion']!='1.0' or value['authority']!=request['authority'] or value['requestId']!=request['requestId'] or value['operationId']!=request['operationId'] or value['lifecycleFenceHeld'] is not True:raise ValueError('reservation mismatch')
+    if value['schemaVersion']!=request['schemaVersion'] or value['authority']!=request['authority'] or value['requestId']!=request['requestId'] or value['operationId']!=request['operationId'] or value['lifecycleFenceHeld'] is not True:raise ValueError('reservation mismatch')
     pid=value['ownerPid']
     if type(pid) is not int or pid<=1:raise ValueError('owner')
     # The root Agent must be the live ancestor holding the parent channel.
@@ -31,24 +34,37 @@ def context(request,path):
 
 def unknown(request):
     now=dt.datetime.now(dt.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
-    return dict(schemaVersion='1.0',kind='actionResult',requestId=request['requestId'],authority=request['authority'],operationId=request['operationId'],action=request['action'],identity=request['identity'],service=request['service'],state='UNKNOWN',effect='MAY_HAVE_RUN',submittedAt=now,completedAt=None,guestExecPid=None,guestExitCode=None,postcondition='NOT_CHECKED',error=dict(code='RESULT_UNKNOWN',message='Action completion unknown; query only',retryMode='READ_ONLY'))
+    value=dict(schemaVersion=request['schemaVersion'],kind='actionResult',requestId=request['requestId'],authority=request['authority'],operationId=request['operationId'],action=request['action'],identity=request['identity'],service=request['service'],state='UNKNOWN',effect='MAY_HAVE_RUN',submittedAt=now,completedAt=None,guestExecPid=None,guestExitCode=None,postcondition='NOT_CHECKED',error=dict(code='RESULT_UNKNOWN',message='Action completion unknown; query only',retryMode='READ_ONLY'))
+    if request['schemaVersion']=='1.1':
+        value['profile']=request.get('profile');value['progress']=dict(oldProcess='NOT_CHECKED',newProcess='UNKNOWN',newIdentity=None)
+    return value
 
 def validate_result(value,request):
-    if not isinstance(value,dict) or value.get('schemaVersion')!='1.0' or value.get('authority',{}).get('vmUuid')!=request['authority']['vmUuid']:raise ValueError('guest identity')
+    if not isinstance(value,dict) or value.get('schemaVersion')!=request['schemaVersion'] or value.get('authority',{}).get('vmUuid')!=request['authority']['vmUuid']:raise ValueError('guest identity')
+    if value.get('kind')=='profiles':
+        if set(value)!={'schemaVersion','kind','requestId','authority','profiles'} or value['requestId']!=request['requestId'] or value['authority']!=request['authority'] or not isinstance(value['profiles'],list) or len(value['profiles'])>32:raise ValueError('profiles')
+        return
     if value.get('kind')=='failure':
         if set(value)!={'schemaVersion','kind','requestId','authority','error'} or value['requestId']!=request['requestId'] or value['authority']!=request['authority']:raise ValueError('failure identity')
         error=value['error']
         if set(error)!={'code','message','retryMode'} or error['code'] not in ('PERMISSION_DENIED','STALE_AUTHORITY','REQUEST_CONFLICT','BUSY','STALE_SNAPSHOT','NOT_FOUND','CHECK_FAILED'):raise ValueError('failure')
         return
     fields={'schemaVersion','kind','requestId','authority','operationId','action','identity','service','state','effect','submittedAt','completedAt','guestExecPid','guestExitCode','postcondition','error'}
+    if value['schemaVersion']=='1.1':
+        fields|={'profile','progress'}
+        if request['kind']=='actionRequest' and value.get('profile')!=request.get('profile'):raise ValueError('profile mismatch')
+        if not isinstance(value.get('progress'),dict) or set(value['progress'])!={'oldProcess','newProcess','newIdentity'}:raise ValueError('progress')
     if set(value)!=fields or value['kind']!='actionResult' or value['operationId']!=request['operationId']:raise ValueError('action result')
     if request['kind']=='actionRequest' and any(value[k]!=request[k] for k in ('requestId','authority','action','identity','service')):raise ValueError('request mismatch')
     state=value['state'];error=value['error']
     if state=='SUCCEEDED':
-        expected='SERVICE_RESTART_VERIFIED' if value['action']=='service.restart' else 'TARGET_EXITED'
+        expected='PROFILE_RESTART_VERIFIED' if value['action']=='process.restart' else 'SERVICE_RESTART_VERIFIED' if value['action']=='service.restart' else 'TARGET_EXITED'
+        if value['action']=='process.restart' and (value['progress']['oldProcess']!='EXITED' or value['progress']['newProcess']!='RUNNING' or not value['progress']['newIdentity']):raise ValueError('profile evidence')
         if value['effect']!='VERIFIED' or value['postcondition']!=expected or error is not None or value['guestExitCode'] not in (None,0) or value['completedAt'] is None:raise ValueError('unverified success')
     elif state=='UNKNOWN':
         if value['effect']!='MAY_HAVE_RUN' or value['postcondition']!='NOT_CHECKED' or value['completedAt'] is not None or not error or error.get('code')!='RESULT_UNKNOWN' or error.get('retryMode')!='READ_ONLY':raise ValueError('unsafe unknown')
+    elif state=='PARTIAL':
+        if value['schemaVersion']!='1.1' or value['effect']!='PARTIAL' or value['postcondition']!='OLD_EXITED_NEW_NOT_STARTED' or value['completedAt'] is None or value['progress']['oldProcess']!='EXITED' or value['progress']['newProcess']!='NOT_RUNNING' or not error or error.get('code')!='START_FAILED':raise ValueError('partial evidence')
     elif state=='FAILED':
         if value['effect'] not in ('NOT_STARTED','MAY_HAVE_RUN') or value['postcondition']!='NOT_CHECKED' or value['completedAt'] is None or not error:raise ValueError('failure evidence')
     else:raise ValueError('unexpected pending reply')
@@ -83,7 +99,7 @@ def run(request,transport,reservation=None):
         lease.mkdir(mode=0o700,exist_ok=True)
         info=lease.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode&0o077:raise ValueError('unsafe lease')
-        marker=lease/('q5-'+request['operationId']+'.json')
+        marker=lease/('q5-'+str(request['operationId'])+'.json')
         # C5 keeps its own durable reservation outside this directory. Only this
         # operation's unresolved marker may be queried under the exclusive lock.
         if any(p!=marker for p in lease.iterdir()):return failure(request,'BUSY','Another operation lease exists')
@@ -113,17 +129,20 @@ def run(request,transport,reservation=None):
         windows=supported_windows(osinfo)
         if arch not in ('x86_64','x86-64','amd64') or not (linux or windows):return failure(request,'TOOLS_REQUIRED','OS unsupported')
         if linux:
-            bundles=approved('linux-action')
-            script="import os,hashlib,sys;p='/usr/libexec/ablestack-qemu-exec-tools/process/';h=hashlib.sha256(open(p+'process_action_linux.py','rb').read()).hexdigest();x=p+'process-action-launcher';y=hashlib.sha256(open(x,'rb').read()).hexdigest();(h,y) in "+repr(bundles)+" or sys.exit(3);os.execv(x,[x,'--request-base64','"+encoded+"'])"
+            bundles=approved('linux-profile' if request['schemaVersion']=='1.1' else 'linux-action')
+            extra=";z=hashlib.sha256(open(p+'process_profile_linux.py','rb').read()).hexdigest()" if request['schemaVersion']=='1.1' else ''
+            pair='(h,y,z)' if request['schemaVersion']=='1.1' else '(h,y)'
+            script="import os,hashlib,sys;p='/usr/libexec/ablestack-qemu-exec-tools/process/';h=hashlib.sha256(open(p+'process_action_linux.py','rb').read()).hexdigest();x=p+'process-action-launcher';y=hashlib.sha256(open(x,'rb').read()).hexdigest()"+extra+";"+pair+" in "+repr(bundles)+" or sys.exit(3);os.execv(x,[x,'--request-base64','"+encoded+"'])"
             command=['/usr/bin/python3','-I','-c',script]
         else:
-            bundles=approved('windows-action')
+            bundles=approved('windows-profile' if request['schemaVersion']=='1.1' else 'windows-action')
+            names="'ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll'"+ (",'ProcessProfile.ps1','Start-ProcessProfile.ps1'" if request['schemaVersion']=='1.1' else '')
             choices='@('+','.join("'"+':'.join(pair)+"'" for pair in bundles)+')'
             # Module auto-loading during Get-FileHash can emit localized CLIXML
             # progress to stderr before the adapter sets its stream preferences.
             # Establish the wire format first; retain strict UTF-8 validation of
             # both streams instead of accepting a lossy transport result.
-            script=r"$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);$p='C:\Program Files\ABLESTACK Process Tools';$h=@('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
+            script=r"$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);$p='C:\Program Files\ABLESTACK Process Tools';$h=@("+names+") | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
             command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         if action:
             context(request,reservation)
@@ -139,7 +158,8 @@ def run(request,transport,reservation=None):
         if host('domuuid',domain)!=vm or host('domstate',domain)!='running':return unknown(request) if action else failure(request,'STALE_AUTHORITY','Domain changed')
         if value.get('kind')=='actionResult':
             if value.get('operationId')!=request['operationId'] or action and any(value.get(k)!=request[k] for k in ('requestId','authority','action','identity','service')):raise ValueError('guest result mismatch')
-            if value.get('state') in ('SUCCEEDED','FAILED') and marker.exists():marker.unlink()
+            if value.get('state') in ('SUCCEEDED','FAILED','PARTIAL') and marker.exists():marker.unlink()
+        elif value.get('kind')=='profiles' and request.get('operation')=='profile.list':pass
         elif value.get('kind')=='failure' and value.get('requestId')==request['requestId']:
             if action and marker.exists():marker.unlink()
         else:raise ValueError('guest result kind')

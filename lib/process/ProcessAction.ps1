@@ -4,12 +4,14 @@ $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 Add-Type -Path (Join-Path $PSScriptRoot 'AbleProcessIdentity.dll')
 Add-Type -Path (Join-Path $PSScriptRoot 'AbleProcessAction.dll')
+# The extension is loaded only for protocol 1.1; old installations remain usable.
+
 function Json($value){return ConvertTo-Json -InputObject $value -Depth 20 -Compress}
 function Utc {return [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')}
 function Uuid($value){if($value -isnot [string] -or $value -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'){throw 'UUID'}}
 function Fields($value,[string]$names){if($null -eq $value -or (($value.Keys | Sort-Object) -join ',') -cne (($names.Split(' ') | Sort-Object) -join ',')){throw 'fields'}}
 function Hash([string]$text){$sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
-function Failure([string]$code){return @{schemaVersion='1.0';kind='failure';requestId=$r.requestId;authority=$r.authority;error=@{code=$code;message='Process operation unavailable';retryMode= $(if($code -in @('BUSY','NOT_FOUND')){'READ_ONLY'}else{'NONE'})}}}
+function Failure([string]$code){return @{schemaVersion=$r.schemaVersion;kind='failure';requestId=$r.requestId;authority=$r.authority;error=@{code=$code;message='Process operation unavailable';retryMode= $(if($code -in @('BUSY','NOT_FOUND')){'READ_ONLY'}else{'NONE'})}}}
 function Unknown($value){$value.state='UNKNOWN';$value.effect='MAY_HAVE_RUN';$value.completedAt=$null;$value.postcondition='NOT_CHECKED';$value.error=@{code='RESULT_UNKNOWN';message='Execution may have occurred; query only';retryMode='READ_ONLY'}}
 function Success($value){$value.state='SUCCEEDED';$value.effect='VERIFIED';$value.completedAt=Utc;$value.guestExitCode=0;$value.postcondition=$(if($value.action -eq 'service.restart'){'SERVICE_RESTART_VERIFIED'}else{'TARGET_EXITED'});$value.error=$null}
 function Persist {[AbleProcessAction]::Save($journal,(Json $state))}
@@ -38,6 +40,7 @@ function ServiceCheck {
 function Reconcile($record){
     $value=$record.result
     if($value.state -in @('ACCEPTED','RUNNING','UNKNOWN')){
+        if($value.action -eq 'process.restart'){return ProfileReconcile $record}
         Unknown $value
         if($value.identity.bootId -ceq (Boot) -and $record.stage -eq 'signal-returned'){
             $current=[AbleProcessIdentity]::Read([uint32]$value.identity.pid)
@@ -63,6 +66,7 @@ function Reconcile($record){
 function Main {
     $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){return Failure 'PERMISSION_DENIED'}
+    if($r.operation -eq 'profile.list'){return ProfileList}
     $root=Join-Path $env:ProgramData 'ABLESTACK-ProcessActions';[AbleProcessAction]::SecureDirectory($root)
     $script:journal=Join-Path $root 'journal.json';$lockPath=Join-Path $root 'lock'
     if(Test-Path -LiteralPath $lockPath){[AbleProcessAction]::CheckPath($lockPath,$false)}
@@ -76,19 +80,23 @@ function Main {
         if($r.kind -eq 'readRequest'){if(-not $old){return Failure 'NOT_FOUND'};return Reconcile $old}
         $service=$null
         if($r.service){$service=[ordered]@{configurationHash=$r.service.configurationHash;manager=$r.service.manager;name=$r.service.name}}
-        $digest=Hash (Json ([ordered]@{action=$r.action;identity=[ordered]@{bootId=$r.identity.bootId;pid=$r.identity.pid;startTicks=$r.identity.startTicks;vmUuid=$r.identity.vmUuid};observedAt=$r.observedAt;service=$service;snapshotId=$r.snapshotId}))
+        $fingerprint=[ordered]@{action=$r.action;identity=[ordered]@{bootId=$r.identity.bootId;pid=$r.identity.pid;startTicks=$r.identity.startTicks;vmUuid=$r.identity.vmUuid};observedAt=$r.observedAt;service=$service;snapshotId=$r.snapshotId}
+        if($r.schemaVersion -eq '1.1'){$fingerprint.profile=$r.profile}
+        $digest=Hash (Json $fingerprint)
         if($old){if($old.digest -cne $digest -or $old.result.requestId -cne $r.requestId){return Failure 'REQUEST_CONFLICT'};return Reconcile $old}
         foreach($entry in $records.Values){if($entry.result.requestId -ceq $r.requestId){return Failure 'REQUEST_CONFLICT'}}
         if($records.Count -ge 4096 -or @($records.Values | Where-Object {$_.result.state -in @('ACCEPTED','RUNNING','UNKNOWN')}).Count -gt 0){return Failure 'BUSY'}
         # Cloud snapshot monotonic TTL and host reservation enforce freshness.
         # Do not compare the host observation timestamp with a guest wall clock.
-        $value=@{schemaVersion='1.0';kind='actionResult';requestId=$r.requestId;authority=$r.authority;operationId=$r.operationId;action=$r.action;identity=$r.identity;service=$r.service;state='ACCEPTED';effect='NOT_STARTED';submittedAt=(Utc);completedAt=$null;guestExecPid=$null;guestExitCode=$null;postcondition='NOT_CHECKED';error=$null}
+        $value=@{schemaVersion=$r.schemaVersion;kind='actionResult';requestId=$r.requestId;authority=$r.authority;operationId=$r.operationId;action=$r.action;identity=$r.identity;service=$r.service;state='ACCEPTED';effect='NOT_STARTED';submittedAt=(Utc);completedAt=$null;guestExecPid=$null;guestExitCode=$null;postcondition='NOT_CHECKED';error=$null}
+        if($r.schemaVersion -eq '1.1'){$value.profile=$r.profile;ProfileProgress $value 'NOT_CHECKED' 'NOT_ATTEMPTED'}
         $record=@{digest=$digest;stage='reserved';result=$value};$records[$r.operationId]=$record;Persist
         $target=$null
         try{
             if($r.action -eq 'process.terminate'){throw 'UNSUPPORTED_ACTION'}
             if($r.identity.bootId -cne (Boot)){throw 'STALE_IDENTITY'}
             $target=New-Object AbleProcessAction+Target([uint32]$r.identity.pid,[string]$r.identity.startTicks)
+            if($r.action -eq 'process.restart'){ProfileRestart $record $target;return $value}
             $info=$null
             if($r.action -eq 'service.restart'){$info=ServiceCheck}
             else{if(@(Get-CimInstance Win32_Service -Filter ('ProcessId='+$r.identity.pid) -OperationTimeoutSec 2).Count -gt 0){throw 'PROTECTED_TARGET'}}
@@ -120,7 +128,7 @@ function Main {
         }catch{
             if($record.stage -eq 'reserved'){
                 $code='STALE_IDENTITY'
-                foreach($known in @('PROTECTED_TARGET','UNSUPPORTED_ACTION','STALE_IDENTITY')){if($_.Exception.ToString().Contains($known)){$code=$known;break}}
+                foreach($known in @('PROTECTED_TARGET','UNSUPPORTED_ACTION','STALE_IDENTITY','PROFILE_CHANGED')){if($_.Exception.ToString().Contains($known)){$code=$known;break}}
                 $value.state='FAILED';$value.effect='NOT_STARTED';$value.completedAt=Utc;$value.error=@{code=$code;message='Process action rejected';retryMode='NONE'}
             }else{Unknown $value}
             Persist
@@ -131,21 +139,28 @@ function Main {
 try{
     $raw=([Text.UTF8Encoding]::new($false,$true)).GetString([Convert]::FromBase64String($RequestBase64));[AbleProcessAction]::ValidateJson($raw);$script:r=[AbleProcessAction]::Parse($raw)
     Fields $r.authority 'vmUuid hostUuid placementGeneration';Uuid $r.requestId;Uuid $r.authority.vmUuid;Uuid $r.authority.hostUuid
-    if($r.schemaVersion -cne '1.0' -or $r.authority.placementGeneration -isnot [string] -or $r.authority.placementGeneration -cnotmatch '^[0-9]{1,20}$' -or $r.budgetMs -isnot [int] -or $r.budgetMs -lt 1 -or $r.budgetMs -gt 90000){throw 'request'}
-    Uuid $r.operationId
+    if($r.schemaVersion -cnotin @('1.0','1.1') -or $r.authority.placementGeneration -isnot [string] -or $r.authority.placementGeneration -cnotmatch '^[0-9]{1,20}$' -or $r.budgetMs -isnot [int] -or $r.budgetMs -lt 1 -or $r.budgetMs -gt 90000){throw 'request'}
+    if($r.schemaVersion -eq '1.1'){. (Join-Path $PSScriptRoot 'ProcessProfile.ps1')}
+    if($r.operation -ne 'profile.list'){Uuid $r.operationId}
     if($r.kind -ceq 'readRequest'){
         Fields $r 'schemaVersion kind requestId authority operation operationId budgetMs'
-        if($r.operation -cne 'operation.get' -or $r.budgetMs -gt 10000){throw 'operation'}
+        if($r.operation -cnotin @('operation.get','profile.list') -or $r.budgetMs -gt 10000){throw 'operation'}
+        if($r.operation -eq 'profile.list' -and ($r.schemaVersion -ne '1.1' -or $null -ne $r.operationId)){throw 'profile query'}
     }else{
-        Fields $r 'schemaVersion kind requestId authority operationId action identity snapshotId observedAt service budgetMs'
-        if($r.kind -cne 'actionRequest' -or $r.action -cnotin @('process.terminate','process.kill','service.restart')){throw 'action'}
+        Fields $r ('schemaVersion kind requestId authority operationId action identity snapshotId observedAt service budgetMs'+$(if($r.schemaVersion -eq '1.1'){' profile'}else{''}))
+        if($r.kind -cne 'actionRequest' -or $r.action -cnotin @('process.terminate','process.kill','service.restart','process.restart')){throw 'action'}
+        if($r.schemaVersion -eq '1.1'){
+            if($r.action -ne 'process.restart'){throw 'extension action'}
+            Fields $r.profile 'id version definitionHash';Uuid $r.profile.id
+            if($r.profile.version -isnot [int] -or $r.profile.version -lt 1 -or $r.profile.definitionHash -cnotmatch '^[a-f0-9]{64}$'){throw 'profile'}
+        }elseif($r.action -eq 'process.restart'){throw 'extension required'}
         Fields $r.identity 'vmUuid bootId pid startTicks';Uuid $r.snapshotId
         if($r.identity.vmUuid -cne $r.authority.vmUuid -or $r.identity.bootId -isnot [string] -or $r.identity.bootId -cnotmatch '^windows:[0-9]{1,20}$' -or $r.identity.startTicks -isnot [string] -or $r.identity.startTicks -cnotmatch '^[0-9]{1,20}$' -or $r.identity.pid -isnot [int] -and $r.identity.pid -isnot [long] -or $r.identity.pid -lt 1 -or $r.identity.pid -gt 4294967295){throw 'identity'}
         if($r.observedAt -isnot [string] -or -not $r.observedAt.EndsWith('Z')){throw 'time'};[void][DateTime]::Parse($r.observedAt)
         if($r.action -ceq 'service.restart'){
             Fields $r.service 'manager name configurationHash'
             if($r.service.manager -cne 'scm' -or $r.service.name -isnot [string] -or $r.service.name -cnotmatch '^[A-Za-z0-9_.-]{1,256}$' -or $r.service.configurationHash -cnotmatch '^[a-f0-9]{64}$'){throw 'service'}
-        }elseif($null -ne $r.service -or $r.budgetMs -gt 15000){throw 'service'}
+        }elseif($null -ne $r.service -or ($r.action -ne 'process.restart' -and $r.budgetMs -gt 15000)){throw 'service'}
     }
     $script:watch=[Diagnostics.Stopwatch]::StartNew();[AbleProcessIdentity]::StartDeadline($r.budgetMs+1000)
     [Console]::WriteLine((Json (Main)))

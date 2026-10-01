@@ -36,7 +36,7 @@ jobs:
           if ($LASTEXITCODE) { throw 'Native helper build failed' }
           & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /target:library /reference:System.Web.Extensions.dll /out:.\lib\process\AbleProcessAction.dll .\lib\process\AbleProcessAction.cs
           if ($LASTEXITCODE) { throw 'Native action helper build failed' }
-          Copy-Item lib/process/ProcessList.ps1,lib/process/ProcessAction.ps1,lib/process/AbleProcessIdentity.dll,lib/process/AbleProcessAction.dll $payload
+          Copy-Item lib/process/ProcessProfile.ps1,lib/process/ProcessList.ps1,lib/process/ProcessAction.ps1,lib/process/AbleProcessIdentity.dll,lib/process/AbleProcessAction.dll $payload
           git rev-parse HEAD | Set-Content "$payload/SOURCE_COMMIT" -Encoding ascii -NoNewline
           wix build windows/process-management/ProcessTools.wxs -arch x64 -d "Payload=$payload" -o "$payload/ABLESTACK-ProcessTools.msi"
           if ($LASTEXITCODE) { throw 'MSI build failed' }
@@ -68,26 +68,30 @@ jobs:
               }
             }
           }
-          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi','virtio-win_license.txt') | ForEach-Object {
+          $files=@('ProcessPolicy.psm1','Repair-ProcessPolicy.ps1','ProcessList.ps1','AbleProcessIdentity.dll','ProcessAction.ps1','ProcessProfile.ps1','Register-ProcessProfile.ps1','Start-ProcessProfile.ps1','AbleProcessAction.dll','ABLESTACK-ProcessTools.msi','qemu-ga-x86_64.msi','virtio-win-gt-x64.msi','virtio-win_license.txt') | ForEach-Object {
             @{name=$_;sha256=(Get-FileHash "$payload/$_" -Algorithm SHA256).Hash.ToLowerInvariant()}
           }
           $driverFiles=Get-ChildItem -LiteralPath "$payload/drivers" -Recurse -File | ForEach-Object {
             @{name=$_.FullName.Substring($payload.Length+1).Replace('\','/');sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
           }
-          @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.1.0';workflowRunId=$env:GITHUB_RUN_ID;vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files);driverFiles=@($driverFiles)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8
+          @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.2.0';workflowRunId=$env:GITHUB_RUN_ID;vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files);driverFiles=@($driverFiles)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8
           '@echo off', 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*', 'exit /b %ERRORLEVEL%' | Set-Content "$payload/install.bat" -Encoding ascii
       - name: Native process list and action regressions
         shell: powershell
         run: |
           & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /reference:System.ServiceProcess.dll /out:.\build\AbleProcessQ5Fixture.exe .\tests\ProcessActionFixture.cs
           if ($LASTEXITCODE) { throw 'Test fixture build failed' }
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /out:.\build\ProcessProfileFixture.exe .\tests\ProcessProfileFixture.cs
+          if ($LASTEXITCODE) { throw 'Profile fixture build failed' }
           tests/process_list_windows_test.ps1
           tests/process_action_windows_test.ps1
+          windows/process-management/ProcessProfile.Array.Tests.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: process-windows-validation
           path: |
             build/AbleProcessQ5Fixture.exe
+            build/ProcessProfileFixture.exe
             build/windows-snapshot.json
             build/windows-action.json
           if-no-files-found: error

@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+# Copyright 2026 ABLECLOUD. Apache-2.0.
+import importlib.util,json,os,subprocess,tempfile,unittest,uuid
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+ROOT=Path(__file__).resolve().parents[1]
+def module(name):
+ spec=importlib.util.spec_from_file_location(name,ROOT/'lib/process'/ (name+'.py'));value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
+p=module('process_profile_linux');a=module('process_action_linux');p.ACTION=a
+class Profiles(unittest.TestCase):
+ def setUp(self):
+  self.temp=tempfile.TemporaryDirectory(dir='/var/lib',prefix='able-profile-test-');self.base=Path(self.temp.name);self.directory=self.base/'profiles';self.directory.mkdir(mode=0o700)
+  self.children=[];self.id=str(uuid.uuid4());self.vm=str(uuid.uuid4());self.argv=[str(20000+os.getpid())]
+  child=self.child();self.binding=dict(vmUuid=self.vm,bootId=a.boot(),pid=child.pid,startTicks=a.identity(child.pid)[1])
+  self.loaded={'LoadState':'loaded','CanStart':'yes','WorkingDirectory':'/var/lib','User':'root','Type':'simple','Restart':'no'}
+  self.unit=b'[Service]\nType=simple\n';self.definition=dict(schemaVersion='1.0',id=self.id,version=1,vmUuid=self.vm,displayName='fixture',executable='/usr/bin/sleep',executableHash=p.digest(Path('/usr/bin/sleep').read_bytes()),argv=self.argv,cwd='/var/lib',account='root',environmentRef=None,supervisor=dict(manager='systemd',name='ableprofile-'+self.id+'.service',configurationHash=p.digest(self.unit),effectiveHash=p.effective(self.loaded)),verification='identity-and-running')
+  a.save(self.directory/(self.id+'.json'),self.definition);a.save(self.base/('profile-'+self.id+'.binding.json'),self.binding)
+  self.patchers=[patch.object(a,'props',return_value=self.loaded),patch.object(p,'BASE',self.base),patch.object(p,'PROFILES',self.directory)]
+  regular=p.regular
+  self.patchers.append(patch.object(p,'regular',side_effect=lambda path,*args:self.unit if str(path).startswith('/etc/systemd/system/ableprofile-') else regular(path,*args)))
+  for patcher in self.patchers:patcher.start()
+  self.request=dict(schemaVersion='1.1',kind='actionRequest',requestId=str(uuid.uuid4()),operationId=str(uuid.uuid4()),snapshotId=str(uuid.uuid4()),authority=dict(vmUuid=self.vm,hostUuid=str(uuid.uuid4()),placementGeneration='1'),identity=self.binding,observedAt=a.stamp(),service=None,budgetMs=5000,action='process.restart',profile=dict(id=self.id,version=1,definitionHash=p.digest((self.directory/(self.id+'.json')).read_bytes())))
+ def child(self):
+  child=subprocess.Popen(['/usr/bin/sleep',*self.argv]);self.children.append(child);return child
+ def tearDown(self):
+  for patcher in reversed(self.patchers):patcher.stop()
+  for child in self.children:
+   if child.poll() is None:child.kill()
+   child.wait()
+  self.temp.cleanup()
+ def test_supervisor_and_environment_reference_preserve_raw_bytes(self):
+  data=b'[Service]\nType=simple\n';path=self.base/'raw.service'
+  p.save_bytes(path,data);self.assertEqual(path.read_bytes(),data);self.assertEqual(path.stat().st_mode&0o777,0o600)
+  p.save_bytes(path,b'KEY=value\n');self.assertEqual(path.read_bytes(),b'KEY=value\n')
+ def test_cgroup_v1_tracks_systemd_hierarchy_not_resource_controller(self):
+  with patch.object(p.Path,'read_text',return_value='1:name=systemd:/system.slice/workload.scope\n2:cpu,cpuacct:/system.slice/sshd.service'):
+   p.check_supervision({'id':self.id},self.binding['pid'])
+  with patch.object(p.Path,'read_text',return_value='1:name=systemd:/system.slice/external.service\n2:cpu,cpuacct:/'):
+   with self.assertRaises(a.Rejected):p.check_supervision({'id':self.id},self.binding['pid'])
+ def test_unloaded_environment_reference_rejected_before_signal(self):
+  self.definition['environmentRef']=str(self.base/'env');p.save_bytes(self.base/'env',b'A=secret\n');a.save(self.directory/(self.id+'.json'),self.definition)
+  with patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
+   with self.assertRaisesRegex(ValueError,'environment reference is not loaded'):p.checked(self.request)
+ def test_unordered_systemd_dependencies_preserve_effective_hash(self):
+  self.assertEqual(p.effective(dict(self.loaded,Requires='-.mount sysinit.target system.slice',Wants='b.target a.target')),p.effective(dict(self.loaded,Requires='system.slice -.mount sysinit.target',Wants='a.target b.target')))
+ def test_registered_identity_metadata_omits_argument_values(self):
+  value=p.list_profiles(self.request);self.assertEqual(value['profiles'][0]['identity'],self.binding);self.assertNotIn('argv',value['profiles'][0]);self.assertEqual(value['profiles'][0]['argumentCount'],1)
+ def test_unregistered_scope_and_definition_changes_never_signal(self):
+  for field,value in [('id',str(uuid.uuid4())),('version',2),('definitionHash','0'*64)]:
+   with self.subTest(field=field):
+    request=json.loads(json.dumps(self.request));request['profile'][field]=value
+    with patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
+     with self.assertRaises((ValueError,OSError,a.Rejected)):p.checked(request)
+ def test_invalid_supervisor_rejected_before_any_old_process_signal(self):
+  for key,value in [('LoadState','error'),('CanStart','no'),('WorkingDirectory','"/var/lib"'),('Restart','always')]:
+   with patch.object(a,'props',return_value=dict(self.loaded,**{key:value})),patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
+    with self.assertRaises(ValueError):p.checked(self.request)
+ def test_extra_supervisor_commands_and_dropins_are_rejected(self):
+  for key in ('DropInPaths','ExecStartPre','ExecStopPost','TriggeredBy'):
+   with patch.object(a,'props',return_value=dict(self.loaded,**{key:'external'})):
+    with self.assertRaises(ValueError):p.checked(self.request)
+ def test_process_owned_by_other_service_rejected_before_mutation(self):
+  with patch.object(p.Path,'read_text',return_value='0::/system.slice/external.service'):
+   with self.assertRaises(a.Rejected):p.check_supervision({'id':self.id},self.binding['pid'])
+  with patch.object(p.Path,'read_text',return_value='0::/system.slice/ableprofile-'+self.id+'.service'):
+   p.check_supervision({'id':self.id},self.binding['pid'])
+ def test_cross_vm_profile_rejected(self):
+  with self.assertRaises(ValueError):p.load(self.id,str(uuid.uuid4()))
+ def test_symlink_binding_and_writable_definition_rejected(self):
+  path=p.paths(self.id)[1];path.unlink();path.symlink_to('/etc/passwd')
+  with self.assertRaises((ValueError,OSError)):p.load(self.id,self.vm)
+  path.unlink();a.save(path,self.binding);os.chmod(p.paths(self.id)[0],0o666)
+  with self.assertRaises(ValueError):p.load(self.id,self.vm)
+ def test_duplicate_process_rejected_before_signal(self):
+  self.child()
+  with self.assertRaises(a.Rejected):p.checked(self.request)
+ def execute(self,fail=False):
+  record={'stage':'reserved','result':a.result(self.request)};writes=[];new=[None]
+  def props(*args):return dict(self.loaded,**({'ActiveState':'inactive','MainPID':'0'} if new[0] is None else {'ActiveState':'active','MainPID':str(new[0].pid),'InvocationID':'new'}))
+  def control(*args,**kw):
+   if not fail:new[0]=self.child()
+   return SimpleNamespace(returncode=1 if fail else 0)
+  with patch.object(a,'props',side_effect=props),patch.object(p,'check_supervision'),patch.object(p.subprocess,'run',side_effect=control):p.run(self.request,record,lambda:writes.append(json.loads(json.dumps(record))),__import__('time').monotonic()+5)
+  return record,writes,new[0]
+ def test_actual_old_exit_new_identity_and_stable_binding(self):
+  record,writes,new=self.execute();self.assertEqual(record['result']['state'],'SUCCEEDED');self.assertEqual(record['result']['progress']['oldProcess'],'EXITED');self.assertNotEqual(record['result']['progress']['newIdentity']['pid'],self.binding['pid']);self.assertIsNotNone(self.children[0].poll());self.assertIsNone(new.poll());self.assertEqual(p.load(self.id,self.vm)[1],record['result']['progress']['newIdentity']);self.assertTrue(any(w['stage']=='profile-start-intent' for w in writes))
+ def test_start_failure_is_terminal_partial_with_old_exit(self):
+  record,_,_=self.execute(True);self.assertEqual(record['result']['state'],'PARTIAL');self.assertEqual(record['result']['effect'],'PARTIAL');self.assertEqual(record['result']['progress'],dict(oldProcess='EXITED',newProcess='NOT_RUNNING',newIdentity=None));self.assertIsNotNone(self.children[0].poll())
+ def test_stopped_crash_recovers_partial_without_start(self):
+  self.children[0].terminate();self.children[0].wait();record={'stage':'profile-stopped','result':a.result(self.request)}
+  with patch.object(p.subprocess,'run',side_effect=AssertionError('replay')):self.assertEqual(p.reconcile(record,lambda:None)['state'],'PARTIAL')
+ def test_old_protocol_rejects_profile_action(self):
+  self.request['schemaVersion']='1.0'
+  with self.assertRaises(ValueError):a.validate(self.request)
+if __name__=='__main__':unittest.main()

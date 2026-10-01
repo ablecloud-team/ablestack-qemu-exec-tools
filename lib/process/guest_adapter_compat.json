@@ -285,6 +285,51 @@
         "AbleProcessAction.dll": "7f3b76ddb1e592a364e6b56d91fe9af9c12895f8a936be7e85f208ba8226ab95",
         "AbleProcessIdentity.dll": "d1dc17886f716f2055ffbaa29501163262733a8ee42560519ce01d2eb1568b47"
       }
+    },
+    {
+      "id": "epic-36831821920-982c74e-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "b64869b5fe0ca9084100c80eea91ed72ab2944f5f8a4b87ec9358b18aefe7c3e",
+        "AbleProcessIdentity.dll": "ba88cfe9dda882c94a84fa574acbf15fe51f1152c2666fc21f263bea9828fb89"
+      }
+    },
+    {
+      "id": "epic-36831821920-982c74e-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "aff47d621639be6aa6d766e9fdd4990459c21155d56a016eabac068c3a1207af",
+        "AbleProcessAction.dll": "714ca61da1f1d4aa0c1a6964e2c6a8a68ab87eb959bd87a88615e59c6bbc81e5",
+        "AbleProcessIdentity.dll": "ba88cfe9dda882c94a84fa574acbf15fe51f1152c2666fc21f263bea9828fb89"
+      }
+    },
+    {
+      "id": "epic-36831821920-982c74e-windows-profile",
+      "profile": "windows-profile",
+      "sha256": {
+        "ProcessAction.ps1": "aff47d621639be6aa6d766e9fdd4990459c21155d56a016eabac068c3a1207af",
+        "AbleProcessAction.dll": "714ca61da1f1d4aa0c1a6964e2c6a8a68ab87eb959bd87a88615e59c6bbc81e5",
+        "AbleProcessIdentity.dll": "ba88cfe9dda882c94a84fa574acbf15fe51f1152c2666fc21f263bea9828fb89",
+        "ProcessProfile.ps1": "0f6daca21256d0061e6671c763ecaaaff85846bfc18d84ad863c52eb4d999899",
+        "Start-ProcessProfile.ps1": "fc751ec17f4009cb73d3aa2927688df9291a84785842e1a31aa50620f8697f82"
+      }
+    },
+    {
+      "id": "epic1199-linux-9cf3f434-validated-linux-action",
+      "profile": "linux-action",
+      "sha256": {
+        "process_action_linux.py": "bac87f7dbf341e93b8f321de83ccc35d0e968262e36c0eb505f8b070229918a7",
+        "process-action-launcher": "853e8989208afb57766d9b5389f9a51ba8922b8d207062fbc699497df6a73e17"
+      }
+    },
+    {
+      "id": "epic1199-linux-9cf3f434-validated-linux-profile",
+      "profile": "linux-profile",
+      "sha256": {
+        "process_action_linux.py": "bac87f7dbf341e93b8f321de83ccc35d0e968262e36c0eb505f8b070229918a7",
+        "process-action-launcher": "853e8989208afb57766d9b5389f9a51ba8922b8d207062fbc699497df6a73e17",
+        "process_profile_linux.py": "d264e2f2d3668b041b0faef9a0d82fdab8f6b644660fca7244dc56d09332cf2d"
+      }
     }
   ]
 }

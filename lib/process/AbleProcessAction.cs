@@ -34,6 +34,26 @@ public static class AbleProcessAction {
   public bool Exited(int milliseconds){return WaitForSingleObject(handle,(uint)Math.Max(0,milliseconds))==0;}
   public void Dispose(){if(handle!=IntPtr.Zero){CloseHandle(handle);handle=IntPtr.Zero;}}
  }
+ [DllImport("shell32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr CommandLineToArgvW(string command,out int count);
+ [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
+ public static bool CommandLineMatches(string command,string executable,string[] arguments) {
+  int count;IntPtr argv=CommandLineToArgvW(command,out count);if(argv==IntPtr.Zero)return false;
+  try {
+   if(count!=arguments.Length+1 || !String.Equals(Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv)),executable,StringComparison.OrdinalIgnoreCase))return false;
+   for(int i=0;i<arguments.Length;i++)if(!String.Equals(Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv,(i+1)*IntPtr.Size)),arguments[i],StringComparison.Ordinal))return false;
+   return true;
+  }finally{LocalFree(argv);}
+ }
+ public static string QuoteArgument(string value) {
+  if(value.IndexOf('\0')>=0)throw new FormatException("Argument");
+  var b=new StringBuilder("\"");int slashes=0;
+  foreach(char c in value) {
+   if(c=='\\'){slashes++;continue;}
+   if(c=='"'){b.Append('\\',slashes*2+1);b.Append(c);slashes=0;continue;}
+   b.Append('\\',slashes);slashes=0;b.Append(c);
+  }
+  b.Append('\\',slashes*2);return b.Append('"').ToString();
+ }
  public static Dictionary<string,object> Parse(string json){var serializer=new JavaScriptSerializer();serializer.MaxJsonLength=16777216;serializer.RecursionLimit=24;return (Dictionary<string,object>)serializer.DeserializeObject(json);}
  public static void SecureDirectory(string path) {
   if(!Directory.Exists(path)) {
@@ -50,7 +70,7 @@ public static class AbleProcessAction {
   if(owner!="S-1-5-18" && owner!="S-1-5-32-544")throw new IOException("Unsafe journal owner");
   foreach(FileSystemAccessRule rule in acl.GetAccessRules(true,true,typeof(SecurityIdentifier))) {
    string sid=rule.IdentityReference.Value;
-   if(rule.AccessControlType==AccessControlType.Allow && sid!="S-1-5-18" && sid!="S-1-5-32-544" && (rule.FileSystemRights&(FileSystemRights.Write|FileSystemRights.Modify|FileSystemRights.FullControl))!=0)throw new IOException("Unsafe journal ACL");
+   if(rule.AccessControlType==AccessControlType.Allow && sid!="S-1-5-18" && sid!="S-1-5-32-544" && (rule.FileSystemRights&(FileSystemRights.Write|FileSystemRights.Delete|FileSystemRights.DeleteSubdirectoriesAndFiles|FileSystemRights.ChangePermissions|FileSystemRights.TakeOwnership))!=0)throw new IOException("Unsafe journal ACL");
   }
  }
  public static void Save(string path,string json) {
