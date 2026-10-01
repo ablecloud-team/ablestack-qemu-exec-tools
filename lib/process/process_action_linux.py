@@ -149,7 +149,7 @@ def expired(deadline):
     if time.monotonic()>=deadline:raise TimeoutError('deadline')
 def props(unit,deadline):
     expired(deadline)
-    names='LoadState,Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,WorkingDirectory,EnvironmentFiles,Environment,Restart,KillMode,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf,Transient'
+    names='DropInPaths,ExecStartPre,ExecStartPost,ExecCondition,ExecStop,ExecStopPost,LoadState,Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,WorkingDirectory,EnvironmentFiles,Environment,Restart,KillMode,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf,Transient'
     # Output is bounded while reading, without temporary files or unbounded communicate().
     import selectors
     p=subprocess.Popen(['/usr/bin/systemctl','show','--no-pager','--property='+names,'--',unit],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},start_new_session=True)
@@ -174,7 +174,7 @@ def config_hash(p):
     return hashlib.sha256(compact(config).encode()).hexdigest()
 def service_check(r,deadline):
     unit=r['service']['name']
-    if UNIT_DENY.match(unit):raise Rejected('PROTECTED_TARGET')
+    if UNIT_DENY.match(unit) or re.fullmatch(r'ableprofile-[a-f0-9-]{36}\.service',unit):raise Rejected('PROTECTED_TARGET')
     p=props(unit,deadline)
     if p.get('Id')!=unit or p.get('MainPID')!=str(r['identity']['pid']) or config_hash(p)!=r['service']['configurationHash']:raise Rejected('STALE_IDENTITY')
     if p.get('Transient')=='yes':raise Rejected('UNSUPPORTED_ACTION')

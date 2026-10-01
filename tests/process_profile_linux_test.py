@@ -45,6 +45,13 @@ class Profiles(unittest.TestCase):
   for key,value in [('LoadState','error'),('CanStart','no'),('WorkingDirectory','"/var/lib"'),('Restart','always')]:
    with patch.object(a,'props',return_value=dict(self.loaded,**{key:value})),patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
     with self.assertRaises(ValueError):p.checked(self.request)
+ def test_extra_supervisor_commands_and_dropins_are_rejected(self):
+  for key in ('DropInPaths','ExecStartPre','ExecStopPost','TriggeredBy'):
+   with patch.object(a,'props',return_value=dict(self.loaded,**{key:'external'})):
+    with self.assertRaises(ValueError):p.checked(self.request)
+ def test_process_owned_by_other_service_rejected_before_mutation(self):
+  with patch.object(p,'check_supervision',side_effect=a.Rejected('PROTECTED_TARGET')),patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
+   with self.assertRaises(a.Rejected):p.checked(self.request)
  def test_cross_vm_profile_rejected(self):
   with self.assertRaises(ValueError):p.load(self.id,str(uuid.uuid4()))
  def test_symlink_binding_and_writable_definition_rejected(self):

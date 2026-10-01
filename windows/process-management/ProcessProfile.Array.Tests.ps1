@@ -37,3 +37,11 @@ try {
     [IO.File]::Delete($environmentFile)
 }
 Write-Output 'Private environment reference content validation passed'
+
+$fn=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'CheckProfileTaskAcl'},$true)
+Invoke-Expression $fn.Extent.Text
+CheckProfileTaskAcl 'O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)'
+$denied=$false
+try{CheckProfileTaskAcl 'O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;BU)'}catch{$denied=$true}
+if(-not $denied){throw 'Expanded task access accepted'}
+Write-Output 'Fixed supervisor task ACL validation passed'

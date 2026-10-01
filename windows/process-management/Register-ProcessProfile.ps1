@@ -19,6 +19,7 @@ if($p.version -isnot [int] -or $p.version -lt 1 -or $p.account -cne 'S-1-5-18' -
 if($p.displayName.Length -lt 1 -or $p.displayName.Length -gt 80 -or $p.argv.Count -gt 32 -or -not [IO.Path]::IsPathRooted($p.cwd) -or -not (Test-Path -LiteralPath $p.cwd -PathType Container)){throw 'profile fields'}
 foreach($arg in $p.argv){if($arg -isnot [string] -or $arg.Length -gt 1024 -or $arg -match '[\x00-\x1f]'){throw 'argument'}}
 ProfileRegular $p.executable
+if(@(Get-CimInstance Win32_Service -Filter ('ProcessId='+$BindPid) -OperationTimeoutSec 2).Count -gt 0){throw 'Service processes must use service restart'}
 $guard=New-Object AbleProcessAction+Target($BindPid,([AbleProcessIdentity]::Read($BindPid).Start));$guard.Dispose()
 $p.schemaVersion='1.0';$p.executableHash=(Get-FileHash -LiteralPath $p.executable).Hash.ToLowerInvariant()
 $script:r=@{authority=@{vmUuid=$p.vmUuid}}

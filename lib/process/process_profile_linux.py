@@ -87,6 +87,7 @@ def load(identifier,vm):
     if digest(regular('/etc/systemd/system/'+unit,False))!=p['supervisor']['configurationHash']:raise ValueError('supervisor changed')
     live=a.props(unit,time.monotonic()+2)
     if live.get('LoadState')!='loaded' or live.get('CanStart')!='yes' or live.get('WorkingDirectory')!=p['cwd'] or live.get('User')!=p['account'] or live.get('Type')!='simple' or live.get('Restart')!='no':raise ValueError('invalid loaded supervisor')
+    if any(live.get(key) for key in ('DropInPaths','ExecStartPre','ExecStartPost','ExecCondition','ExecStop','ExecStopPost','TriggeredBy','RequiredBy','BoundBy','ConsistsOf')):raise ValueError('external supervisor configuration')
     if effective(live)!=p['supervisor']['effectiveHash']:raise ValueError('loaded supervisor changed')
     b=a.strict(regular(binding).decode());a.fields(b,'vmUuid bootId pid startTicks')
     if b['vmUuid']!=vm:raise ValueError('binding scope')
@@ -95,7 +96,7 @@ def load(identifier,vm):
 def effective(value):
     a=adapter()
     command=re.sub(r'( ; ignore_errors=(?:yes|no)) ; start_time=.*?(?= \})',r'\1',value.get('ExecStart',''))
-    return digest(a.compact(dict(command=command,account=value.get('User',''),cwd=value.get('WorkingDirectory',''),environmentRef=value.get('EnvironmentFiles',''),inlineEnvironment=value.get('Environment',''),restart=value.get('Restart',''),type=value.get('Type',''),killMode=value.get('KillMode',''))).encode())
+    return digest(a.compact(dict(command=command,account=value.get('User',''),cwd=value.get('WorkingDirectory',''),environmentRef=value.get('EnvironmentFiles',''),inlineEnvironment=value.get('Environment',''),restart=value.get('Restart',''),type=value.get('Type',''),killMode=value.get('KillMode',''),requires=value.get('Requires',''),wants=value.get('Wants',''))).encode())
 
 def public(p,b,h):
     return dict(id=p['id'],version=p['version'],definitionHash=h,displayName=p['displayName'],executable=p['executable'],argumentCount=len(p['argv']),cwd=p['cwd'],account=p['account'],environmentRef=p['environmentRef'],supervisor=p['supervisor']['manager'],verification=p['verification'],identity=b)
@@ -127,10 +128,17 @@ def duplicates(p,exclude):
     if len(names)>4096:raise ValueError('process capacity')
     return any(int(name)!=exclude and matches(p,int(name)) for name in names)
 
+def check_supervision(p,pid):
+    raw=Path('/proc',str(pid),'cgroup').read_text()
+    if len(raw)>65536:raise ValueError('cgroup capacity')
+    units=[part for line in raw.splitlines() for part in line.split(':',2)[-1].split('/') if part.endswith('.service')]
+    if units and units[-1]!='ableprofile-'+p['id']+'.service':raise adapter().Rejected('PROTECTED_TARGET')
+
 def checked(r):
     a=adapter();p,b,h=load(r['profile']['id'],r['authority']['vmUuid'])
     if r['profile']!={'id':p['id'],'version':p['version'],'definitionHash':h}:raise a.Rejected('PROFILE_CHANGED')
     if b!=r['identity'] or not matches(p,b['pid']) or duplicates(p,b['pid']):raise a.Rejected('STALE_IDENTITY')
+    check_supervision(p,b['pid'])
     return p,b,h
 
 def progress(v,old,new,identity=None):v['progress']=dict(oldProcess=old,newProcess=new,newIdentity=identity)
@@ -193,9 +201,9 @@ def reconcile(record,persist):
         if not old_exited:return v
         progress(v,'EXITED','UNKNOWN' if 'start' in record['stage'] else 'NOT_ATTEMPTED')
         if record['stage'] in ('profile-stop-intent','profile-stopped'):return partial(record,persist)
-        if record['stage']=='profile-start-returned' or record.get('newIdentity'):
+        if record['stage'] in ('profile-start-intent','profile-start-returned') or record.get('newIdentity'):
             current=a.props(p['supervisor']['name'],time.monotonic()+2);pid=int(current.get('MainPID','0'))
-            if current.get('ActiveState')=='failed' and current.get('MainPID','0')=='0' and not duplicates(p,0):return partial(record,persist)
+            if current.get('ActiveState')=='failed' and current.get('MainPID','0')=='0' and current.get('InvocationID')!=record.get('oldInvocation') and not duplicates(p,0):return partial(record,persist)
             if pid and current.get('ActiveState')=='active' and current.get('InvocationID')!=record.get('oldInvocation') and matches(p,pid) and not duplicates(p,pid):
                 _,ticks,_,state=a.identity(pid)
                 if state not in ('Z','X') and (pid,ticks)!=(v['identity']['pid'],v['identity']['startTicks']):
@@ -217,6 +225,7 @@ def provision(description,pid):
     if p['executable'] in ('/usr/bin/python3','/bin/sh','/usr/bin/bash') or Path(p['executable']).name in a.PROTECTED:raise ValueError('protected/interpreter executable')
     p['schemaVersion']='1.0';p['executableHash']=digest(regular(p['executable'],False))
     b=dict(vmUuid=p['vmUuid'],bootId=a.boot(),pid=pid,startTicks=a.identity(pid)[1])
+    check_supervision(p,pid)
     if os.readlink('/proc/'+str(pid)+'/exe')!=p['executable'] or not matches(p,pid):raise ValueError('binding executable/account/argv mismatch')
     BASE.mkdir(mode=0o700,exist_ok=True);a.secure(BASE,True)
     if p['environmentRef'] is not None:

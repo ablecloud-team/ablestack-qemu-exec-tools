@@ -27,9 +27,18 @@ $taskExecutable=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershel
 $taskArguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+[AbleProcessAction]::QuoteArgument($launcher)+' -ProfileId '+$p.id
 return '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context="System"><Exec><Command>'+ (Escape $taskExecutable) +'</Command><Arguments>'+ (Escape $taskArguments) +'</Arguments><WorkingDirectory>'+ (Escape $p.cwd) +'</WorkingDirectory></Exec></Actions></Task>'
 }
+function CheckProfileTaskAcl([string]$sddl) {
+    $acl=New-Object Security.AccessControl.RawSecurityDescriptor($sddl)
+    if(-not $acl.Owner -or $acl.Owner.Value -notin @('S-1-5-18','S-1-5-32-544')){throw 'PROFILE_CHANGED'}
+    if(-not $acl.DiscretionaryAcl){throw 'PROFILE_CHANGED'}
+    foreach($ace in $acl.DiscretionaryAcl) {
+        if($ace.AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed -and $ace.SecurityIdentifier.Value -notin @('S-1-5-18','S-1-5-32-544')){throw 'PROFILE_CHANGED'}
+    }
+}
 function TaskInfo([string]$name) {
     $scheduler=New-Object -ComObject Schedule.Service;$scheduler.Connect()
     $task=$scheduler.GetFolder('\ABLESTACKProfiles').GetTask($name)
+    CheckProfileTaskAcl ([string]$task.GetSecurityDescriptor(7))
     $xml=[string]$task.Xml
     if($xml.Length -gt 65536){throw 'PROFILE_CHANGED'}
     return @{task=$task;hash=(Hash $xml)}
