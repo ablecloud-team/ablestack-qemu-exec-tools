@@ -153,18 +153,18 @@ function ProfileReconcile($record) {
         $identity=[AbleProcessIdentity]::Read([uint32]$record.result.identity.pid)
         if(-not $present -or ($identity -and $identity.Start -cne $record.result.identity.startTicks)){ProfilePartial $record;return $record.result}
     }
-    if($record.stage -eq 'profile-start-returned' -and -not $record.newIdentity) {
+    if($record.stage -in @('profile-start-intent','profile-start-returned') -and $record.oldTaskRun -and -not $record.newIdentity) {
         try {
             $entry=ProfileLoad $record.result.profile.id $record.result.authority.vmUuid;$next=@(ProfileCandidates $entry.definition)
-            if($entry.hash -ceq $record.result.profile.definitionHash -and $next.Count -eq 1 -and ($next[0].pid -ne $record.result.identity.pid -or $next[0].startTicks -cne $record.result.identity.startTicks)){$record.newIdentity=$next[0];Persist}
-            elseif($entry.task.State -eq 3 -and $entry.task.LastTaskResult -ne 267009 -and $next.Count -eq 0){ProfilePartial $record;return $record.result}
+            if(([string]$entry.task.LastRunTime.ToUniversalTime().ToFileTimeUtc()) -cne $record.oldTaskRun -and $entry.hash -ceq $record.result.profile.definitionHash -and $next.Count -eq 1 -and ($next[0].pid -ne $record.result.identity.pid -or $next[0].startTicks -cne $record.result.identity.startTicks)){$record.newIdentity=$next[0];Persist}
+            elseif(([string]$entry.task.LastRunTime.ToUniversalTime().ToFileTimeUtc()) -cne $record.oldTaskRun -and $entry.task.State -eq 3 -and $entry.task.LastTaskResult -ne 267009 -and $next.Count -eq 0){ProfilePartial $record;return $record.result}
         }catch{}
     }
     if($record.newIdentity) {
         try {
             $entry=ProfileLoad $record.result.profile.id $record.result.authority.vmUuid;$next=@(ProfileCandidates $entry.definition)
             $i=$record.newIdentity
-            if($entry.hash -ceq $record.result.profile.definitionHash -and $next.Count -eq 1 -and $next[0].bootId -ceq $i.bootId -and $next[0].pid -eq $i.pid -and $next[0].startTicks -ceq $i.startTicks) {
+            if(([string]$entry.task.LastRunTime.ToUniversalTime().ToFileTimeUtc()) -cne $record.oldTaskRun -and $entry.hash -ceq $record.result.profile.definitionHash -and $next.Count -eq 1 -and $next[0].bootId -ceq $i.bootId -and $next[0].pid -eq $i.pid -and $next[0].startTicks -ceq $i.startTicks) {
                 [AbleProcessAction]::Save((ProfilePaths $entry.definition.id)[1],(Json $i));ProfileComplete $record $i
             }
         }catch{}
