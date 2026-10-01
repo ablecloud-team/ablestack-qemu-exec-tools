@@ -39,6 +39,46 @@ class PolicyTests(unittest.TestCase):
     def test_blocklist_preserves_unrelated_denials(self):
         self.assertEqual(['--block-rpcs=guest-shutdown'], p.rewrite_args(['--block-rpcs=guest-exec,guest-shutdown,guest-file-read']))
 
+    def test_rocky8_effective_blacklist_is_not_ready(self):
+        blocked = p.REQUIRED[:8]
+        dumped = '[general]\nblacklist=' + ','.join(reversed(blocked)) + '\n'
+        self.assertEqual(list(blocked), p.missing_rpcs(dumped, ['--blacklist=' + ','.join(blocked)]))
+        self.assertEqual([], p.missing_rpcs('[general]\nblacklist=guest-shutdown\n', ['--blacklist=guest-shutdown']))
+
+    def test_legacy_environment_preserves_hook_and_unrelated_denials(self):
+        before = '# vendor defaults\nBLACKLIST_RPC="guest-exec,guest-shutdown" # owner\nFSFREEZE_HOOK_PATHNAME=/etc/qemu-ga/fsfreeze-hook\n'
+        after = p.rewrite_legacy_environment(before, {False: ['guest-exec', 'guest-shutdown']})
+        self.assertEqual(before.replace('guest-exec,', ''), after)
+        self.assertEqual(after, p.rewrite_legacy_environment(after, {False: ['guest-shutdown']}))
+
+    def test_legacy_empty_allow_and_duplicate_aliases(self):
+        self.assertEqual(list(p.REQUIRED), p.missing_rpcs('[general]\nwhitelist=\n', ['--whitelist=']))
+        self.assertEqual([], p.missing_rpcs('[general]\nwhitelist=\n', []))
+        with self.assertRaises(ValueError):
+            p.rewrite_args(['--blacklist=guest-exec', '--block-rpcs=guest-ping'])
+        with self.assertRaises(ValueError):
+            p.missing_rpcs('[general]\nblacklist=guest-exec\nblock-rpcs=guest-ping\n', [])
+
+    def test_legacy_environment_expansion_duplicate_and_mismatch_rejected(self):
+        for value in ('BLACKLIST_RPC="$DYNAMIC"\n', 'BLACKLIST_RPC="`command`"\n',
+                      'BLACKLIST_RPC=guest-*\n', 'BLACKLIST_RPC=x\nBLACKLIST_RPC=y\n'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                p.rewrite_legacy_environment(value, {False: ['guest-exec']})
+        with self.assertRaisesRegex(RuntimeError, 'Runtime filter differs'):
+            p.rewrite_legacy_environment('BLACKLIST_RPC=guest-ping\n', {False: ['guest-exec']})
+
+    def test_legacy_unit_is_repaired_without_replacing_execstart(self):
+        unit = 'EnvironmentFile=/etc/sysconfig/qemu-ga\nExecStart=/usr/bin/qemu-ga --blacklist=${BLACKLIST_RPC} -F${FSFREEZE_HOOK_PATHNAME}'
+        before = 'BLACKLIST_RPC=guest-exec,guest-shutdown\nFSFREEZE_HOOK_PATHNAME=/etc/qemu-ga/fsfreeze-hook\n'
+        with patch.object(p, 'run', return_value=unit), patch.object(p, 'regular'), patch.object(Path, 'read_text', return_value=before):
+            changes = p.plan(['--blacklist=guest-exec,guest-shutdown', '-F/etc/qemu-ga/fsfreeze-hook'], None)
+        self.assertEqual(before.replace('guest-exec,', '').encode(), changes[Path('/etc/sysconfig/qemu-ga')])
+
+    def test_legacy_ini_and_short_args(self):
+        self.assertEqual('[general]\nblacklist=guest-shutdown\n', p.rewrite_ini('[general]\nblacklist=guest-exec,guest-shutdown\n'))
+        with patch.object(p, 'run', return_value='EnvironmentFile=/etc/sysconfig/qemu-ga\nExecStart=qemu-ga $FILTER_RPC_ARGS'), patch.object(p, 'regular'), patch.object(Path, 'read_text', return_value='FILTER_RPC_ARGS="-b guest-exec,guest-shutdown"\n'):
+            self.assertIn(b'-b guest-shutdown', p.plan(['-b', 'guest-exec,guest-shutdown'], None)[Path('/etc/sysconfig/qemu-ga')])
+
     def test_ini_preserves_other_sections(self):
         value = '[general]\nblock-rpcs=guest-exec,guest-shutdown\npath=/dev/virtio-ports/org.qemu.guest_agent.0\n[other]\nallow-rpcs=guest-ping\n'
         self.assertEqual(value.replace('guest-exec,', ''), p.rewrite_ini(value))

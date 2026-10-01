@@ -1,0 +1,42 @@
+[
+  {
+    "case": "hash-tamper-rejected.json",
+    "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+    "rejectedReadiness": "READY",
+    "rejectedAllowedActions": [
+      "process.list"
+    ],
+    "restoredReadiness": "READY",
+    "restoredAllowedActions": [
+      "process.list",
+      "process.terminate",
+      "process.kill",
+      "service.restart"
+    ],
+    "finalSnapshotStatus": "OK"
+  },
+  {
+    "case": "read-hash-tamper-rejected.json",
+    "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+    "rejectedReadiness": "TOOLS_REQUIRED",
+    "rejectedAllowedActions": [],
+    "restoredReadiness": "READY",
+    "restoredAllowedActions": null,
+    "finalSnapshotStatus": "OK"
+  },
+  {
+    "case": "approved-new-action-DLL-with-old-identity-DLL",
+    "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+    "rejectedReadiness": "READY",
+    "rejectedAllowedActions": [
+      "process.list"
+    ],
+    "restoredReadiness": "READY",
+    "restoredAllowedActions": [
+      "process.list",
+      "process.kill",
+      "service.restart"
+    ],
+    "finalSnapshotStatus": "OK"
+  }
+]

@@ -1,0 +1,54 @@
+[
+  {
+    "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+    "name": "Debian12-Sparse",
+    "sourceHost": "ablecube31-1",
+    "targetHost": "ablecube31-2",
+    "guestBootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+    "unchangedGuestBundle": [
+      {
+        "name": "process_list_linux.py",
+        "sha256": "c804df891698339f213ec8c99e0c63b62caebc70858dbdda84a8ac64c8609b6e"
+      },
+      {
+        "name": "process_action_linux.py",
+        "sha256": "a1f7b890af205e07128b003bb73229102d041f540f72072747264b44de1ffd98"
+      },
+      {
+        "name": "process-action-launcher",
+        "sha256": "853e8989208afb57766d9b5389f9a51ba8922b8d207062fbc699497df6a73e17"
+      }
+    ],
+    "afterMigrationReadiness": "READY",
+    "actualActionsVerified": 3,
+    "returnedToOriginalHost": true
+  },
+  {
+    "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+    "name": "Windows22-Sparse",
+    "sourceHost": "ablecube31-2",
+    "targetHost": "ablecube31-1",
+    "guestBootId": "windows:134351649845000000",
+    "unchangedGuestBundle": [
+      {
+        "sha256": "b64869b5fe0ca9084100c80eea91ed72ab2944f5f8a4b87ec9358b18aefe7c3e",
+        "name": "ProcessList.ps1"
+      },
+      {
+        "sha256": "73b97caf8d167e528fcc45c60a4bd50f7c514e91f47b6b8ac995cab37edea26d",
+        "name": "AbleProcessIdentity.dll"
+      },
+      {
+        "sha256": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "name": "ProcessAction.ps1"
+      },
+      {
+        "sha256": "f751d2b363ed8e9b502575b95af28ce649df6e97305f56e8f7b379b22e5cb8fd",
+        "name": "AbleProcessAction.dll"
+      }
+    ],
+    "afterMigrationReadiness": "READY",
+    "actualActionsVerified": 2,
+    "returnedToOriginalHost": true
+  }
+]

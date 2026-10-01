@@ -3,7 +3,7 @@
 import base64,datetime as dt,fcntl,json,os,stat,time,uuid
 from pathlib import Path
 from process_list_host import RUNTIME_ROOT,inherited_guard,parent_alive,failure
-from guest_adapter_compat import approved, supported_windows
+from guest_adapter_compat import approved, linux_read_profile, supported_windows
 
 def context(request,path):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -109,7 +109,7 @@ def run(request,transport,reservation=None):
         guest=dict(request,budgetMs=max(1,int((deadline-time.monotonic())*1000)-300))
         encoded=base64.b64encode(transport.dumps(guest).encode()).decode()
         family=osinfo.get('id');version=osinfo.get('version-id');arch=osinfo.get('machine')
-        linux=(family=='rocky' and version in ('9.6','9.7','9.8','10.2')) or (family=='ubuntu' and version in ('22.04','24.04','26.04'))
+        linux=linux_read_profile(osinfo) is not None
         windows=supported_windows(osinfo)
         if arch not in ('x86_64','x86-64','amd64') or not (linux or windows):return failure(request,'TOOLS_REQUIRED','OS unsupported')
         if linux:
@@ -119,7 +119,11 @@ def run(request,transport,reservation=None):
         else:
             bundles=approved('windows-action')
             choices='@('+','.join("'"+':'.join(pair)+"'" for pair in bundles)+')'
-            script=r"$ErrorActionPreference='Stop';$p='C:\Program Files\ABLESTACK Process Tools';$h=@('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
+            # Module auto-loading during Get-FileHash can emit localized CLIXML
+            # progress to stderr before the adapter sets its stream preferences.
+            # Establish the wire format first; retain strict UTF-8 validation of
+            # both streams instead of accepting a lossy transport result.
+            script=r"$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);$p='C:\Program Files\ABLESTACK Process Tools';$h=@('ProcessAction.ps1','AbleProcessAction.dll','AbleProcessIdentity.dll') | ForEach-Object {(Get-FileHash -LiteralPath (Join-Path $p $_)).Hash.ToLowerInvariant()};$approved="+choices+";if($approved -notcontains ($h -join ':')){exit 3};& (Join-Path $p 'ProcessAction.ps1') -RequestBase64 '"+encoded+"'"
             command=[r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',base64.b64encode(script.encode('utf-16le')).decode()]
         if action:
             context(request,reservation)

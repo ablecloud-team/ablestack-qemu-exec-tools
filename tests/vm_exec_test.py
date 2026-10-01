@@ -195,6 +195,15 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr)
 
     def test_protocol_guard_has_no_virsh_side_effect(self):
+        # Exercise a package missing its protocol adapter, not the fully
+        # implemented source adapter which correctly starts host admission.
+        prefix = self.path / 'missing-adapter'
+        binary = prefix / 'usr/bin/vm_exec'
+        library = prefix / 'usr/libexec/ablestack-qemu-exec-tools'
+        binary.parent.mkdir(parents=True)
+        library.mkdir(parents=True)
+        shutil.copy2(self.command, binary)
+        shutil.copy2(ROOT / 'lib/vm_exec.py', library / 'vm_exec.py')
         req = {"schemaVersion": "1.0", "kind": "readRequest",
                "requestId": "33333333-3333-4333-8333-333333333333",
                "authority": {"vmUuid": "11111111-1111-4111-8111-111111111111",
@@ -205,7 +214,7 @@ class TransportTests(unittest.TestCase):
         path.write_text(json.dumps(req))
         path.chmod(0o600)
         for version in ("1.0", "2.0"):
-            run = subprocess.run(["bash", str(self.command), "--process-protocol", version,
+            run = subprocess.run(["bash", str(binary), "--process-protocol", version,
                                   "--request-json", str(path)], env=self.env,
                                  capture_output=True, text=True, timeout=3)
             self.assertEqual(run.returncode, 0, run.stderr)
@@ -213,7 +222,7 @@ class TransportTests(unittest.TestCase):
                              "HOST_TOOL_MISSING" if version == "1.0" else "UNSUPPORTED_VERSION")
         self.assertFalse((self.path / "trace").exists())
         path.chmod(0o644)
-        run = subprocess.run(["bash", str(self.command), "--process-protocol", "1.0",
+        run = subprocess.run(["bash", str(binary), "--process-protocol", "1.0",
                               "--request-json", str(path)], env=self.env, capture_output=True)
         self.assertEqual(run.returncode, 2)
 

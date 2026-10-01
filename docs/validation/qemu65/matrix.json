@@ -1,0 +1,374 @@
+[
+  {
+    "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976",
+    "name": "R10-Sparse",
+    "host": "ablecube31-1",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "rocky",
+      "version": "10.2"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "2fa49660-fa1e-4032-8235-8f52158b3612",
+    "status": "OK",
+    "processCount": 237,
+    "cpuMeasured": 237,
+    "qgaVersion": "10.1.0",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-rocky-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 2063,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7",
+    "name": "Rocky9-Sparse",
+    "host": "ablecube31-3",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "rocky",
+      "version": "9.8"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "efedcad8-8305-46df-9604-8ba79948930e",
+    "status": "OK",
+    "processCount": 131,
+    "cpuMeasured": 131,
+    "qgaVersion": "10.1.0",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-rocky-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 2052,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4",
+    "name": "Rocky8-Sparse",
+    "host": "ablecube31-3",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "rocky",
+      "version": "8.10"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "17734630-7ced-43b0-ba17-f815273c13e8",
+    "status": "OK",
+    "processCount": 119,
+    "cpuMeasured": 119,
+    "qgaVersion": "6.2.0",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-rocky-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 1044,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7",
+    "name": "U26-Sparse",
+    "host": "ablecube31-1",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "ubuntu",
+      "version": "26.04"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "666ccef4-40fb-4908-b8b5-055e7aeedf3a",
+    "status": "OK",
+    "processCount": 130,
+    "cpuMeasured": 130,
+    "qgaVersion": "10.2.1",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-ubuntu-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 2068,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3",
+    "name": "Ubuntu24-Sparse",
+    "host": "ablecube31-3",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "ubuntu",
+      "version": "24.04"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "1f3c0f8d-3ae7-4488-9cce-21408281d75c",
+    "status": "OK",
+    "processCount": 118,
+    "cpuMeasured": 118,
+    "qgaVersion": "8.2.2",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-ubuntu-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 2054,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658",
+    "name": "Ubuntu22-Sparse",
+    "host": "ablecube31-2",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "ubuntu",
+      "version": "22.04"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "617d4982-5b91-4db0-b5a5-a157b491addc",
+    "status": "OK",
+    "processCount": 121,
+    "cpuMeasured": 121,
+    "qgaVersion": "6.2.0",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-ubuntu-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 2059,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367",
+    "name": "Debian13-Sparse",
+    "host": "ablecube31-3",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "debian",
+      "version": "13"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "933293a8-9bff-47d5-9231-fd1f5be34616",
+    "status": "OK",
+    "processCount": 165,
+    "cpuMeasured": 165,
+    "qgaVersion": "10.0.13",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-ubuntu-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 2061,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+    "name": "Debian12-Sparse",
+    "host": "ablecube31-1",
+    "os": {
+      "arch": "x86_64",
+      "productType": "none",
+      "family": "linux",
+      "id": "debian",
+      "version": "12"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "3be6b543-d0e2-4b15-bf34-4e935d620b3c",
+    "status": "OK",
+    "processCount": 159,
+    "cpuMeasured": 159,
+    "qgaVersion": "7.2.22",
+    "guestAdapterVersion": "epic-36682627651-6dcb57e-ubuntu-read/epic-36680423982-659489d-linux-action",
+    "apiCollectionElapsedMs": 1042,
+    "snapshotResponseBytes": 441
+  },
+  {
+    "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471",
+    "name": "W2025-Sparse-Clone1",
+    "host": "ablecube31-2",
+    "os": {
+      "arch": "x86_64",
+      "productType": "server",
+      "family": "windows",
+      "id": "mswindows",
+      "version": "2025"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "031292f4-e64e-4b81-bd73-869089a7d20a",
+    "status": "OK",
+    "processCount": 84,
+    "cpuMeasured": 84,
+    "qgaVersion": "110.2.3",
+    "guestAdapterVersion": "epic-36688611885-c439f93-windows-read/epic-36688611885-c439f93-windows-action",
+    "apiCollectionElapsedMs": 2572,
+    "snapshotResponseBytes": 424
+  },
+  {
+    "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+    "name": "Windows22-Sparse",
+    "host": "ablecube31-2",
+    "os": {
+      "arch": "x86_64",
+      "productType": "server",
+      "family": "windows",
+      "id": "mswindows",
+      "version": "2022"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "0b5a2f6f-2087-409e-8b06-bb8c876fa0a8",
+    "status": "OK",
+    "processCount": 97,
+    "cpuMeasured": 97,
+    "qgaVersion": "110.2.3",
+    "guestAdapterVersion": "epic-36688611885-c439f93-windows-read/epic-36688611885-c439f93-windows-action",
+    "apiCollectionElapsedMs": 2058,
+    "snapshotResponseBytes": 424
+  },
+  {
+    "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d",
+    "name": "Windows19-Sparse",
+    "host": "ablecube31-2",
+    "os": {
+      "arch": "x86_64",
+      "productType": "server",
+      "family": "windows",
+      "id": "mswindows",
+      "version": "2019"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "e1ffa5a8-4ec8-46c2-a2d2-c61a015cfe81",
+    "status": "OK",
+    "processCount": 92,
+    "cpuMeasured": 92,
+    "qgaVersion": "110.2.3",
+    "guestAdapterVersion": "epic-36688611885-c439f93-windows-read/epic-36688611885-c439f93-windows-action",
+    "apiCollectionElapsedMs": 3079,
+    "snapshotResponseBytes": 424
+  },
+  {
+    "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+    "name": "Windows11-Sparse",
+    "host": "ablecube31-1",
+    "os": {
+      "arch": "x86_64",
+      "productType": "client",
+      "family": "windows",
+      "id": "mswindows",
+      "version": "11"
+    },
+    "readiness": "READY",
+    "rpcs": {
+      "guest-exec": "ENABLED",
+      "guest-exec-status": "ENABLED",
+      "guest-file-open": "ENABLED",
+      "guest-file-close": "ENABLED",
+      "guest-file-read": "ENABLED",
+      "guest-file-write": "ENABLED",
+      "guest-file-seek": "ENABLED",
+      "guest-file-flush": "ENABLED"
+    },
+    "snapshotId": "7e79c7c0-8d96-44a4-9009-67549a32b5a1",
+    "status": "OK",
+    "processCount": 89,
+    "cpuMeasured": 89,
+    "qgaVersion": "110.2.3",
+    "guestAdapterVersion": "epic-36688611885-c439f93-windows-read/epic-36688611885-c439f93-windows-action",
+    "apiCollectionElapsedMs": 29,
+    "snapshotResponseBytes": 424
+  }
+]

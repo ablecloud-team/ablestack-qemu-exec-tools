@@ -1,0 +1,150 @@
+{
+  "hosts": [
+    {
+      "host": "10.10.31.1",
+      "package": "ablestack-qemu-exec-tools-0.10.0-1.epic36688611885.el9.el9.x86_64",
+      "moldAgent": "active",
+      "ftctlTimerUnchanged": "inactive",
+      "hangctlTimerUnchanged": "active",
+      "agentConfigurationNonCommentContentUnchanged": true,
+      "agentConfigurationBytesChangedOnlyInComments": true,
+      "ftctlHangctlFilesUnchanged": true,
+      "approvedCatalogSha256": "911e68d86c20a2271640b78e8d5e27a13b288de88cb427d8d1b4df4469f9598c"
+    },
+    {
+      "host": "10.10.31.2",
+      "package": "ablestack-qemu-exec-tools-0.10.0-1.epic36688611885.el9.el9.x86_64",
+      "moldAgent": "active",
+      "ftctlTimerUnchanged": "inactive",
+      "hangctlTimerUnchanged": "active",
+      "agentConfigurationNonCommentContentUnchanged": true,
+      "agentConfigurationBytesChangedOnlyInComments": true,
+      "ftctlHangctlFilesUnchanged": true,
+      "approvedCatalogSha256": "911e68d86c20a2271640b78e8d5e27a13b288de88cb427d8d1b4df4469f9598c"
+    },
+    {
+      "host": "10.10.31.3",
+      "package": "ablestack-qemu-exec-tools-0.10.0-1.epic36688611885.el9.el9.x86_64",
+      "moldAgent": "active",
+      "ftctlTimerUnchanged": "inactive",
+      "hangctlTimerUnchanged": "active",
+      "agentConfigurationNonCommentContentUnchanged": true,
+      "agentConfigurationBytesChangedOnlyInComments": true,
+      "ftctlHangctlFilesUnchanged": true,
+      "approvedCatalogSha256": "911e68d86c20a2271640b78e8d5e27a13b288de88cb427d8d1b4df4469f9598c"
+    }
+  ],
+  "virtualMachines": [
+    {
+      "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976",
+      "name": "R10-Sparse",
+      "state": "Running",
+      "host": "ablecube31-1",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7",
+      "name": "Rocky9-Sparse",
+      "state": "Running",
+      "host": "ablecube31-3",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4",
+      "name": "Rocky8-Sparse",
+      "state": "Running",
+      "host": "ablecube31-3",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7",
+      "name": "U26-Sparse",
+      "state": "Running",
+      "host": "ablecube31-1",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3",
+      "name": "Ubuntu24-Sparse",
+      "state": "Running",
+      "host": "ablecube31-3",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658",
+      "name": "Ubuntu22-Sparse",
+      "state": "Running",
+      "host": "ablecube31-2",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367",
+      "name": "Debian13-Sparse",
+      "state": "Running",
+      "host": "ablecube31-3",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+      "name": "Debian12-Sparse",
+      "state": "Running",
+      "host": "ablecube31-1",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471",
+      "name": "W2025-Sparse-Clone1",
+      "state": "Running",
+      "host": "ablecube31-2",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+      "name": "Windows22-Sparse",
+      "state": "Running",
+      "host": "ablecube31-2",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d",
+      "name": "Windows19-Sparse",
+      "state": "Running",
+      "host": "ablecube31-2",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    },
+    {
+      "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+      "name": "Windows11-Sparse",
+      "state": "Running",
+      "host": "ablecube31-1",
+      "networkInterfaceObservationAvailable": true,
+      "interfaceCount": 2,
+      "remainingOperationMarkers": []
+    }
+  ],
+  "activeCloudProcessOperationCount": 0,
+  "originalUnknownOperationRetained": "UNKNOWN\tNULL",
+  "webClientHttpStatus": 200
+}

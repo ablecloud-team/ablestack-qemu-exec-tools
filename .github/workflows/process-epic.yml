@@ -1,0 +1,177 @@
+# Copyright 2026 ABLECLOUD. Apache-2.0.
+name: Process Epic packages and runtime gates
+on:
+  push:
+    branches: [codex/process-epic-1170]
+    paths-ignore: ['docs/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-payload:
+    uses: ./.github/workflows/windows-process-repair.yml
+    with:
+      source_ref: ${{ github.sha }}
+  runtime:
+    needs: windows-payload
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-process-payload
+          path: build/windows-process-payload
+      - name: Build one canonical runtime for packages and ISOs
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
+          test "$(tr -d '\r\n' < build/windows-process-payload/SOURCE_COMMIT)" = "$GITHUB_SHA"
+          cp build/windows-process-payload/AbleProcess*.dll lib/process/
+          cp build/windows-process-payload/ProcessList.ps1 build/windows-process-payload/ProcessAction.ps1 lib/process/
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o lib/process/process-read-launcher lib/process/process_read_launcher.c
+          musl-gcc -static -O2 -Wall -Wextra -Werror -o lib/process/process-action-launcher lib/process/process_action_launcher.c
+          for family in rocky ubuntu windows; do
+            python3 scripts/append_guest_adapter_compat.py --directory lib/process --family "$family" --id "epic-${GITHUB_RUN_ID}-${GITHUB_SHA::7}"
+          done
+          git rev-parse HEAD > lib/process/SOURCE_COMMIT
+          (cd lib/process && sha256sum AbleProcess*.dll process-*-launcher guest_adapter_compat.json > SHA256SUMS)
+      - name: Process transport, repair, identity, bounded output and lifecycle gates
+        run: |
+          set -euo pipefail
+          export PYTHONPATH=.
+          for test in vm_exec process_policy guest_adapter_compat process_list process_action_linux process_action_host process_cloud_guard process_guest_iso_manifest; do
+            sudo env PYTHONPATH=. python3 "tests/${test}_test.py"
+          done
+          bash tests/hangctl_snapshot_protection_smoke.sh
+          bash tests/ftctl_dr_release_tombstone_smoke.sh
+          bash tests/ftctl_firewalld_no_reload_smoke.sh
+          bash tests/iso_pkg_manager_selection_smoke.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-canonical-runtime
+          path: lib/process/
+          if-no-files-found: error
+  rpm:
+    needs: runtime
+    runs-on: ubuntu-24.04
+    container: rockylinux:9
+    steps:
+      - name: Install package build dependencies
+        run: dnf install -y git make rpm-build cpio python3
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: process-canonical-runtime
+          path: lib/process
+      - name: Build only the host execution RPM and verify packaged runtime
+        run: |
+          set -eu
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          test "$(tr -d '\r\n' < lib/process/SOURCE_COMMIT)" = "$GITHUB_SHA"
+          chmod 0755 lib/process/process-*-launcher
+          (cd lib/process && sha256sum -c SHA256SUMS)
+          make rpm RELEASE="1.epic${GITHUB_RUN_ID}"
+          mkdir -p build/unpack
+          (cd build/unpack && rpm2cpio ../rpm/*.rpm | cpio -idm --quiet)
+          for name in AbleProcessIdentity.dll AbleProcessAction.dll process-read-launcher process-action-launcher guest_adapter_compat.json; do
+            cmp "lib/process/$name" "build/unpack/usr/libexec/ablestack-qemu-exec-tools/process/$name"
+          done
+          (cd build/rpm && sha256sum *.rpm > SHA256SUMS)
+          git rev-parse HEAD > build/rpm/SOURCE_COMMIT
+      - name: Clean ABLESTACK host profile install and upgrade
+        run: |
+          set -eu
+          dnf install -y bash python3 jq libvirt-client cloud-init iproute
+          sed -i 's/^PRETTY_NAME=.*/PRETTY_NAME="ABLESTACK package test host"/' /etc/os-release
+          rpm -ivh build/rpm/*.rpm
+          /usr/bin/vm_exec --help
+          rpm -Uvh --replacepkgs build/rpm/*.rpm
+          /usr/bin/vm_exec --help
+          rpm -V ablestack-qemu-exec-tools
+          test ! -e /etc/ablestack-qemu-exec-tools
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-host-rpm
+          path: build/rpm/*
+          if-no-files-found: error
+  deb:
+    needs: runtime
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: process-canonical-runtime
+          path: lib/process
+      - name: Build only the host execution DEB and verify packaged runtime
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < lib/process/SOURCE_COMMIT)" = "$GITHUB_SHA"
+          chmod 0755 lib/process/process-*-launcher
+          (cd lib/process && sha256sum -c SHA256SUMS)
+          make deb RELEASE="1.epic${GITHUB_RUN_ID}"
+          dpkg-deb -x build/deb/*.deb build/unpack
+          for name in AbleProcessIdentity.dll AbleProcessAction.dll process-read-launcher process-action-launcher guest_adapter_compat.json; do
+            cmp "lib/process/$name" "build/unpack/usr/libexec/ablestack-qemu-exec-tools/process/$name"
+          done
+          (cd build/deb && sha256sum *.deb > SHA256SUMS)
+          git rev-parse HEAD > build/deb/SOURCE_COMMIT
+      - name: Clean ABLESTACK host profile install and upgrade
+        run: |
+          docker run --rm -v "$PWD/build/deb:/packages:ro" ubuntu:24.04 bash -ec '
+            apt-get update -qq
+            apt-get install -y bash python3 jq libvirt-clients qemu-guest-agent cloud-init
+            sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"ABLESTACK package test host\"/" /etc/os-release
+            dpkg -i /packages/*.deb
+            /usr/bin/vm_exec --help
+            dpkg -i /packages/*.deb
+            /usr/bin/vm_exec --help
+            dpkg -V ablestack-qemu-exec-tools
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-host-deb
+          path: build/deb/*
+          if-no-files-found: error
+  guest-isos:
+    needs: runtime
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-process-payload
+          path: build/windows-process-payload
+      - uses: actions/download-artifact@v4
+        with:
+          name: process-canonical-runtime
+          path: lib/process
+      - name: Assemble offline multi-OS ISOs with the canonical runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y genisoimage
+          test "$(tr -d '\r\n' < lib/process/SOURCE_COMMIT)" = "$GITHUB_SHA"
+          (cd lib/process && sha256sum -c SHA256SUMS)
+          mkdir -p build
+          install -m 0755 lib/process/process-read-launcher lib/process/process-action-launcher build/
+          bash -n scripts/build-guest-packages.sh scripts/build-process-guest-isos.sh scripts/install-guest-process-linux.sh
+          bash scripts/build-guest-packages.sh build/guest-packages
+          version="process-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          bash scripts/build-process-guest-isos.sh build/guest-packages build/windows-process-payload build/guest-isos "$version"
+          python3 scripts/process_guest_iso_manifest.py --root build/guest-isos --source-commit "$GITHUB_SHA" --workflow-run-id "$GITHUB_RUN_ID" --version "$version"
+          (cd build/guest-isos && sha256sum -c SHA256SUMS)
+          cp lib/process/guest_adapter_compat.json build/host-catalog.json
+          for family in rocky ubuntu windows; do
+            iso="build/guest-isos/ABLESTACK-Tools-$family-$version.iso"
+            python3 scripts/append_guest_adapter_compat.py --iso "$iso" --family "$family" --id "iso-check-${GITHUB_RUN_ID}"
+          done
+          # Every ISO bundle was already approved in the canonical host catalog.
+          cmp build/host-catalog.json lib/process/guest_adapter_compat.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-guest-isos
+          path: build/guest-isos/*
+          if-no-files-found: error
+          retention-days: 14

@@ -211,6 +211,80 @@
         "AbleProcessAction.dll": "c008ac98c5bc8a7cb390dd655ff1546ea6104e54e51c8c78018c0b1a09ab358e",
         "AbleProcessIdentity.dll": "ac3a2928f5d8d14262ce1e12f480cefee2d272d87ef3802f43f8d5c8529659f1"
       }
+    },
+    {
+      "id": "epic-36680423982-659489d-linux-action",
+      "profile": "linux-action",
+      "sha256": {
+        "process_action_linux.py": "a1f7b890af205e07128b003bb73229102d041f540f72072747264b44de1ffd98",
+        "process-action-launcher": "853e8989208afb57766d9b5389f9a51ba8922b8d207062fbc699497df6a73e17"
+      }
+    },
+    {
+      "id": "epic-36680423982-659489d-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "b64869b5fe0ca9084100c80eea91ed72ab2944f5f8a4b87ec9358b18aefe7c3e",
+        "AbleProcessIdentity.dll": "73b97caf8d167e528fcc45c60a4bd50f7c514e91f47b6b8ac995cab37edea26d"
+      }
+    },
+    {
+      "id": "epic-36680423982-659489d-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "f751d2b363ed8e9b502575b95af28ce649df6e97305f56e8f7b379b22e5cb8fd",
+        "AbleProcessIdentity.dll": "73b97caf8d167e528fcc45c60a4bd50f7c514e91f47b6b8ac995cab37edea26d"
+      }
+    },
+    {
+      "id": "epic-36682627651-6dcb57e-rocky-read",
+      "profile": "rocky-read",
+      "sha256": {
+        "process_list_linux.py": "8adcf323eac69feb14d611f634b7b57be2e4bb89d95e4ef28ed1bdff9bee8158",
+        "process-read-launcher": "2e202dc05be052ab636799291092d3da46a4f42028fb466f34923791fe3b38a4"
+      }
+    },
+    {
+      "id": "epic-36682627651-6dcb57e-ubuntu-read",
+      "profile": "ubuntu-read",
+      "sha256": {
+        "process_list_linux.py": "8adcf323eac69feb14d611f634b7b57be2e4bb89d95e4ef28ed1bdff9bee8158"
+      }
+    },
+    {
+      "id": "epic-36682627651-6dcb57e-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "b64869b5fe0ca9084100c80eea91ed72ab2944f5f8a4b87ec9358b18aefe7c3e",
+        "AbleProcessIdentity.dll": "ca15e4507574c45a32067205b43a288bb8d6f34fe9d0880557962b63515d4aea"
+      }
+    },
+    {
+      "id": "epic-36682627651-6dcb57e-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "f8b21c3218c59d584123c0bf81df305671c2eb14b88c9f483602e4f5109c8435",
+        "AbleProcessIdentity.dll": "ca15e4507574c45a32067205b43a288bb8d6f34fe9d0880557962b63515d4aea"
+      }
+    },
+    {
+      "id": "epic-36688611885-c439f93-windows-read",
+      "profile": "windows-read",
+      "sha256": {
+        "ProcessList.ps1": "b64869b5fe0ca9084100c80eea91ed72ab2944f5f8a4b87ec9358b18aefe7c3e",
+        "AbleProcessIdentity.dll": "d1dc17886f716f2055ffbaa29501163262733a8ee42560519ce01d2eb1568b47"
+      }
+    },
+    {
+      "id": "epic-36688611885-c439f93-windows-action",
+      "profile": "windows-action",
+      "sha256": {
+        "ProcessAction.ps1": "1f46fb58d6d1215854378080df0c4bba1bc75f96fb379d8abbbd59cd185b72be",
+        "AbleProcessAction.dll": "7f3b76ddb1e592a364e6b56d91fe9af9c12895f8a936be7e85f208ba8226ab95",
+        "AbleProcessIdentity.dll": "d1dc17886f716f2055ffbaa29501163262733a8ee42560519ce01d2eb1568b47"
+      }
     }
   ]
 }

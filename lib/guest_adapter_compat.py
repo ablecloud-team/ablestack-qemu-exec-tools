@@ -19,6 +19,25 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}\Z")
 
 
+def linux_read_profile(osinfo):
+    """Select only the Linux releases carried by the guest ISO contract.
+
+    RHEL-family guests use the confined reader; Ubuntu and Debian share the
+    portable Linux reader. A matching ID_LIKE alone never grants support.
+    """
+    family = osinfo.get("id")
+    version = osinfo.get("version-id")
+    if not isinstance(version, str):
+        return None
+    if family in ("rocky", "rhel") and re.fullmatch(r"(?:8|9|10)(?:\.[0-9]+)*", version):
+        return "rocky-read"
+    if family == "ubuntu" and version in ("22.04", "24.04", "26.04"):
+        return "ubuntu-read"
+    if family == "debian" and version in ("12", "13"):
+        return "ubuntu-read"
+    return None
+
+
 def supported_windows(osinfo):
     """Accept the Windows releases carried by the multi-OS guest ISO."""
     if osinfo.get("id") not in ("mswindows", "windows"):

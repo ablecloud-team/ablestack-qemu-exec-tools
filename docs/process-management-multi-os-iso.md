@@ -1,6 +1,6 @@
 # Multi-OS process Tools guest ISO
 
-The `process-guest-isos.yml` GitHub Actions workflow builds four guest installation
+The `process-epic.yml` GitHub Actions workflow builds host RPM/DEB packages and four guest installation
 media from one source commit: Rocky Linux 8/9/10, Ubuntu 22.04/24.04/26.04,
 Debian 12/13, and Windows 11/Server 2019/2022/2025 (x86_64 only). Debian 11 is
 excluded. Rocky guest evidence does not establish support for a RHEL guest; RHEL
@@ -30,6 +30,11 @@ and the vendor ISO hash in the Windows payload manifest.
 5. Verify the installer exit status, installed packages/files, QGA service and
    configuration before/after. Verify each actual guest version separately.
    A successful ISO attachment or installer message alone is insufficient.
+
+Cloud registration uses an array of Ready ISO UUIDs in
+`vm.process.tools.iso.catalog`. The ISO's supported OS metadata determines the
+family; administrators do not enter file hashes or a per-version JSON mapping.
+Keep SHA-256 and source/run manifests as separate deployment integrity evidence.
 
 This issue's installer PASS does not claim QGA RPC functionality, VirtIO device
 functionality, or Cloud process actions. Those are separate Q6/C7 runtime gates.

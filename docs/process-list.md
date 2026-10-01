@@ -18,7 +18,9 @@ capability READY를 활성화하지 않으며 Q1의 다른 요청은 계속 fail
 호스트 관측 5초, 게스트 관측 최대 3초, RPC 최대 3초로 제한한다.
 UTF-8 JSON 최대 1MiB/10,000행, 스냅샷 유효기간 10초다.
 실행 전 `/run/ablestack-vm-operations/VM_UUID/q4-read-REQUEST_UUID.json`을 기록한다.
-정상 완료 후에만 제거하고 UNKNOWN/호스트 중단 시 남겨 후속 요청을 BUSY로 차단한다.
+부모 채널이 실행 전에 닫히면 자기 marker만 제거한다. 정상 완료 후에도 제거하고,
+dispatch 이후 UNKNOWN/호스트 중단 시에는 남겨 후속 요청을 BUSY로 차단한다.
+marker에는 PRE_DISPATCH/DISPATCHING/UNKNOWN 단계, owner PID/startTicks/host boot 및 guest-exec PID를 기록한다.
 Q4는 자동 lease 복구를 제공하지 않는다. 관리자/C4가 해당 guest-exec PID 종료를 확인한 후 해당 파일만 정리해야 한다.
 PID를 받기 전 전송 결과가 불명확하면 재부팅 또는 별도 종료 증거 없이 자동 삭제하지 않는다.
 
@@ -53,6 +55,7 @@ GitHub Actions `process-list.yml`에서 선행 테스트와 C1 fixture, Windows 
 소스 아카이브와 Windows MSI 빌드를 수행한다. 전체 Cloud 빌드는 수행하지 않는다.
 
 실제 VM 검증 결과와 빌드 run은 PR에 기록한다.
-Rocky 10.2 SELinux Enforcing에서는 QGA 프로세스 도메인의 /proc·systemd 접근 제한 때문에
-제한된 목록(PARTIAL)을 반환한다. 이는 전체 Linux 프로세스/서비스 지원 완료를 의미하지 않는다.
-별도 최소 권한 설계 없이 QGA 도메인에 광범위한 읽기/제어 권한을 부여하지 않는다.
+Rocky 8/9/10의 SELinux Enforcing 조회는 전용 read launcher와 최소 권한 정책을 사용한다.
+QGA 도메인의 일반 읽기/제어 권한을 넓히지 않는다. `systemctl show '*.service'`로 실제
+unit을 선택하여 연결 서비스와 구성 해시를 수집한다. manager 속성만 조회한 빈 매핑을
+정상 관측으로 오인하지 않는다. 실제 패키지 검증 결과는 Q6 검증 기록을 따른다.

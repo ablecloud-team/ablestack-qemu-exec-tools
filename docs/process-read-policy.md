@@ -53,6 +53,8 @@ QGA RPC 설정·Q2 probe 정책·SELinux Enforcing은 이 제거 작업으로 �
 Actions에서 musl 정적 launcher 및 ISO를 생성하고, Rocky 9/10 컨테이너 정책 저장소에
 semodule -N으로 컴파일한다. 이는 실제 VM 동작 검증과 다르다.
 호스트에는 source artifact의 process_list_host.py/collector와 같은 run의 launcher를 함께 배포한다.
-기존 Windows DLL/PS1은 보존한다. Linux 게스트와 호스트의 collector bytes가 일치해야 한다.
+기존 Windows DLL/PS1은 보존한다. Linux 게스트의 collector/launcher 전체 해시 묶음은
+호스트의 승인 카탈로그에 있어야 한다. 호스트 현재 collector와 동일 버전일 필요는 없다.
+Q6 Actions는 한 번 빌드한 바이너리를 RPM/DEB/ISO에 배치하고 기존 승인 묶음을 유지한다.
 전체 RPM/DEB 배포 및 모든 OS 버전 설치 승인은 Q6 범위이며 이번 변경으로 완료되었다고 간주하지 않는다.
 실제 Rocky Enforcing 조회·복구·재설치·권한 거부 결과와 Ubuntu/Windows 회귀 결과는 PR에 기록한다.

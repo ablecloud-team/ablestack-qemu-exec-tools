@@ -76,6 +76,21 @@ jobs:
           }
           @{schemaVersion=1;sourceCommit=(git rev-parse HEAD);version='1.1.0';workflowRunId=$env:GITHUB_RUN_ID;vendorIsoSha256=(Get-FileHash build/virtio-win.iso).Hash;files=@($files);driverFiles=@($driverFiles)} | ConvertTo-Json -Depth 5 | Set-Content "$payload/manifest.json" -Encoding utf8
           '@echo off', 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*', 'exit /b %ERRORLEVEL%' | Set-Content "$payload/install.bat" -Encoding ascii
+      - name: Native process list and action regressions
+        shell: powershell
+        run: |
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /reference:System.ServiceProcess.dll /out:.\build\AbleProcessQ5Fixture.exe .\tests\ProcessActionFixture.cs
+          if ($LASTEXITCODE) { throw 'Test fixture build failed' }
+          tests/process_list_windows_test.ps1
+          tests/process_action_windows_test.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-windows-validation
+          path: |
+            build/AbleProcessQ5Fixture.exe
+            build/windows-snapshot.json
+            build/windows-action.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: windows-process-payload

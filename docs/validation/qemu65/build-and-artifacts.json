@@ -1,0 +1,59 @@
+{
+  "runtimeSourceCommit": "c439f930e030fc75e4eae7be59956efd1835c2b4",
+  "workflowRunId": 36688611885,
+  "workflowUrl": "https://github.com/dhslove/ablestack-qemu-exec-tools/actions/runs/36688611885",
+  "cloudSourceCommit": "88a7f5896a120cdfb58da41abbace8419fdcca60",
+  "approvedCatalogSha256": "911e68d86c20a2271640b78e8d5e27a13b288de88cb427d8d1b4df4469f9598c",
+  "artifacts": [
+    {
+      "artifact": "process-host-rpm",
+      "filename": "ablestack-qemu-exec-tools-0.10.0-1.epic36688611885.el9.el9.x86_64.rpm",
+      "sha256": "13c8a5a412427854742d10d619288c1872ccf9608e0df9f9394a1dc1dc4a4ab2",
+      "bytes": 1306082
+    },
+    {
+      "artifact": "process-host-deb",
+      "filename": "ablestack-qemu-exec-tools_0.10.0-1.epic36688611885.deb",
+      "sha256": "7b87c271675d6f06b83e2fa62b21773f5603e7217c41655941cd70ccef49dc8b",
+      "bytes": 1220874
+    },
+    {
+      "artifact": "windows-process-payload",
+      "filename": "ABLESTACK-ProcessTools.msi",
+      "sha256": "edb5a8343274b5f26a19d503d3c097eb4970c2a5fec25c566c09bdfe30c287d4",
+      "bytes": 53248
+    },
+    {
+      "artifact": "process-guest-isos",
+      "family": "rocky",
+      "isoUuid": "dcdeb196-47f8-4c69-8ce5-3fac121b65e8",
+      "filename": "ABLESTACK-Tools-rocky-process-6-c439f93.iso",
+      "sha256": "ecb954a4a71c3eb2f1910fb0b6f990b4c9707f3498a45b9fc06203cac467eade",
+      "bytes": 264808448
+    },
+    {
+      "artifact": "process-guest-isos",
+      "family": "ubuntu",
+      "isoUuid": "1c0e894a-f880-4b9f-8a55-48f9c472861c",
+      "filename": "ABLESTACK-Tools-ubuntu-process-6-c439f93.iso",
+      "sha256": "12a21a281b7a3fa0a5b49446809df5833a41668706e6656f317b5525500db1fd",
+      "bytes": 58279936
+    },
+    {
+      "artifact": "process-guest-isos",
+      "family": "debian",
+      "isoUuid": "0369f6c4-9eac-48d6-8f4d-0f2e18d69355",
+      "filename": "ABLESTACK-Tools-debian-process-6-c439f93.iso",
+      "sha256": "15485be053ee54e6d21a54a9ad8b12d00b285ebab198c46dc90e5fcbd71d1c79",
+      "bytes": 41439232
+    },
+    {
+      "artifact": "process-guest-isos",
+      "family": "windows",
+      "isoUuid": "786839a0-9924-4ffa-b721-a6c8e085dbcd",
+      "filename": "ABLESTACK-Tools-windows-process-6-c439f93.iso",
+      "sha256": "cf60f1158cb44acb9f3499b43019a8b64b34761d356fd024671aef23867a4a25",
+      "bytes": 24926208
+    }
+  ]
+}

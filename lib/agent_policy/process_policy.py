@@ -20,6 +20,10 @@ REQUIRED = ('guest-exec', 'guest-exec-status', 'guest-file-open', 'guest-file-cl
             'guest-file-read', 'guest-file-write', 'guest-file-seek', 'guest-file-flush',
             'guest-info', 'guest-ping', 'guest-get-osinfo', 'guest-sync', 'guest-sync-delimited')
 ROOT = Path('/var/lib/ablestack-qemu-exec-tools/process-policy')
+FILTER_OPTIONS = {'--allow-rpcs': True, '-a': True, '--whitelist': True,
+                  '--block-rpcs': False, '-b': False, '--blacklist': False}
+FILTER_KEYS = {True: ('allow-rpcs', 'whitelist'), False: ('block-rpcs', 'blacklist')}
+LEGACY_ENV = {True: 'WHITELIST_RPC', False: 'BLACKLIST_RPC'}
 
 
 def run(args, env=None):
@@ -51,6 +55,44 @@ def extend(value, allow):
     return ','.join(items)
 
 
+def filters_from_args(args):
+    filters = {}
+    index = 0
+    while index < len(args):
+        key, sep, value = args[index].partition('=')
+        if key in FILTER_OPTIONS:
+            allow = FILTER_OPTIONS[key]
+            if allow in filters:
+                raise ValueError('Duplicate RPC filter option')
+            if not sep:
+                index += 1
+                if index == len(args):
+                    raise ValueError('Missing filter value')
+                value = args[index]
+            filters[allow] = rpc_list(value)
+        elif 'rpcs' in key or 'blacklist' in key or 'whitelist' in key:
+            raise ValueError('Unsupported vendor RPC option')
+        index += 1
+    return filters
+
+
+def missing_rpcs(dumped, args):
+    parser = configparser.ConfigParser(interpolation=None, strict=True)
+    parser.read_string(dumped)
+    section = parser['general']
+    filters = {}
+    runtime = filters_from_args(args)
+    for allow, aliases in FILTER_KEYS.items():
+        values = [rpc_list(section[key]) for key in aliases if key in section]
+        if len(values) > 1:
+            raise ValueError('Ambiguous effective RPC filter aliases')
+        filters[allow] = values[0] if values else []
+    # An empty dumped allowlist means unrestricted unless explicitly passed.
+    allow = filters[True] if filters[True] or True in runtime else None
+    block = filters[False]
+    return [rpc for rpc in REQUIRED if (allow is not None and rpc not in allow) or rpc in block]
+
+
 def rewrite_args(args):
     """Retain order and unrelated args. Never evaluate an environment file."""
     result = list(args)
@@ -59,8 +101,8 @@ def rewrite_args(args):
     while index < len(result):
         word = result[index]
         key, sep, value = word.partition('=')
-        if key in ('--allow-rpcs', '--block-rpcs', '-a', '-b'):
-            allow = key in ('--allow-rpcs', '-a')
+        if key in FILTER_OPTIONS:
+            allow = FILTER_OPTIONS[key]
             if allow in seen:
                 raise ValueError('Duplicate RPC filter option')
             seen.add(allow)
@@ -104,20 +146,54 @@ def rewrite_environment(text):
     return ''.join(lines), args
 
 
+def rewrite_legacy_environment(text, runtime):
+    lines = text.splitlines(keepends=True)
+    configured = {}
+    for allow, name in LEGACY_ENV.items():
+        indexes = [n for n, line in enumerate(lines) if re.match(r'^\s*' + name + r'\s*=', line)]
+        if not indexes:
+            if allow in runtime:
+                raise ValueError('Missing legacy environment assignment')
+            continue
+        if len(indexes) != 1:
+            raise ValueError('Duplicate legacy environment assignment')
+        index = indexes[0]
+        line = lines[index].rstrip('\r\n')
+        match = re.fullmatch(r'(\s*' + name + r'\s*=\s*)([^\r\n]*?)(\s+#.*)?', line)
+        raw = match[2]
+        if any(char in raw for char in ('$','`','\\')):
+            raise ValueError('Unsupported environment expansion')
+        values = shlex.split(raw)
+        if len(values) > 1:
+            raise ValueError('Ambiguous environment assignment')
+        value = values[0] if values else ''
+        configured[allow] = rpc_list(value)
+        updated = extend(value, allow)
+        if updated != value:
+            quote = raw[0] if raw.startswith(('"', "'")) else ''
+            lines[index] = match[1] + quote + updated + quote + (match[3] or '') + '\n'
+    if configured != runtime:
+        raise RuntimeError('Runtime filter differs from supported environment assignment')
+    return ''.join(lines)
+
+
 def rewrite_ini(text):
     parser = configparser.ConfigParser(interpolation=None, strict=True)
     parser.read_string(text)
     if not parser.has_section('general'):
         raise ValueError('Missing general section')
+    for aliases in FILTER_KEYS.values():
+        if sum(key in parser['general'] for key in aliases) > 1:
+            raise ValueError('Duplicate RPC filter aliases')
     lines = text.splitlines(keepends=True)
     general = False
     for n, line in enumerate(lines):
         if line.strip().startswith('['):
             general = line.strip() == '[general]'
-        match = re.match(r'^(\s*)(allow-rpcs|block-rpcs)\s*=\s*([^#;\r\n]*)(.*)$', line.rstrip('\r\n'))
+        match = re.match(r'^(\s*)(allow-rpcs|block-rpcs|whitelist|blacklist)\s*=\s*([^#;\r\n]*)(.*)$', line.rstrip('\r\n'))
         if general and match:
             old = match[3].strip()
-            new = extend(old, match[2] == 'allow-rpcs')
+            new = extend(old, match[2] in FILTER_KEYS[True])
             if old != new:
                 lines[n] = match[1] + match[2] + '=' + new + match[4] + '\n'
     return ''.join(lines)
@@ -138,16 +214,7 @@ def effective():
         if value.startswith(b'QGA_CONF='):
             environment['QGA_CONF'] = value.split(b'=', 1)[1].decode()
     dumped = run([str(binary), *args[1:], '--dump-conf'], env=environment)
-    parser = configparser.ConfigParser(interpolation=None, strict=True)
-    parser.read_string(dumped)
-    section = parser['general']
-    # dump-conf prints an empty allow-rpcs even when no allowlist was configured.
-    allow = rpc_list(section['allow-rpcs']) if section.get('allow-rpcs') else None
-    for index, value in enumerate(args):
-        if value == '--allow-rpcs=' or (value in ('-a', '--allow-rpcs') and index + 1 < len(args) and args[index + 1] == ''):
-            allow = []
-    block = rpc_list(section.get('block-rpcs', ''))
-    missing = [rpc for rpc in REQUIRED if (allow is not None and rpc not in allow) or rpc in block]
+    missing = missing_rpcs(dumped, args[1:])
     return args[1:], environment.get('QGA_CONF'), missing, dumped
 
 
@@ -159,19 +226,21 @@ def regular(path):
 def plan(args, config):
     changes = {}
     unit = run(['systemctl', 'cat', 'qemu-guest-agent'])
-    filters = any(x.split('=')[0] in ('-a', '-b', '--allow-rpcs', '--block-rpcs') for x in args)
+    filters = filters_from_args(args)
     if filters:
         source = Path('/etc/sysconfig/qemu-ga')
-        if '/etc/sysconfig/qemu-ga' not in unit or not any(token in unit for token in ('$FILTER_RPC_ARGS', '${FILTER_RPC_ARGS}')):
+        modern = any(token in unit for token in ('$FILTER_RPC_ARGS', '${FILTER_RPC_ARGS}'))
+        legacy = all(any(token in unit for token in ('$' + LEGACY_ENV[allow], '${' + LEGACY_ENV[allow] + '}')) for allow in filters)
+        if '/etc/sysconfig/qemu-ga' not in unit or modern == legacy:
             raise RuntimeError('Custom ExecStart filter requires administrator review')
         regular(source)
         before = source.read_text()
-        after, configured = rewrite_environment(before)
-        # Actual runtime filter values must match the file we are about to edit.
-        runtime_filters = [x for x in args if x.startswith('--allow-rpcs=') or x.startswith('--block-rpcs=')]
-        configured_filters = [x for x in configured if x.startswith('--allow-rpcs=') or x.startswith('--block-rpcs=')]
-        if runtime_filters != configured_filters or not runtime_filters:
-            raise RuntimeError('Runtime filter differs from supported environment assignment')
+        if modern:
+            after, configured = rewrite_environment(before)
+            if filters != filters_from_args(configured):
+                raise RuntimeError('Runtime filter differs from supported environment assignment')
+        else:
+            after = rewrite_legacy_environment(before, filters)
         if before != after:
             changes[source] = after.encode()
     for index, arg in enumerate(args):

@@ -12,7 +12,7 @@ from pathlib import Path
 import stat
 import time
 import uuid
-from guest_adapter_compat import approved, supported_windows
+from guest_adapter_compat import approved, linux_read_profile, supported_windows
 
 
 RUNTIME_ROOT=Path('/run/ablestack-vm-operations')
@@ -88,6 +88,47 @@ def inherited_guard(fd, path):
     return os.dup(fd)
 
 
+def execute_with_read_lease(request, transport, domain, command, options, cloud_guard, lease):
+    """Remove only a proven pre-dispatch or completed read lease; retain uncertainty."""
+    lease.mkdir(mode=0o700, exist_ok=True)
+    marker = lease / ('q4-read-' + request['requestId'] + '.json')
+    fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    inode = os.fstat(fd)
+    dispatched = completed = False
+    record = dict(kind='q4-read-lease', requestId=request['requestId'],
+                  vmUuid=request['authority']['vmUuid'], guestExecPid=None,
+                  stage='PRE_DISPATCH', ownerPid=os.getpid(),
+                  ownerStartTicks=Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19],
+                  hostBootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+    try:
+        with os.fdopen(fd, 'w') as handle:
+            def persist():
+                handle.seek(0)
+                json.dump(record, handle)
+                handle.truncate()
+                handle.flush()
+                os.fsync(handle.fileno())
+            persist()
+            if cloud_guard is not None:
+                parent_alive()
+            record['stage'] = 'DISPATCHING'
+            persist()
+            dispatched = True
+            result = transport.execute(domain, command, options)
+            completed = result['state'] != 'UNKNOWN'
+            if not completed:
+                record.update(stage='UNKNOWN', guestExecPid=result.get('guest_exec_pid'))
+                persist()
+            return result
+    finally:
+        if not dispatched or completed:
+            # Never remove an administrator replacement or another operation's marker.
+            actual = marker.lstat()
+            if (actual.st_dev, actual.st_ino) != (inode.st_dev, inode.st_ino):
+                raise ValueError('Read lease inode changed')
+            marker.unlink()
+
+
 def run(request, transport, cloud_guard=None):
     if os.geteuid()!=0: return failure(request,'HOST_TOOL_MISSING','Root process collector required')
     deadline=time.monotonic()+min(5,request['budgetMs']/1000)
@@ -116,7 +157,8 @@ def run(request, transport, cloud_guard=None):
         with transport.Admission() as slot:
             osinfo=transport.rpc(domain,{'execute':'guest-get-osinfo'},deadline,3,slot.fd,65536)
         family=osinfo.get('id',''); version=osinfo.get('version-id',''); arch=osinfo.get('machine','')
-        linux=(family=='rocky' and version in ('9.6','9.7','9.8','10.2')) or (family=='ubuntu' and version in ('22.04','24.04','26.04'))
+        profile=linux_read_profile(osinfo)
+        linux=profile is not None
         windows=supported_windows(osinfo)
         if arch not in ('x86_64','x86-64','amd64') or not (linux or windows): return failure(request,'TOOLS_REQUIRED','OS adapter unsupported')
         if cloud_guard is not None:
@@ -136,10 +178,9 @@ def run(request, transport, cloud_guard=None):
         guest=dict(request,budgetMs=max(1,min(3000,int((remaining-0.3)*1000))))
         encoded=base64.b64encode(transport.dumps(guest).encode()).decode()
         if linux:
-            profile='rocky-read' if family=='rocky' else 'ubuntu-read'
             bundles=approved(profile)
             script="import hashlib,runpy,sys,os;p='/usr/libexec/ablestack-qemu-exec-tools/process/process_list_linux.py';h=hashlib.sha256(open(p,'rb').read()).hexdigest();"
-            if family=='rocky':
+            if profile=='rocky-read':
                 script+="x='/usr/libexec/ablestack-qemu-exec-tools/process/process-read-launcher';y=hashlib.sha256(open(x,'rb').read()).hexdigest();(h,y) in "+repr(bundles)+" or sys.exit(3);os.execv(x,[x,'--request-base64','"+encoded+"'])"
             else:
                 script+="(h,) in "+repr(bundles)+" or sys.exit(3);sys.argv=[p,'--request-base64','"+encoded+"'];runpy.run_path(p,run_name='__main__')"
@@ -152,20 +193,9 @@ def run(request, transport, cloud_guard=None):
         options={'mode':'-l','timeout':remaining,'rpc_timeout':3,'max_output':1048576,'headers':None,'out':'','csv':False,'table':False}
         # Persist before dispatch: host crash or ambiguous guest-exec must block
         # another observer until an operator/C4 reconciles guest completion.
-        lease.mkdir(mode=0o700,exist_ok=True)
-        marker=lease/('q4-read-'+request['requestId']+'.json')
-        marker_fd=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-        with os.fdopen(marker_fd,'w') as handle:
-            json.dump({'kind':'q4-read-lease','requestId':request['requestId'],'vmUuid':vm,'guestExecPid':None},handle)
-            handle.flush();os.fsync(handle.fileno())
-        if cloud_guard is not None: parent_alive()
-        result=transport.execute(domain,command,options)
+        result=execute_with_read_lease(request,transport,domain,command,options,cloud_guard,lease)
         if result['state']=='UNKNOWN':
-            with marker.open('w') as handle:
-                json.dump({'kind':'q4-read-lease','requestId':request['requestId'],'vmUuid':vm,'guestExecPid':result.get('guest_exec_pid')},handle)
-                handle.flush();os.fsync(handle.fileno())
             return failure(request,'CHECK_FAILED','Guest completion unknown; observation lease retained for reconciliation')
-        marker.unlink()
         if result['state']!='SUCCEEDED' or result['exit_code']!=0 or result['encoding_loss'] or result['out_truncated']:
             return failure(request,'CHECK_FAILED','Guest adapter execution failed, unavailable or incomplete')
         snapshot=transport.strict_json(result['stdout_raw'])

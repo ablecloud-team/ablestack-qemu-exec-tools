@@ -1,0 +1,1314 @@
+[
+  {
+    "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "1a4340ce-b969-40fc-b8ab-0575382100f6",
+        "identity": {
+          "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976",
+          "bootId": "linux:359f43fb-e026-4b37-94ee-b817f99803f7",
+          "pid": 69735,
+          "startTicks": "87301316"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976"
+          },
+          "completedAt": "2026-09-30T08:35:56.059Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:359f43fb-e026-4b37-94ee-b817f99803f7",
+            "pid": 69735.0,
+            "startTicks": "87301316",
+            "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976"
+          },
+          "kind": "actionResult",
+          "operationId": "5e39230e-487d-485d-a803-97372fe5552e",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "13090679-8458-478f-86d7-68771541e870",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:35:56.053Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "7597a8cc-d7d8-4dbc-aa90-556db4c63bc9",
+        "identity": {
+          "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976",
+          "bootId": "linux:359f43fb-e026-4b37-94ee-b817f99803f7",
+          "pid": 69822,
+          "startTicks": "87301631"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976"
+          },
+          "completedAt": "2026-09-30T08:36:01.245Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:359f43fb-e026-4b37-94ee-b817f99803f7",
+            "pid": 69822.0,
+            "startTicks": "87301631",
+            "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976"
+          },
+          "kind": "actionResult",
+          "operationId": "69a878e4-1df5-42fc-ba91-15f9a51e156f",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "3535905b-008c-4213-bb69-0a804b38c442",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:01.237Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "7a900e5f-b98e-453d-8f4c-e776f6687264",
+        "identity": {
+          "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976",
+          "bootId": "linux:359f43fb-e026-4b37-94ee-b817f99803f7",
+          "pid": 70041,
+          "startTicks": "87302177"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976"
+          },
+          "completedAt": "2026-09-30T08:36:07.113Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:359f43fb-e026-4b37-94ee-b817f99803f7",
+            "pid": 70041.0,
+            "startTicks": "87302177",
+            "vmUuid": "2f35ea9a-7ff2-494f-a857-6527e0fb1976"
+          },
+          "kind": "actionResult",
+          "operationId": "db7581a1-3ef2-40ca-81ac-76377477968e",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "050b1c32-7c1d-443e-9157-c61875e63db1",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:07.050Z"
+        },
+        "guestBefore": "MainPID=70041\nInvocationID=e45b78e68a9d402ab5f8b58faa1cc102\n",
+        "guestAfter": "MainPID=70103\nActiveState=active\nInvocationID=4b449d7a198b49e4a754d7ce0b558511\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "714a3e8e-9e13-4836-92c3-dc56e7974ad8",
+        "identity": {
+          "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7",
+          "bootId": "linux:19d8648d-0372-4d1c-98f8-40ac2ff58d1d",
+          "pid": 22941,
+          "startTicks": "9281647"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7"
+          },
+          "completedAt": "2026-09-30T08:36:10.535Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:19d8648d-0372-4d1c-98f8-40ac2ff58d1d",
+            "pid": 22941.0,
+            "startTicks": "9281647",
+            "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7"
+          },
+          "kind": "actionResult",
+          "operationId": "c45e0d9e-fc55-4b48-8a33-b818ff652627",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "b8fde2d1-c0f2-4f89-a5f2-82b907017b64",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:10.529Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "fc436fd5-c54f-4000-9ee1-b719ae2b9c01",
+        "identity": {
+          "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7",
+          "bootId": "linux:19d8648d-0372-4d1c-98f8-40ac2ff58d1d",
+          "pid": 23054,
+          "startTicks": "9281841"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7"
+          },
+          "completedAt": "2026-09-30T08:36:16.538Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:19d8648d-0372-4d1c-98f8-40ac2ff58d1d",
+            "pid": 23054.0,
+            "startTicks": "9281841",
+            "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7"
+          },
+          "kind": "actionResult",
+          "operationId": "4245ece4-f2c1-4d33-94f6-df5ab4b5eb41",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "f8e2bf5d-dd3c-4f1b-8155-e1a753e6d1c9",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:16.531Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "6a11e933-fb36-430d-b803-e11930254763",
+        "identity": {
+          "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7",
+          "bootId": "linux:19d8648d-0372-4d1c-98f8-40ac2ff58d1d",
+          "pid": 23193,
+          "startTicks": "9282461"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7"
+          },
+          "completedAt": "2026-09-30T08:36:22.969Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:19d8648d-0372-4d1c-98f8-40ac2ff58d1d",
+            "pid": 23193.0,
+            "startTicks": "9282461",
+            "vmUuid": "c5ac0d8b-c004-4040-8334-d57586eee4c7"
+          },
+          "kind": "actionResult",
+          "operationId": "8bf3e682-07a4-41db-92b0-48cbfc6f3005",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "736120a8-47e8-4905-95d2-2a522da2cb0a",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:22.898Z"
+        },
+        "guestBefore": "MainPID=23193\nInvocationID=7f71dc12ed0c4dfeb8227254f6bf2661\n",
+        "guestAfter": "MainPID=23259\nActiveState=active\nInvocationID=4f387b0aea0548f0806cc99a4dfa6745\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "1a7a1b89-c90c-4688-8e6f-49da37ca53a5",
+        "identity": {
+          "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4",
+          "bootId": "linux:d22586af-204d-4c87-9ca7-51972f19800c",
+          "pid": 50910,
+          "startTicks": "9261817"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4"
+          },
+          "completedAt": "2026-09-30T08:36:28.280Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:d22586af-204d-4c87-9ca7-51972f19800c",
+            "pid": 50910.0,
+            "startTicks": "9261817",
+            "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4"
+          },
+          "kind": "actionResult",
+          "operationId": "0260112e-0719-409f-9892-caa20851a88b",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "b23f2bd6-575e-4aa4-a5b3-225912d84403",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:28.215Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "0f6f8604-3ee7-45ce-81ce-e57d7ea826ef",
+        "identity": {
+          "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4",
+          "bootId": "linux:d22586af-204d-4c87-9ca7-51972f19800c",
+          "pid": 51000,
+          "startTicks": "9262037"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4"
+          },
+          "completedAt": "2026-09-30T08:36:34.554Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:d22586af-204d-4c87-9ca7-51972f19800c",
+            "pid": 51000.0,
+            "startTicks": "9262037",
+            "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4"
+          },
+          "kind": "actionResult",
+          "operationId": "d0d1d016-7bbf-4f94-8766-f09c550ee417",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "551a200a-709c-44d5-943b-1f300f80dd2d",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:34.501Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "b4ea0ebc-3ed0-4879-9962-733688a0dd31",
+        "identity": {
+          "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4",
+          "bootId": "linux:d22586af-204d-4c87-9ca7-51972f19800c",
+          "pid": 51648,
+          "startTicks": "9262658"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4"
+          },
+          "completedAt": "2026-09-30T08:36:40.963Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:d22586af-204d-4c87-9ca7-51972f19800c",
+            "pid": 51648.0,
+            "startTicks": "9262658",
+            "vmUuid": "2785322f-54d0-4a5d-bf42-59bef03635d4"
+          },
+          "kind": "actionResult",
+          "operationId": "5e0cfb80-ca9f-42bc-8063-50f734b57810",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "425b6d4a-5476-4986-877a-7a37983f1741",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:40.886Z"
+        },
+        "guestBefore": "MainPID=51648\nInvocationID=bef6faf5b49c4c519bd2db6b4ff66d46\n",
+        "guestAfter": "MainPID=52254\nActiveState=active\nInvocationID=252c72069b01499db9ad5a57ce10c22d\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "6b6e47e9-338f-4076-b444-eb69fb8e54e6",
+        "identity": {
+          "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7",
+          "bootId": "linux:b7043df7-74aa-477d-92e5-2f791054da09",
+          "pid": 46657,
+          "startTicks": "45671774"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7"
+          },
+          "completedAt": "2026-09-30T08:36:43.312Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:b7043df7-74aa-477d-92e5-2f791054da09",
+            "pid": 46657.0,
+            "startTicks": "45671774",
+            "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7"
+          },
+          "kind": "actionResult",
+          "operationId": "d961b4bb-47f8-4244-b7f5-70013ba045a1",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "f1af603c-e543-4a05-919c-c3b42327b3a7",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:43.306Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "3ffa6e07-1b79-4215-88c3-c15cc37e91a5",
+        "identity": {
+          "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7",
+          "bootId": "linux:b7043df7-74aa-477d-92e5-2f791054da09",
+          "pid": 46669,
+          "startTicks": "45672153"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7"
+          },
+          "completedAt": "2026-09-30T08:36:49.130Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:b7043df7-74aa-477d-92e5-2f791054da09",
+            "pid": 46669.0,
+            "startTicks": "45672153",
+            "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7"
+          },
+          "kind": "actionResult",
+          "operationId": "b64b6741-772b-4fff-928b-fdb08afe015d",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "468f3db7-e6f0-4b42-ba02-0410a54d275d",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:49.124Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "e29a16d8-ca42-48a1-b243-6bf84f7e67bc",
+        "identity": {
+          "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7",
+          "bootId": "linux:b7043df7-74aa-477d-92e5-2f791054da09",
+          "pid": 46736,
+          "startTicks": "45672757"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7"
+          },
+          "completedAt": "2026-09-30T08:36:56.133Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:b7043df7-74aa-477d-92e5-2f791054da09",
+            "pid": 46736.0,
+            "startTicks": "45672757",
+            "vmUuid": "4cb71960-fc75-43e1-9830-8f4ee198def7"
+          },
+          "kind": "actionResult",
+          "operationId": "3bc60711-3282-47d4-924e-f7eaf1f041da",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "b7da71dd-4c4b-4e72-a883-c00a28ce4ab0",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:36:56.060Z"
+        },
+        "guestBefore": "InvocationID=49ab84a0624144a0993ae27436928721\nMainPID=46736\n",
+        "guestAfter": "ActiveState=active\nInvocationID=de8ed07cd37f42ad994625d771284c3d\nMainPID=46753\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "b724ca27-4838-4e05-9229-f7d922600b5d",
+        "identity": {
+          "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3",
+          "bootId": "linux:f2f33906-3094-4b0f-b719-35d595d8f27d",
+          "pid": 7181,
+          "startTicks": "2143777"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3"
+          },
+          "completedAt": "2026-09-30T08:37:01.331Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:f2f33906-3094-4b0f-b719-35d595d8f27d",
+            "pid": 7181.0,
+            "startTicks": "2143777",
+            "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3"
+          },
+          "kind": "actionResult",
+          "operationId": "bf590460-8f86-4111-a5e9-0f707b7f8efc",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "3dde1c9d-3f55-466d-9d7e-afb018ba7f9d",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:01.326Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "af3a6d43-3ede-4c57-bc42-79a3798af2d5",
+        "identity": {
+          "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3",
+          "bootId": "linux:f2f33906-3094-4b0f-b719-35d595d8f27d",
+          "pid": 7193,
+          "startTicks": "2144058"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3"
+          },
+          "completedAt": "2026-09-30T08:37:08.194Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:f2f33906-3094-4b0f-b719-35d595d8f27d",
+            "pid": 7193.0,
+            "startTicks": "2144058",
+            "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3"
+          },
+          "kind": "actionResult",
+          "operationId": "ba572fef-7cea-4598-94bb-60b68679845d",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "db52d3d1-389e-460f-991e-9a35510b3f63",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:08.189Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "f4c76d08-a15a-42a8-b8a9-52e000826e4d",
+        "identity": {
+          "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3",
+          "bootId": "linux:f2f33906-3094-4b0f-b719-35d595d8f27d",
+          "pid": 7247,
+          "startTicks": "2144761"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3"
+          },
+          "completedAt": "2026-09-30T08:37:14.704Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:f2f33906-3094-4b0f-b719-35d595d8f27d",
+            "pid": 7247.0,
+            "startTicks": "2144761",
+            "vmUuid": "04125c04-cfa5-4f43-be41-39e3c7d536d3"
+          },
+          "kind": "actionResult",
+          "operationId": "a446b6fd-325c-4357-b789-8ac51ffa72ec",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "755099c3-ef06-411c-859b-50f246329ae9",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:14.660Z"
+        },
+        "guestBefore": "MainPID=7247\nInvocationID=4d85eaa497f34221ae2a67fca56932ba\n",
+        "guestAfter": "MainPID=7276\nActiveState=active\nInvocationID=90ad106d2e484b8ca28e226d73d0d0fd\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "c9dc9680-7c32-4c32-9263-fe5b5675116d",
+        "identity": {
+          "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658",
+          "bootId": "linux:6f23e98c-1326-4717-a6c9-d4575a833bfa",
+          "pid": 9260,
+          "startTicks": "9605591"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658"
+          },
+          "completedAt": "2026-09-30T08:37:20.917Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:6f23e98c-1326-4717-a6c9-d4575a833bfa",
+            "pid": 9260.0,
+            "startTicks": "9605591",
+            "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658"
+          },
+          "kind": "actionResult",
+          "operationId": "7de85daa-82cb-459b-b215-d7e1ba1b965e",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "80f0bdaf-8a94-4eb5-bd2a-46a175af27e4",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:20.912Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "d03ecebf-f114-4071-8c6c-4875add3c59f",
+        "identity": {
+          "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658",
+          "bootId": "linux:6f23e98c-1326-4717-a6c9-d4575a833bfa",
+          "pid": 9272,
+          "startTicks": "9605969"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658"
+          },
+          "completedAt": "2026-09-30T08:37:25.713Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:6f23e98c-1326-4717-a6c9-d4575a833bfa",
+            "pid": 9272.0,
+            "startTicks": "9605969",
+            "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658"
+          },
+          "kind": "actionResult",
+          "operationId": "4502485f-efc4-4b86-89b3-e0168c2f95bd",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "a8769da0-a6ad-47b6-885b-d25bc4bddbf2",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:25.708Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "bbeac10d-051d-4305-801d-b9fd34a88776",
+        "identity": {
+          "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658",
+          "bootId": "linux:6f23e98c-1326-4717-a6c9-d4575a833bfa",
+          "pid": 9318,
+          "startTicks": "9606472"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658"
+          },
+          "completedAt": "2026-09-30T08:37:32.136Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:6f23e98c-1326-4717-a6c9-d4575a833bfa",
+            "pid": 9318.0,
+            "startTicks": "9606472",
+            "vmUuid": "d3cd2c68-78e3-42dd-a944-7c5ce731e658"
+          },
+          "kind": "actionResult",
+          "operationId": "42fe472a-85ec-4c71-915a-a1342150ae40",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "1dd2f693-dcc2-45f2-9afe-07497cb9e7a5",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:32.096Z"
+        },
+        "guestBefore": "MainPID=9318\nInvocationID=f07fbb40fb404618aa0c196ca0344d64\n",
+        "guestAfter": "MainPID=9336\nActiveState=active\nInvocationID=4684d000251e44bc8b73c9268b1ebbf7\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "33f30925-57de-465c-a356-4eb9f8a6fad3",
+        "identity": {
+          "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367",
+          "bootId": "linux:30a0e05e-44fb-445d-ad79-06b9167abcf8",
+          "pid": 12695,
+          "startTicks": "9378370"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367"
+          },
+          "completedAt": "2026-09-30T08:37:37.276Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:30a0e05e-44fb-445d-ad79-06b9167abcf8",
+            "pid": 12695.0,
+            "startTicks": "9378370",
+            "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367"
+          },
+          "kind": "actionResult",
+          "operationId": "0c414579-b74c-402b-a693-45274707f55f",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "74fc9f71-cb34-4a04-bb47-0596ff226cd0",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:37.271Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "a3fce182-3330-4c0b-a235-e5be10ad0896",
+        "identity": {
+          "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367",
+          "bootId": "linux:30a0e05e-44fb-445d-ad79-06b9167abcf8",
+          "pid": 12707,
+          "startTicks": "9378651"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367"
+          },
+          "completedAt": "2026-09-30T08:37:45.144Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:30a0e05e-44fb-445d-ad79-06b9167abcf8",
+            "pid": 12707.0,
+            "startTicks": "9378651",
+            "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367"
+          },
+          "kind": "actionResult",
+          "operationId": "7ceb305b-bf6f-42b0-aa24-b40595986451",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "ec3c32d3-6030-475c-81aa-5e0b7d27c402",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:45.140Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "03227121-ea9a-4084-9620-4ec7ca2e0d24",
+        "identity": {
+          "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367",
+          "bootId": "linux:30a0e05e-44fb-445d-ad79-06b9167abcf8",
+          "pid": 12792,
+          "startTicks": "9379460"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367"
+          },
+          "completedAt": "2026-09-30T08:37:52.185Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:30a0e05e-44fb-445d-ad79-06b9167abcf8",
+            "pid": 12792.0,
+            "startTicks": "9379460",
+            "vmUuid": "b51c954a-45fc-4fdd-a395-e1b3b5b5d367"
+          },
+          "kind": "actionResult",
+          "operationId": "21b65f35-7e4d-41c7-8e4f-68914c924045",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "e6cedd20-4cba-4643-9dbd-a26b8b348516",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:52.129Z"
+        },
+        "guestBefore": "MainPID=12792\nInvocationID=fdc7ea67a15547a2ad454413103f41ef\n",
+        "guestAfter": "MainPID=12807\nActiveState=active\nInvocationID=4b9e9ea02f5c4d3cb4fc2f2b046400e0\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+    "actions": [
+      {
+        "command": "terminateVirtualMachineProcess",
+        "snapshotId": "e516c264-e0b7-48c4-aa96-c0aec86cb698",
+        "identity": {
+          "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+          "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+          "pid": 10959,
+          "startTicks": "9493595"
+        },
+        "service": [],
+        "result": {
+          "action": "process.terminate",
+          "authority": {
+            "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+          },
+          "completedAt": "2026-09-30T08:37:57.348Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+            "pid": 10959.0,
+            "startTicks": "9493595",
+            "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+          },
+          "kind": "actionResult",
+          "operationId": "c39cc3ba-1aac-44bb-ab1b-486656ddadfe",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "2f430086-9fd4-4b00-b221-1eb787e8025b",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:37:57.344Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "9417ca64-d9cb-40d3-8e11-c216a78e57a3",
+        "identity": {
+          "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+          "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+          "pid": 10971,
+          "startTicks": "9493872"
+        },
+        "service": [],
+        "result": {
+          "action": "process.kill",
+          "authority": {
+            "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+          },
+          "completedAt": "2026-09-30T08:38:04.189Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+            "pid": 10971.0,
+            "startTicks": "9493872",
+            "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+          },
+          "kind": "actionResult",
+          "operationId": "97143c7e-2613-482d-bc74-4e19e7cedc35",
+          "postcondition": "TARGET_EXITED",
+          "requestId": "03c433d7-de04-4a8f-a7d1-dad959782a3a",
+          "schemaVersion": "1.0",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:38:04.183Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "5b09dd95-a830-4f2a-b07b-5818b03d4527",
+        "identity": {
+          "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+          "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+          "pid": 11000,
+          "startTicks": "9494570"
+        },
+        "service": [
+          {
+            "manager": "systemd",
+            "name": "process-q6-fixture.service",
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853"
+          }
+        ],
+        "result": {
+          "action": "service.restart",
+          "authority": {
+            "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+          },
+          "completedAt": "2026-09-30T08:38:09.668Z",
+          "effect": "VERIFIED",
+          "guestExitCode": 0.0,
+          "identity": {
+            "bootId": "linux:2fa68ee7-c678-4e6d-8a8f-372e3a939cc8",
+            "pid": 11000.0,
+            "startTicks": "9494570",
+            "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222"
+          },
+          "kind": "actionResult",
+          "operationId": "92820922-01bb-4240-bf51-3770a2de6cae",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "requestId": "e1d3729e-81ee-4233-a32c-5a0832558b9c",
+          "schemaVersion": "1.0",
+          "service": {
+            "configurationHash": "dac9ac26db5993019fe610dffef672aad5870e0976980097c2680ee982ec8853",
+            "manager": "systemd",
+            "name": "process-q6-fixture.service"
+          },
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:38:09.599Z"
+        },
+        "guestBefore": "MainPID=11000\nInvocationID=fee073ea2bd6442296326308449a9f91\n",
+        "guestAfter": "MainPID=11014\nActiveState=active\nInvocationID=e994c9bf97b0402693a869bb6c2c9008\n",
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471",
+    "actions": [
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "a5086ef2-8548-4189-9704-047ddec37fee",
+        "identity": {
+          "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471",
+          "bootId": "windows:134352839335000000",
+          "pid": 2448,
+          "startTicks": "134352889699152194"
+        },
+        "service": [],
+        "result": {
+          "guestExitCode": 0.0,
+          "completedAt": "2026-10-01T00:42:54.079Z",
+          "identity": {
+            "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471",
+            "bootId": "windows:134352839335000000",
+            "pid": 2448.0,
+            "startTicks": "134352889699152194"
+          },
+          "authority": {
+            "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "process.kill",
+          "postcondition": "TARGET_EXITED",
+          "operationId": "250622b3-4809-4dea-9b71-167ed83a5620",
+          "requestId": "2b8d2663-dfd4-4599-b7b9-cb770c854d9b",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-10-01T00:42:53.833Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "2799be37-d133-44f6-80c8-d3e4d9c8b900",
+        "identity": {
+          "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471",
+          "bootId": "windows:134352839335000000",
+          "pid": 1284,
+          "startTicks": "134352889774396169"
+        },
+        "service": [
+          {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          }
+        ],
+        "result": {
+          "guestExitCode": 0.0,
+          "service": {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          },
+          "completedAt": "2026-10-01T00:43:04.471Z",
+          "identity": {
+            "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471",
+            "bootId": "windows:134352839335000000",
+            "pid": 1284.0,
+            "startTicks": "134352889774396169"
+          },
+          "authority": {
+            "vmUuid": "f4be8cb2-f649-47ef-bcd2-7b59b71d5471"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "service.restart",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "operationId": "c5b7fa84-3422-42ea-b418-f54c113356c1",
+          "requestId": "2bb836fb-f03e-4e24-8bcf-50e7c81ea04f",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-10-01T00:43:03.564Z"
+        },
+        "guestAfter": {
+          "state": "Running",
+          "pid": 588
+        },
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+    "actions": [
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "83674586-22dd-41f4-adaa-3a786d392c23",
+        "identity": {
+          "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+          "bootId": "windows:134351649845000000",
+          "pid": 2044,
+          "startTicks": "134352313907674041"
+        },
+        "service": [],
+        "result": {
+          "guestExitCode": 0.0,
+          "completedAt": "2026-09-30T08:43:14.230Z",
+          "identity": {
+            "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+            "bootId": "windows:134351649845000000",
+            "pid": 2044.0,
+            "startTicks": "134352313907674041"
+          },
+          "authority": {
+            "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "process.kill",
+          "postcondition": "TARGET_EXITED",
+          "operationId": "3296d889-33ef-47ad-b26f-7682d7713daa",
+          "requestId": "a70fd9b8-eae6-4779-9389-2f05fa45caad",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:43:13.995Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "92fabd4f-ee6a-481e-a654-1c448ce851bd",
+        "identity": {
+          "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+          "bootId": "windows:134351649845000000",
+          "pid": 4428,
+          "startTicks": "134352313971023264"
+        },
+        "service": [
+          {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          }
+        ],
+        "result": {
+          "guestExitCode": 0.0,
+          "service": {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          },
+          "completedAt": "2026-09-30T08:43:23.325Z",
+          "identity": {
+            "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d",
+            "bootId": "windows:134351649845000000",
+            "pid": 4428.0,
+            "startTicks": "134352313971023264"
+          },
+          "authority": {
+            "vmUuid": "675696ba-a228-44c4-94c3-3c788808ce3d"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "service.restart",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "operationId": "81c109ae-4df1-4d62-903f-e42b9e5df12b",
+          "requestId": "f041d4f4-06d6-42f6-a344-632ea38315e3",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:43:22.513Z"
+        },
+        "guestAfter": {
+          "state": "Running",
+          "pid": 4540
+        },
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d",
+    "actions": [
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "f59a0a01-bbf6-49ea-bc46-6c1f30826c03",
+        "identity": {
+          "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d",
+          "bootId": "windows:134351700844585070",
+          "pid": 4412,
+          "startTicks": "134352314098512828"
+        },
+        "service": [],
+        "result": {
+          "guestExitCode": 0.0,
+          "completedAt": "2026-09-30T08:43:36.329Z",
+          "identity": {
+            "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d",
+            "bootId": "windows:134351700844585070",
+            "pid": 4412.0,
+            "startTicks": "134352314098512828"
+          },
+          "authority": {
+            "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "process.kill",
+          "postcondition": "TARGET_EXITED",
+          "operationId": "114c8a26-465b-47e8-acc7-a1def8126d20",
+          "requestId": "c3a9a3d1-2559-4b6b-955b-857ae53cd917",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:43:36.016Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "c3913824-3036-4944-a53b-626a262aedd0",
+        "identity": {
+          "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d",
+          "bootId": "windows:134351700844585070",
+          "pid": 1892,
+          "startTicks": "134352314216944442"
+        },
+        "service": [
+          {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          }
+        ],
+        "result": {
+          "guestExitCode": 0.0,
+          "service": {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          },
+          "completedAt": "2026-09-30T08:43:51.501Z",
+          "identity": {
+            "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d",
+            "bootId": "windows:134351700844585070",
+            "pid": 1892.0,
+            "startTicks": "134352314216944442"
+          },
+          "authority": {
+            "vmUuid": "3ff1be7c-689c-4633-bcaa-060ccead098d"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "service.restart",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "operationId": "f0496c9e-b452-47ee-98cc-665f6630b902",
+          "requestId": "de6aeb90-1cb4-486a-a139-414c9658e38d",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:43:50.688Z"
+        },
+        "guestAfter": {
+          "state": "Running",
+          "pid": 3284
+        },
+        "guestPostconditionVerified": true
+      }
+    ]
+  },
+  {
+    "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+    "actions": [
+      {
+        "command": "killVirtualMachineProcess",
+        "snapshotId": "49e3cc1a-da5e-4bf0-af73-e987a2d43ee4",
+        "identity": {
+          "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+          "bootId": "windows:134352288555000000",
+          "pid": 2236,
+          "startTicks": "134352314344833168"
+        },
+        "service": [],
+        "result": {
+          "guestExitCode": 0.0,
+          "completedAt": "2026-09-30T08:43:58.126Z",
+          "identity": {
+            "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+            "bootId": "windows:134352288555000000",
+            "pid": 2236.0,
+            "startTicks": "134352314344833168"
+          },
+          "authority": {
+            "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "process.kill",
+          "postcondition": "TARGET_EXITED",
+          "operationId": "ddf31e40-611d-4843-95da-9993291811a6",
+          "requestId": "9220fb44-db68-480f-90f9-88d6e336c8b4",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:43:57.827Z"
+        },
+        "guestPostconditionVerified": true
+      },
+      {
+        "command": "restartVirtualMachineService",
+        "snapshotId": "c7e74fd5-18c2-402d-9fb5-b3dd0befad13",
+        "identity": {
+          "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+          "bootId": "windows:134352288555000000",
+          "pid": 1020,
+          "startTicks": "134352314413833993"
+        },
+        "service": [
+          {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          }
+        ],
+        "result": {
+          "guestExitCode": 0.0,
+          "service": {
+            "manager": "scm",
+            "name": "AbleProcessQ5Fixture",
+            "configurationHash": "7c3c7101214aca12d1f83fd7394260c7f43a8365a882a0abfe0b693471a34dd8"
+          },
+          "completedAt": "2026-09-30T08:44:08.026Z",
+          "identity": {
+            "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45",
+            "bootId": "windows:134352288555000000",
+            "pid": 1020.0,
+            "startTicks": "134352314413833993"
+          },
+          "authority": {
+            "vmUuid": "c51bcc9c-e045-40d7-b215-e319b36c1d45"
+          },
+          "kind": "actionResult",
+          "schemaVersion": "1.0",
+          "effect": "VERIFIED",
+          "action": "service.restart",
+          "postcondition": "SERVICE_RESTART_VERIFIED",
+          "operationId": "b851adc8-c6bb-4e74-b9f8-c4f4fe6756c7",
+          "requestId": "eef2ac03-97b4-4798-843e-84364936c833",
+          "state": "SUCCEEDED",
+          "submittedAt": "2026-09-30T08:44:06.951Z"
+        },
+        "guestAfter": {
+          "state": "Running",
+          "pid": 3636
+        },
+        "guestPostconditionVerified": true
+      }
+    ]
+  }
+]

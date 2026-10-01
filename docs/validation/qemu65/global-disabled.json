@@ -1,0 +1,16 @@
+{
+  "vmUuid": "40f046e8-7433-4cc8-a0f0-1bc60513d222",
+  "disabled": {
+    "httpStatus": 431,
+    "response": {
+      "getvirtualmachineprocesscapabilitiesresponse": {
+        "uuidList": [],
+        "errorcode": 431,
+        "cserrorcode": 4350,
+        "errortext": "VM process capability rollout is disabled"
+      }
+    }
+  },
+  "refreshRefused": true,
+  "originalSettingRestored": true
+}
