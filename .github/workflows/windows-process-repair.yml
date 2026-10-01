@@ -85,6 +85,7 @@ jobs:
           if ($LASTEXITCODE) { throw 'Profile fixture build failed' }
           tests/process_list_windows_test.ps1
           tests/process_action_windows_test.ps1
+          windows/process-management/ProcessProfile.Array.Tests.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: process-windows-validation

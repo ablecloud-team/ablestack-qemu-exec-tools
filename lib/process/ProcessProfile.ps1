@@ -80,7 +80,7 @@ function ProfileCandidates($p) {
         if(-not [AbleProcessAction]::CommandLineMatches([string]$process.CommandLine,[string]$p.executable,[string[]]$p.argv)){continue}
         $matches+=,@{vmUuid=$r.authority.vmUuid;bootId=(Boot);pid=[long]$process.ProcessId;startTicks=$identity.Start}
     }
-    return ,$matches
+    return $matches
 }
 function ProfileProgress($value,$old,$new,$identity=$null) {$value.progress=@{oldProcess=$old;newProcess=$new;newIdentity=$identity}}
 function ProfileComplete($record,$identity) {
@@ -104,7 +104,8 @@ function ProfileRestart($record,$target) {
     $entry=ProfileLoad $r.profile.id $r.authority.vmUuid
     if($entry.hash -cne $r.profile.definitionHash -or @(ProfileCandidates $p).Count -ne 0){ProfilePartial $record;return}
     $record.stage='profile-start-intent';ProfileProgress $record.result 'EXITED' 'UNKNOWN';Persist
-    try{$running=$entry.task.Run($null)}catch{ProfilePartial $record;return}
+    $record.oldTaskRun=[string]$entry.task.LastRunTime.ToUniversalTime().ToFileTimeUtc();$startElapsed=$watch.ElapsedMilliseconds;Persist
+    try{$running=$entry.task.Run($null)}catch{throw 'RESULT_UNKNOWN'}
     $record.stage='profile-start-returned';Persist
     do {
         Deadline;Start-Sleep -Milliseconds 100;$next=@(ProfileCandidates $p)
@@ -117,7 +118,7 @@ function ProfileRestart($record,$target) {
             }
         }
         $entry=ProfileLoad $r.profile.id $r.authority.vmUuid
-        if($watch.ElapsedMilliseconds -gt 1500 -and $entry.task.State -eq 3 -and $entry.task.LastTaskResult -ne 267009 -and $next.Count -eq 0){ProfilePartial $record;return}
+        if(($watch.ElapsedMilliseconds-$startElapsed) -gt 1500 -and ([string]$entry.task.LastRunTime.ToUniversalTime().ToFileTimeUtc()) -cne $record.oldTaskRun -and $entry.task.State -eq 3 -and $entry.task.LastTaskResult -ne 267009 -and $next.Count -eq 0){ProfilePartial $record;return}
     }while($true)
 }
 function ProfileReconcile($record) {
