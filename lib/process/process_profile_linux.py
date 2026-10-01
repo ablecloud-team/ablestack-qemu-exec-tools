@@ -13,6 +13,7 @@ import signal
 import stat
 import subprocess
 import time
+import tempfile
 import uuid
 
 BASE=Path('/var/lib/ablestack-process-actions')
@@ -44,6 +45,20 @@ def regular(path,private=True):
     finally:os.close(fd)
 
 def digest(data):return hashlib.sha256(data).hexdigest()
+def save_bytes(path,data):
+    # Supervisor and EnvironmentFile are bytes, not JSON journal values.
+    a=adapter()
+    if path.exists() or path.is_symlink():a.secure(path)
+    fd,name=tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd,'wb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+        os.replace(name,path)
+        parent=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(parent)
+        finally:os.close(parent)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+
 def paths(identifier):
     if str(uuid.UUID(identifier))!=identifier:raise ValueError('profile ID')
     return PROFILES/(identifier+'.json'),BASE/('profile-'+identifier+'.binding.json')
@@ -203,7 +218,7 @@ def provision(description,pid):
     if os.readlink('/proc/'+str(pid)+'/exe')!=p['executable'] or not matches(p,pid):raise ValueError('binding executable/account/argv mismatch')
     BASE.mkdir(mode=0o700,exist_ok=True);a.secure(BASE,True)
     if p['environmentRef'] is not None:
-        original=regular(p['environmentRef']);p['environmentRef']=str(BASE/('profile-'+p['id']+'.env'));a.save(Path(p['environmentRef']),original)
+        original=regular(p['environmentRef']);p['environmentRef']=str(BASE/('profile-'+p['id']+'.env'));save_bytes(Path(p['environmentRef']),original)
     unit='ableprofile-'+p['id']+'.service'
     # Only the administrator provisioning CLI writes a supervisor definition.
     text='[Unit]\nDescription=ABLESTACK registered process profile\n[Service]\nType=simple\nRestart=no\nUser='+p['account']+'\nWorkingDirectory='+quote(p['cwd'])+'\nExecStart='+ ' '.join(quote(x) for x in [p['executable'],*p['argv']])+'\n'
@@ -213,7 +228,7 @@ def provision(description,pid):
         if not isinstance(p['environmentRef'],str) or len(p['environmentRef'])>1024 or any(ord(c)<32 for c in p['environmentRef']):raise ValueError('environment reference')
         regular(p['environmentRef']);text+='EnvironmentFile='+quote(p['environmentRef'])+'\n'
     path=Path('/etc/systemd/system')/unit
-    a.save(path,text.encode())
+    save_bytes(path,text.encode())
     if Path('/usr/sbin/restorecon').exists():subprocess.run(['/usr/sbin/restorecon',str(path)],check=True,timeout=10)
     subprocess.run(['/usr/bin/systemctl','daemon-reload'],check=True,timeout=10)
     p['supervisor']=dict(manager='systemd',name=unit,configurationHash=digest(text.encode()),effectiveHash=effective(a.props(unit,time.monotonic()+5)))

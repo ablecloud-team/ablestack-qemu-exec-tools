@@ -28,6 +28,10 @@ class Profiles(unittest.TestCase):
    if child.poll() is None:child.kill()
    child.wait()
   self.temp.cleanup()
+ def test_supervisor_and_environment_reference_preserve_raw_bytes(self):
+  data=b'[Service]\nType=simple\n';path=self.base/'raw.service'
+  p.save_bytes(path,data);self.assertEqual(path.read_bytes(),data);self.assertEqual(path.stat().st_mode&0o777,0o600)
+  p.save_bytes(path,b'KEY=value\n');self.assertEqual(path.read_bytes(),b'KEY=value\n')
  def test_registered_identity_metadata_omits_argument_values(self):
   value=p.list_profiles(self.request);self.assertEqual(value['profiles'][0]['identity'],self.binding);self.assertNotIn('argv',value['profiles'][0]);self.assertEqual(value['profiles'][0]['argumentCount'],1)
  def test_unregistered_scope_and_definition_changes_never_signal(self):
