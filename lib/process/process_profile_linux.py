@@ -96,7 +96,7 @@ def load(identifier,vm):
 def effective(value):
     a=adapter()
     command=re.sub(r'( ; ignore_errors=(?:yes|no)) ; start_time=.*?(?= \})',r'\1',value.get('ExecStart',''))
-    return digest(a.compact(dict(command=command,account=value.get('User',''),cwd=value.get('WorkingDirectory',''),environmentRef=value.get('EnvironmentFiles',''),inlineEnvironment=value.get('Environment',''),restart=value.get('Restart',''),type=value.get('Type',''),killMode=value.get('KillMode',''),requires=value.get('Requires',''),wants=value.get('Wants',''))).encode())
+    return digest(a.compact(dict(command=command,account=value.get('User',''),cwd=value.get('WorkingDirectory',''),environmentRef=value.get('EnvironmentFiles',''),inlineEnvironment=value.get('Environment',''),restart=value.get('Restart',''),type=value.get('Type',''),killMode=value.get('KillMode',''),requires=sorted(value.get('Requires','').split()),wants=sorted(value.get('Wants','').split()))).encode())
 
 def public(p,b,h):
     return dict(id=p['id'],version=p['version'],definitionHash=h,displayName=p['displayName'],executable=p['executable'],argumentCount=len(p['argv']),cwd=p['cwd'],account=p['account'],environmentRef=p['environmentRef'],supervisor=p['supervisor']['manager'],verification=p['verification'],identity=b)
