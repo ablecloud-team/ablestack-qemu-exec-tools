@@ -50,8 +50,10 @@ class Profiles(unittest.TestCase):
    with patch.object(a,'props',return_value=dict(self.loaded,**{key:'external'})):
     with self.assertRaises(ValueError):p.checked(self.request)
  def test_process_owned_by_other_service_rejected_before_mutation(self):
-  with patch.object(p,'check_supervision',side_effect=a.Rejected('PROTECTED_TARGET')),patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
-   with self.assertRaises(a.Rejected):p.checked(self.request)
+  with patch.object(p.Path,'read_text',return_value='0::/system.slice/external.service'):
+   with self.assertRaises(a.Rejected):p.check_supervision({'id':self.id},self.binding['pid'])
+  with patch.object(p.Path,'read_text',return_value='0::/system.slice/ableprofile-'+self.id+'.service'):
+   p.check_supervision({'id':self.id},self.binding['pid'])
  def test_cross_vm_profile_rejected(self):
   with self.assertRaises(ValueError):p.load(self.id,str(uuid.uuid4()))
  def test_symlink_binding_and_writable_definition_rejected(self):
@@ -68,7 +70,7 @@ class Profiles(unittest.TestCase):
   def control(*args,**kw):
    if not fail:new[0]=self.child()
    return SimpleNamespace(returncode=1 if fail else 0)
-  with patch.object(a,'props',side_effect=props),patch.object(p.subprocess,'run',side_effect=control):p.run(self.request,record,lambda:writes.append(json.loads(json.dumps(record))),__import__('time').monotonic()+5)
+  with patch.object(a,'props',side_effect=props),patch.object(p,'check_supervision'),patch.object(p.subprocess,'run',side_effect=control):p.run(self.request,record,lambda:writes.append(json.loads(json.dumps(record))),__import__('time').monotonic()+5)
   return record,writes,new[0]
  def test_actual_old_exit_new_identity_and_stable_binding(self):
   record,writes,new=self.execute();self.assertEqual(record['result']['state'],'SUCCEEDED');self.assertEqual(record['result']['progress']['oldProcess'],'EXITED');self.assertNotEqual(record['result']['progress']['newIdentity']['pid'],self.binding['pid']);self.assertIsNotNone(self.children[0].poll());self.assertIsNone(new.poll());self.assertEqual(p.load(self.id,self.vm)[1],record['result']['progress']['newIdentity']);self.assertTrue(any(w['stage']=='profile-start-intent' for w in writes))
