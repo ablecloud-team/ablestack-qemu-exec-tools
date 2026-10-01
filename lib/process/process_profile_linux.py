@@ -85,7 +85,9 @@ def load(identifier,vm):
     unit=p['supervisor']['name']
     if p['supervisor']['manager']!='systemd' or unit!='ableprofile-'+identifier+'.service':raise ValueError('supervisor')
     if digest(regular('/etc/systemd/system/'+unit,False))!=p['supervisor']['configurationHash']:raise ValueError('supervisor changed')
-    if effective(a.props(unit,time.monotonic()+2))!=p['supervisor']['effectiveHash']:raise ValueError('loaded supervisor changed')
+    live=a.props(unit,time.monotonic()+2)
+    if live.get('LoadState')!='loaded' or live.get('CanStart')!='yes' or live.get('WorkingDirectory')!=p['cwd'] or live.get('User')!=p['account'] or live.get('Type')!='simple' or live.get('Restart')!='no':raise ValueError('invalid loaded supervisor')
+    if effective(live)!=p['supervisor']['effectiveHash']:raise ValueError('loaded supervisor changed')
     b=a.strict(regular(binding).decode());a.fields(b,'vmUuid bootId pid startTicks')
     if b['vmUuid']!=vm:raise ValueError('binding scope')
     return p,b,digest(raw)
@@ -221,7 +223,7 @@ def provision(description,pid):
         original=regular(p['environmentRef']);p['environmentRef']=str(BASE/('profile-'+p['id']+'.env'));save_bytes(Path(p['environmentRef']),original)
     unit='ableprofile-'+p['id']+'.service'
     # Only the administrator provisioning CLI writes a supervisor definition.
-    text='[Unit]\nDescription=ABLESTACK registered process profile\n[Service]\nType=simple\nRestart=no\nUser='+p['account']+'\nWorkingDirectory='+quote(p['cwd'])+'\nExecStart='+ ' '.join(quote(x) for x in [p['executable'],*p['argv']])+'\n'
+    text='[Unit]\nDescription=ABLESTACK registered process profile\n[Service]\nType=simple\nRestart=no\nUser='+p['account']+'\nWorkingDirectory='+p['cwd'].replace('%','%%')+'\nExecStart='+ ' '.join(quote(x) for x in [p['executable'],*p['argv']])+'\n'
     for name in ('executable','cwd','account'):
         if not isinstance(p[name],str) or len(p[name])>1024 or any(ord(c)<32 for c in p[name]):raise ValueError('profile path/account')
     if p['environmentRef'] is not None:

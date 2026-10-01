@@ -13,9 +13,10 @@ class Profiles(unittest.TestCase):
   self.temp=tempfile.TemporaryDirectory(dir='/var/lib',prefix='able-profile-test-');self.base=Path(self.temp.name);self.directory=self.base/'profiles';self.directory.mkdir(mode=0o700)
   self.children=[];self.id=str(uuid.uuid4());self.vm=str(uuid.uuid4());self.argv=[str(20000+os.getpid())]
   child=self.child();self.binding=dict(vmUuid=self.vm,bootId=a.boot(),pid=child.pid,startTicks=a.identity(child.pid)[1])
-  self.unit=b'[Service]\nType=simple\n';self.definition=dict(schemaVersion='1.0',id=self.id,version=1,vmUuid=self.vm,displayName='fixture',executable='/usr/bin/sleep',executableHash=p.digest(Path('/usr/bin/sleep').read_bytes()),argv=self.argv,cwd='/var/lib',account='root',environmentRef=None,supervisor=dict(manager='systemd',name='ableprofile-'+self.id+'.service',configurationHash=p.digest(self.unit),effectiveHash=p.effective({})),verification='identity-and-running')
+  self.loaded={'LoadState':'loaded','CanStart':'yes','WorkingDirectory':'/var/lib','User':'root','Type':'simple','Restart':'no'}
+  self.unit=b'[Service]\nType=simple\n';self.definition=dict(schemaVersion='1.0',id=self.id,version=1,vmUuid=self.vm,displayName='fixture',executable='/usr/bin/sleep',executableHash=p.digest(Path('/usr/bin/sleep').read_bytes()),argv=self.argv,cwd='/var/lib',account='root',environmentRef=None,supervisor=dict(manager='systemd',name='ableprofile-'+self.id+'.service',configurationHash=p.digest(self.unit),effectiveHash=p.effective(self.loaded)),verification='identity-and-running')
   a.save(self.directory/(self.id+'.json'),self.definition);a.save(self.base/('profile-'+self.id+'.binding.json'),self.binding)
-  self.patchers=[patch.object(a,'props',return_value={}),patch.object(p,'BASE',self.base),patch.object(p,'PROFILES',self.directory)]
+  self.patchers=[patch.object(a,'props',return_value=self.loaded),patch.object(p,'BASE',self.base),patch.object(p,'PROFILES',self.directory)]
   regular=p.regular
   self.patchers.append(patch.object(p,'regular',side_effect=lambda path,*args:self.unit if str(path).startswith('/etc/systemd/system/ableprofile-') else regular(path,*args)))
   for patcher in self.patchers:patcher.start()
@@ -40,6 +41,10 @@ class Profiles(unittest.TestCase):
     request=json.loads(json.dumps(self.request));request['profile'][field]=value
     with patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
      with self.assertRaises((ValueError,OSError,a.Rejected)):p.checked(request)
+ def test_invalid_supervisor_rejected_before_any_old_process_signal(self):
+  for key,value in [('LoadState','error'),('CanStart','no'),('WorkingDirectory','"/var/lib"'),('Restart','always')]:
+   with patch.object(a,'props',return_value=dict(self.loaded,**{key:value})),patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
+    with self.assertRaises(ValueError):p.checked(self.request)
  def test_cross_vm_profile_rejected(self):
   with self.assertRaises(ValueError):p.load(self.id,str(uuid.uuid4()))
  def test_symlink_binding_and_writable_definition_rejected(self):
@@ -52,7 +57,7 @@ class Profiles(unittest.TestCase):
   with self.assertRaises(a.Rejected):p.checked(self.request)
  def execute(self,fail=False):
   record={'stage':'reserved','result':a.result(self.request)};writes=[];new=[None]
-  def props(*args):return {'ActiveState':'inactive','MainPID':'0'} if new[0] is None else {'ActiveState':'active','MainPID':str(new[0].pid),'InvocationID':'new'}
+  def props(*args):return dict(self.loaded,**({'ActiveState':'inactive','MainPID':'0'} if new[0] is None else {'ActiveState':'active','MainPID':str(new[0].pid),'InvocationID':'new'}))
   def control(*args,**kw):
    if not fail:new[0]=self.child()
    return SimpleNamespace(returncode=1 if fail else 0)

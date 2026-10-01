@@ -149,7 +149,7 @@ def expired(deadline):
     if time.monotonic()>=deadline:raise TimeoutError('deadline')
 def props(unit,deadline):
     expired(deadline)
-    names='Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,WorkingDirectory,EnvironmentFiles,Environment,Restart,KillMode,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf,Transient'
+    names='LoadState,Id,MainPID,ExecStart,User,Requires,Wants,CanStart,CanStop,ActiveState,SubState,Type,WorkingDirectory,EnvironmentFiles,Environment,Restart,KillMode,InvocationID,TriggeredBy,RequiredBy,BoundBy,ConsistsOf,Transient'
     # Output is bounded while reading, without temporary files or unbounded communicate().
     import selectors
     p=subprocess.Popen(['/usr/bin/systemctl','show','--no-pager','--property='+names,'--',unit],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},start_new_session=True)
