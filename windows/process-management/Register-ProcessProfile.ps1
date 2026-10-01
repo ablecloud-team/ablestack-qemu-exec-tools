@@ -26,9 +26,7 @@ $candidates=@(ProfileCandidates $p)
 if($candidates.Count -ne 1 -or $candidates[0].pid -ne $BindPid){throw 'Binding must match the executable, fixed arguments, LocalSystem account and session 0'}
 $arguments=@($p.argv | ForEach-Object {[AbleProcessAction]::QuoteArgument($_)}) -join ' '
 $launcher=Join-Path $PSScriptRoot 'Start-ProcessProfile.ps1';ProfileRegular $launcher
-$taskExecutable=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$taskArguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+[AbleProcessAction]::QuoteArgument($launcher)+' -ProfileId '+$p.id
-$xml='<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Principals><Principal id="System"><UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context="System"><Exec><Command>'+ (Escape $taskExecutable) +'</Command><Arguments>'+ (Escape $taskArguments) +'</Arguments><WorkingDirectory>'+ (Escape $p.cwd) +'</WorkingDirectory></Exec></Actions></Task>'
+$xml=ProfileTaskDefinition $p $launcher
 $scheduler=New-Object -ComObject Schedule.Service;$scheduler.Connect()
 try{$folder=$scheduler.GetFolder('\ABLESTACKProfiles')}catch{$folder=$scheduler.GetFolder('\').CreateFolder('ABLESTACKProfiles','D:P(A;;FA;;;SY)(A;;FA;;;BA)')}
 $task=$folder.RegisterTask($p.id,$xml,6,'SYSTEM',$null,5,'D:P(A;;FA;;;SY)(A;;FA;;;BA)')

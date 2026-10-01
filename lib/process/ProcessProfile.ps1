@@ -22,6 +22,11 @@ function ProfileRegular([string]$path,[bool]$private=$false) {
         $parent=$parent.Parent
     }
 }
+function ProfileTaskDefinition($p,[string]$launcher) {
+$taskExecutable=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$taskArguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+[AbleProcessAction]::QuoteArgument($launcher)+' -ProfileId '+$p.id
+return '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context="System"><Exec><Command>'+ (Escape $taskExecutable) +'</Command><Arguments>'+ (Escape $taskArguments) +'</Arguments><WorkingDirectory>'+ (Escape $p.cwd) +'</WorkingDirectory></Exec></Actions></Task>'
+}
 function TaskInfo([string]$name) {
     $scheduler=New-Object -ComObject Schedule.Service;$scheduler.Connect()
     $task=$scheduler.GetFolder('\ABLESTACKProfiles').GetTask($name)
