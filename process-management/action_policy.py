@@ -52,6 +52,12 @@ def save(path,data,mode=0o600):
 
 def mapping(name):return re.escape(str(TARGET/name))
 
+ENV_PATTERN=r'/var/lib/ablestack-process-actions/profile-[a-f0-9-]{36}\.env'
+ENV_LABEL='ablestack_process_profile_env_t'
+def ensure_environment_mapping(known):
+    if ENV_PATTERN not in known:run('semanage','fcontext','-a','-t',ENV_LABEL,ENV_PATTERN)
+    elif ':'+ENV_LABEL+':' not in known[ENV_PATTERN]:raise RuntimeError('Conflicting profile environment mapping')
+
 def local_mappings():
     return {line.split()[0]:line.split()[-1] for line in run('semanage','fcontext','-l','-C').splitlines() if line.startswith('/')}
 
@@ -85,7 +91,8 @@ def restore(state, trusted_current=None):
         p=TARGET/name
         if entry['original'] is None:p.unlink(missing_ok=True)
         else:save(p,base64.b64decode(entry['original']),entry['originalMode']);run('restorecon',str(p))
-    if MODULE in modules() and not Path('/var/lib/ablestack-process-actions/journal.json').exists():
+    if MODULE in modules() and not Path('/var/lib/ablestack-process-actions/journal.json').exists() and not any(Path('/var/lib/ablestack-process-actions/profiles').glob('*.json')):
+        if ENV_PATTERN in local_mappings():run('semanage','fcontext','-d',ENV_PATTERN)
         pattern=re.escape('/var/lib/ablestack-process-actions')+'(/.*)?'
         if pattern in local_mappings():run('semanage','fcontext','-d',pattern)
         run('semodule','-r',MODULE)
@@ -112,6 +119,7 @@ def apply(payload):
             if journal.stat().st_mode&0o077:raise RuntimeError('Unsafe action journal directory')
             pattern=re.escape(str(journal))+'(/.*)?'
             if ':ablestack_process_action_state_t:' not in known.get(pattern,''):raise RuntimeError('Managed journal mapping changed')
+            ensure_environment_mapping(local_mappings())
             run('restorecon','-R',str(journal))
             return 'UNCHANGED'
         restore(old, inputs)
@@ -139,6 +147,7 @@ def apply(payload):
         mappings=local_mappings()
         if pattern not in mappings:run('semanage','fcontext','-a','-t','ablestack_process_action_state_t',pattern)
         elif ':ablestack_process_action_state_t:' not in mappings[pattern]:raise RuntimeError('Conflicting action journal mapping')
+        ensure_environment_mapping(local_mappings())
         run('restorecon','-R',str(journal))
         state['phase']='installed';write_state(state)
         return 'INSTALLED'

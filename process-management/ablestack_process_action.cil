@@ -65,3 +65,10 @@
 
 ; Registered profiles verify fixed supervisor files; QGA gains no write/execute rights.
 (allow ablestack_process_action_t systemd_unit_file_type (file (getattr open read)))
+
+; PID 1 reads only private profile environment references, not the action journal.
+(type ablestack_process_profile_env_t)
+(typeattributeset file_type (ablestack_process_profile_env_t))
+(allow init_t ablestack_process_action_state_t (dir (getattr search)))
+(allow init_t ablestack_process_profile_env_t (file (getattr open read)))
+(allow ablestack_process_action_t ablestack_process_profile_env_t (file (getattr open read)))
