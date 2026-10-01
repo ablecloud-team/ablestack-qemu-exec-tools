@@ -88,6 +88,7 @@ def load(identifier,vm):
     live=a.props(unit,time.monotonic()+2)
     if live.get('LoadState')!='loaded' or live.get('CanStart')!='yes' or live.get('WorkingDirectory')!=p['cwd'] or live.get('User')!=p['account'] or live.get('Type')!='simple' or live.get('Restart')!='no':raise ValueError('invalid loaded supervisor')
     if any(live.get(key) for key in ('DropInPaths','ExecStartPre','ExecStartPost','ExecCondition','ExecStop','ExecStopPost','TriggeredBy','RequiredBy','BoundBy','ConsistsOf')):raise ValueError('external supervisor configuration')
+    if p['environmentRef'] is not None and live.get('EnvironmentFiles')!=p['environmentRef']+' (ignore_errors=no)':raise ValueError('environment reference is not loaded')
     if effective(live)!=p['supervisor']['effectiveHash']:raise ValueError('loaded supervisor changed')
     b=a.strict(regular(binding).decode());a.fields(b,'vmUuid bootId pid startTicks')
     if b['vmUuid']!=vm:raise ValueError('binding scope')
@@ -237,7 +238,7 @@ def provision(description,pid):
         if not isinstance(p[name],str) or len(p[name])>1024 or any(ord(c)<32 for c in p[name]):raise ValueError('profile path/account')
     if p['environmentRef'] is not None:
         if not isinstance(p['environmentRef'],str) or len(p['environmentRef'])>1024 or any(ord(c)<32 for c in p['environmentRef']):raise ValueError('environment reference')
-        regular(p['environmentRef']);text+='EnvironmentFile='+quote(p['environmentRef'])+'\n'
+        regular(p['environmentRef']);text+='EnvironmentFile='+p['environmentRef'].replace('%','%%')+'\n'
     path=Path('/etc/systemd/system')/unit
     save_bytes(path,text.encode())
     if Path('/usr/sbin/restorecon').exists():subprocess.run(['/usr/sbin/restorecon',str(path)],check=True,timeout=10)

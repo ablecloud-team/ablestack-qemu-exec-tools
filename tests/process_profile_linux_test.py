@@ -33,6 +33,10 @@ class Profiles(unittest.TestCase):
   data=b'[Service]\nType=simple\n';path=self.base/'raw.service'
   p.save_bytes(path,data);self.assertEqual(path.read_bytes(),data);self.assertEqual(path.stat().st_mode&0o777,0o600)
   p.save_bytes(path,b'KEY=value\n');self.assertEqual(path.read_bytes(),b'KEY=value\n')
+ def test_unloaded_environment_reference_rejected_before_signal(self):
+  self.definition['environmentRef']=str(self.base/'env');p.save_bytes(self.base/'env',b'A=secret\n');a.save(self.directory/(self.id+'.json'),self.definition)
+  with patch.object(a.signal,'pidfd_send_signal',side_effect=AssertionError('mutation')):
+   with self.assertRaisesRegex(ValueError,'environment reference is not loaded'):p.checked(self.request)
  def test_unordered_systemd_dependencies_preserve_effective_hash(self):
   self.assertEqual(p.effective(dict(self.loaded,Requires='-.mount sysinit.target system.slice',Wants='b.target a.target')),p.effective(dict(self.loaded,Requires='system.slice -.mount sysinit.target',Wants='a.target b.target')))
  def test_registered_identity_metadata_omits_argument_values(self):
