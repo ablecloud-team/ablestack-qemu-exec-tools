@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # shellcheck source=/dev/null
-source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_allocation.sh"
 
 v2k_interactive_has_tty() { [[ -t 0 && ( -t 2 || -t 1 ) ]]; }
 
@@ -172,12 +172,14 @@ v2k_interactive_print_command() {
 
 v2k_cmd_wizard() {
   local vm="" vcenter_host="" username="" password="" cred_file="" vddk_cred_file="" insecure="1" compat_profile="${V2K_COMPAT_PROFILE:-auto}"
+  local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0 target_preallocation_source=""
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json="" rbd_pool="${V2K_WIZARD_RBD_POOL:-rbd}" file_root="${V2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file="" cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id="" cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local split="${V2K_WIZARD_DEFAULT_SPLIT:-phase1}" shutdown="guest" cutover_policy="start" yes=0 print_command=0 target_name inventory_json cloud_choices cloud_storage_json cloud_storage_path cloud_storage_scope cloud_nic_mappings_json
   while [[ $# -gt 0 ]]; do case "$1" in
     --vm) vm="${2:-}"; shift 2;; --vcenter) vcenter_host="${2:-}"; shift 2;; --username) username="${2:-}"; shift 2;; --password) password="${2:-}"; shift 2;; --cred-file) cred_file="${2:-}"; shift 2;; --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;; --compat-profile) compat_profile="${2:-}"; shift 2;; --insecure) insecure="${2:-}"; shift 2;;
+    --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
     --target-preallocation) image_preallocation_enum "${2-}" || return $?; target_preallocation="$2"; target_preallocation_set=1; shift 2;;
     --target-profile|--profile) target_profile="${2:-}"; shift 2;; --target-provider) target_provider="${2:-}"; shift 2;; --target-storage) target_storage="${2:-}"; shift 2;; --target-format) target_format="${2:-}"; shift 2;; --dst) dst="${2:-}"; shift 2;; --target-map-json) target_map_json="${2:-}"; shift 2;; --rbd-pool) rbd_pool="${2:-}"; shift 2;; --file-root) file_root="${2:-}"; shift 2;;
     --cloud-endpoint) cloud_endpoint="${2:-}"; shift 2;; --cloud-api-key) cloud_api_key="${2:-}"; shift 2;; --cloud-secret-key) cloud_secret_key="${2:-}"; shift 2;; --cloud-cred-file) cloud_cred_file="${2:-}"; shift 2;; --cloud-zone-id) cloud_zone_id="${2:-}"; shift 2;; --cloud-service-offering-id) cloud_service_offering_id="${2:-}"; shift 2;; --cloud-network-id) cloud_network_ids="${cloud_network_ids:+${cloud_network_ids},}${2:-}"; shift 2;; --cloud-network-ids) cloud_network_ids="${2:-}"; shift 2;; --cloud-storage-id) cloud_storage_id="${2:-}"; shift 2;; --cloud-disk-offering-id) cloud_disk_offering_id="${2:-}"; shift 2;; --cloud-host-id) cloud_host_id="${2:-}"; shift 2;; --cloud-account) cloud_account="${2:-}"; shift 2;; --cloud-domain-id) cloud_domain_id="${2:-}"; shift 2;; --cloud-project-id) cloud_project_id="${2:-}"; shift 2;; --cloud-name) cloud_name="${2:-}"; shift 2;; --cloud-display-name) cloud_display_name="${2:-}"; shift 2;; --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; shift 2;;
@@ -231,6 +233,8 @@ v2k_cmd_wizard() {
   # Passed through Bash dynamic scope to the run/init resolver.
   # shellcheck disable=SC2034
   local V2K_PREALLOCATION_SOURCE="${target_preallocation_source}"
+  migration_cloud_allocation_copy_choice v2k "${target_provider}" "${target_storage}" "${target_preallocation}" "${V2K_MANIFEST:-}" "${cloud_allocation_copy}" "${yes}" "${print_command}" || return $?
+  cloud_allocation_copy="${CLOUD_ALLOCATION_COPY_CHOICE}"
   target_name="${cloud_name:-v2k-$(v2k_interactive_safe_name "${vm}")-$(date +%Y%m%d%H%M%S)}"; cloud_name="${cloud_name:-${target_name}}"; cloud_display_name="${cloud_display_name:-${cloud_name}}"
   if [[ -z "${V2K_WORKDIR:-}" && "${split}" != "phase2" ]]; then V2K_WORKDIR="$(v2k_interactive_default_workdir "${vm}")"; export V2K_WORKDIR; V2K_MANIFEST="${V2K_WORKDIR}/manifest.json"; export V2K_MANIFEST; fi
   inventory_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter_host}")" || {
@@ -261,6 +265,7 @@ v2k_cmd_wizard() {
     jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' <<<"${cloud_nic_mappings_json}" >&2
   fi
   local -a run_args=(run --foreground --vm "${vm}" --vcenter "${vcenter_host}" --split "${split}" --shutdown "${shutdown}" --compat-profile "${compat_profile}" --target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
+  [[ "${cloud_allocation_copy}" != 1 ]] || run_args+=(--cloud-allocation-copy)
   if [[ "${target_storage}" == file ]]; then
     run_args+=(--target-preallocation "${target_preallocation}")
   elif [[ "${target_preallocation_set}" == 1 ]]; then

@@ -347,6 +347,7 @@ if [[ "$TOOL" == v2k ]]; then source "$REPO/lib/v2k/orchestrator.sh"; fi
         args += ["--vcenter" if tool == "v2k" else "--pc", "source.invalid"]
         args += ["--target-profile", "cloud-filesystem" if cloud else "libvirt-qcow2"]
         if cloud:
+            args += ["--cloud-allocation-copy"]
             args += ["--cloud-endpoint", "https://cloud.invalid", "--cloud-api-key", "fixture-key",
                      "--cloud-secret-key", "fixture-cloud-secret", "--cloud-zone-id", "zone",
                      "--cloud-service-offering-id", "offering", "--cloud-network-id", "network",

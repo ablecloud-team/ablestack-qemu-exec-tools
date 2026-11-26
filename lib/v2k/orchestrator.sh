@@ -207,6 +207,7 @@ v2k_cmd_run_foreground() {
 
   local do_cleanup="1" keep_snapshots="0" keep_workdir="1"
   local default_jobs="" default_chunk="" default_coalesce_gap=""
+  local cloud_allocation_copy=0
   local init_target_preallocation_set=0
   local -a preallocation_args=("$@")
   local base_args_str="" incr_args_str="" cutover_args_str=""
@@ -257,6 +258,7 @@ v2k_cmd_run_foreground() {
       --incr-args) incr_args_str="${2:-}"; shift 2;;
       --cutover-args) cutover_args_str="${2:-}"; shift 2;;
       --mode) init_mode="${2:-}"; shift 2;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
         init_target_preallocation_set=1; shift 2 ;;
@@ -375,6 +377,7 @@ v2k_cmd_run_foreground() {
   local -a init_args=( --vm "${vm}" --vcenter "${vcenter_host}" --dst "${dst}" --mode "${init_mode}" )
   init_args+=( --compat-profile "${V2K_COMPAT_PROFILE:-auto}" )
   [[ "${target_provider_arg_set}" -eq 1 ]] && init_args+=( --target-provider "${target_provider}" )
+  [[ "${cloud_allocation_copy}" != 1 ]] || init_args+=( --cloud-allocation-copy )
   [[ -z "${resolved_preallocation}" ]] || init_args+=( --target-preallocation "${resolved_preallocation}" )
   [[ -n "${init_target_format}" ]] && init_args+=( --target-format "${init_target_format}" )
   [[ -n "${init_target_storage}" ]] && init_args+=( --target-storage "${init_target_storage}" )
@@ -568,6 +571,9 @@ v2k_cmd_run_foreground() {
   if [[ "${skip_init}" -eq 0 ]]; then
     v2k_cmd_init "${init_args[@]}"
   fi
+
+  if [[ "${V2K_DRY_RUN:-0}" != 1 ]]; then migration_cloud_allocation_allow_copy "${V2K_MANIFEST}" "${cloud_allocation_copy}" || return $?; fi
+  migration_cloud_allocation_check_manifest v2k "${V2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
 
   if [[ "${skip_cbt}" -eq 0 ]]; then
     v2k_cmd_cbt enable

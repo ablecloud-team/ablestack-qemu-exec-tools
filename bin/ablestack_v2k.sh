@@ -180,6 +180,7 @@ Init-stage options:
   --mode govc                               Inventory mode (default: govc)
   --target-format qcow2|raw                 Target image format (default: qcow2)
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)
   --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>
@@ -253,6 +254,7 @@ Target profiles:
   --target-storage file|block|rbd
   --target-format qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --dst <path>
   --target-map-json <json>
   --rbd-pool <pool>                         Default: rbd
@@ -295,6 +297,7 @@ Options:
   --compat-profile <id|auto>   Compatibility profile (default: auto)
   --target-format qcow2|raw                 Target image format (default: qcow2)
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)
   --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>

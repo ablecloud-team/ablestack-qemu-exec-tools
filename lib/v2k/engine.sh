@@ -2954,6 +2954,7 @@ v2k_cmd_init() {
 
   # New: target override options (CLI -> env)
   local target_format="" target_storage="" target_map_json=""
+  local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
@@ -2973,6 +2974,7 @@ v2k_cmd_init() {
       --compat-profile) compat_profile="${2:-}"; shift 2;;
 
       # --- new options ---
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
         target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
@@ -3172,6 +3174,7 @@ EOF
     return 2
   fi
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
+  migration_cloud_allocation_allow_copy "${V2K_MANIFEST}" "${cloud_allocation_copy}" || return $?
 
   local controller_validation_rc=0
   if v2k_manifest_validate_source_disk_controllers "${V2K_MANIFEST}"; then
@@ -3226,6 +3229,8 @@ EOF
   v2k_manifest_set_compat_detected_esxi_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_ESXI_VERSION:-}"
   v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}" "${V2K_NBDKIT_BIN:-}" "${V2K_NBDKIT_VDDK_PLUGIN:-}"
   v2k_compat_write_env "${V2K_WORKDIR}" || true
+  migration_cloud_allocation_check_manifest v2k "${V2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
+
   v2k_manifest_phase_done "${V2K_MANIFEST}" "init"
 
   v2k_event INFO "init" "" "phase_done" "{\"manifest\":\"${V2K_MANIFEST}\",\"workdir\":\"${V2K_WORKDIR}\"}"

@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # shellcheck source=/dev/null
-source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_allocation.sh"
 
 n2k_interactive_has_tty() {
   [[ -t 0 && ( -t 2 || -t 1 ) ]]
@@ -549,6 +549,7 @@ EOF
 
 n2k_cmd_wizard() {
   local vm="" pc="" username="" password="" cred_file="" insecure="1"
+  local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0 target_preallocation_source=""
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json=""
   local rbd_pool="${N2K_WIZARD_RBD_POOL:-rbd}" file_root="${N2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
@@ -576,6 +577,7 @@ n2k_cmd_wizard() {
       --target-profile|--profile) target_profile="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
         target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
@@ -713,6 +715,8 @@ n2k_cmd_wizard() {
   # Passed through Bash dynamic scope to the run/init resolver.
   # shellcheck disable=SC2034
   local N2K_PREALLOCATION_SOURCE="${target_preallocation_source}"
+  migration_cloud_allocation_copy_choice n2k "${target_provider}" "${target_storage}" "${target_preallocation}" "${N2K_MANIFEST:-}" "${cloud_allocation_copy}" "${yes}" "${print_command}" || return $?
+  cloud_allocation_copy="${CLOUD_ALLOCATION_COPY_CHOICE}"
   rbd_access_mode="${rbd_access_mode:-librbd}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   if [[ -n "${target_map_json}" ]]; then
@@ -868,6 +872,7 @@ n2k_cmd_wizard() {
   run_args+=(--source-api "${source_api}" --split "${split}" --shutdown "${shutdown}")
   [[ "${force_v3}" == "true" ]] && run_args+=(--force-v3)
   run_args+=(--target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
+  [[ "${cloud_allocation_copy}" != 1 ]] || run_args+=(--cloud-allocation-copy)
   if [[ "${target_storage}" == file ]]; then
     run_args+=(--target-preallocation "${target_preallocation}")
   elif [[ "${target_preallocation_set}" == 1 ]]; then

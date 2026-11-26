@@ -154,6 +154,7 @@ n2k_cmd_init() {
   local username="" password="" insecure="1"
   local inventory_json_arg="" inventory_source="none"
   local target_format="qcow2" target_storage="file" target_map_json="{}" rbd_access_mode="librbd"
+  local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
@@ -176,6 +177,7 @@ n2k_cmd_init() {
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-file) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
         target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
@@ -302,10 +304,13 @@ n2k_cmd_init() {
     return 2
   fi
   n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}" "${resolved_preallocation}" "${resolved_preallocation_source}"
+  migration_cloud_allocation_allow_copy "${N2K_MANIFEST}" "${cloud_allocation_copy}" || return $?
   if [[ -n "${inventory_json}" ]]; then
     local controller_validation_rc=0
     if n2k_manifest_record_source_controller_validation "${N2K_MANIFEST}"; then
-      n2k_event INFO "init" "" "source_disk_controller_validation_passed" \
+      migration_cloud_allocation_check_manifest n2k "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
+
+  n2k_event INFO "init" "" "source_disk_controller_validation_passed" \
         "$(jq -c '{
             supported_controllers:.runtime.source_validation.supported_controllers,
             root_selection:.runtime.source_validation.root_selection,
@@ -504,6 +509,7 @@ n2k_build_preflight_result_from_args() {
   local cred_file="" username="" password="" insecure="1" probe_legacy=false
   local v4_vmm="auto" v4_dp="auto" v4_data_plane="auto" legacy="auto" legacy_verified="auto" cold="auto" manual="auto"
   local target_storage="auto" target_format="qcow2" rbd_access_mode="librbd"
+  local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt" target_provider_arg_set=0
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
@@ -519,6 +525,7 @@ n2k_build_preflight_result_from_args() {
       --vm) vm="${2:-}"; shift 2 ;;
       --mode) mode="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
         target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
@@ -680,8 +687,10 @@ n2k_build_preflight_result_from_args() {
     "${v4_vmm}" "${v4_dp}" "${v4_data_plane}" "${legacy}" "${legacy_verified}" "${cold}" "${manual}" \
     "${target_storage}" "${target_format}" "${source_api_policy}" "${target_provider}")" || return $?
   image_preallocation_resolve "$(jq -r '.target.selected_storage' <<< "${result}")" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
-  jq -c --arg mode "${IMAGE_PREALLOCATION_MODE}" --arg origin "${IMAGE_PREALLOCATION_SOURCE}" '
-    .target.preallocation = (if $mode == "" then null else $mode end)
+  jq -c --arg mode "${IMAGE_PREALLOCATION_MODE}" --arg origin "${IMAGE_PREALLOCATION_SOURCE}" --argjson copy "${cloud_allocation_copy}" '
+    .target.allocation_import_copy_allowed = ($copy == 1)
+    | .target.allocation_import_verified = false
+    | .target.preallocation = (if $mode == "" then null else $mode end)
     | .target.preallocation_source = $origin
     | .target.required_space_policy = (if $mode == "falloc" or $mode == "full" then "virtual_size_plus_metadata" else "sparse" end)' <<< "${result}"
 }
@@ -1124,6 +1133,7 @@ n2k_cmd_run() {
   local username="" password="" insecure="1" inventory_source="api" inventory_json_arg=""
   local target_format="qcow2" target_storage="file" target_map_json="" rbd_access_mode="librbd"
   local rbd_access_mode_arg_set=0
+  local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt" target_provider_arg_set=0
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
@@ -1159,6 +1169,7 @@ n2k_cmd_run() {
       --insecure) insecure="${2:-}"; shift 2 ;;
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
         target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
@@ -1325,6 +1336,7 @@ n2k_cmd_run() {
     [[ -n "${vm}" ]] || n2k_die "run --split ${split} requires --vm when no manifest exists"
     [[ -n "${pc}" ]] || n2k_die "run --split ${split} requires --pc when no manifest exists"
     local -a init_args=(--vm "${vm}" --pc "${pc}" --mode "${mode}" --inventory-source "${inventory_source}" --target-format "${target_format}" --target-storage "${target_storage}" --rbd-access-mode "${rbd_access_mode}")
+    [[ "${cloud_allocation_copy}" != 1 ]] || init_args+=(--cloud-allocation-copy)
     [[ -z "${resolved_preallocation}" ]] || init_args+=(--target-preallocation "${resolved_preallocation}")
     [[ -n "${inventory_json_arg}" ]] && init_args+=(--inventory-json "${inventory_json_arg}")
     [[ "${target_provider_arg_set}" -eq 1 ]] && init_args+=(--target-provider "${target_provider}")
@@ -1352,6 +1364,8 @@ n2k_cmd_run() {
     n2k_require_manifest
   fi
 
+  if [[ "${N2K_DRY_RUN:-0}" != 1 ]]; then migration_cloud_allocation_allow_copy "${N2K_MANIFEST}" "${cloud_allocation_copy}" || return $?; fi
+
   if [[ "${target_provider_arg_set}" -eq 1 || "${cloud_config_arg_set}" -eq 1 ]]; then
     local cloud_config_json
     cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
@@ -1362,6 +1376,8 @@ n2k_cmd_run() {
   if [[ "${target_provider}" == "ablestack-cloud" && "$(jq -r '.target.storage.type // ""' "${N2K_MANIFEST}")" == "file" ]]; then
     n2k_cloud_target_resolve_file_storage_for_manifest "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" >/dev/null
   fi
+
+  migration_cloud_allocation_check_manifest n2k "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
 
   vm="${vm:-$(n2k_run_manifest_value "${N2K_MANIFEST}" '.source.vm.name // empty')}"
   pc="${pc:-$(n2k_run_manifest_value "${N2K_MANIFEST}" '.source.pc // empty')}"

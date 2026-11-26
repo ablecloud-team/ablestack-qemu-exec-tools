@@ -120,6 +120,7 @@ Options:
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --target-provider <p>   libvirt|ablestack-cloud; default libvirt
   --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
@@ -187,6 +188,7 @@ Options:
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --target-provider <p>   libvirt|ablestack-cloud; default libvirt
   --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
@@ -250,6 +252,7 @@ Options:
   --dst <path>            Destination root
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -365,6 +368,7 @@ Source options:
 
 Target convenience options:
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-pool <pool>       RBD pool for generated target paths; default rbd
   --file-root <path>      Libvirt file target root; default /var/lib/libvirt/images
                           Cloud FileSystem resolves this from selected storage
@@ -437,6 +441,7 @@ Options:
   --inventory-source <s>  none|fixture|api
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access

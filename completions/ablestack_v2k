@@ -142,7 +142,7 @@ _ablestack_v2k()
         --no-cleanup --keep-snapshots --keep-workdir
         --jobs --chunk --coalesce-gap
         --base-args --incr-args --cutover-args
-        --mode --target-format --target-preallocation --target-storage --target-map-json --target-provider --force-block-device
+        --mode --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
         --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
         --cloud-network-id --cloud-network-ids
@@ -163,7 +163,7 @@ _ablestack_v2k()
         --vm --vcenter --username --password
         --cred-file --vddk-cred-file --compat-profile --insecure
         --target-profile --profile --target-provider
-        --target-format --target-preallocation --target-storage --target-map-json
+        --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json
         --dst --rbd-pool --file-root
         --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
@@ -194,7 +194,7 @@ _ablestack_v2k()
       local -a init_opts=(
         --vm --vcenter --dst
         --mode --cred-file --vddk-cred-file --compat-profile
-        --target-format --target-preallocation --target-storage --target-map-json --target-provider --force-block-device
+        --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
         --cloud-endpoint --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
         --cloud-network-id --cloud-network-ids
