@@ -236,19 +236,22 @@ v2k_transfer_base_one() {
     fmt="$(jq -r '.target.format // "qcow2"' "${manifest}")"
     st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
 
+    image_preallocation_from_manifest "${manifest}" || return $?
+    local preallocation="${IMAGE_PREALLOCATION_MODE}"
+    local base_method="${V2K_BASE_METHOD:-nbdcopy}"
+    base_method="$(printf '%s' "${base_method}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    if [[ "${st}" == rbd || "${base_method}" != nbdcopy ]]; then base_method=qemu-img; fi
+
+    if [[ "${st}" == file && "${V2K_DRY_RUN:-0}" != 1 && "$(jq -r ".disks[${idx}].transfer.base_done // false" "${manifest}")" == true ]]; then
+      image_preallocation_verify "${manifest}" "${idx}" "${target_path}" "${fmt}" "${size_bytes}" "${preallocation}" resume || return $?
+      v2k_event INFO "sync.base" "${disk_id}" "resume_disk_already_complete" '{}'
+      return 0
+    fi
+
     if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
       kind="file-qcow2"
-      mkdir -p "$(dirname "${target_path}")"
-      # qcow2??먼�? 만들?�둬??qemu-nbd attach 가??      
-      if [[ ! -f "${target_path}" ]]; then
-        qemu-img create -f qcow2 "${target_path}" "${size_bytes}" >/dev/null
-      fi
     elif [[ "${st}" == "file" && "${fmt}" == "raw" ]]; then
       kind="file-raw"
-      mkdir -p "$(dirname "${target_path}")"
-      if [[ ! -f "${target_path}" ]]; then
-        truncate -s "${size_bytes}" "${target_path}"
-      fi
     elif [[ "${st}" == "block" ]]; then
       kind="block-device"
       # target_path는 /dev/sdX 같은 디바이스 자체    
@@ -265,8 +268,23 @@ v2k_transfer_base_one() {
 
     if [[ "${V2K_DRY_RUN:-0}" -eq 1 ]]; then
       v2k_event INFO "sync.base" "${disk_id}" "dry_run" "{}"
-      v2k_manifest_mark_base_done "${manifest}" "${idx}"
       return 0
+    fi
+
+    if [[ "${st}" == file ]]; then
+      local prepare_rc=0
+      (
+        image_preallocation_check_tools "${fmt}" "${preallocation}" "${base_method}" || exit $?
+        image_preallocation_claim "${manifest}" "${idx}" "${target_path}" "${preallocation}" "${base_method}" || exit $?
+        if [[ "${base_method}" == nbdcopy ]]; then
+          qemu-img create -f "${fmt}" -o "preallocation=${preallocation}" "${target_path}" "${size_bytes}" >/dev/null || exit $?
+          image_preallocation_record "${manifest}" "${idx}" "${preallocation}" "${base_method}" created || exit $?
+        fi
+      ) || prepare_rc=$?
+      if [[ "${prepare_rc}" != 0 ]]; then
+        v2k_transfer_base_record_failure "${manifest}" "${idx}" "${disk_id}" "${prepare_rc}" preallocation_prepare_failed
+        return "${prepare_rc}"
+      fi
     fi
 
     local logdir="${V2K_WORKDIR}/logs"; mkdir -p "${logdir}"
@@ -332,7 +350,6 @@ v2k_transfer_base_one() {
 
     # - V2K_BASE_METHOD=convert : qemu-img convert
     # - V2K_BASE_METHOD=nbdcopy : nbdcopy
-    local base_method="${V2K_BASE_METHOD:-nbdcopy}"
     if [[ "${st}" == "rbd" ]]; then
       base_method="qemu-img"
     fi
@@ -373,6 +390,12 @@ v2k_transfer_base_one() {
       attempt_log="${logdir}/nbdkit_base_${idx}_attempt_${attempt}.log"
       : > "${attempt_log}"
       convert_sparse_args=""
+      if [[ "${st}" == file ]]; then
+        convert_sparse_args="-o preallocation=${preallocation}"
+        if [[ "${preallocation}" == falloc || "${preallocation}" == full ]]; then
+          convert_sparse_args+=" -S 0"
+        fi
+      fi
 
       if [[ "${st}" == "rbd" ]]; then
         active_staging="$(
@@ -414,8 +437,14 @@ v2k_transfer_base_one() {
           run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none ${convert_sparse_args} -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
           ;;
         nbdcopy)
-          if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
-            run_str="${child_env_prefix} ${nbdcopy_path} --progress \"\$uri\" -- \"[\" qemu-nbd -f qcow2 \"${out_target}\" \"]\""
+          local allocated_args=""
+          if [[ "${st}" == file && ( "${preallocation}" == falloc || "${preallocation}" == full ) ]]; then
+            allocated_args="--allocated"
+          fi
+          # NBD destinations cannot be truncated by nbdcopy. Use this for raw
+          # preallocation too, including libnbd versions without --no-truncate.
+          if [[ "${st}" == file && ( "${fmt}" == qcow2 || -n "${allocated_args}" ) ]]; then
+            run_str="${child_env_prefix} ${nbdcopy_path} ${allocated_args} --progress \"\$uri\" -- \"[\" qemu-nbd -f \"${fmt}\" \"${out_target}\" \"]\""
           else
             run_str="${child_env_prefix} ${nbdcopy_path} --progress \"\$uri\" \"${out_target}\""
           fi
@@ -531,6 +560,15 @@ v2k_transfer_base_one() {
         "$(jq -nc --arg target "${target_path}" '{target:$target,atomic:true}')"
       if v2k_rbd_sparse_enabled; then
         v2k_rbd_sparsify "${target_path}"
+      fi
+    fi
+
+    if [[ "${st}" == file ]]; then
+      local allocation_rc=0
+      image_preallocation_verify "${manifest}" "${idx}" "${target_path}" "${fmt}" "${size_bytes}" "${preallocation}" "${base_method}" || allocation_rc=$?
+      if [[ "${allocation_rc}" != 0 ]]; then
+        v2k_transfer_base_record_failure "${manifest}" "${idx}" "${disk_id}" "${allocation_rc}" preallocation_verification_failed
+        return "${allocation_rc}"
       fi
     fi
 

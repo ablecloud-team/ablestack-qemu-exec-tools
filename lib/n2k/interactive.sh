@@ -17,6 +17,9 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+
 n2k_interactive_has_tty() {
   [[ -t 0 && ( -t 2 || -t 1 ) ]]
 }
@@ -546,6 +549,7 @@ EOF
 
 n2k_cmd_wizard() {
   local vm="" pc="" username="" password="" cred_file="" insecure="1"
+  local target_preallocation="" target_preallocation_set=0 target_preallocation_source=""
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json=""
   local rbd_pool="${N2K_WIZARD_RBD_POOL:-rbd}" file_root="${N2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
   local rbd_access_mode=""
@@ -572,6 +576,9 @@ n2k_cmd_wizard() {
       --target-profile|--profile) target_profile="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --dst) dst="${2:-}"; shift 2 ;;
       --target-map-json) target_map_json="${2:-}"; shift 2 ;;
@@ -700,6 +707,12 @@ n2k_cmd_wizard() {
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_target_storage "${target_storage}" || n2k_die "Invalid --target-storage: ${target_storage}"
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
+  image_preallocation_wizard n2k "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${yes}" "${print_command}" || return $?
+  target_preallocation="${IMAGE_PREALLOCATION_MODE}"
+  target_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
+  # Passed through Bash dynamic scope to the run/init resolver.
+  # shellcheck disable=SC2034
+  local N2K_PREALLOCATION_SOURCE="${target_preallocation_source}"
   rbd_access_mode="${rbd_access_mode:-librbd}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   if [[ -n "${target_map_json}" ]]; then
@@ -839,6 +852,7 @@ n2k_cmd_wizard() {
     "${split}" "${shutdown}" "${cutover_policy}" "${dst}" "${cloud_endpoint}" "${cloud_zone_id}" \
     "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_host_id}" \
     "${cloud_name}" "${target_map_json:-}"
+  printf '  Target preallocation: %s (%s)\n' "${target_preallocation:-not_applicable}" "${target_preallocation_source}" >&2
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     printf '  Cloud NIC mappings:\n' >&2
     jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' \
@@ -854,6 +868,11 @@ n2k_cmd_wizard() {
   run_args+=(--source-api "${source_api}" --split "${split}" --shutdown "${shutdown}")
   [[ "${force_v3}" == "true" ]] && run_args+=(--force-v3)
   run_args+=(--target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
+  if [[ "${target_storage}" == file ]]; then
+    run_args+=(--target-preallocation "${target_preallocation}")
+  elif [[ "${target_preallocation_set}" == 1 ]]; then
+    run_args+=(--target-preallocation off)
+  fi
   run_args+=(--rbd-access-mode "${rbd_access_mode}")
   [[ -n "${cred_file}" ]] && run_args+=(--cred-file "${cred_file}")
   [[ -n "${target_map_json}" && "${target_map_json}" != "{}" ]] && run_args+=(--target-map-json "${target_map_json}")

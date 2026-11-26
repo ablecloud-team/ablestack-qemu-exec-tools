@@ -337,6 +337,10 @@ n2k_transfer_cold_base_one() {
   target_path="$(jq -r ".disks[${idx}].transfer.target_path" "${manifest}")"
   target_format="$(jq -r '.target.format // "qcow2"' "${manifest}")"
   target_storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
+  image_preallocation_from_manifest "${manifest}" || return $?
+  local preallocation="${IMAGE_PREALLOCATION_MODE}" preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
+  n2k_event INFO "sync.base" "${disk_id}" "preallocation_selected" \
+    "$(jq -nc --arg mode "${preallocation}" --arg origin "${preallocation_source}" '{preallocation:(if $mode == "" then null else $mode end),source:$origin}')"
   base_done="$(jq -r ".disks[${idx}].transfer.base_done // false" "${manifest}")"
 
   if [[ "${base_done}" == "true" && "${N2K_DRY_RUN:-0}" -ne 1 ]]; then
@@ -496,7 +500,7 @@ n2k_transfer_cold_base_one() {
     done
     bytes_written="${source_size}"
   else
-    n2k_storage_copy_base "${source_path}" "${target_path}" "${target_storage}" "${target_format}" || non_rbd_copy_rc=$?
+    n2k_storage_copy_base "${source_path}" "${target_path}" "${target_storage}" "${target_format}" "${preallocation}" "${manifest}" "${idx}" || non_rbd_copy_rc=$?
     if [[ "${non_rbd_copy_rc}" -ne 0 ]]; then
       n2k_transfer_cold_record_failure \
         "${manifest}" "${idx}" "${disk_id}" "${non_rbd_copy_rc}" "base_copy_failed" \

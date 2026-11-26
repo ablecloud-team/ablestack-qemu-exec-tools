@@ -207,6 +207,8 @@ v2k_cmd_run_foreground() {
 
   local do_cleanup="1" keep_snapshots="0" keep_workdir="1"
   local default_jobs="" default_chunk="" default_coalesce_gap=""
+  local init_target_preallocation_set=0
+  local -a preallocation_args=("$@")
   local base_args_str="" incr_args_str="" cutover_args_str=""
 
   local vm="" vcenter_host="" username="" password="" dst=""
@@ -255,6 +257,9 @@ v2k_cmd_run_foreground() {
       --incr-args) incr_args_str="${2:-}"; shift 2;;
       --cutover-args) cutover_args_str="${2:-}"; shift 2;;
       --mode) init_mode="${2:-}"; shift 2;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        init_target_preallocation_set=1; shift 2 ;;
       --target-format) init_target_format="${2:-}"; shift 2;;
       --target-storage) init_target_storage="${2:-}"; shift 2;;
       --target-map-json) init_target_map_json="${2:-}"; shift 2;;
@@ -325,6 +330,19 @@ v2k_cmd_run_foreground() {
       export V2K_MANIFEST="${V2K_WORKDIR}/manifest.json"
   fi
 
+  image_preallocation_resolve_args "${V2K_MANIFEST}" "${V2K_PREALLOCATION_SOURCE:-cli}" "${preallocation_args[@]}" || return $?
+  local resolved_preallocation="${IMAGE_PREALLOCATION_MODE}"
+  local V2K_PREALLOCATION_SOURCE="${IMAGE_PREALLOCATION_SOURCE}"
+  if [[ -n "${resolved_preallocation}" && "${V2K_DRY_RUN:-0}" != 1 && "${split}" != phase2 ]] &&
+      { [[ ! -f "${V2K_MANIFEST}" ]] || ! image_preallocation_has_targets "${V2K_MANIFEST}"; }; then
+    local policy_format="${init_target_format:-qcow2}"
+    [[ ! -f "${V2K_MANIFEST}" ]] || policy_format="$(jq -r '.target.format // "qcow2"' "${V2K_MANIFEST}")"
+    image_preallocation_check_tools "${policy_format}" "${resolved_preallocation}" "${V2K_BASE_METHOD:-nbdcopy}" || return $?
+  fi
+  if [[ -f "${V2K_MANIFEST}" && "${init_target_preallocation_set}" == 1 && "${V2K_DRY_RUN:-0}" != 1 ]]; then
+    image_preallocation_store "${V2K_MANIFEST}" "${resolved_preallocation}" "${V2K_PREALLOCATION_SOURCE}" || return $?
+  fi
+
   # Create workdir if not exists (important for full run, harmless for phase2)
   mkdir -p "${V2K_WORKDIR}"
 
@@ -357,6 +375,7 @@ v2k_cmd_run_foreground() {
   local -a init_args=( --vm "${vm}" --vcenter "${vcenter_host}" --dst "${dst}" --mode "${init_mode}" )
   init_args+=( --compat-profile "${V2K_COMPAT_PROFILE:-auto}" )
   [[ "${target_provider_arg_set}" -eq 1 ]] && init_args+=( --target-provider "${target_provider}" )
+  [[ -z "${resolved_preallocation}" ]] || init_args+=( --target-preallocation "${resolved_preallocation}" )
   [[ -n "${init_target_format}" ]] && init_args+=( --target-format "${init_target_format}" )
   [[ -n "${init_target_storage}" ]] && init_args+=( --target-storage "${init_target_storage}" )
   [[ -n "${init_target_map_json}" ]] && init_args+=( --target-map-json "${init_target_map_json}" )
@@ -536,6 +555,14 @@ v2k_cmd_run_foreground() {
     skip_cbt=1
     skip_base=1
     v2k_event INFO run "" skip_base_phase2 "{\"manifest\":\"${V2K_MANIFEST}\"}"
+  fi
+
+  if [[ -f "${V2K_MANIFEST}" && "${split}" != phase2 ]]; then
+    skip_init=1
+    if [[ "$(jq -r '.phases.base_sync.done // .phases.base.done // false' "${V2K_MANIFEST}")" == true ]]; then
+      skip_cbt=1
+      skip_base=1
+    fi
   fi
 
   if [[ "${skip_init}" -eq 0 ]]; then
@@ -746,6 +773,9 @@ v2k_cmd_run_foreground() {
 # Background launcher (default): run_id ë°˜í™˜ ???Œì»¤ë¥?nohupë¡?ë¶„ë¦¬ ?¤í–‰
 # -----------------------------------------------------------------------------
 v2k_cmd_run() {
+  local policy_manifest="${V2K_MANIFEST:-}"
+  [[ -n "${policy_manifest}" || -z "${V2K_WORKDIR:-}" ]] || policy_manifest="${V2K_WORKDIR}/manifest.json"
+  image_preallocation_resolve_args "${policy_manifest}" "${V2K_PREALLOCATION_SOURCE:-cli}" "$@" || return $?
   # If user explicitly wants foreground
   local foreground=0
   local -a args=( "$@" )

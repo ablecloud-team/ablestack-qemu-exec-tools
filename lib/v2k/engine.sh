@@ -2954,6 +2954,7 @@ v2k_cmd_init() {
 
   # New: target override options (CLI -> env)
   local target_format="" target_storage="" target_map_json=""
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
@@ -2972,6 +2973,9 @@ v2k_cmd_init() {
       --compat-profile) compat_profile="${2:-}"; shift 2;;
 
       # --- new options ---
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2;;
       --target-storage) target_storage="${2:-}"; shift 2;;
       --target-map-json) target_map_json="${2:-}"; shift 2;;
@@ -3041,6 +3045,9 @@ v2k_cmd_init() {
     fi
     export V2K_TARGET_STORAGE_MAP_JSON="${map_compact}"
   fi
+
+  image_preallocation_resolve "${V2K_TARGET_STORAGE_TYPE:-file}" "${V2K_TARGET_FORMAT:-qcow2}" "${target_preallocation}" "${target_preallocation_set}" "" "${V2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  export V2K_TARGET_PREALLOCATION="${target_preallocation}" V2K_TARGET_PREALLOCATION_SET="${target_preallocation_set}"
 
   # Safety: block/rbd storage requires map json
   if [[ "${V2K_TARGET_STORAGE_TYPE:-file}" == "block" || "${V2K_TARGET_STORAGE_TYPE:-file}" == "rbd" ]]; then
@@ -3160,6 +3167,10 @@ EOF
     "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_provider\":\"${target_provider}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
 
   # Build manifest using inventory json + target settings (from env)
+  if [[ -f "${V2K_MANIFEST}" ]]; then
+    echo 'Manifest already exists; use run with the existing workdir instead of init' >&2
+    return 2
+  fi
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
 
   local controller_validation_rc=0

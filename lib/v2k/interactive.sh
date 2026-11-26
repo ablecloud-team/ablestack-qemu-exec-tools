@@ -6,6 +6,9 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+
 v2k_interactive_has_tty() { [[ -t 0 && ( -t 2 || -t 1 ) ]]; }
 
 v2k_interactive_prompt_text() {
@@ -169,15 +172,38 @@ v2k_interactive_print_command() {
 
 v2k_cmd_wizard() {
   local vm="" vcenter_host="" username="" password="" cred_file="" vddk_cred_file="" insecure="1" compat_profile="${V2K_COMPAT_PROFILE:-auto}"
+  local target_preallocation="" target_preallocation_set=0 target_preallocation_source=""
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json="" rbd_pool="${V2K_WIZARD_RBD_POOL:-rbd}" file_root="${V2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file="" cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id="" cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local split="${V2K_WIZARD_DEFAULT_SPLIT:-phase1}" shutdown="guest" cutover_policy="start" yes=0 print_command=0 target_name inventory_json cloud_choices cloud_storage_json cloud_storage_path cloud_storage_scope cloud_nic_mappings_json
   while [[ $# -gt 0 ]]; do case "$1" in
     --vm) vm="${2:-}"; shift 2;; --vcenter) vcenter_host="${2:-}"; shift 2;; --username) username="${2:-}"; shift 2;; --password) password="${2:-}"; shift 2;; --cred-file) cred_file="${2:-}"; shift 2;; --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;; --compat-profile) compat_profile="${2:-}"; shift 2;; --insecure) insecure="${2:-}"; shift 2;;
+    --target-preallocation) image_preallocation_enum "${2-}" || return $?; target_preallocation="$2"; target_preallocation_set=1; shift 2;;
     --target-profile|--profile) target_profile="${2:-}"; shift 2;; --target-provider) target_provider="${2:-}"; shift 2;; --target-storage) target_storage="${2:-}"; shift 2;; --target-format) target_format="${2:-}"; shift 2;; --dst) dst="${2:-}"; shift 2;; --target-map-json) target_map_json="${2:-}"; shift 2;; --rbd-pool) rbd_pool="${2:-}"; shift 2;; --file-root) file_root="${2:-}"; shift 2;;
     --cloud-endpoint) cloud_endpoint="${2:-}"; shift 2;; --cloud-api-key) cloud_api_key="${2:-}"; shift 2;; --cloud-secret-key) cloud_secret_key="${2:-}"; shift 2;; --cloud-cred-file) cloud_cred_file="${2:-}"; shift 2;; --cloud-zone-id) cloud_zone_id="${2:-}"; shift 2;; --cloud-service-offering-id) cloud_service_offering_id="${2:-}"; shift 2;; --cloud-network-id) cloud_network_ids="${cloud_network_ids:+${cloud_network_ids},}${2:-}"; shift 2;; --cloud-network-ids) cloud_network_ids="${2:-}"; shift 2;; --cloud-storage-id) cloud_storage_id="${2:-}"; shift 2;; --cloud-disk-offering-id) cloud_disk_offering_id="${2:-}"; shift 2;; --cloud-host-id) cloud_host_id="${2:-}"; shift 2;; --cloud-account) cloud_account="${2:-}"; shift 2;; --cloud-domain-id) cloud_domain_id="${2:-}"; shift 2;; --cloud-project-id) cloud_project_id="${2:-}"; shift 2;; --cloud-name) cloud_name="${2:-}"; shift 2;; --cloud-display-name) cloud_display_name="${2:-}"; shift 2;; --cloud-cpu-speed) cloud_cpu_speed="${2:-}"; shift 2;;
     --split) split="${2:-}"; shift 2;; --shutdown) shutdown="${2:-}"; shift 2;; --define-only) cutover_policy="define-only"; shift;; --apply) cutover_policy="apply"; shift;; --start) cutover_policy="start"; shift;; --yes|-y) yes=1; shift;; --print-command) print_command=1; shift;; *) echo "Unknown option for wizard: $1" >&2; return 2;; esac; done
   case "${split}" in phase1|phase2|full) ;; *) echo "Invalid --split: ${split}" >&2; return 2;; esac
+
+  if [[ -z "${V2K_MANIFEST:-}" && -n "${V2K_WORKDIR:-}" ]]; then
+    V2K_MANIFEST="${V2K_WORKDIR}/manifest.json"
+  fi
+  if [[ -f "${V2K_MANIFEST:-}" ]]; then
+    target_storage="${target_storage:-$(jq -r '.target.storage.type // "file"' "${V2K_MANIFEST}")}"
+    target_format="${target_format:-$(jq -r '.target.format // "qcow2"' "${V2K_MANIFEST}")}"
+    target_provider="${target_provider:-$(jq -r '.target.provider // "libvirt"' "${V2K_MANIFEST}")}"
+    dst="${dst:-$(jq -r '.target.dst_root // empty' "${V2K_MANIFEST}")}"
+    target_map_json="${target_map_json:-$(jq -c '.target.storage.map // {}' "${V2K_MANIFEST}")}"
+    if [[ -z "${target_profile}" ]]; then
+      case "${target_provider}:${target_storage}" in
+        ablestack-cloud:file) target_profile=cloud-filesystem ;;
+        ablestack-cloud:rbd) target_profile=cloud-rbd ;;
+        libvirt:rbd) target_profile=libvirt-rbd ;;
+        *) target_profile=libvirt-qcow2 ;;
+      esac
+    fi
+  elif [[ "${split}" == phase2 ]]; then
+    echo 'wizard phase2 requires an existing --manifest or --workdir' >&2; return 2
+  fi
 
   [[ -z "${cred_file}" ]] || { v2k_vmware_load_cred_file "${cred_file}"; vcenter_host="${vcenter_host:-$(printf '%s' "${GOVC_URL:-}" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##; s#^.*@##; s#:[0-9]+$##')}"; }
   if [[ -z "${vcenter_host}" ]]; then [[ "${yes}" -eq 0 ]] || { echo "--vcenter is required with --yes" >&2; return 2; }; v2k_interactive_has_tty || { echo "--vcenter is required without a TTY" >&2; return 2; }; vcenter_host="$(v2k_interactive_prompt_text "vCenter host" "" 1 "10.10.10.10")"; fi
@@ -199,6 +225,12 @@ v2k_cmd_wizard() {
   fi
   if [[ -z "${target_profile}" ]]; then if [[ "${yes}" -eq 1 ]]; then target_profile="cloud-rbd"; else target_profile="$(v2k_interactive_select_tsv "target profile" "$(v2k_interactive_target_profile_choices)" "" 0 1)"; fi; fi
   case "${target_profile}" in cloud-rbd) target_provider="${target_provider:-ablestack-cloud}"; target_storage="${target_storage:-rbd}"; target_format="${target_format:-raw}";; cloud-filesystem|cloud-qcow2) target_profile="cloud-filesystem"; target_provider="${target_provider:-ablestack-cloud}"; target_storage="${target_storage:-file}"; target_format="${target_format:-qcow2}";; libvirt-rbd) target_provider="${target_provider:-libvirt}"; target_storage="${target_storage:-rbd}"; target_format="${target_format:-raw}";; libvirt-qcow2) target_provider="${target_provider:-libvirt}"; target_storage="${target_storage:-file}"; target_format="${target_format:-qcow2}";; *) echo "Invalid --target-profile: ${target_profile}" >&2; return 2;; esac
+  image_preallocation_wizard v2k "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${V2K_MANIFEST:-}" "${yes}" "${print_command}" || return $?
+  target_preallocation="${IMAGE_PREALLOCATION_MODE}"
+  target_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
+  # Passed through Bash dynamic scope to the run/init resolver.
+  # shellcheck disable=SC2034
+  local V2K_PREALLOCATION_SOURCE="${target_preallocation_source}"
   target_name="${cloud_name:-v2k-$(v2k_interactive_safe_name "${vm}")-$(date +%Y%m%d%H%M%S)}"; cloud_name="${cloud_name:-${target_name}}"; cloud_display_name="${cloud_display_name:-${cloud_name}}"
   if [[ -z "${V2K_WORKDIR:-}" && "${split}" != "phase2" ]]; then V2K_WORKDIR="$(v2k_interactive_default_workdir "${vm}")"; export V2K_WORKDIR; V2K_MANIFEST="${V2K_WORKDIR}/manifest.json"; export V2K_MANIFEST; fi
   inventory_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter_host}")" || {
@@ -223,11 +255,17 @@ v2k_cmd_wizard() {
   if [[ -z "${target_map_json}" && ( "${target_storage}" == "rbd" || "${target_provider}" == "ablestack-cloud" ) ]]; then target_map_json="$(v2k_interactive_build_target_map_json "${inventory_json}" "${target_storage}" "${target_format}" "${rbd_pool}" "${file_root}" "${target_name}")"; fi
 
   printf '\nMigration summary:\n  Source VM: %s\n  vCenter: %s\n  Target profile: %s\n  Target provider: %s\n  Target storage: %s/%s\n  Split: %s\n  Workdir: %s\n  Destination: %s\n' "${vm}" "${vcenter_host}" "${target_profile}" "${target_provider}" "${target_storage}" "${target_format}" "${split}" "${V2K_WORKDIR:-}" "${dst}" >&2
+  printf '  Target preallocation: %s (%s)\n' "${target_preallocation:-not_applicable}" "${target_preallocation_source}" >&2
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     printf '  Cloud NIC mappings:\n' >&2
     jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' <<<"${cloud_nic_mappings_json}" >&2
   fi
   local -a run_args=(run --foreground --vm "${vm}" --vcenter "${vcenter_host}" --split "${split}" --shutdown "${shutdown}" --compat-profile "${compat_profile}" --target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
+  if [[ "${target_storage}" == file ]]; then
+    run_args+=(--target-preallocation "${target_preallocation}")
+  elif [[ "${target_preallocation_set}" == 1 ]]; then
+    run_args+=(--target-preallocation off)
+  fi
   [[ -n "${cred_file}" ]] && run_args+=(--cred-file "${cred_file}"); [[ -n "${vddk_cred_file}" ]] && run_args+=(--vddk-cred-file "${vddk_cred_file}"); [[ -z "${cred_file}" ]] && run_args+=(--username "${username}" --password "${password}" --insecure "${insecure}"); [[ -n "${target_map_json}" && "${target_map_json}" != "{}" ]] && run_args+=(--target-map-json "${target_map_json}")
   case "${cutover_policy}" in define-only) run_args+=(--kvm-vm-policy define-only);; apply) run_args+=(--cutover-args "--apply");; start) run_args+=(--kvm-vm-policy define-and-start);; esac
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then run_args+=(--cloud-endpoint "${cloud_endpoint}" --cloud-api-key "${cloud_api_key}" --cloud-secret-key "${cloud_secret_key}" --cloud-zone-id "${cloud_zone_id}" --cloud-service-offering-id "${cloud_service_offering_id}" --cloud-network-ids "${cloud_network_ids}" --cloud-storage-id "${cloud_storage_id}"); [[ -n "${cloud_cred_file}" ]] && run_args+=(--cloud-cred-file "${cloud_cred_file}"); [[ -n "${cloud_disk_offering_id}" ]] && run_args+=(--cloud-disk-offering-id "${cloud_disk_offering_id}"); [[ -n "${cloud_host_id}" ]] && run_args+=(--cloud-host-id "${cloud_host_id}"); [[ -n "${cloud_account}" ]] && run_args+=(--cloud-account "${cloud_account}"); [[ -n "${cloud_domain_id}" ]] && run_args+=(--cloud-domain-id "${cloud_domain_id}"); [[ -n "${cloud_project_id}" ]] && run_args+=(--cloud-project-id "${cloud_project_id}"); [[ -n "${cloud_name}" ]] && run_args+=(--cloud-name "${cloud_name}"); [[ -n "${cloud_display_name}" ]] && run_args+=(--cloud-display-name "${cloud_display_name}"); [[ -n "${cloud_cpu_speed}" ]] && run_args+=(--cloud-cpu-speed "${cloud_cpu_speed}"); fi

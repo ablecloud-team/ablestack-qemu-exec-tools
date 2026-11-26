@@ -17,14 +17,20 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+
 N2K_SCHEMA_ID="ablestack-n2k/manifest-v1"
 
 n2k_manifest_init() {
+  local requested_preallocation="${15-}" preallocation_source="${16:-default}"
   local manifest="$1" run_id="$2" workdir="$3" vm="$4" pc="$5" mode="$6" dst="$7" target_format="$8" target_storage="$9" target_map_json="${10}"
   local inventory_json="${11:-}"
   local rbd_access_mode="${12:-librbd}"
   local target_provider="${13:-libvirt}"
   local cloud_json="${14:-}"
+  image_preallocation_resolve "${target_storage}" "${target_format}" "${requested_preallocation}" "$(if [[ -n "${requested_preallocation}" ]]; then printf 1; else printf 0; fi)" "" "${preallocation_source}" || return $?
+
   local created_at
   created_at="$(n2k_now_iso)"
 
@@ -64,6 +70,8 @@ n2k_manifest_init() {
     --arg dst "${dst}" \
     --arg target_format "${target_format}" \
     --arg target_storage "${target_storage}" \
+    --arg preallocation "${IMAGE_PREALLOCATION_MODE}" \
+    --arg preallocation_source "${IMAGE_PREALLOCATION_SOURCE}" \
     --arg rbd_access_mode "${rbd_access_mode}" \
     --arg target_provider "${target_provider}" \
     --argjson target_map "${map_compact}" \
@@ -157,6 +165,8 @@ n2k_manifest_init() {
         dst_root: $dst,
         storage: {
           type: $target_storage,
+          preallocation: (if $preallocation == "" then null else $preallocation end),
+          preallocation_source: $preallocation_source,
           rbd_access_mode: $rbd_access_mode,
           priority: (if $target_storage == "rbd" then 1 elif $target_storage == "file" and $target_format == "qcow2" then 2 elif $target_storage == "block" then 3 else 9 end),
           prepared: false,
@@ -995,6 +1005,8 @@ n2k_manifest_status_summary() {
         type: .target.type,
         format: .target.format,
         storage: .target.storage.type,
+        preallocation: (if .target.storage.type == "file" then (.target.storage.preallocation // "off") else null end),
+        preallocation_source: (.target.storage.preallocation_source // (if .target.storage.type == "file" then "legacy" else "manifest" end)),
         dst_root: .target.dst_root
       },
       disks_count: (.disks | length),

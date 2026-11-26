@@ -1216,3 +1216,9 @@ ablestack_n2k \
   --workdir /var/lib/ablestack-n2k/<vm>/<run-id> \
   status --resume-plan
 ```
+
+## 대상 이미지 preallocation
+
+신규 파일 대상의 기본값은 `falloc`입니다. `--target-preallocation`으로 정책을 선택할 수 있으며 wizard에서도 대화형 선택과 명시 입력을 지원합니다.
+
+[지원 모드, wizard, 기존 manifest 재개 및 운영 영향](../v2k_n2k_preallocation.md)을 확인하세요.

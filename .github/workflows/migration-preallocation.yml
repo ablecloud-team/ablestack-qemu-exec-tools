@@ -1,0 +1,51 @@
+name: Migration preallocation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["codex/issue-84-preallocation"]
+  pull_request:
+    paths:
+      - "bin/ablestack_v2k.sh"
+      - "bin/ablestack_n2k.sh"
+      - "lib/v2k/**"
+      - "lib/n2k/**"
+      - "completions/ablestack_*2k"
+      - "tests/image_preallocation_test.py"
+      - ".github/workflows/migration-preallocation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "rockylinux:9"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install image test tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y python3 jq qemu-utils libnbd-bin shellcheck
+          else
+            dnf -y install python3 jq qemu-img libnbd
+          fi
+          qemu-img --version
+          nbdcopy --version
+      - name: Policy, CLI, wizard and real image matrix
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/image_preallocation_test.py
+      - name: N2K Shellcheck
+        shell: bash
+        run: |
+          if command -v shellcheck >/dev/null; then
+            shellcheck bin/ablestack_n2k.sh lib/n2k/*.sh
+          fi

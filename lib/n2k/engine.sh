@@ -154,6 +154,7 @@ n2k_cmd_init() {
   local username="" password="" insecure="1"
   local inventory_json_arg="" inventory_source="none"
   local target_format="qcow2" target_storage="file" target_map_json="{}" rbd_access_mode="librbd"
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids=""
@@ -175,6 +176,9 @@ n2k_cmd_init() {
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-file) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
       --target-map-json) target_map_json="${2:-}"; shift 2 ;;
@@ -218,6 +222,8 @@ n2k_cmd_init() {
   fi
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
   n2k_valid_target_storage "${target_storage}" || n2k_die "Invalid --target-storage: ${target_storage}"
+  image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  local resolved_preallocation="${IMAGE_PREALLOCATION_MODE}" resolved_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   case "${inventory_source}" in
@@ -291,7 +297,11 @@ n2k_cmd_init() {
     storage_pool_config="$(n2k_cloud_target_storage_pool_config_json "${storage_pool_json}")"
     cloud_config_json="$(jq -c --argjson pool "${storage_pool_config}" '. + {storage_pool:$pool}' <<<"${cloud_config_json}")"
   fi
-  n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}"
+  if [[ -f "${N2K_MANIFEST}" ]]; then
+    echo 'Manifest already exists; use run with the existing workdir instead of init' >&2
+    return 2
+  fi
+  n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}" "${resolved_preallocation}" "${resolved_preallocation_source}"
   if [[ -n "${inventory_json}" ]]; then
     local controller_validation_rc=0
     if n2k_manifest_record_source_controller_validation "${N2K_MANIFEST}"; then
@@ -494,6 +504,7 @@ n2k_build_preflight_result_from_args() {
   local cred_file="" username="" password="" insecure="1" probe_legacy=false
   local v4_vmm="auto" v4_dp="auto" v4_data_plane="auto" legacy="auto" legacy_verified="auto" cold="auto" manual="auto"
   local target_storage="auto" target_format="qcow2" rbd_access_mode="librbd"
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt" target_provider_arg_set=0
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
@@ -508,6 +519,9 @@ n2k_build_preflight_result_from_args() {
       --vm) vm="${2:-}"; shift 2 ;;
       --mode) mode="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --rbd-access-mode) rbd_access_mode="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; target_provider_arg_set=1; shift 2 ;;
@@ -621,6 +635,9 @@ n2k_build_preflight_result_from_args() {
     *) n2k_die "Invalid --target-storage: ${target_storage}" ;;
   esac
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
+  if [[ "${target_storage}" != auto ]]; then
+    image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" || return $?
+  fi
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
 
@@ -657,10 +674,16 @@ n2k_build_preflight_result_from_args() {
   fi
   deps_json="$(n2k_detect_host_dependencies)"
 
-  n2k_preflight_result_json "${pc}" "${vm}" "${mode}" "${allow_experimental}" \
+  local result
+  result="$(n2k_preflight_result_json "${pc}" "${vm}" "${mode}" "${allow_experimental}" \
     "${capability_json}" "${deps_json}" \
     "${v4_vmm}" "${v4_dp}" "${v4_data_plane}" "${legacy}" "${legacy_verified}" "${cold}" "${manual}" \
-    "${target_storage}" "${target_format}" "${source_api_policy}" "${target_provider}"
+    "${target_storage}" "${target_format}" "${source_api_policy}" "${target_provider}")" || return $?
+  image_preallocation_resolve "$(jq -r '.target.selected_storage' <<< "${result}")" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  jq -c --arg mode "${IMAGE_PREALLOCATION_MODE}" --arg origin "${IMAGE_PREALLOCATION_SOURCE}" '
+    .target.preallocation = (if $mode == "" then null else $mode end)
+    | .target.preallocation_source = $origin
+    | .target.required_space_policy = (if $mode == "falloc" or $mode == "full" then "virtual_size_plus_metadata" else "sparse" end)' <<< "${result}"
 }
 
 n2k_maybe_record_phase_done() {
@@ -1064,6 +1087,9 @@ n2k_run_start_background() {
 }
 
 n2k_cmd_run() {
+  local policy_manifest="${N2K_MANIFEST:-}"
+  [[ -n "${policy_manifest}" || -z "${N2K_WORKDIR:-}" ]] || policy_manifest="${N2K_WORKDIR}/manifest.json"
+  image_preallocation_resolve_args "${policy_manifest}" "${N2K_PREALLOCATION_SOURCE:-cli}" "$@" || return $?
   local -a foreground_run_args=()
   local arg
   for arg in "$@"; do
@@ -1098,6 +1124,7 @@ n2k_cmd_run() {
   local username="" password="" insecure="1" inventory_source="api" inventory_json_arg=""
   local target_format="qcow2" target_storage="file" target_map_json="" rbd_access_mode="librbd"
   local rbd_access_mode_arg_set=0
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt" target_provider_arg_set=0
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
@@ -1132,6 +1159,9 @@ n2k_cmd_run() {
       --insecure) insecure="${2:-}"; shift 2 ;;
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
       --target-map-json) target_map_json="${2:-}"; shift 2 ;;
@@ -1258,6 +1288,17 @@ n2k_cmd_run() {
   [[ -n "${password}" ]] && credential_args+=(--password "${password}")
 
   n2k_run_set_manifest_paths_from_workdir
+  if [[ -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]]; then
+    target_storage="$(jq -r '.target.storage.type // "file"' "${N2K_MANIFEST}")"
+    target_format="$(jq -r '.target.format // "qcow2"' "${N2K_MANIFEST}")"
+  fi
+  image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  local resolved_preallocation="${IMAGE_PREALLOCATION_MODE}"
+  local N2K_PREALLOCATION_SOURCE="${IMAGE_PREALLOCATION_SOURCE}"
+  if [[ -n "${resolved_preallocation}" && "${N2K_DRY_RUN:-0}" != 1 && "${split}" != phase2 ]] &&
+      { [[ ! -f "${N2K_MANIFEST:-}" ]] || ! image_preallocation_has_targets "${N2K_MANIFEST}"; }; then
+    image_preallocation_check_tools "${target_format}" "${resolved_preallocation}" convert || return $?
+  fi
 
   if [[ "${execution_mode}" == "background" ]]; then
     if [[ "${split}" == "phase2" ]]; then
@@ -1272,6 +1313,10 @@ n2k_cmd_run() {
     return 0
   fi
 
+  if [[ -f "${N2K_MANIFEST:-}" && "${target_preallocation_set}" == 1 && "${N2K_DRY_RUN:-0}" != 1 ]]; then
+    image_preallocation_store "${N2K_MANIFEST}" "${resolved_preallocation}" "${N2K_PREALLOCATION_SOURCE}" || return $?
+  fi
+
   if [[ "${split}" == "phase2" ]]; then
     n2k_require_manifest
     n2k_manifest_split_is_done "${N2K_MANIFEST}" "phase1" || \
@@ -1280,6 +1325,7 @@ n2k_cmd_run() {
     [[ -n "${vm}" ]] || n2k_die "run --split ${split} requires --vm when no manifest exists"
     [[ -n "${pc}" ]] || n2k_die "run --split ${split} requires --pc when no manifest exists"
     local -a init_args=(--vm "${vm}" --pc "${pc}" --mode "${mode}" --inventory-source "${inventory_source}" --target-format "${target_format}" --target-storage "${target_storage}" --rbd-access-mode "${rbd_access_mode}")
+    [[ -z "${resolved_preallocation}" ]] || init_args+=(--target-preallocation "${resolved_preallocation}")
     [[ -n "${inventory_json_arg}" ]] && init_args+=(--inventory-json "${inventory_json_arg}")
     [[ "${target_provider_arg_set}" -eq 1 ]] && init_args+=(--target-provider "${target_provider}")
     [[ -n "${dst}" ]] && init_args+=(--dst "${dst}")
@@ -1347,6 +1393,7 @@ n2k_cmd_run() {
     local -a plan_args=(--vm "${vm}" --pc "${pc}" --mode "${mode}" --target-format "${target_format}" --target-storage "${target_storage}" --rbd-access-mode "${rbd_access_mode}")
     plan_args+=("${credential_args[@]}")
     plan_args+=(--target-provider "${target_provider}")
+    [[ -z "${resolved_preallocation}" ]] || plan_args+=(--target-preallocation "${resolved_preallocation}")
     [[ -n "${cloud_endpoint}" ]] && plan_args+=(--cloud-endpoint "${cloud_endpoint}")
     [[ -n "${cloud_api_key}" ]] && plan_args+=(--cloud-api-key "${cloud_api_key}")
     [[ -n "${cloud_secret_key}" ]] && plan_args+=(--cloud-secret-key "${cloud_secret_key}")
