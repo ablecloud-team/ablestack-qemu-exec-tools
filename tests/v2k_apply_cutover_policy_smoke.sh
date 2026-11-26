@@ -21,6 +21,8 @@ rm -rf "${WORK_ROOT}"
 mkdir -p "${WORK_ROOT}"
 
 # shellcheck source=/dev/null
+export V2K_ROOT_DIR="${ROOT_DIR}" V2K_LIB_DIR="${ROOT_DIR}/lib/v2k"
+source "${ROOT_DIR}/lib/v2k/engine.sh"
 source "${ROOT_DIR}/lib/v2k/orchestrator.sh"
 
 v2k_valid_target_provider() { return 0; }
