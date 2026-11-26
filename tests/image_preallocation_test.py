@@ -330,6 +330,8 @@ if [[ "$TOOL" == v2k ]]; then source "$REPO/lib/v2k/orchestrator.sh"; fi
             self.assertFalse(directory.exists())
 
     def wizard(self, tool, flags=(), *, tty="0", selection="\n", cancel=False, legacy=False, saved=None, cloud=False):
+        if tool == "v2k":
+            flags = ("--guest-config-policy", "off", *flags)
         directory = self.case / ("wizard-" + str(len(list(self.case.iterdir()))))
         directory.mkdir()
         if legacy or saved:

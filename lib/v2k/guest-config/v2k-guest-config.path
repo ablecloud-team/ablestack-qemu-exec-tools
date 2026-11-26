@@ -1,0 +1,8 @@
+# Copyright 2026 ABLECLOUD. Licensed under the Apache License, Version 2.0.
+[Unit]
+Description=Observe new V2K guest configuration requests
+[Path]
+PathChanged=/var/lib/ablestack-v2k/guest-config/binding-@OPERATION_ID@.commit
+Unit=v2k-guest-config.service
+[Install]
+WantedBy=multi-user.target

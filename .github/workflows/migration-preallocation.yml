@@ -11,6 +11,8 @@ on:
       - "lib/v2k/**"
       - "lib/n2k/**"
       - "completions/ablestack_*2k"
+      - "tests/v2k_guest_configuration_test.py"
+      - "tests/v2k_windows_storage_test.ps1"
       - "tests/v2k_controller_policy_test.py"
       - "tests/v2k_cloud_handoff_resume_test.py"
       - "tests/image_preallocation_test.py"
@@ -36,9 +38,9 @@ jobs:
           set -euo pipefail
           if command -v apt-get >/dev/null; then
             apt-get update
-            DEBIAN_FRONTEND=noninteractive apt-get install -y python3 jq qemu-utils libnbd-bin shellcheck
+            DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-yaml jq qemu-utils libnbd-bin shellcheck
           else
-            dnf -y install python3 jq qemu-img libnbd
+            dnf -y install python3 python3-pyyaml jq qemu-img libnbd
           fi
           qemu-img --version
           nbdcopy --version
@@ -56,9 +58,21 @@ jobs:
         run: |
           python3 tests/v2k_controller_policy_test.py
           python3 tests/v2k_cloud_handoff_resume_test.py
+      - name: V2K guest configuration contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/v2k_guest_configuration_test.py
       - name: N2K Shellcheck
         shell: bash
         run: |
           if command -v shellcheck >/dev/null; then
             shellcheck bin/ablestack_n2k.sh lib/n2k/*.sh
           fi
+
+  windows-storage:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows storage policy and owned rollback
+        shell: powershell
+        run: .\tests\v2k_windows_storage_test.ps1

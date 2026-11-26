@@ -116,7 +116,7 @@ class ControllerPolicy(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 source=inventory(('ide','scsi'),False);source['vm']['nics']=[{'mac':'52:54:00:12:34:56','label':'nic0'}]
                 env={**os.environ,'REPO':str(ROOT),'TOOL':'v2k','CASE_DIR':tmp,'TEST_TTY':'1' if interactive else '0','CANCEL':'0','INVENTORY':json.dumps(source)}
-                args=['--vm','fixture','--vcenter','source.invalid','--username','fixture-user','--password','fixture-secret','--target-profile','cloud-filesystem','--split','phase1','--dst',tmp+'/target','--target-preallocation','falloc','--cloud-endpoint','https://cloud.invalid','--cloud-api-key','fixture-key','--cloud-secret-key','fixture-cloud-secret','--cloud-zone-id','zone','--cloud-service-offering-id','offering','--cloud-network-id','network','--cloud-storage-id','pool','--cloud-name','fixture-target']
+                args=['--guest-config-policy','off','--vm','fixture','--vcenter','source.invalid','--username','fixture-user','--password','fixture-secret','--target-profile','cloud-filesystem','--split','phase1','--dst',tmp+'/target','--target-preallocation','falloc','--cloud-endpoint','https://cloud.invalid','--cloud-api-key','fixture-key','--cloud-secret-key','fixture-cloud-secret','--cloud-zone-id','zone','--cloud-service-offering-id','offering','--cloud-network-id','network','--cloud-storage-id','pool','--cloud-name','fixture-target']
                 if not interactive:args+=['--yes']
                 result=subprocess.run(['bash','-euo','pipefail','-c',image_tests.WIZARD,'test',*args],input='2\nvirtio-scsi\n',env=env,capture_output=True,text=True)
                 captured=Path(tmp)/'captured'

@@ -1,0 +1,16 @@
+[Unit]
+Description=ABLECLOUD V2K guest configuration evidence
+After=local-fs.target network.target qemu-guest-agent.service
+Wants=qemu-guest-agent.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /var/lib/ablestack-v2k/guest-config/helper.py
+User=root
+UMask=0077
+TimeoutStartSec=650
+RuntimeMaxSec=650
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

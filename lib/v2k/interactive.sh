@@ -179,6 +179,11 @@ v2k_cmd_wizard() {
   local split="${V2K_WIZARD_DEFAULT_SPLIT:-phase1}" shutdown="guest" cutover_policy="start" yes=0 print_command=0 target_name inventory_json cloud_choices cloud_storage_json cloud_storage_path cloud_storage_scope cloud_nic_mappings_json
   while [[ $# -gt 0 ]]; do case "$1" in
     --vm) vm="${2:-}"; shift 2;; --vcenter) vcenter_host="${2:-}"; shift 2;; --username) username="${2:-}"; shift 2;; --password) password="${2:-}"; shift 2;; --cred-file) cred_file="${2:-}"; shift 2;; --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;; --compat-profile) compat_profile="${2:-}"; shift 2;; --insecure) insecure="${2:-}"; shift 2;;
+      --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-user) export V2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export V2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
     --root-disk-id) export V2K_ROOT_DISK_ID="${2:-}"; shift 2;;
       --target-disk-controller) v2k_controller_policy_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
       --keep-workdir) wizard_keep_workdir=1; shift;;
@@ -274,6 +279,7 @@ v2k_cmd_wizard() {
   if [[ -z "${dst}" ]]; then case "${target_storage}" in rbd) dst="rbd:${rbd_pool}/${target_name}";; file) if [[ "${target_provider}" == "ablestack-cloud" ]]; then dst="${file_root%/}"; else dst="${file_root%/}/${target_name}"; fi;; esac; fi
   if [[ -z "${target_map_json}" && ( "${target_storage}" == "rbd" || "${target_provider}" == "ablestack-cloud" ) ]]; then target_map_json="$(v2k_interactive_build_target_map_json "${inventory_json}" "${target_storage}" "${target_format}" "${rbd_pool}" "${file_root}" "${target_name}")"; fi
 
+  v2k_guest_config_wizard "$target_provider" "${V2K_MANIFEST:-}" "$yes" "$print_command" || return $?
   printf '\nMigration summary:\n  Source VM: %s\n  vCenter: %s\n  Target profile: %s\n  Target provider: %s\n  Target storage: %s/%s\n  Split: %s\n  Workdir: %s\n  Destination: %s\n' "${vm}" "${vcenter_host}" "${target_profile}" "${target_provider}" "${target_storage}" "${target_format}" "${split}" "${V2K_WORKDIR:-}" "${dst}" >&2
   printf '  Target preallocation: %s (%s)\n' "${target_preallocation:-not_applicable}" "${target_preallocation_source}" >&2
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
@@ -281,6 +287,11 @@ v2k_cmd_wizard() {
     jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' <<<"${cloud_nic_mappings_json}" >&2
   fi
   local -a run_args=(run --foreground --vm "${vm}" --vcenter "${vcenter_host}" --split "${split}" --shutdown "${shutdown}" --compat-profile "${compat_profile}" --target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
+  [[ -z "${V2K_GUEST_CONFIG_POLICY:-}" ]] || run_args+=(--guest-config-policy "$V2K_GUEST_CONFIG_POLICY")
+  [[ -z "${V2K_GUEST_CONFIG_MAP_JSON:-}" ]] || run_args+=(--guest-config-map-json "$V2K_GUEST_CONFIG_MAP_JSON")
+  [[ -z "${V2K_GUEST_CONFIG_TIMEOUT:-}" ]] || run_args+=(--guest-config-timeout "$V2K_GUEST_CONFIG_TIMEOUT")
+  [[ -z "${V2K_SOURCE_GUEST_PASSWORD_FD:-}" ]] || run_args+=(--source-guest-password-fd "$V2K_SOURCE_GUEST_PASSWORD_FD")
+  [[ -z "${V2K_SOURCE_GUEST_USER:-}" ]] || run_args+=(--source-guest-user "$V2K_SOURCE_GUEST_USER")
   [[ "$wizard_keep_workdir" != 1 ]] || run_args+=(--keep-workdir)
   [[ -z "${V2K_ROOT_DISK_ID:-}" ]] || run_args+=(--root-disk-id "$V2K_ROOT_DISK_ID")
   [[ -z "${V2K_TARGET_DISK_CONTROLLER:-}" ]] || run_args+=(--target-disk-controller "$V2K_TARGET_DISK_CONTROLLER")

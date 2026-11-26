@@ -47,6 +47,8 @@ source "${V2K_LIB_DIR}/cloudstack_api.sh"
 source "${V2K_LIB_DIR}/target_cloud.sh"
 source "${V2K_LIB_DIR}/controller_policy.sh"
 # shellcheck source=/dev/null
+source "${V2K_LIB_DIR}/guest_configuration.sh"
+# shellcheck source=/dev/null
 source "${V2K_LIB_DIR}/verify.sh"
 # shellcheck source=/dev/null
 source "${V2K_LIB_DIR}/nbd_utils.sh"
@@ -2975,6 +2977,11 @@ v2k_cmd_init() {
       --compat-profile) compat_profile="${2:-}"; shift 2;;
 
       # --- new options ---
+      --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-user) export V2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export V2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
       --root-disk-id) export V2K_ROOT_DISK_ID="${2:-}"; shift 2;;
       --target-disk-controller) v2k_controller_policy_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
       --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
@@ -3226,6 +3233,12 @@ v2k_cmd_init() {
   v2k_compat_write_env "${V2K_WORKDIR}" || true
   migration_cloud_allocation_check_manifest v2k "${V2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
   v2k_controller_check_target "${V2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
+  v2k_guest_config_configure "$V2K_MANIFEST" preserve || return $?
+  if [[ "$(jq -r '.target.guest_config_policy // empty' "$V2K_MANIFEST")" == preserve ]]; then
+    v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
+    v2k_guest_config_collect "$V2K_MANIFEST" || return $?
+  fi
+
 
   v2k_manifest_phase_done "${V2K_MANIFEST}" "init"
 
@@ -3818,6 +3831,11 @@ v2k_cmd_cutover() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-user) export V2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export V2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
       --shutdown) shutdown="${2:-}"; shift 2;;
       --shutdown-force) shutdown_force=1; shift 1;;
       --shutdown-timeout) shutdown_timeout="${2:-}"; shift 2;;
@@ -3911,12 +3929,13 @@ v2k_cmd_cutover() {
     if [[ "$define_only" == 0 && "$apply_define" == 0 && "$start_vm" == 0 ]]; then start_vm=1; fi
     local handoff_result
     if handoff_result="$(v2k_cloud_target_cutover "$V2K_MANIFEST" "$define_only" "$apply_define" "$start_vm" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file")"; then
-      v2k_manifest_phase_done "$V2K_MANIFEST" cutover
+      if jq -e ".complete != false" <<<"$handoff_result" >/dev/null; then v2k_manifest_phase_done "$V2K_MANIFEST" cutover; fi
       v2k_json_or_text_ok cutover "$handoff_result" 'Mold deployment reconciled without source sync.'
       return 0
     else return $?; fi
   fi
 
+  v2k_guest_config_configure "$V2K_MANIFEST" || return $?
   # -------------------------------------------------------------------
   # Auto WinPE policy:
   # - If source VM is NOT Windows, skip WinPE unless explicitly forced by CLI.
@@ -4037,6 +4056,9 @@ v2k_cmd_cutover() {
     fi
   fi
 
+  if ! v2k_guest_config_source_copy_frozen "$V2K_MANIFEST"; then
+  v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
+  v2k_guest_config_collect "$V2K_MANIFEST" || return $?
   # As approved: default flow is shutdown -> final snapshot -> final sync
   v2k_event INFO "cutover" "" "phase_start" "{\"shutdown\":\"${shutdown}\"}"
 
@@ -4109,6 +4131,10 @@ v2k_cmd_cutover() {
       || true
     echo "Final sync failed. rc=${_rc}" >&2
     exit "${_rc}"
+  fi
+
+  else
+    v2k_event INFO cutover '' guest_config_resume_frozen_copy '{}'
   fi
 
   # Cloud targets also need the Linux storage bootstrap before import/deploy.
@@ -4199,6 +4225,8 @@ v2k_cmd_cutover() {
     start_vm=0
   fi
 
+  v2k_guest_config_stage "$V2K_MANIFEST" || return $?
+
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     local cloud_result cloud_error_file cloud_rc cloud_error_text cloud_error_json
     cloud_error_file="$(mktemp)"
@@ -4214,7 +4242,7 @@ v2k_cmd_cutover() {
       return "${cloud_rc}"
     fi
     v2k_event INFO "cutover" "" "cloud_target_cutover" "${cloud_result}"
-    if [[ "${define_only}" -eq 1 || "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]]; then
+    if [[ "${define_only}" -eq 1 || "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]] && jq -e ".complete != false" <<<"$cloud_result" >/dev/null; then
       v2k_manifest_phase_done "${V2K_MANIFEST}" "cutover"
     fi
     v2k_json_or_text_ok "cutover" "${cloud_result}" "Cloud cutover completed: $(jq -r '.vm_id // .provider' <<<"${cloud_result}")"

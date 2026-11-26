@@ -16,6 +16,8 @@
 # ---------------------------------------------------------------------
 
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/guest_configuration.sh"
 
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/cloud_allocation.sh"
@@ -1339,6 +1341,7 @@ v2k_cloud_target_preflight_json() {
 
 v2k_cloud_target_cutover() {
   local manifest="$1" define_only="$2" apply_define="$3" start_vm="$4"
+  v2k_guest_config_frozen_options "$1" || return $?
   local endpoint_arg="${5:-}" api_key_arg="${6:-}" secret_key_arg="${7:-}" cred_file="${8:-}"
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
   local disk_offering_id owner_params root_import root_volume_id deploy vm_id data_volumes_json jobs_json
@@ -1362,6 +1365,19 @@ v2k_cloud_target_cutover() {
   storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
   disk_offering_id="$(jq -r '.disk_offering_id // ""' <<<"${cfg}")"
   owner_params="$(v2k_cloud_target_optional_owner_params "${cfg}")"
+  if jq -e '.target.guest_configuration_plan.version==1 and (.runtime.cloud.checkpoint.vm_id // "")!=""' "$manifest" >/dev/null; then
+    local guest_existing_id guest_existing_vm
+    guest_existing_id="$(jq -r '.runtime.cloud.checkpoint.vm_id' "$manifest")"
+    guest_existing_vm="$(v2k_cloud_target_vm_json "$endpoint" "$api_key" "$secret_key" "$guest_existing_id")" || return $?
+    if jq -e '.state=="Running"' <<<"$guest_existing_vm" >/dev/null; then
+      migration_cloud_allocation_verify_final v2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
+      v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
+      v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
+      v2k_cloud_target_record_checkpoint "$manifest" complete '{"complete":true,"started":true,"inspection_required":false}' || return $?
+      jq -nc --arg id "$guest_existing_id" '{provider:"ablestack-cloud",vm_id:$id,started:true,validated:true,status:"completed",guest_configuration_verified:true}'
+      return 0
+    fi
+  fi
   if service_offering_json="$(v2k_cloud_target_service_offering_json \
       "${endpoint}" "${api_key}" "${secret_key}" \
       "$(jq -r '.service_offering_id // ""' <<<"${cfg}")")"; then
@@ -1464,6 +1480,7 @@ v2k_cloud_target_cutover() {
         checkpoint="$(v2k_cloud_target_existing_checkpoint_json "${manifest}")"
       else
         v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
+    v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
         migration_cloud_allocation_verify_final v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
         result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
         printf '%s' "${result_json}"
@@ -1708,6 +1725,7 @@ v2k_cloud_target_cutover() {
     return 2
   fi
 
+  v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" bind || return $?
   if [[ "${start_vm}" -eq 1 && "${inspection_required}" == "false" ]]; then
     if start_result="$(v2k_cloud_target_start_vm "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")"; then
       v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
@@ -1744,6 +1762,10 @@ v2k_cloud_target_cutover() {
     fi
   fi
 
+  if [[ "$started" == true ]] && ! v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify; then
+    v2k_cloud_target_record_checkpoint "$manifest" guest-config-pending '{"complete":false,"started":true,"inspection_required":true}' || return $?
+    return 78
+  fi
   result_json="$(jq -nc \
     --arg provider "ablestack-cloud" \
     --arg endpoint "${endpoint}" \
@@ -1767,16 +1789,22 @@ v2k_cloud_target_cutover() {
       vm_id:$vm_id,root_volume_id:$root_volume_id,root_volume:$root_volume,root_volume_converted:$root_volume_converted,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties,nic_verification:$nic_verification}
      + (if ($disk_offering | length) > 0 then {disk_offering:$disk_offering} else {} end)
      + (if ($root_volume_update_job_id | length) > 0 then {root_volume_update_job_id:$root_volume_update_job_id} else {} end)')"
+  local guest_state guest_verified target_complete=true
+  guest_state="$(jq -r '.runtime.guest_configuration.status // "LEGACY_UNVERIFIED"' "$manifest")"
+  guest_verified="$(jq -r '.runtime.guest_configuration.verified // false' "$manifest")"
+  if [[ "$guest_state" == SKIPPED || "$guest_state" == BOUND || "$guest_state" == STAGED ]]; then target_complete=false; fi
+  result_json="$(jq --arg status "$guest_state" --argjson verified "$guest_verified" --argjson complete "$target_complete" '. + {complete:$complete,guest_configuration_status:$status,guest_configuration_verified:$verified} | if $complete then . else .validated=false | .status=(if $status=="SKIPPED" then "guest_config_skipped" else "bound" end) end' <<<"$result_json")"
   v2k_cloud_target_record_result "${manifest}" "${result_json}" || return 78
   v2k_cloud_target_record_checkpoint "${manifest}" \
-    "$(if [[ "${inspection_required}" == "true" ]]; then printf inspection-required; else printf complete; fi)" \
+    "$(if [[ "$target_complete" == false ]]; then printf guest-config-unverified; elif [[ "${inspection_required}" == "true" ]]; then printf inspection-required; else printf complete; fi)" \
     "$(jq -nc \
       --arg vm_id "${vm_id}" \
       --arg root_volume_id "${root_volume_id}" \
       --argjson issues "${issues_json}" \
       --argjson inspection_required "${inspection_required}" \
       --argjson started "${started}" \
-      '{complete:true,vm_id:$vm_id,root_volume_id:$root_volume_id,started:$started,inspection_required:$inspection_required,issues:$issues}')" || return 78
+      --argjson complete "$target_complete" \
+      '{complete:$complete,vm_id:$vm_id,root_volume_id:$root_volume_id,started:$started,inspection_required:$inspection_required,issues:$issues}')" || return 78
   printf '%s' "${result_json}"
 }
 
@@ -1786,6 +1814,11 @@ v2k_cloud_target_source_deploy_params_json() {
   base="$(v2k_cloud_target_source_deploy_params_legacy_json "$@")" || return $?
   if jq -e '.target.disk_controller_plan.version == 1' "$1" >/dev/null; then
     plan="$(v2k_controller_python params --manifest "$1")" || return $?
+    if jq -e ' .target.guest_configuration_plan.version==1' "$1" >/dev/null; then
+      local guest_params
+      guest_params="$(v2k_guest_config_python guest_configuration.py params --manifest "$1")" || return $?
+      plan="$(jq -nc --argjson p "$plan" --argjson g "$guest_params" '$p+$g')"
+    fi
     jq -nc --argjson base "$base" --argjson plan "$plan" '$base + $plan'
   else printf '%s' "$base"; fi
 }

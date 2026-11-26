@@ -258,6 +258,11 @@ v2k_cmd_run_foreground() {
       --incr-args) incr_args_str="${2:-}"; shift 2;;
       --cutover-args) cutover_args_str="${2:-}"; shift 2;;
       --mode) init_mode="${2:-}"; shift 2;;
+      --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-user) export V2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export V2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
       --root-disk-id) export V2K_ROOT_DISK_ID="${2:-}"; shift 2;;
       --target-disk-controller) v2k_controller_policy_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
       --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
@@ -488,6 +493,12 @@ v2k_cmd_run_foreground() {
     [[ "$split" != phase1 ]] || { echo 'CLOUD_TARGET_SEALED: phase1 cannot restart after Mold handoff; resume full or phase2' >&2; return 44; }
   fi
 
+  local final_copy_reentry=0
+  if [[ "$have_manifest" == 1 ]] && v2k_guest_config_source_copy_frozen "$V2K_MANIFEST"; then
+    final_copy_reentry=1; skip_init=1; skip_cbt=1; skip_base=1
+    [[ "$split" != phase1 ]] || { echo 'FINAL_COPY_FROZEN: resume full or phase2' >&2; return 44; }
+  fi
+
   if [[ "${split}" == "phase2" ]]; then
     if [[ "${have_manifest}" -ne 1 ]]; then
       v2k_die "split=phase2 requires existing manifest at ${V2K_MANIFEST}"
@@ -569,7 +580,7 @@ v2k_cmd_run_foreground() {
   fi
 
   # Incr loop
-  if [[ "${no_incr}" == "0" && "$cloud_handoff_reentry" == 0 ]]; then
+  if [[ "${no_incr}" == "0" && "$cloud_handoff_reentry" == 0 && "$final_copy_reentry" == 0 ]]; then
     local iter=0 converged=0
     local incr_failed=0
     while :; do
@@ -638,7 +649,7 @@ v2k_cmd_run_foreground() {
     fi
   fi
 
-  if [[ "${split}" == "phase2" && "$cloud_handoff_reentry" == 0 ]]; then
+  if [[ "${split}" == "phase2" && "$cloud_handoff_reentry" == 0 && "$final_copy_reentry" == 0 ]]; then
     local within_deadline
     within_deadline="$(jq -r '.runtime.sync_within_deadline // false' "${V2K_MANIFEST}" 2>/dev/null || echo false)"
     if [[ "${within_deadline}" != "true" ]]; then
