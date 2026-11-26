@@ -2,7 +2,12 @@
 # Copyright 2026 ABLECLOUD. Licensed under the Apache License, Version 2.0.
 # shellcheck source=/dev/null
 
-v2k_controller_python() { python3 "$(dirname "${BASH_SOURCE[0]}")/controller_policy.py" "$@"; }
+v2k_controller_python() {
+  # Policy uses only the host standard library, never the profile's VMware SDK.
+  local interpreter="${V2K_POLICY_PYTHON_BIN:-/usr/bin/python3}"
+  [[ -x "$interpreter" ]] || interpreter="$(command -v python3)"
+  "$interpreter" "$(dirname "${BASH_SOURCE[0]}")/controller_policy.py" "$@"
+}
 v2k_controller_policy_enum() {
   case "${1:-}" in auto|sata|virtio-scsi|preserve) return 0;; *) echo 'Expected --target-disk-controller auto|sata|virtio-scsi|preserve' >&2; return 44;; esac
 }
