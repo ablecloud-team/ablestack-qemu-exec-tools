@@ -15,6 +15,10 @@
 # limitations under the License.
 # ---------------------------------------------------------------------
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/runtime_credentials.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_handoff.sh"
 
 V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
@@ -44,19 +48,7 @@ v2k_require_vddk_env() {
   v2k_has_govc_bin
 }
 
-v2k_load_vddk_cred_from_manifest() {
-  local manifest="$1"
-  local cred
-  cred="$(jq -r '.source.vddk.cred_file // empty' "${manifest}" 2>/dev/null || true)"
-  [[ -n "${cred}" && -f "${cred}" ]] || {
-    echo "Missing .source.vddk.cred_file in manifest (or file not found). Provide it via init --vddk-cred-file." >&2
-    exit 32
-  }
-  # shellcheck disable=SC1090
-  source "${cred}"
-  : "${VDDK_USER:?missing VDDK_USER in vddk cred file}"
-  : "${VDDK_PASSWORD:?missing VDDK_PASSWORD in vddk cred file}"
-}
+
 
 v2k_transfer_base_retryable_nfc_log() {
   local log_file="$1"
@@ -122,6 +114,9 @@ v2k_transfer_base_run_vddk() {
   local vm_moref="${10}"
   local snap_moref="${11}"
   local vmdk_path="${12}"
+  local password_fd rc=0
+  exec {password_fd}< <(printf '%s' "${VDDK_PASSWORD}")
+  passfile="/proc/self/fd/${password_fd}"
 
   LD_LIBRARY_PATH="${vddk_ld_library_path}" \
   "${nbdkit_bin}" -r -U - "${nbdkit_plugin}" \
@@ -135,7 +130,9 @@ v2k_transfer_base_run_vddk() {
     snapshot="${snap_moref}" \
     transports=nbd:nbdssl \
     file="${vmdk_path}" \
-    --run "${run_str}" >>"${attempt_log}" 2>&1
+    --run "${run_str}" >>"${attempt_log}" 2>&1 || rc=$?
+  exec {password_fd}<&-
+  return "$rc"
 }
 
 v2k_transfer_base_record_failure() {
@@ -160,6 +157,7 @@ v2k_transfer_base_record_failure() {
 
 v2k_transfer_base_all() {
   local manifest="$1" jobs="$2"
+  v2k_cloud_require_unmanaged_target "$manifest" || return $?
   : "${jobs:?}"
   local count
   count="$(jq -r '.disks|length' "${manifest}")"
@@ -167,11 +165,7 @@ v2k_transfer_base_all() {
   mkdir -p /tmp
   v2k_load_vddk_cred_from_manifest "${manifest}"
 
-  local passfile
-  passfile="$(mktemp /tmp/v2k_vddk_pass.XXXXXX)"
-  echo -n "${VDDK_PASSWORD}" > "${passfile}"
-  chmod 600 "${passfile}"
-  trap 'rm -f "${passfile-}" >/dev/null 2>&1 || true' EXIT
+  local passfile="/dev/null"
 
   local server
   # vCenter 중심: vddk.server -> vcenter(host) -> esxi_host
@@ -223,6 +217,7 @@ v2k_transfer_base_all() {
 
 v2k_transfer_base_one() {
   local manifest="$1" idx="$2" server="$3" thumbprint="$4" vm_moref="$5" snap_moref="$6" passfile="$7"
+  v2k_cloud_require_unmanaged_target "$manifest" || return $?
   (
 
     local disk_id vmdk_path target_path

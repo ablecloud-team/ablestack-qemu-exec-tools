@@ -58,7 +58,10 @@ _v2k_trace_env_once() {
 # ---------------------------------------------------------------------
 _v2k_letter() {
   local n="$1"
-  printf "%b" "\\$(printf '%03o' "$((97 + n))")"
+  local out="" remainder
+  n=$((n + 1))
+  while (( n > 0 )); do remainder=$(((n - 1) % 26)); out="$(printf "%b" "\\$(printf '%03o' "$((97 + remainder))")")${out}"; n=$(((n - 1) / 26)); done
+  printf '%s' "$out"
 }
 
 _v2k_escape_xml() {
@@ -94,6 +97,9 @@ _v2k_target_disk_xml() {
   else
     bus="$(_v2k_disk_bus_from_controller_type "$(jq -r ".disks[$idx].controller.type // empty" "${manifest}")")"
   fi
+  if jq -e '.target.disk_controller_plan.version == 1' "$manifest" >/dev/null; then
+    bus="$(v2k_controller_python disk --manifest "$manifest" --index "$idx" | jq -r .bus)" || return $?
+  fi
   dev="sd$(_v2k_letter "$idx")"
   st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
 
@@ -124,7 +130,7 @@ EOF
 
   cat <<EOF
     <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2' cache='none' io='io_uring'/>
+      <driver name='qemu' type='$(jq -r '.target.format // "qcow2"' "${manifest}")' cache='none' io='io_uring'/>
       <source file='$(_v2k_escape_xml "${path}")'/>
       <target dev='${dev}' bus='${bus}'/>
     </disk>
@@ -267,6 +273,12 @@ v2k_target_generate_libvirt_xml() {
     controller_xml="<controller type='sata' index='0'/>"
   else
     controller_xml="<controller type='scsi' index='0' model='virtio-scsi'/>"
+  fi
+  if jq -e '.target.disk_controller_plan.version == 1' "$manifest" >/dev/null; then
+    v2k_controller_validate "$manifest" || return $?
+    controller_xml=""
+    if jq -e 'any(.target.disk_controller_plan.disks[]; .target.bus == "scsi")' "$manifest" >/dev/null; then controller_xml="<controller type='scsi' index='0' model='virtio-scsi'/>"; fi
+    if jq -e 'any(.target.disk_controller_plan.disks[]; .target.bus == "sata")' "$manifest" >/dev/null; then controller_xml+="<controller type='sata' index='0'/>"; fi
   fi
   local count i
   count="$(jq -r '.disks | length' "${manifest}")"

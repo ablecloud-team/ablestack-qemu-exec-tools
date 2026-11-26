@@ -334,6 +334,7 @@ v2k_manifest_init() {
           mode:$mode,
           vcenter:$vcenter,
           vm:$inv.vm,
+          controller_plan:($inv.controller_plan // {}),
 
           # ESXi host where the VM is currently running (kept for future use)
           esxi_host: ($inv.esxi_host // ""),

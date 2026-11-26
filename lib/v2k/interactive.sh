@@ -171,14 +171,17 @@ v2k_interactive_print_command() {
 }
 
 v2k_cmd_wizard() {
-  local vm="" vcenter_host="" username="" password="" cred_file="" vddk_cred_file="" insecure="1" compat_profile="${V2K_COMPAT_PROFILE:-auto}"
-  local cloud_allocation_copy=0
+  local vm="" vcenter_host="" username="${GOVC_USERNAME:-}" password="${GOVC_PASSWORD:-}" cred_file="" vddk_cred_file="" insecure="1" compat_profile="${V2K_COMPAT_PROFILE:-auto}"
+  local cloud_allocation_copy=0 wizard_keep_workdir=0
   local target_preallocation="" target_preallocation_set=0 target_preallocation_source=""
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json="" rbd_pool="${V2K_WIZARD_RBD_POOL:-rbd}" file_root="${V2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file="" cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id="" cloud_disk_offering_id="" cloud_host_id="" cloud_account="" cloud_domain_id="" cloud_project_id="" cloud_name="" cloud_display_name="" cloud_cpu_speed=""
   local split="${V2K_WIZARD_DEFAULT_SPLIT:-phase1}" shutdown="guest" cutover_policy="start" yes=0 print_command=0 target_name inventory_json cloud_choices cloud_storage_json cloud_storage_path cloud_storage_scope cloud_nic_mappings_json
   while [[ $# -gt 0 ]]; do case "$1" in
     --vm) vm="${2:-}"; shift 2;; --vcenter) vcenter_host="${2:-}"; shift 2;; --username) username="${2:-}"; shift 2;; --password) password="${2:-}"; shift 2;; --cred-file) cred_file="${2:-}"; shift 2;; --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;; --compat-profile) compat_profile="${2:-}"; shift 2;; --insecure) insecure="${2:-}"; shift 2;;
+    --root-disk-id) export V2K_ROOT_DISK_ID="${2:-}"; shift 2;;
+      --target-disk-controller) v2k_controller_policy_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
+      --keep-workdir) wizard_keep_workdir=1; shift;;
     --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
     --target-preallocation) image_preallocation_enum "${2-}" || return $?; target_preallocation="$2"; target_preallocation_set=1; shift 2;;
     --target-profile|--profile) target_profile="${2:-}"; shift 2;; --target-provider) target_provider="${2:-}"; shift 2;; --target-storage) target_storage="${2:-}"; shift 2;; --target-format) target_format="${2:-}"; shift 2;; --dst) dst="${2:-}"; shift 2;; --target-map-json) target_map_json="${2:-}"; shift 2;; --rbd-pool) rbd_pool="${2:-}"; shift 2;; --file-root) file_root="${2:-}"; shift 2;;
@@ -242,6 +245,19 @@ v2k_cmd_wizard() {
     return 2
   }
 
+  local selected_inventory
+  if ! selected_inventory="$(v2k_controller_inventory "$inventory_json" "${V2K_ROOT_DISK_ID:-}")"; then
+    if [[ "$yes" == 0 && "$print_command" == 0 ]] && v2k_interactive_has_tty; then
+      V2K_ROOT_DISK_ID="$(v2k_interactive_select_tsv 'source boot disk (stable ID)' "$(jq -r '.disks[] | [.disk_id, ((.label // .disk_id) + " [" + (.controller.kind // .controller.type // "unknown") + "] " + ((.size_bytes / 1073741824) | tostring) + " GiB")] | @tsv' <<<"$inventory_json")" '' 0 1)" || return $?
+      export V2K_ROOT_DISK_ID
+      selected_inventory="$(v2k_controller_inventory "$inventory_json" "$V2K_ROOT_DISK_ID")" || return $?
+    else return 44; fi
+  fi
+  inventory_json="$selected_inventory"
+  if [[ -z "${V2K_TARGET_DISK_CONTROLLER:-}" && "$yes" == 0 && "$print_command" == 0 ]] && v2k_interactive_has_tty; then
+    V2K_TARGET_DISK_CONTROLLER="$(v2k_interactive_select_tsv 'target disk driver policy' $'auto\tAutomatic qualified SATA/virtio-scsi conversion\nsata\tAll disks use SATA/AHCI\nvirtio-scsi\tAll disks use VirtIO SCSI\npreserve\tPreserve a qualified native SATA driver' '' 0 1)" || return $?
+    export V2K_TARGET_DISK_CONTROLLER
+  fi
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     [[ -z "${cloud_cred_file}" ]] || v2k_cloud_load_cred_file "${cloud_cred_file}"
     cloud_endpoint="${cloud_endpoint:-${V2K_CLOUD_ENDPOINT:-${ABLESTACK_CLOUD_ENDPOINT:-${CLOUDSTACK_ENDPOINT:-}}}}"; cloud_api_key="$(v2k_cloud_resolve_api_key "${cloud_api_key}")"; cloud_secret_key="$(v2k_cloud_resolve_secret_key "${cloud_secret_key}")"
@@ -265,6 +281,9 @@ v2k_cmd_wizard() {
     jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' <<<"${cloud_nic_mappings_json}" >&2
   fi
   local -a run_args=(run --foreground --vm "${vm}" --vcenter "${vcenter_host}" --split "${split}" --shutdown "${shutdown}" --compat-profile "${compat_profile}" --target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
+  [[ "$wizard_keep_workdir" != 1 ]] || run_args+=(--keep-workdir)
+  [[ -z "${V2K_ROOT_DISK_ID:-}" ]] || run_args+=(--root-disk-id "$V2K_ROOT_DISK_ID")
+  [[ -z "${V2K_TARGET_DISK_CONTROLLER:-}" ]] || run_args+=(--target-disk-controller "$V2K_TARGET_DISK_CONTROLLER")
   [[ "${cloud_allocation_copy}" != 1 ]] || run_args+=(--cloud-allocation-copy)
   if [[ "${target_storage}" == file ]]; then
     run_args+=(--target-preallocation "${target_preallocation}")

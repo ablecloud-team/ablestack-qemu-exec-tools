@@ -278,7 +278,7 @@ source "$REPO/lib/v2k/engine.sh"
 v2k_compat_bootstrap_env() { :; }
 v2k_compat_resolve_profile() { :; }
 v2k_compat_write_env() { :; }
-v2k_vmware_inventory_json() { printf '{"vm":{"name":"fixture"},"disks":[{"disk_id":"scsi0:0","size_bytes":8388608,"controller":{"kind":"scsi","type":"VirtualLsiLogicSASController"},"vmdk":{"path":"[fixture] disk.vmdk"}}]}'; }
+v2k_vmware_inventory_json() { printf '{"vm":{"name":"fixture","cbt_supported":true},"disks":[{"disk_id":"scsi0:0","device_key":"2000","size_bytes":8388608,"controller":{"kind":"scsi","type":"VirtualLsiLogicSASController"},"vmdk":{"path":"[fixture] disk.vmdk"}}]}'; }
 v2k_event() { :; }
 v2k_cmd_init "$@"
 ''', env={"CASE_DIR": str(directory)}, args=flags)
@@ -342,6 +342,9 @@ if [[ "$TOOL" == v2k ]]; then source "$REPO/lib/v2k/orchestrator.sh"; fi
             path.write_text(json.dumps(doc))
         inventory = {"vm": {"name": "fixture", "nics": [{"mac": "52:54:00:12:34:56", "label": "nic0"}]},
                      "disks": [{"disk_id": "disk-0", "size_bytes": SIZE}]}
+        if tool == "v2k":
+            inventory["vm"]["firmware"]="bios"
+            inventory["disks"][0].update({"disk_id":"scsi0:0","device_key":"2000","controller":{"kind":"scsi","type":"VirtualLsiLogicSASController","bus":0,"unit":0}})
         args = ["--vm", "fixture", "--username", "fixture-user", "--password", "fixture-secret",
                 "--split", "phase2" if (legacy or saved) else "phase1", "--dst", str(directory / "target")]
         args += ["--vcenter" if tool == "v2k" else "--pc", "source.invalid"]

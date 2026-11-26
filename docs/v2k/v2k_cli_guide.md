@@ -316,3 +316,7 @@ Notes:
 신규 파일 대상의 기본값은 `falloc`입니다. `--target-preallocation`으로 정책을 선택할 수 있으며 wizard에서도 대화형 선택과 명시 입력을 지원합니다.
 
 [지원 모드, wizard, 기존 manifest 재개 및 운영 영향](../v2k_n2k_preallocation.md)을 확인하세요.
+
+## 원본 디스크와 대상 드라이버 정책
+
+`--root-disk-id`와 `--target-disk-controller`는 wizard를 포함해 지원합니다. [지원 정책, 재개 제약 및 Mold 최종 검증](v2k_disk_controller_policy.md)을 확인하세요.

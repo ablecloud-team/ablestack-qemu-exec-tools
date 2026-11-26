@@ -212,7 +212,7 @@ v2k_cmd_run_foreground() {
   local -a preallocation_args=("$@")
   local base_args_str="" incr_args_str="" cutover_args_str=""
 
-  local vm="" vcenter_host="" username="" password="" dst=""
+  local vm="" vcenter_host="" username="${GOVC_USERNAME:-}" password="${GOVC_PASSWORD:-}" dst=""
   local cred_file_in="" vddk_cred_file_in=""
   local compat_profile="${V2K_COMPAT_PROFILE:-auto}"
   local init_mode="govc"
@@ -258,6 +258,8 @@ v2k_cmd_run_foreground() {
       --incr-args) incr_args_str="${2:-}"; shift 2;;
       --cutover-args) cutover_args_str="${2:-}"; shift 2;;
       --mode) init_mode="${2:-}"; shift 2;;
+      --root-disk-id) export V2K_ROOT_DISK_ID="${2:-}"; shift 2;;
+      --target-disk-controller) v2k_controller_policy_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
       --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
@@ -408,70 +410,23 @@ v2k_cmd_run_foreground() {
   local persisted_compat_env="${V2K_WORKDIR}/compat.env"  
   local -a cleanup_tmp=()
 
-  # A. GOVC Credential
+  # Operator credential files remain external. Runtime credentials never enter the workdir.
   if [[ -n "${cred_file_in}" ]]; then
-      # User provided or Auto-discovered
-      tmp_govc_env="${cred_file_in}"
+    v2k_source_kv_env "${cred_file_in}"
+    init_args+=( --cred-file "${cred_file_in}" )
   else
-      # Generate from args
-      local govc_url
-      govc_url="$(v2k_build_govc_url_from_vcenter_host "${vcenter_host}")"
-      tmp_govc_env="$(v2k_mktemp_file "govc.env")"
-      v2k_write_kv_file "${tmp_govc_env}" \
-        "GOVC_URL=${govc_url}" \
-        "GOVC_USERNAME=${username}" \
-        "GOVC_PASSWORD=${password}" \
-        "GOVC_INSECURE=${insecure}"
-      cleanup_tmp+=("${tmp_govc_env}")
+    export GOVC_URL="$(v2k_build_govc_url_from_vcenter_host "${vcenter_host}")"
+    export GOVC_USERNAME="${username:-${GOVC_USERNAME:-}}" GOVC_PASSWORD="${password:-${GOVC_PASSWORD:-}}" GOVC_INSECURE="${insecure}"
   fi
-
-  # B. VDDK Credential
   if [[ -n "${vddk_cred_file_in}" ]]; then
-      # User provided or Auto-discovered
-      tmp_vddk_cred="${vddk_cred_file_in}"
+    export V2K_VDDK_CRED_FILE="${vddk_cred_file_in}"
+    init_args+=( --vddk-cred-file "${vddk_cred_file_in}" )
   else
-      # Generate from args if username is present
-      if [[ -n "${username}" ]]; then
-          tmp_vddk_cred="$(v2k_mktemp_file "vddk.cred")"
-          v2k_write_kv_file "${tmp_vddk_cred}" \
-            "VDDK_USER=${username}" \
-            "VDDK_PASSWORD=${password}" \
-            "VDDK_SERVER=${vcenter_host}"
-          cleanup_tmp+=("${tmp_vddk_cred}")
-      fi
+    export VDDK_USER="${GOVC_USERNAME:-}" VDDK_PASSWORD="${GOVC_PASSWORD:-}"
   fi
-
-  # C. Persist to Workdir (Idempotent: cp even if same file, to ensure permission/existence)
-  # Only persist if it's NOT already the persisted file to avoid "cp: same file" warning
-  if [[ "${tmp_govc_env}" != "${persisted_govc_env}" ]]; then
-      install -m 600 "${tmp_govc_env}" "${persisted_govc_env}"
-  fi
-  
-  if [[ -n "${tmp_vddk_cred}" ]]; then
-      if [[ "${tmp_vddk_cred}" != "${persisted_vddk_cred}" ]]; then
-          install -m 600 "${tmp_vddk_cred}" "${persisted_vddk_cred}"
-      fi
-      export V2K_VDDK_CRED_FILE="${persisted_vddk_cred}"
-      # If auto-discovered, V2K_VDDK_SERVER needs to be loaded or assumed. 
-      # Usually loaded from govc.env but let's ensure exported if passed by arg.
-      [[ -n "${vcenter_host}" ]] && export V2K_VDDK_SERVER="${vcenter_host}"
-      
-      init_args+=( --vddk-cred-file "${persisted_vddk_cred}" )
-  fi
-
-  # Load Env
-  v2k_source_kv_env "${persisted_govc_env}"
+  [[ -z "${vcenter_host}" ]] || export V2K_VDDK_SERVER="${vcenter_host}"
   v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
   v2k_compat_resolve_profile "${V2K_COMPAT_PROFILE:-auto}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 0
-
-  # For init, we point to the persisted file
-  init_args+=( --cred-file "${persisted_govc_env}" )
-
-  # Cleanup temps
-  if (( ${#cleanup_tmp[@]} > 0 )); then
-      # shellcheck disable=SC2064
-      v2k_trap_append EXIT "rm -f ${cleanup_tmp[*]} 2>/dev/null || true"
-  fi
 
   # -----------------------------------------------------------------------------
   # Failure handling setup
@@ -525,12 +480,19 @@ v2k_cmd_run_foreground() {
   local skip_base=0
   local have_manifest=0
   [[ -f "${V2K_MANIFEST}" ]] && have_manifest=1
+  local cloud_handoff_reentry=0
+  if [[ "$have_manifest" == 1 ]] && v2k_cloud_handoff_started "$V2K_MANIFEST"; then
+    cloud_handoff_reentry=1
+    skip_init=1; skip_cbt=1; skip_base=1
+    [[ "$(jq -r '.target.provider' "$V2K_MANIFEST")" == ablestack-cloud ]] || return 44
+    [[ "$split" != phase1 ]] || { echo 'CLOUD_TARGET_SEALED: phase1 cannot restart after Mold handoff; resume full or phase2' >&2; return 44; }
+  fi
 
   if [[ "${split}" == "phase2" ]]; then
     if [[ "${have_manifest}" -ne 1 ]]; then
       v2k_die "split=phase2 requires existing manifest at ${V2K_MANIFEST}"
     fi
-    if ! v2k_manifest_split_is_done "${V2K_MANIFEST}" "phase1"; then
+    if [[ "$cloud_handoff_reentry" == 0 ]] && ! v2k_manifest_split_is_done "${V2K_MANIFEST}" "phase1"; then
       v2k_die "split=phase2 requires split=phase1 completion marker in manifest"
     fi
     
@@ -607,7 +569,7 @@ v2k_cmd_run_foreground() {
   fi
 
   # Incr loop
-  if [[ "${no_incr}" == "0" ]]; then
+  if [[ "${no_incr}" == "0" && "$cloud_handoff_reentry" == 0 ]]; then
     local iter=0 converged=0
     local incr_failed=0
     while :; do
@@ -676,7 +638,7 @@ v2k_cmd_run_foreground() {
     fi
   fi
 
-  if [[ "${split}" == "phase2" ]]; then
+  if [[ "${split}" == "phase2" && "$cloud_handoff_reentry" == 0 ]]; then
     local within_deadline
     within_deadline="$(jq -r '.runtime.sync_within_deadline // false' "${V2K_MANIFEST}" 2>/dev/null || echo false)"
     if [[ "${within_deadline}" != "true" ]]; then

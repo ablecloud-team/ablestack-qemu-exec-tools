@@ -97,6 +97,10 @@ _ablestack_v2k()
       COMPREPLY=( $(compgen -W "0 1" -- "${cur}") )
       return 0
       ;;
+    --target-disk-controller)
+      COMPREPLY=( $(compgen -W "auto sata virtio-scsi preserve" -- "${cur}") )
+      return 0
+      ;;
     --target-preallocation)
       COMPREPLY=( $(compgen -W "off metadata falloc full" -- "${cur}") )
       return 0
@@ -142,7 +146,7 @@ _ablestack_v2k()
         --no-cleanup --keep-snapshots --keep-workdir
         --jobs --chunk --coalesce-gap
         --base-args --incr-args --cutover-args
-        --mode --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
+        --mode --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
         --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
         --cloud-network-id --cloud-network-ids
@@ -163,7 +167,7 @@ _ablestack_v2k()
         --vm --vcenter --username --password
         --cred-file --vddk-cred-file --compat-profile --insecure
         --target-profile --profile --target-provider
-        --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json
+        --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json
         --dst --rbd-pool --file-root
         --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
@@ -194,7 +198,7 @@ _ablestack_v2k()
       local -a init_opts=(
         --vm --vcenter --dst
         --mode --cred-file --vddk-cred-file --compat-profile
-        --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
+        --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
         --cloud-endpoint --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
         --cloud-network-id --cloud-network-ids

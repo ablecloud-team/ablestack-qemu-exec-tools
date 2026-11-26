@@ -19,6 +19,8 @@ set -euo pipefail
 
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/cloud_allocation.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/controller_policy.sh"
 
 v2k_cloud_target_disk_offering_name() {
   local storage_type="$1"
@@ -376,6 +378,7 @@ v2k_cloud_target_service_offering_json() {
 v2k_cloud_target_prepare_disk_controller_plan() {
   local manifest="$1"
   local ts tmp status
+  if jq -e ' .target.disk_controller_plan.version == 1' "$manifest" >/dev/null; then v2k_controller_validate "$manifest"; return $?; fi
 
   [[ -f "${manifest}" ]] || return 2
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -445,6 +448,7 @@ v2k_cloud_target_prepare_disk_controller_plan() {
 
 v2k_cloud_target_disk_controller_plan_is_valid() {
   local manifest="$1"
+  if jq -e '.target.disk_controller_plan.version == 1' "$manifest" >/dev/null; then v2k_controller_validate "$manifest"; return $?; fi
   jq -e '
     def supported($kind):
       ((["ide","scsi","sata"] | index($kind)) != null);
@@ -532,7 +536,7 @@ v2k_cloud_target_apply_disk_controller_override() {
   mv -f "${tmp}" "${manifest}"
 }
 
-v2k_cloud_target_source_deploy_params_json() {
+v2k_cloud_target_source_deploy_params_legacy_json() {
   local manifest="$1" offering_json="${2:-}"
   [[ -n "${offering_json}" ]] || offering_json='{}'
   offering_json="$(jq -c 'if type == "object" then . else {} end' <<<"${offering_json}")" || return 2
@@ -1348,6 +1352,8 @@ v2k_cloud_target_cutover() {
   endpoint="$(jq -r '.endpoint // ""' <<<"${runtime}")"
   api_key="$(jq -r '.api_key // ""' <<<"${runtime}")"
   secret_key="$(jq -r '.secret_key // ""' <<<"${runtime}")"
+  v2k_controller_resume_check "$manifest" || return $?
+  v2k_controller_check_target "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
   v2k_cloud_target_ensure_manifest_nic_mappings "${manifest}" || return $?
   cfg="$(v2k_cloud_target_required_config_json "${manifest}")"
   v2k_cloud_target_validate_config "${manifest}" "${runtime}" || return $?
@@ -1457,6 +1463,7 @@ v2k_cloud_target_cutover() {
         v2k_cloud_target_record_checkpoint "${manifest}" deployment-incomplete '{"complete":false}' || return 78
         checkpoint="$(v2k_cloud_target_existing_checkpoint_json "${manifest}")"
       else
+        v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
         migration_cloud_allocation_verify_final v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
         result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
         printf '%s' "${result_json}"
@@ -1694,6 +1701,7 @@ v2k_cloud_target_cutover() {
       '$jobs + [{kind:"import-data",job_id:$import_job},{kind:"attach-data",job_id:$attach_job}]' <<<"{}")"
   done
 
+  v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" prestart || return $?
   if ! migration_cloud_allocation_verify_final v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}"; then
     v2k_cloud_target_record_checkpoint "${manifest}" allocation-unverified '{"complete":false,"inspection_required":true,"allocation_verified":false}' || return 78
     v2k_cloud_target_record_result "${manifest}" '{"status":"blocked","applied":true,"started":false,"validated":false,"inspection_required":true,"reason":"ALLOCATION_EVIDENCE_REQUIRED"}' || return 78
@@ -1702,6 +1710,7 @@ v2k_cloud_target_cutover() {
 
   if [[ "${start_vm}" -eq 1 && "${inspection_required}" == "false" ]]; then
     if start_result="$(v2k_cloud_target_start_vm "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")"; then
+      v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
       started=true
       v2k_cloud_target_record_checkpoint "${manifest}" "vm-started" \
         "$(jq -nc --arg start_job_id "$(jq -r '.job_id // empty' <<<"${start_result}")" '{start_job_id:$start_job_id,started:true}')" || return 78
@@ -1769,4 +1778,14 @@ v2k_cloud_target_cutover() {
       --argjson started "${started}" \
       '{complete:true,vm_id:$vm_id,root_volume_id:$root_volume_id,started:$started,inspection_required:$inspection_required,issues:$issues}')" || return 78
   printf '%s' "${result_json}"
+}
+
+
+v2k_cloud_target_source_deploy_params_json() {
+  local base plan
+  base="$(v2k_cloud_target_source_deploy_params_legacy_json "$@")" || return $?
+  if jq -e '.target.disk_controller_plan.version == 1' "$1" >/dev/null; then
+    plan="$(v2k_controller_python params --manifest "$1")" || return $?
+    jq -nc --argjson base "$base" --argjson plan "$plan" '$base + $plan'
+  else printf '%s' "$base"; fi
 }

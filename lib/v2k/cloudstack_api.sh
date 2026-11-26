@@ -105,7 +105,7 @@ v2k_cloud_signed_query() {
 v2k_cloud_api_prefers_post() {
   local command="$1"
   case "${command}" in
-    createDiskOffering|importVolume|deployVirtualMachineForVolume|updateVolume|attachVolume|startVirtualMachine)
+    createDiskOffering|importVolume|deployVirtualMachineForVolume|updateVolume|attachVolume|startVirtualMachine|verifyMigratedVirtualMachine)
       return 0
       ;;
     *)

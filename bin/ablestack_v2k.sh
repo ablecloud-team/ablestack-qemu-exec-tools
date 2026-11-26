@@ -179,6 +179,8 @@ Extra args:
 Init-stage options:
   --mode govc                               Inventory mode (default: govc)
   --target-format qcow2|raw                 Target image format (default: qcow2)
+  --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
+  --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)
@@ -253,6 +255,8 @@ Target profiles:
   --target-provider libvirt|ablestack-cloud
   --target-storage file|block|rbd
   --target-format qcow2|raw
+  --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
+  --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --dst <path>
@@ -296,6 +300,8 @@ Options:
   --vddk-cred-file <file>
   --compat-profile <id|auto>   Compatibility profile (default: auto)
   --target-format qcow2|raw                 Target image format (default: qcow2)
+  --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
+  --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)

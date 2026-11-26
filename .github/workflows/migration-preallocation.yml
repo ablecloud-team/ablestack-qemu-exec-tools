@@ -11,6 +11,8 @@ on:
       - "lib/v2k/**"
       - "lib/n2k/**"
       - "completions/ablestack_*2k"
+      - "tests/v2k_controller_policy_test.py"
+      - "tests/v2k_cloud_handoff_resume_test.py"
       - "tests/image_preallocation_test.py"
       - "tests/mold_preallocation_handoff_test.py"
       - ".github/workflows/migration-preallocation.yml"
@@ -48,6 +50,12 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/mold_preallocation_handoff_test.py
+      - name: V2K source identity, firmware and final driver policy
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 tests/v2k_controller_policy_test.py
+          python3 tests/v2k_cloud_handoff_resume_test.py
       - name: N2K Shellcheck
         shell: bash
         run: |

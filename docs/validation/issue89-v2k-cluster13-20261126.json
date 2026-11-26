@@ -1,0 +1,1094 @@
+{
+  "version": 1,
+  "date": "2026-11-26",
+  "scope": "issue89-v2k-only",
+  "vcenter_version": "8.0.1",
+  "source_folder": "V2K-Test-20261126",
+  "mold_cluster": "13 / GFS2",
+  "base_vm_preservation": {
+    "count": 100,
+    "changed": []
+  },
+  "cases": [
+    {
+      "source_name": "v2k-tst-ubuntu2204-ide-bios",
+      "source_uuid": "4235cd4a-30cf-46b6-d99b-b0d892bbd147",
+      "firmware": "bios",
+      "policy": "auto",
+      "plan_hash": "63a91c8487bda6d29c1515e02c03702e39b56ef82b1fe657086bb76173a097a8",
+      "vm_id": "ba1bdff1-5919-4f04-8f6b-8655b324c360",
+      "target_name": "v2k-89-ubuntu2204-ide-bios-20261126",
+      "instance": "i-2-295-VM",
+      "host": "ablecube13-1",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "ide0:0",
+          "device_key": "3000",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 34359738368,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "ide0:1",
+          "device_key": "3001",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "controller_observation": {
+        "supported": true,
+        "planhash": "63a91c8487bda6d29c1515e02c03702e39b56ef82b1fe657086bb76173a097a8",
+        "disks": [
+          {
+            "id": "3e70ce57-3456-4766-a1f6-9e43112b845c",
+            "device": "sda",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-ubuntu2204-ide-bios-20261126-disk0.qcow2",
+            "format": "qcow2"
+          },
+          {
+            "id": "a54627c9-1adb-47ed-9c83-d21ed3433e64",
+            "device": "sdb",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-ubuntu2204-ide-bios-20261126-disk1.qcow2",
+            "format": "qcow2"
+          }
+        ],
+        "machine": "pc-q35-rhel9.8.0",
+        "firmware": "bios"
+      },
+      "allocation": {
+        "strict": true,
+        "verified": true,
+        "disks": [
+          {
+            "index": 0,
+            "volume_id": "3e70ce57-3456-4766-a1f6-9e43112b845c",
+            "path": "v2k-89-ubuntu2204-ide-bios-20261126-disk0.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "34432843776",
+              "observedat": "2026-11-26T11:43:03.827721791Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "43a64110aa9f8cb505ea95e0924f65d66a04bcff92e568ac0d80b26a950b8b67",
+              "importverifiedat": "2026-11-26T11:43:03.827710476Z",
+              "importpath": "v2k-89-ubuntu2204-ide-bios-20261126-disk0.qcow2",
+              "importrequestid": "3e70ce57-3456-4766-a1f6-9e43112b845c",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+              "importstartedat": "2026-11-26T11:43:07.363989744Z"
+            },
+            "verified": true,
+            "scope": "historical-first-start"
+          },
+          {
+            "index": 1,
+            "volume_id": "a54627c9-1adb-47ed-9c83-d21ed3433e64",
+            "path": "v2k-89-ubuntu2204-ide-bios-20261126-disk1.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "8608370688",
+              "observedat": "2026-11-26T11:43:03.987781344Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "a24fd4ca35e93fc8b43742a0d8000646225d3ebbdcd5b5b8e87466291a744e42",
+              "importverifiedat": "2026-11-26T11:43:03.987769730Z",
+              "importpath": "v2k-89-ubuntu2204-ide-bios-20261126-disk1.qcow2",
+              "importrequestid": "a54627c9-1adb-47ed-9c83-d21ed3433e64",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+              "importstartedat": "2026-11-26T11:43:07.367913295Z"
+            },
+            "verified": true,
+            "scope": "historical-first-start"
+          }
+        ],
+        "scope": "historical-first-start"
+      },
+      "guest": {
+        "verified": true,
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69475.json",
+            "sha256": "eaa6a0856ac2ea6c93cf3cc7b36f5a05256b409ef98099affbac97295cc69c2e"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69475.json",
+            "sha256": "eaa6a0856ac2ea6c93cf3cc7b36f5a05256b409ef98099affbac97295cc69c2e"
+          }
+        ],
+        "rw": [
+          "/var/tmp/v2k-target-rw-7776e3f633b6fdc9.bin",
+          "/data/v2k/v2k-target-rw-78879b3eb8aacba4.bin"
+        ],
+        "firmware": "bios",
+        "drivers": [
+          {
+            "name": "sda",
+            "size": 34359738368,
+            "drivers": [
+              "sd",
+              "ahci"
+            ]
+          },
+          {
+            "name": "sdb",
+            "size": 8589934592,
+            "drivers": [
+              "sd",
+              "ahci"
+            ]
+          }
+        ],
+        "transport": "console"
+      }
+    },
+    {
+      "source_name": "v2k-tst-ubuntu2204-sata-uefi",
+      "source_uuid": "42356c86-0a37-78a3-a5a0-c43dc55f562d",
+      "firmware": "efi",
+      "policy": "auto",
+      "plan_hash": "bcf170171a39c36867a42bb62023a37c27f4d12f250ad19ae2998f785b59009b",
+      "vm_id": "577ce0a3-483d-44b1-9600-863e53444e9c",
+      "target_name": "v2k-89-ubuntu2204-sata-uefi-20261126",
+      "instance": "i-2-297-VM",
+      "host": "ablecube13-1",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "sata0:1",
+          "device_key": "16001",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 34359738368,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "sata0:2",
+          "device_key": "16002",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 2,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "controller_observation": {
+        "supported": true,
+        "planhash": "bcf170171a39c36867a42bb62023a37c27f4d12f250ad19ae2998f785b59009b",
+        "disks": [
+          {
+            "id": "9a5aeef2-122f-495a-95d4-abebdc02530c",
+            "device": "sda",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-ubuntu2204-sata-uefi-20261126-disk0.qcow2",
+            "format": "qcow2"
+          },
+          {
+            "id": "2cac0440-e776-4d40-8952-ac195ebdc504",
+            "device": "sdb",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-ubuntu2204-sata-uefi-20261126-disk1.qcow2",
+            "format": "qcow2"
+          }
+        ],
+        "machine": "pc-q35-rhel9.8.0",
+        "firmware": "efi"
+      },
+      "allocation": {
+        "strict": true,
+        "verified": true,
+        "disks": [
+          {
+            "index": 0,
+            "volume_id": "9a5aeef2-122f-495a-95d4-abebdc02530c",
+            "path": "v2k-89-ubuntu2204-sata-uefi-20261126-disk0.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "34432843776",
+              "observedat": "2026-11-26T11:50:50.394621222Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "3467df1b17e131f4a348cd3c658e42a06fccb624640a46bea41f5d0dbf208b58",
+              "importverifiedat": "2026-11-26T11:50:50.394611130Z",
+              "importpath": "v2k-89-ubuntu2204-sata-uefi-20261126-disk0.qcow2",
+              "importrequestid": "9a5aeef2-122f-495a-95d4-abebdc02530c",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+            },
+            "verified": true,
+            "scope": "pre-first-start"
+          },
+          {
+            "index": 1,
+            "volume_id": "2cac0440-e776-4d40-8952-ac195ebdc504",
+            "path": "v2k-89-ubuntu2204-sata-uefi-20261126-disk1.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "8608370688",
+              "observedat": "2026-11-26T11:50:50.606195882Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "3eceb9da63f5a03f2fbd114a71d99ded73c158c8cc8ffc860e952f067f12ffcb",
+              "importverifiedat": "2026-11-26T11:50:50.606185124Z",
+              "importpath": "v2k-89-ubuntu2204-sata-uefi-20261126-disk1.qcow2",
+              "importrequestid": "2cac0440-e776-4d40-8952-ac195ebdc504",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+            },
+            "verified": true,
+            "scope": "pre-first-start"
+          }
+        ],
+        "scope": "pre-first-start"
+      },
+      "guest": {
+        "verified": true,
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69476.json",
+            "sha256": "fcf3d78431019aea0792f2f412789526b9b14d1c8c262791cf4f963c7acbe1c4"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69476.json",
+            "sha256": "fcf3d78431019aea0792f2f412789526b9b14d1c8c262791cf4f963c7acbe1c4"
+          }
+        ],
+        "rw": [
+          "/var/tmp/v2k-target-rw-307bbeab67a7c1fb.bin",
+          "/data/v2k/v2k-target-rw-181c80a705194e1f.bin"
+        ],
+        "firmware": "efi",
+        "drivers": [
+          {
+            "name": "sda",
+            "size": 34359738368,
+            "drivers": [
+              "sd",
+              "ahci"
+            ]
+          },
+          {
+            "name": "sdb",
+            "size": 8589934592,
+            "drivers": [
+              "sd",
+              "ahci"
+            ]
+          }
+        ],
+        "transport": "console"
+      }
+    },
+    {
+      "source_name": "v2k-tst-ubuntu2204-scsi-uefi",
+      "source_uuid": "4235044d-e54b-6093-48ca-1d2a6c6964a2",
+      "firmware": "efi",
+      "policy": "auto",
+      "plan_hash": "b20ceaf41a0184b28dd5589160d482cf844df3a2504aeac35a71fb05ad098f9d",
+      "vm_id": "8a3ac2ab-0335-4d89-8267-bf95790167a2",
+      "target_name": "v2k-89-ubuntu2204-scsi-uefi-20261126",
+      "instance": "i-2-299-VM",
+      "host": "ablecube13-3",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "scsi0:0",
+          "device_key": "2000",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 34359738368,
+          "role": "root",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "scsi0:1",
+          "device_key": "2001",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sdb"
+          }
+        }
+      ],
+      "controller_observation": {
+        "supported": true,
+        "planhash": "b20ceaf41a0184b28dd5589160d482cf844df3a2504aeac35a71fb05ad098f9d",
+        "disks": [
+          {
+            "id": "7f4db8f7-478b-4482-aac3-029815b15628",
+            "device": "sda",
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "path": "/mnt/glue-gfs/v2k-89-ubuntu2204-scsi-uefi-20261126-disk0.qcow2",
+            "format": "qcow2"
+          },
+          {
+            "id": "e6a01337-ba90-49cb-9f95-43e238745ed5",
+            "device": "sdb",
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "path": "/mnt/glue-gfs/v2k-89-ubuntu2204-scsi-uefi-20261126-disk1.qcow2",
+            "format": "qcow2"
+          }
+        ],
+        "machine": "pc-q35-rhel9.8.0",
+        "firmware": "efi"
+      },
+      "allocation": {
+        "strict": true,
+        "verified": true,
+        "disks": [
+          {
+            "index": 0,
+            "volume_id": "7f4db8f7-478b-4482-aac3-029815b15628",
+            "path": "v2k-89-ubuntu2204-scsi-uefi-20261126-disk0.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "34432843776",
+              "observedat": "2026-11-26T11:58:18.348599216Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "db1efa9c68a8ea3e7ebd1834c862b5d3716ec433e9f7c8a945a27276122767f7",
+              "importverifiedat": "2026-11-26T11:58:18.348584185Z",
+              "importpath": "v2k-89-ubuntu2204-scsi-uefi-20261126-disk0.qcow2",
+              "importrequestid": "7f4db8f7-478b-4482-aac3-029815b15628",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+            },
+            "verified": true,
+            "scope": "pre-first-start"
+          },
+          {
+            "index": 1,
+            "volume_id": "e6a01337-ba90-49cb-9f95-43e238745ed5",
+            "path": "v2k-89-ubuntu2204-scsi-uefi-20261126-disk1.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "8608370688",
+              "observedat": "2026-11-26T11:58:18.556340129Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "bf0ba68ceb1023f29a61bf7436b1f146ac0c3fa67244f7b66fa6b3c260a2aef4",
+              "importverifiedat": "2026-11-26T11:58:18.556317774Z",
+              "importpath": "v2k-89-ubuntu2204-scsi-uefi-20261126-disk1.qcow2",
+              "importrequestid": "e6a01337-ba90-49cb-9f95-43e238745ed5",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+            },
+            "verified": true,
+            "scope": "pre-first-start"
+          }
+        ],
+        "scope": "pre-first-start"
+      },
+      "guest": {
+        "verified": true,
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69477.json",
+            "sha256": "f1484b24979b67330603985c2dd62955f0809794797d8fdd5aaa19421f4dba0f"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69477.json",
+            "sha256": "f1484b24979b67330603985c2dd62955f0809794797d8fdd5aaa19421f4dba0f"
+          }
+        ],
+        "rw": [
+          "/var/tmp/v2k-target-rw-0bbf013124611369.bin",
+          "/data/v2k/v2k-target-rw-064547b095ab3744.bin"
+        ],
+        "firmware": "efi",
+        "drivers": [
+          {
+            "name": "sda",
+            "size": 34359738368,
+            "drivers": [
+              "sd",
+              "virtio_scsi",
+              "virtio-pci"
+            ]
+          },
+          {
+            "name": "sdb",
+            "size": 8589934592,
+            "drivers": [
+              "sd",
+              "virtio_scsi",
+              "virtio-pci"
+            ]
+          }
+        ],
+        "transport": "console"
+      }
+    },
+    {
+      "source_name": "v2k-tst-win2022-ide-bios",
+      "source_uuid": "4235ccb4-7751-4405-f44d-a0cc59250f8f",
+      "firmware": "bios",
+      "policy": "auto",
+      "plan_hash": "93f965dddb920f9fbad14236ec1ba736389b6a570cb6d7c9b9cc14f0ee4509b7",
+      "vm_id": "c9b364bc-25f6-4858-8a5a-3fe8911c7cec",
+      "target_name": "v2k-89-win2022-ide-bios-20261126",
+      "instance": "i-2-298-VM",
+      "host": "ablecube13-1",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "ide0:0",
+          "device_key": "3000",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 68719476736,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "ide0:1",
+          "device_key": "3001",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "controller_observation": {
+        "supported": true,
+        "planhash": "93f965dddb920f9fbad14236ec1ba736389b6a570cb6d7c9b9cc14f0ee4509b7",
+        "disks": [
+          {
+            "id": "251eae4b-924b-4a3f-a334-f9e1238f7051",
+            "device": "sda",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-win2022-ide-bios-20261126-disk0.qcow2",
+            "format": "qcow2"
+          },
+          {
+            "id": "19998268-054b-47df-898d-da4bbf01d815",
+            "device": "sdb",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-win2022-ide-bios-20261126-disk1.qcow2",
+            "format": "qcow2"
+          }
+        ],
+        "machine": "pc-q35-rhel9.8.0",
+        "firmware": "bios"
+      },
+      "allocation": {
+        "strict": true,
+        "verified": true,
+        "disks": [
+          {
+            "index": 0,
+            "volume_id": "251eae4b-924b-4a3f-a334-f9e1238f7051",
+            "path": "v2k-89-win2022-ide-bios-20261126-disk0.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "68865470464",
+              "observedat": "2026-11-26T11:51:15.710286604Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "787e5031e0b12d3c8cec8ae3d4cefd5deac5f24aaaeaadefd26b616a8353e486",
+              "importverifiedat": "2026-11-26T11:51:15.710277245Z",
+              "importpath": "v2k-89-win2022-ide-bios-20261126-disk0.qcow2",
+              "importrequestid": "251eae4b-924b-4a3f-a334-f9e1238f7051",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+            },
+            "verified": true,
+            "scope": "pre-first-start"
+          },
+          {
+            "index": 1,
+            "volume_id": "19998268-054b-47df-898d-da4bbf01d815",
+            "path": "v2k-89-win2022-ide-bios-20261126-disk1.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "8608370688",
+              "observedat": "2026-11-26T11:51:15.920664050Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "a35998e63f2e2a1d047119fdc7be6bb964eeaaf91d8eba9c5d5fcb400c776900",
+              "importverifiedat": "2026-11-26T11:51:15.920654375Z",
+              "importpath": "v2k-89-win2022-ide-bios-20261126-disk1.qcow2",
+              "importrequestid": "19998268-054b-47df-898d-da4bbf01d815",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+            },
+            "verified": true,
+            "scope": "pre-first-start"
+          }
+        ],
+        "scope": "pre-first-start"
+      },
+      "guest": {
+        "verified": true,
+        "proofs": [
+          {
+            "sha256": "c30db8079197b64936a67f2d96409cde1bc17112f551c7b5b351c74c1a93970c",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69478.json"
+          },
+          {
+            "sha256": "c30db8079197b64936a67f2d96409cde1bc17112f551c7b5b351c74c1a93970c",
+            "path": "E:\\v2k-issue89-proof-vm-69478.json"
+          }
+        ],
+        "rw": [
+          "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\v2k-target-rw-df49e13927ce7958.bin",
+          "E:\\v2k-target-rw-df49e13927ce7958.bin"
+        ],
+        "firmware": "Bios",
+        "controllers": [
+          {
+            "FriendlyName": "Microsoft Storage Spaces Controller",
+            "Class": "SCSIAdapter",
+            "Status": "OK"
+          },
+          {
+            "FriendlyName": "Standard SATA AHCI Controller",
+            "Class": "HDC",
+            "Status": "OK"
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Size": 68719476736,
+            "BusType": "SATA",
+            "PartitionStyle": "MBR"
+          },
+          {
+            "Number": 1,
+            "Size": 8589934592,
+            "BusType": "SATA",
+            "PartitionStyle": "GPT"
+          }
+        ]
+      }
+    },
+    {
+      "source_name": "v2k-tst-win2022-sata-uefi",
+      "source_uuid": "423574d2-d33a-44a3-5d14-324aa3861c95",
+      "firmware": "efi",
+      "policy": "auto",
+      "plan_hash": "e1864459e9debf697569d6fa4d4775ff02b6f213b402e37fa5879e9f0ad1c9f2",
+      "vm_id": "1a9f127d-e7b3-4a84-95a6-0d07a7037b1b",
+      "target_name": "v2k-89-win2022-sata-uefi-20261126",
+      "instance": "i-2-296-VM",
+      "host": "ablecube13-1",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "sata0:1",
+          "device_key": "16001",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 68719476736,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "sata0:2",
+          "device_key": "16002",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 2,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "controller_observation": {
+        "supported": true,
+        "planhash": "e1864459e9debf697569d6fa4d4775ff02b6f213b402e37fa5879e9f0ad1c9f2",
+        "disks": [
+          {
+            "id": "a7c7b1f0-8a62-40c0-a542-57e9e56bf3ec",
+            "device": "sda",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-win2022-sata-uefi-20261126-disk0.qcow2",
+            "format": "qcow2"
+          },
+          {
+            "id": "11454a2d-2303-4e91-9dcd-5626d6d63f92",
+            "device": "sdb",
+            "bus": "sata",
+            "model": "ahci",
+            "path": "/mnt/glue-gfs/v2k-89-win2022-sata-uefi-20261126-disk1.qcow2",
+            "format": "qcow2"
+          }
+        ],
+        "machine": "pc-q35-rhel9.8.0",
+        "firmware": "efi"
+      },
+      "allocation": {
+        "strict": true,
+        "verified": true,
+        "disks": [
+          {
+            "index": 0,
+            "volume_id": "a7c7b1f0-8a62-40c0-a542-57e9e56bf3ec",
+            "path": "v2k-89-win2022-sata-uefi-20261126-disk0.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "68865470464",
+              "observedat": "2026-11-26T11:43:03.818696522Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "4d4c4e292f52731742c67788b45fa21810d956cfcb403d4e251e0bcec0ccdd92",
+              "importverifiedat": "2026-11-26T11:43:03.818676160Z",
+              "importpath": "v2k-89-win2022-sata-uefi-20261126-disk0.qcow2",
+              "importrequestid": "a7c7b1f0-8a62-40c0-a542-57e9e56bf3ec",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+              "importstartedat": "2026-11-26T11:43:07.224434963Z"
+            },
+            "verified": true,
+            "scope": "historical-first-start"
+          },
+          {
+            "index": 1,
+            "volume_id": "11454a2d-2303-4e91-9dcd-5626d6d63f92",
+            "path": "v2k-89-win2022-sata-uefi-20261126-disk1.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "8608370688",
+              "observedat": "2026-11-26T11:43:03.980773577Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "e999f2464bded1b86ab50dc49eb3dabb73d09a99e0f0f1b75c345a41f2ece576",
+              "importverifiedat": "2026-11-26T11:43:03.980757402Z",
+              "importpath": "v2k-89-win2022-sata-uefi-20261126-disk1.qcow2",
+              "importrequestid": "11454a2d-2303-4e91-9dcd-5626d6d63f92",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+              "importstartedat": "2026-11-26T11:43:07.227853304Z"
+            },
+            "verified": true,
+            "scope": "historical-first-start"
+          }
+        ],
+        "scope": "historical-first-start"
+      },
+      "guest": {
+        "verified": true,
+        "proofs": [
+          {
+            "sha256": "adc762ebb13a647ca36c7255cae822f465deb2556762bc5bf659e08e096f2298",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69479.json"
+          },
+          {
+            "sha256": "adc762ebb13a647ca36c7255cae822f465deb2556762bc5bf659e08e096f2298",
+            "path": "E:\\v2k-issue89-proof-vm-69479.json"
+          }
+        ],
+        "rw": [
+          "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\v2k-target-rw-c49885d21f4659d0.bin",
+          "E:\\v2k-target-rw-c49885d21f4659d0.bin"
+        ],
+        "firmware": "Uefi",
+        "controllers": [
+          {
+            "FriendlyName": "Microsoft Storage Spaces Controller",
+            "Class": "SCSIAdapter",
+            "Status": "OK"
+          },
+          {
+            "FriendlyName": "Standard SATA AHCI Controller",
+            "Class": "HDC",
+            "Status": "OK"
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Size": 68719476736,
+            "BusType": "SATA",
+            "PartitionStyle": "GPT"
+          },
+          {
+            "Number": 1,
+            "Size": 8589934592,
+            "BusType": "SATA",
+            "PartitionStyle": "GPT"
+          }
+        ]
+      }
+    },
+    {
+      "source_name": "v2k-tst-win2022-scsi-uefi",
+      "source_uuid": "42354a9e-847c-cce4-21d1-6c232e0c5dfa",
+      "firmware": "efi",
+      "policy": "auto",
+      "plan_hash": "eeef9e5b20c8d0fb9ed6d8c8abd19e90762d0cea81975169a8c12f776439af6a",
+      "vm_id": "a6dc8aa7-1c2c-4187-bebf-21128daecbfc",
+      "target_name": "v2k-89-win2022-scsi-uefi-r2-20261126",
+      "instance": "i-2-301-VM",
+      "host": "ablecube13-3",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "scsi0:0",
+          "device_key": "2000",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 68719476736,
+          "role": "root",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "scsi0:1",
+          "device_key": "2001",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sdb"
+          }
+        }
+      ],
+      "controller_observation": {
+        "supported": true,
+        "planhash": "eeef9e5b20c8d0fb9ed6d8c8abd19e90762d0cea81975169a8c12f776439af6a",
+        "disks": [
+          {
+            "id": "f620da33-3129-4f79-a31e-33780870898c",
+            "device": "sda",
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "path": "/mnt/glue-gfs/v2k-89-win2022-scsi-uefi-r2-20261126-disk0.qcow2",
+            "format": "qcow2"
+          },
+          {
+            "id": "f5b7b97d-1098-4663-a884-0eccf3da059d",
+            "device": "sdb",
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "path": "/mnt/glue-gfs/v2k-89-win2022-scsi-uefi-r2-20261126-disk1.qcow2",
+            "format": "qcow2"
+          }
+        ],
+        "machine": "pc-q35-rhel9.8.0",
+        "firmware": "efi"
+      },
+      "allocation": {
+        "strict": true,
+        "verified": true,
+        "disks": [
+          {
+            "index": 0,
+            "volume_id": "f620da33-3129-4f79-a31e-33780870898c",
+            "path": "v2k-89-win2022-scsi-uefi-r2-20261126-disk0.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "68865470464",
+              "observedat": "2026-11-26T12:22:44.791670873Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "c54ba2a089dca15443966814f92ebd5877d5d51f3c284671602299e35bff2629",
+              "importverifiedat": "2026-11-26T12:22:44.791661850Z",
+              "importpath": "v2k-89-win2022-scsi-uefi-r2-20261126-disk0.qcow2",
+              "importrequestid": "f620da33-3129-4f79-a31e-33780870898c",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+              "importstartedat": "2026-11-26T12:22:46.579440206Z"
+            },
+            "verified": true,
+            "scope": "historical-first-start"
+          },
+          {
+            "index": 1,
+            "volume_id": "f5b7b97d-1098-4663-a884-0eccf3da059d",
+            "path": "v2k-89-win2022-scsi-uefi-r2-20261126-disk1.qcow2",
+            "allocation": {
+              "contractversion": "1",
+              "requestedpolicy": "falloc",
+              "requestedformat": "qcow2",
+              "policyorigin": "explicit",
+              "fixedpolicy": "falloc",
+              "effectivepolicy": "falloc",
+              "appliedmethod": "import-adopt-falloc",
+              "actualformat": "qcow2",
+              "evidence": "verified",
+              "appliedbackend": "GFS2",
+              "appliedoperation": "import",
+              "evidencescope": "import-time",
+              "observedallocatedbytes": "8608370688",
+              "observedat": "2026-11-26T12:22:44.938333039Z",
+              "observedsource": "stat-st-blocks-times-512",
+              "importstrategy": "adopt",
+              "importidentity": "d4d8caccd09a2b1ee1baf8d01f89ba5dc098f34b2d2060b2bf08b18e63140bb9",
+              "importverifiedat": "2026-11-26T12:22:44.938324555Z",
+              "importpath": "v2k-89-win2022-scsi-uefi-r2-20261126-disk1.qcow2",
+              "importrequestid": "f5b7b97d-1098-4663-a884-0eccf3da059d",
+              "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+              "importstartedat": "2026-11-26T12:22:46.582134071Z"
+            },
+            "verified": true,
+            "scope": "historical-first-start"
+          }
+        ],
+        "scope": "historical-first-start"
+      },
+      "guest": {
+        "verified": true,
+        "proofs": [
+          {
+            "sha256": "c1cfdec416f5dd0680b3a17ce0d178dc48b1b08a70241fc9f31d16e8238feafb",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69480.json"
+          },
+          {
+            "sha256": "c1cfdec416f5dd0680b3a17ce0d178dc48b1b08a70241fc9f31d16e8238feafb",
+            "path": "E:\\v2k-issue89-proof-vm-69480.json"
+          }
+        ],
+        "rw": [
+          "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\v2k-target-rw-dec0e1a757b9f5e7.bin",
+          "E:\\v2k-target-rw-dec0e1a757b9f5e7.bin"
+        ],
+        "firmware": "Uefi",
+        "controllers": [
+          {
+            "FriendlyName": "Microsoft Storage Spaces Controller",
+            "Class": "SCSIAdapter",
+            "Status": "OK"
+          },
+          {
+            "FriendlyName": "Standard SATA AHCI Controller",
+            "Class": "HDC",
+            "Status": "OK"
+          },
+          {
+            "FriendlyName": "Red Hat VirtIO SCSI pass-through controller",
+            "Class": "SCSIAdapter",
+            "Status": "OK"
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Size": 68719476736,
+            "BusType": "SAS",
+            "PartitionStyle": "GPT"
+          },
+          {
+            "Number": 1,
+            "Size": 8589934592,
+            "BusType": "SAS",
+            "PartitionStyle": "GPT"
+          }
+        ]
+      }
+    }
+  ],
+  "windows_scsi_os_adjustment": {
+    "newDiskPolicy": "OfflineShared",
+    "before": {
+      "IsOffline": true,
+      "IsReadOnly": true,
+      "UniqueId": "f5b7b97d10984663a884"
+    },
+    "dataDrive": "E",
+    "after": {
+      "IsOffline": false,
+      "IsReadOnly": false,
+      "UniqueId": "f5b7b97d10984663a884"
+    }
+  },
+  "windows_scsi_restart": {
+    "from": "ablecube13-2",
+    "to": "ablecube13-3",
+    "root_ports": 16,
+    "guest_proof_after_restart": true
+  }
+}

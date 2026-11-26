@@ -15,6 +15,10 @@
 # limitations under the License.
 # ---------------------------------------------------------------------
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/runtime_credentials.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_handoff.sh"
 
 V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
@@ -71,33 +75,18 @@ v2k_validate_cbt_coverage() {
   ' <<<"${areas_json}" >/dev/null 2>&1
 }
 
-v2k_load_vddk_cred_from_manifest() {
-  local manifest="$1"
-  local cred
-  cred="$(jq -r '.source.vddk.cred_file // empty' "${manifest}" 2>/dev/null || true)"
-  [[ -n "${cred}" && -f "${cred}" ]] || {
-    echo "Missing .source.vddk.cred_file in manifest (or file not found). Provide it via init --vddk-cred-file." >&2
-    exit 32
-  }
-  # shellcheck disable=SC1090
-  source "${cred}"
-  : "${VDDK_USER:?missing VDDK_USER in vddk cred file}"
-  : "${VDDK_PASSWORD:?missing VDDK_PASSWORD in vddk cred file}"
-}
+
 
 v2k_transfer_patch_all() {
   local manifest="$1" which="$2" jobs="$3" coalesce_gap="$4" chunk="$5"
+  v2k_cloud_require_unmanaged_target "$manifest" || return $?
   local count
   count="$(jq -r '.disks|length' "${manifest}")"
 
   mkdir -p /tmp
   v2k_load_vddk_cred_from_manifest "${manifest}"
 
-  local passfile
-  passfile="$(mktemp /tmp/vmware_pass.XXXXXX)"
-  echo -n "${VDDK_PASSWORD}" > "${passfile}"
-  chmod 600 "${passfile}"
-  trap 'rm -f "${passfile-}" >/dev/null 2>&1 || true' EXIT
+  local passfile="/dev/null"
 
   local server
   # vCenter 중심: vddk.server -> vcenter(host) -> esxi_host
@@ -150,6 +139,7 @@ v2k_transfer_patch_all() {
 
 v2k_transfer_patch_one() {
   local manifest="$1" which="$2" idx="$3" server="$4" thumbprint="$5" vm_moref="$6" snap_name="$7" snap_moref="$8" coalesce_gap="$9" chunk="${10}" passfile="${11}"
+  v2k_cloud_require_unmanaged_target "$manifest" || return $?
   (
     set -euo pipefail
 
@@ -394,6 +384,9 @@ v2k_transfer_patch_one() {
     echo "[INFO] nbdkit binary: ${nbdkit_bin}" >> "${nbdlog}"
     echo "[INFO] VDDK libdir: ${VDDK_LIBDIR}" >> "${nbdlog}"
     echo "[INFO] VDDK config: ${vddk_config}" >> "${nbdlog}"
+    local password_fd
+    exec {password_fd}< <(printf '%s' "${VDDK_PASSWORD}")
+    passfile="/proc/self/fd/${password_fd}"
     LD_LIBRARY_PATH="${vddk_ld_library_path}" \
     "${nbdkit_bin}" -r -U "${sock}" -P "${pidfile}" "${nbdkit_plugin}" \
       libdir="${VDDK_LIBDIR}" \
