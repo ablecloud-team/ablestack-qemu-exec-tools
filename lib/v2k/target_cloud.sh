@@ -1407,6 +1407,15 @@ v2k_cloud_target_cutover() {
       return 2
     }
     import_path="$(v2k_cloud_target_import_path "${storage}" "${target_path}")" || return $?
+    # Managed/committed imports are reconciled by UUID, never re-probed as unmanaged images.
+    # In particular, a completed Running VM must not trigger offline source qemu inspection.
+    if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]] && jq -e --argjson idx "${idx}" '
+        .runtime.cloud.checkpoint as $c
+        | (if $idx == 0 then ($c.root_volume_id // $c.root_import_job_id // "")
+           else ($c.data_volumes[($idx | tostring)].id // $c.data_volumes[($idx | tostring)].import_job_id // "") end)
+        | length > 0' "${manifest}" >/dev/null; then
+      continue
+    fi
     v2k_cloud_target_validate_import_visible "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${import_path}" || {
       echo "Cloud import source is not visible: ${import_path}" >&2
       if [[ "${storage}" == "file" && -n "${pool_path:-}" ]]; then
@@ -1440,10 +1449,19 @@ v2k_cloud_target_cutover() {
   checkpoint_state="$(v2k_cloud_target_checkpoint_reentry_state "${checkpoint}")"
   case "${checkpoint_state}" in
     complete)
-      migration_cloud_allocation_verify_final v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
-      result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
-      printf '%s' "${result_json}"
-      return 0
+      migration_cloud_allocation_intent "${manifest}" || return $?
+      if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]] &&
+          { jq -e '.inspection_required == true' <<<"${checkpoint}" >/dev/null ||
+             { [[ "${start_vm}" -eq 1 ]] && ! jq -e '.started == true' <<<"${checkpoint}" >/dev/null; }; }; then
+        # An earlier warning/define-only result is not a completed requested first start.
+        v2k_cloud_target_record_checkpoint "${manifest}" deployment-incomplete '{"complete":false}' || return 78
+        checkpoint="$(v2k_cloud_target_existing_checkpoint_json "${manifest}")"
+      else
+        migration_cloud_allocation_verify_final v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
+        result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
+        printf '%s' "${result_json}"
+        return 0
+      fi
       ;;
     incomplete)
       echo "Cloud cutover is resuming from an incomplete mutation checkpoint." >&2
@@ -1696,6 +1714,25 @@ v2k_cloud_target_cutover() {
   elif [[ "${start_vm}" -eq 1 ]]; then
     issues_json="$(jq -c --argjson issues "${issues_json}" \
       '$issues + [{component:"assembly",stage:"start-vm",reason:"start_skipped_due_to_degraded_target"}]' <<<"{}")"
+  fi
+
+  migration_cloud_allocation_intent "${manifest}" || return $?
+  if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]]; then
+    if [[ "${start_vm}" -eq 1 && "${started}" == true ]]; then
+      local observed_vm
+      if ! observed_vm="$(v2k_cloud_target_vm_json "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")" ||
+          ! jq -e '.state == "Running"' <<<"${observed_vm}" >/dev/null; then
+        inspection_required=true; started=false
+        issues_json="$(jq -c '. + [{component:"boot",stage:"start-vm",reason:"cloud_vm_not_running"}]' <<<"${issues_json}")"
+      fi
+    fi
+    if [[ "${inspection_required}" == true ]]; then
+      v2k_cloud_target_record_result "${manifest}" \
+        "$(jq -nc --argjson issues "${issues_json}" '{status:"blocked",applied:true,started:false,validated:false,inspection_required:true,reason:"CLOUD_CUTOVER_INCOMPLETE",issues:$issues}')" || return 78
+      v2k_cloud_target_record_checkpoint "${manifest}" deployment-incomplete \
+        "$(jq -nc --argjson issues "${issues_json}" '{complete:false,started:false,inspection_required:true,issues:$issues}')" || return 78
+      return 2
+    fi
   fi
 
   result_json="$(jq -nc \

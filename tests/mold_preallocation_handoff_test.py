@@ -29,7 +29,9 @@ elif api=='createDiskOffering':
     value={**p,'id':str(uuid.uuid4()),'iscustomized':True,'state':'Active','tags':''}
     if 'allocationpolicy' in p:value['allocation']={'contractversion':'1','policyorigin':'explicit','requestedpolicy':p['allocationpolicy'],'requestedformat':p['allocationformat']}
     state['offerings'].append(value);out=result(api.lower(),{'diskoffering':value})
-elif api=='listVolumesForImport':out=result(api.lower(),{'volume':[{'path':p.get('path'),'fullpath':p.get('path'),'name':Path(p.get('path','disk')).name,'format':'QCOW2'}]})
+elif api=='listVolumesForImport':
+    if state['vm'].get('state')=='Running':raise RuntimeError('Offline unmanaged image probe is forbidden after first start')
+    out=result(api.lower(),{'volume':[{'path':p.get('path'),'fullpath':p.get('path'),'name':Path(p.get('path','disk')).name,'format':'QCOW2'}]})
 elif api=='importVolume':
     id=p['allocationrequestid'];policy=p['allocationpolicy'];fmt=p['allocationformat'];copy=policy in ['metadata','full']
     allocation={'contractversion':'1','requestedpolicy':policy,'requestedformat':fmt,'policyorigin':'explicit','fixedpolicy':policy,'effectivepolicy':policy,'actualformat':fmt,'evidence':'verified','appliedbackend':'GFS2','appliedoperation':'copy' if copy else 'import','appliedmethod':('qemu-preallocation-' if copy else 'import-adopt-')+policy,'evidencescope':'creation-or-copy-time' if copy else 'import-time','importrequestid':id,'importidentity':'0'*64,'importpool':'pool','importverifiedat':'2026-11-26T00:00:00Z','importstrategy':'copy' if copy else 'adopt','observedallocatedbytes':'1075838976'}
@@ -52,7 +54,12 @@ elif api=='verifyImportedVolumeAllocation':
     if os.environ.get('BAD_FINAL')=='1':value['allocation']['effectivepolicy']='off'
     out=result(api.lower(),{'volume':value})
 elif api=='startVirtualMachine':
-    state['vm']['state']='Running';out=result(api.lower(),job({'virtualmachine':state['vm']}))
+    if os.environ.get('BAD_START')=='1':
+        file.write_text(json.dumps(state));print(json.dumps({'errorresponse':{'errortext':'fixture rejected start'}}));sys.exit(1)
+    if os.environ.get('BAD_START_STATE')!='1':state['vm']['state']='Running'
+    for value in state['volumes'].values():
+        if state['vm'].get('state')=='Running':value['allocation']['importstartedat']='2026-11-26T00:01:00Z'
+    out=result(api.lower(),job({'virtualmachine':state['vm']}))
 else:raise RuntimeError('Unexpected API '+api)
 file.write_text(json.dumps(state));print(json.dumps(out))
 """
@@ -64,17 +71,20 @@ source "$REPO/lib/$TOOL/engine.sh"
 v2k_cloud_api_get() { python3 "$CASE/fake.py" "$4" "$5"; }
 n2k_cloud_api_get() { python3 "$CASE/fake.py" "$4" "$5"; }
 "${TOOL}_cloud_target_cutover" "$CASE/manifest.json" 0 1 1 https://mold.invalid fixture-key fixture-secret ''
+if [[ "${REPEAT:-0}" == 1 ]]; then
+"${TOOL}_cloud_target_cutover" "$CASE/manifest.json" 0 1 1 https://mold.invalid fixture-key fixture-secret ''
+fi
 """
 
 class Handoff(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='mold-allocation-test-');self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
-    def run_cutover(self,tool,policy='falloc',fmt='qcow2',copy=False,bad_cap=False,bad_final=False):
+    def run_cutover(self,tool,policy='falloc',fmt='qcow2',copy=False,bad_cap=False,bad_final=False,bad_start=False,bad_start_state=False,repeat=False):
         case=self.root/(tool+'-'+policy+fmt+str(len(list(self.root.iterdir()))));case.mkdir();(case/'target').mkdir();(case/'fake.py').write_text(FAKE)
         disks=[{'disk_id':'scsi0:'+str(i),'size_bytes':1073741824,'controller':{'kind':'scsi','type':'VirtualLsiLogicSASController'},'transfer':{'base_done':True,'target_path':str(case/'target'/('disk'+str(i)+'.'+fmt))}} for i in range(2)]
         manifest={'source':{'vm':{'name':'fixture','cpu':1,'memory_mb':1024,'firmware':'bios','nics':[{'key':'nic0','label':'nic0','mac':'52:54:00:87:00:01'}]}},'target':{'provider':'ablestack-cloud','format':fmt,'storage':{'type':'file','preallocation':policy,'preallocation_source':'cli'},'dst_root':str(case/'target'),'cloud':{'endpoint':'https://mold.invalid','zone_id':'zone','service_offering_id':'offering','network_ids':['network'],'storage_id':'pool','name':'fixture','allocation_allow_copy':copy}},'disks':disks}
         (case/'manifest.json').write_text(json.dumps(manifest))
-        env={**os.environ,'REPO':str(ROOT),'CASE':str(case),'TOOL':tool,'BAD_CAP':str(int(bad_cap)),'BAD_FINAL':str(int(bad_final))}
+        env={**os.environ,'REPO':str(ROOT),'CASE':str(case),'TOOL':tool,'BAD_CAP':str(int(bad_cap)),'BAD_FINAL':str(int(bad_final)),'BAD_START':str(int(bad_start)),'BAD_START_STATE':str(int(bad_start_state)),'REPEAT':str(int(repeat))}
         r=subprocess.run(['bash','-euo','pipefail','-c',SHELL],env=env,text=True,capture_output=True,timeout=60)
         state=json.loads((case/'mold.json').read_text()) if (case/'mold.json').exists() else {'calls':[]}
         return r,state,json.loads((case/'manifest.json').read_text())
@@ -110,6 +120,25 @@ class Handoff(unittest.TestCase):
             for kw in [{'bad_cap':True},{'policy':'metadata','copy':False},{'policy':'full','copy':False}]:
                 r,state,_=self.run_cutover(tool,**kw);self.assertNotEqual(r.returncode,0)
                 self.assertFalse(any(c['api'] in ['importVolume','deployVirtualMachineForVolume','createDiskOffering','startVirtualMachine'] for c in state['calls']))
+    def test_start_failure_or_nonrunning_result_cannot_be_complete(self):
+        for tool in ['v2k','n2k']:
+            for failure in [{'bad_start':True},{'bad_start_state':True}]:
+                r,state,manifest=self.run_cutover(tool,**failure)
+                self.assertNotEqual(r.returncode,0,r.stdout+'\n'+r.stderr)
+                self.assertEqual(state['vm']['state'],'Stopped')
+                self.assertFalse(manifest['runtime']['cloud']['checkpoint']['complete'])
+                self.assertEqual(manifest['runtime']['cloud']['reason'],'CLOUD_CUTOVER_INCOMPLETE')
+
+    def test_running_reconciliation_never_probes_an_unmanaged_image(self):
+        for tool in ['v2k','n2k']:
+            r,state,manifest=self.run_cutover(tool,repeat=True)
+            self.assertEqual(r.returncode,0,r.stdout+'\n'+r.stderr)
+            calls=[c['api'] for c in state['calls']]
+            self.assertNotIn('listVolumesForImport',calls[calls.index('startVirtualMachine')+1:])
+            self.assertEqual(calls.count('importVolume'),2)
+            self.assertEqual(calls.count('startVirtualMachine'),1)
+            self.assertEqual(manifest['runtime']['cloud']['allocation']['scope'],'historical-first-start')
+
     def test_helper_bundles_match(self):
         self.assertEqual((ROOT/'lib/v2k/cloud_allocation.sh').read_bytes(),(ROOT/'lib/n2k/cloud_allocation.sh').read_bytes())
 
