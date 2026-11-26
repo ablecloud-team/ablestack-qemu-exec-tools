@@ -1,0 +1,3285 @@
+{
+  "version": 1,
+  "date_range": [
+    "2026-11-26",
+    "2026-11-27"
+  ],
+  "scope": "issue90-v2k-Mold-cluster13-GFS2",
+  "method": "Real VMware source clones, production v2k Wizard and real Mold/Agent/QGA; RAM-only session transport replaces API authentication only.",
+  "source_original_folder": "V2K-Test-20261126",
+  "source_clone_folder": "V2K-I90-Auto-20261126",
+  "cases": [
+    {
+      "case": "ubuntu-ide",
+      "source_name": "v2k-i90-src-ubuntu2204-ide-bios",
+      "source_vm_uuid": "4235183b-e063-977a-d023-ac36d2acf021",
+      "source_capture_id": "fb2e3588-a411-409b-81ec-060367ed17cc",
+      "source_boot_id": "37e6a088-fae7-43d9-8e7f-ae0f9195bb7d",
+      "source_os": "linux",
+      "source_os_version": "22.04",
+      "target_name": "v2k-i90-ubuntu-ide-final-20261127",
+      "vm_id": "fe393009-f437-4f40-88fd-55f71700123b",
+      "instance": "i-2-312-VM",
+      "current_host": "ablecube13-1",
+      "state": "Running",
+      "firmware": "bios",
+      "controller_plan_hash": "3e90a17b1587cdc1d71d3c60f7c38ba96bfac5d56b104112367c91914cf47ca8",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "ide0:0",
+          "device_key": "3000",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 34359738368,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "ide0:1",
+          "device_key": "3001",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "operation_id": "acbc378e-55a5-4031-b736-1f4ffe09a279",
+      "guest_plan_hash": "8ab977b621a0391e519379a74955712f9d1475c80dbe6b41b46fa44dc1dd04cc",
+      "root_identity": "fs:4eb790e9-4894-486e-bffa-ab56ff2d41c6",
+      "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+      "manual_guest_repairs_before_verified": 0,
+      "first_boot": {
+        "version": 1.0,
+        "operation_id": "acbc378e-55a5-4031-b736-1f4ffe09a279",
+        "plan_hash": "8ab977b621a0391e519379a74955712f9d1475c80dbe6b41b46fa44dc1dd04cc",
+        "vm_uuid": "fe393009-f437-4f40-88fd-55f71700123b",
+        "binding_sha256": "83848116a1fe61e41012b08111248843c779e94523268f09e0ef7b1a0399a86a",
+        "boot_scope": "33820917b639f2abc6b5c31d9a873310f404ef35a8daaee78e6a21905395c057",
+        "boot_id": "33ce9ca1-9eb6-4a25-9e87-ce6d795f3a6f",
+        "root_identity": "fs:4eb790e9-4894-486e-bffa-ab56ff2d41c6",
+        "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+        "status": "VERIFIED",
+        "network": {
+          "status": "VERIFIED",
+          "interfaces": [
+            {
+              "mac": "00:50:56:39:90:09",
+              "ifname": "ens192",
+              "addresses": [
+                "10.10.254.160/16",
+                "fd12:8ea6:72a:69eb:250:56ff:fe39:9009/64",
+                "fe80::250:56ff:fe39:9009/64"
+              ],
+              "mtu": 1500.0,
+              "status": "VERIFIED"
+            }
+          ]
+        },
+        "windows": {
+          "status": "NOT_APPLICABLE"
+        },
+        "mutations": []
+      },
+      "after_host_move": {
+        "version": 1.0,
+        "operation_id": "acbc378e-55a5-4031-b736-1f4ffe09a279",
+        "plan_hash": "8ab977b621a0391e519379a74955712f9d1475c80dbe6b41b46fa44dc1dd04cc",
+        "vm_uuid": "fe393009-f437-4f40-88fd-55f71700123b",
+        "binding_sha256": "de2eeae5e35c5ed3973c27225409914c63d4fe061ae8b620feceb9d7ada2244b",
+        "boot_scope": "cb7f7ca34ea5ca3ba1ac1b6644dc96b4316db919cbe4aabeb0bfe95126ae77c8",
+        "boot_id": "d4f3dfb2-9b42-4093-b816-436aacd82729",
+        "root_identity": "fs:4eb790e9-4894-486e-bffa-ab56ff2d41c6",
+        "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+        "status": "VERIFIED",
+        "network": {
+          "status": "VERIFIED",
+          "interfaces": [
+            {
+              "mac": "00:50:56:39:90:09",
+              "ifname": "ens192",
+              "addresses": [
+                "10.10.254.160/16",
+                "fd12:8ea6:72a:69eb:250:56ff:fe39:9009/64",
+                "fe80::250:56ff:fe39:9009/64"
+              ],
+              "mtu": 1500.0,
+              "status": "VERIFIED"
+            }
+          ]
+        },
+        "windows": {
+          "status": "NOT_APPLICABLE"
+        },
+        "mutations": []
+      },
+      "initial_io": {
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69475.json",
+            "sha256": "eaa6a0856ac2ea6c93cf3cc7b36f5a05256b409ef98099affbac97295cc69c2e"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69475.json",
+            "sha256": "eaa6a0856ac2ea6c93cf3cc7b36f5a05256b409ef98099affbac97295cc69c2e"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ],
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:90:09",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.160",
+                "prefixlen": 16,
+                "metric": 100,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "label": "ens192",
+                "valid_life_time": 7116,
+                "preferred_life_time": 7116
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:9009",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "mngtmpaddr": true,
+                "noprefixroute": true,
+                "valid_life_time": 2591983,
+                "preferred_life_time": 604783
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:9009",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "/dev/mapper/ubuntu--vg-ubuntu--lv /      ext4",
+        "firmware": "bios"
+      },
+      "after_host_move_io": {
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69475.json",
+            "sha256": "eaa6a0856ac2ea6c93cf3cc7b36f5a05256b409ef98099affbac97295cc69c2e"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69475.json",
+            "sha256": "eaa6a0856ac2ea6c93cf3cc7b36f5a05256b409ef98099affbac97295cc69c2e"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ],
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:90:09",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.160",
+                "prefixlen": 16,
+                "metric": 100,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "label": "ens192",
+                "valid_life_time": 7161,
+                "preferred_life_time": 7161
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:9009",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "mngtmpaddr": true,
+                "noprefixroute": true,
+                "valid_life_time": 2591964,
+                "preferred_life_time": 604764
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:9009",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "/dev/mapper/ubuntu--vg-ubuntu--lv /      ext4",
+        "firmware": "bios"
+      },
+      "volumes": [
+        {
+          "id": "8a9e7497-29ca-4ba3-a3f6-45999b51984c",
+          "type": "ROOT",
+          "deviceid": 0,
+          "path": "v2k-i90-ubuntu-ide-final-20261127-disk0.qcow2",
+          "size": 34359738368,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-26T17:01:55.818064252Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-ubuntu-ide-final-20261127-disk0.qcow2",
+            "importrequestid": "8a9e7497-29ca-4ba3-a3f6-45999b51984c",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T17:01:59.409530316Z",
+            "importstrategy": "adopt",
+            "importidentity": "61102c597fe82c4bb990c171aac854dea3982d7f666433f38c5c973ce81ff632",
+            "importverifiedat": "2026-11-26T17:01:55.818059670Z"
+          }
+        },
+        {
+          "id": "dec27554-9736-4e77-8df6-b0b60a930c7d",
+          "type": "DATADISK",
+          "deviceid": 1,
+          "path": "v2k-i90-ubuntu-ide-final-20261127-disk1.qcow2",
+          "size": 8589934592,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-26T17:01:55.929542361Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-ubuntu-ide-final-20261127-disk1.qcow2",
+            "importrequestid": "dec27554-9736-4e77-8df6-b0b60a930c7d",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T17:01:59.412405522Z",
+            "importstrategy": "adopt",
+            "importidentity": "6fed59379f238ad35e415490cae2fb3a8cffd1f112707e335d298f5df816b26d",
+            "importverifiedat": "2026-11-26T17:01:55.929537374Z"
+          }
+        }
+      ]
+    },
+    {
+      "case": "ubuntu-sata",
+      "source_name": "v2k-i90-src-ubuntu2204-sata-uefi",
+      "source_vm_uuid": "42352fcd-b621-a7c7-cc43-704f74fb7776",
+      "source_capture_id": "1eff52ad-57d6-4c45-9b11-5c520170a097",
+      "source_boot_id": "e30e7f7c-bc79-44a0-a23b-521c06f4c45e",
+      "source_os": "linux",
+      "source_os_version": "22.04",
+      "target_name": "v2k-i90-ubuntu-sata-final-20261127",
+      "vm_id": "b4b1a1c4-97a9-462f-a887-3228ea29e114",
+      "instance": "i-2-311-VM",
+      "current_host": "ablecube13-2",
+      "state": "Running",
+      "firmware": "efi",
+      "controller_plan_hash": "076f9658c39a834ce3d809573dcf6a743c91e109b5010ee45414d0753b40b0fc",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "sata0:1",
+          "device_key": "16001",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 34359738368,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "sata0:2",
+          "device_key": "16002",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 2,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "operation_id": "44219e2e-ebf4-412f-9496-e94236abeea0",
+      "guest_plan_hash": "e8c77978394b8ab5709da91c1229c19aa7916bbeaf3dfa911e59c9e01b6353ae",
+      "root_identity": "fs:4d3cf136-3e70-4ed4-a0a2-483b8721917c",
+      "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+      "manual_guest_repairs_before_verified": 0,
+      "first_boot": {
+        "version": 1.0,
+        "operation_id": "44219e2e-ebf4-412f-9496-e94236abeea0",
+        "plan_hash": "e8c77978394b8ab5709da91c1229c19aa7916bbeaf3dfa911e59c9e01b6353ae",
+        "vm_uuid": "b4b1a1c4-97a9-462f-a887-3228ea29e114",
+        "binding_sha256": "324deee246e55fefc4841fd875769c9d64edc634b6255ebc8399c238ab997cf7",
+        "boot_scope": "171cb932331979c0ec288a960ec34b0a69ab85667883615667d8f498bfc238da",
+        "boot_id": "518b3ff4-2fe0-4cd0-b6c2-13fdad0ae694",
+        "root_identity": "fs:4d3cf136-3e70-4ed4-a0a2-483b8721917c",
+        "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+        "status": "VERIFIED",
+        "network": {
+          "status": "VERIFIED",
+          "interfaces": [
+            {
+              "mac": "00:50:56:39:90:0a",
+              "ifname": "ens192",
+              "addresses": [
+                "10.10.254.165/16",
+                "fd12:8ea6:72a:69eb:250:56ff:fe39:900a/64",
+                "fe80::250:56ff:fe39:900a/64"
+              ],
+              "mtu": 1500.0,
+              "status": "VERIFIED"
+            }
+          ]
+        },
+        "windows": {
+          "status": "NOT_APPLICABLE"
+        },
+        "mutations": []
+      },
+      "after_host_move": {
+        "version": 1.0,
+        "operation_id": "44219e2e-ebf4-412f-9496-e94236abeea0",
+        "plan_hash": "e8c77978394b8ab5709da91c1229c19aa7916bbeaf3dfa911e59c9e01b6353ae",
+        "vm_uuid": "b4b1a1c4-97a9-462f-a887-3228ea29e114",
+        "binding_sha256": "8b5dd3c19d0104eb33b6d795827073e439e04dc33f558e2a2f473ae731f73e46",
+        "boot_scope": "8d4611c63b5ee4a7435a27402b6edbdd681fc4510d23acf0fa18eb068e62c4ac",
+        "boot_id": "7f7bee0d-a090-450b-b96f-85437122abfa",
+        "root_identity": "fs:4d3cf136-3e70-4ed4-a0a2-483b8721917c",
+        "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+        "status": "VERIFIED",
+        "network": {
+          "status": "VERIFIED",
+          "interfaces": [
+            {
+              "mac": "00:50:56:39:90:0a",
+              "ifname": "ens192",
+              "addresses": [
+                "10.10.254.165/16",
+                "fd12:8ea6:72a:69eb:250:56ff:fe39:900a/64",
+                "fe80::250:56ff:fe39:900a/64"
+              ],
+              "mtu": 1500.0,
+              "status": "VERIFIED"
+            }
+          ]
+        },
+        "windows": {
+          "status": "NOT_APPLICABLE"
+        },
+        "mutations": []
+      },
+      "initial_io": {
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69476.json",
+            "sha256": "fcf3d78431019aea0792f2f412789526b9b14d1c8c262791cf4f963c7acbe1c4"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69476.json",
+            "sha256": "fcf3d78431019aea0792f2f412789526b9b14d1c8c262791cf4f963c7acbe1c4"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ],
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:90:0a",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.165",
+                "prefixlen": 16,
+                "metric": 100,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "label": "ens192",
+                "valid_life_time": 7084,
+                "preferred_life_time": 7084
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:900a",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "mngtmpaddr": true,
+                "noprefixroute": true,
+                "valid_life_time": 2591980,
+                "preferred_life_time": 604780
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:900a",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "/dev/mapper/ubuntu--vg-ubuntu--lv /      ext4",
+        "firmware": "efi"
+      },
+      "after_host_move_io": {
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69476.json",
+            "sha256": "fcf3d78431019aea0792f2f412789526b9b14d1c8c262791cf4f963c7acbe1c4"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69476.json",
+            "sha256": "fcf3d78431019aea0792f2f412789526b9b14d1c8c262791cf4f963c7acbe1c4"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ],
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:90:0a",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.165",
+                "prefixlen": 16,
+                "metric": 100,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "label": "ens192",
+                "valid_life_time": 7162,
+                "preferred_life_time": 7162
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:900a",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "mngtmpaddr": true,
+                "noprefixroute": true,
+                "valid_life_time": 2591963,
+                "preferred_life_time": 604763
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:900a",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "/dev/mapper/ubuntu--vg-ubuntu--lv /      ext4",
+        "firmware": "efi"
+      },
+      "volumes": [
+        {
+          "id": "30b590ce-14db-40a3-9e8f-ce6e545952a4",
+          "type": "ROOT",
+          "deviceid": 0,
+          "path": "v2k-i90-ubuntu-sata-final-20261127-disk0.qcow2",
+          "size": 34359738368,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-26T17:01:24.390611562Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-ubuntu-sata-final-20261127-disk0.qcow2",
+            "importrequestid": "30b590ce-14db-40a3-9e8f-ce6e545952a4",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T17:01:27.149439869Z",
+            "importstrategy": "adopt",
+            "importidentity": "f09d9e0b4b5e154a727db7a6ec35cf83d84fb963cc23c6396f11e0d7f960b930",
+            "importverifiedat": "2026-11-26T17:01:24.390607007Z"
+          }
+        },
+        {
+          "id": "4529f005-ef0c-4335-ab49-19e83e40d44b",
+          "type": "DATADISK",
+          "deviceid": 1,
+          "path": "v2k-i90-ubuntu-sata-final-20261127-disk1.qcow2",
+          "size": 8589934592,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-26T17:01:24.539644601Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-ubuntu-sata-final-20261127-disk1.qcow2",
+            "importrequestid": "4529f005-ef0c-4335-ab49-19e83e40d44b",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T17:01:27.152674810Z",
+            "importstrategy": "adopt",
+            "importidentity": "9dee3459089752c126b6b1e7e41ab6c74c188dd6516ab9f82610a21130b85b9d",
+            "importverifiedat": "2026-11-26T17:01:24.539639726Z"
+          }
+        }
+      ]
+    },
+    {
+      "case": "ubuntu-scsi",
+      "source_name": "v2k-i90-src-ubuntu2204-scsi-uefi",
+      "source_vm_uuid": "42356b48-328d-4211-6269-caa5905a0f05",
+      "source_capture_id": "929209ad-d96f-43f5-84ad-81e1b901fa22",
+      "source_boot_id": "5e6ade71-d00d-4a2a-a1e7-4df0f76002f4",
+      "source_os": "linux",
+      "source_os_version": "22.04",
+      "target_name": "v2k-i90-ubuntu-scsi-final-20261127",
+      "vm_id": "0401bc71-bcf6-4cf8-aa48-813f25fe052f",
+      "instance": "i-2-310-VM",
+      "current_host": "ablecube13-1",
+      "state": "Running",
+      "firmware": "efi",
+      "controller_plan_hash": "3da7eb29101802b0d8f4e80d614c2dba52b60414bfd559ba49622b09e031d54c",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "scsi0:0",
+          "device_key": "2000",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 34359738368,
+          "role": "root",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "scsi0:1",
+          "device_key": "2001",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sdb"
+          }
+        }
+      ],
+      "operation_id": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747",
+      "guest_plan_hash": "7f8a0a4f696b03c9abcf3a52bd89865e55c51e03ede1379f478a22b504957b7d",
+      "root_identity": "fs:326c88e4-9a56-46e7-b00b-e2740ebd11ed",
+      "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+      "manual_guest_repairs_before_verified": 0,
+      "first_boot": {
+        "version": 1.0,
+        "operation_id": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747",
+        "plan_hash": "7f8a0a4f696b03c9abcf3a52bd89865e55c51e03ede1379f478a22b504957b7d",
+        "vm_uuid": "0401bc71-bcf6-4cf8-aa48-813f25fe052f",
+        "binding_sha256": "dd0b9981a6d4df636cb09a6389e8378db3df68280d8cf724510f073f43bd28e7",
+        "boot_scope": "2c1f9ba2eb959a8707bda4cee63adc4d9b4466c50224563e6dfb8c903754d1b7",
+        "boot_id": "781fb0f7-df93-487e-a6d4-0e2c0c04fa5d",
+        "root_identity": "fs:326c88e4-9a56-46e7-b00b-e2740ebd11ed",
+        "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+        "status": "VERIFIED",
+        "network": {
+          "status": "VERIFIED",
+          "interfaces": [
+            {
+              "mac": "00:50:56:39:90:0b",
+              "ifname": "ens192",
+              "addresses": [
+                "10.10.254.164/16",
+                "fe80::250:56ff:fe39:900b/64"
+              ],
+              "mtu": 1500.0,
+              "status": "VERIFIED"
+            }
+          ]
+        },
+        "windows": {
+          "status": "NOT_APPLICABLE"
+        },
+        "mutations": []
+      },
+      "after_host_move": {
+        "version": 1.0,
+        "operation_id": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747",
+        "plan_hash": "7f8a0a4f696b03c9abcf3a52bd89865e55c51e03ede1379f478a22b504957b7d",
+        "vm_uuid": "0401bc71-bcf6-4cf8-aa48-813f25fe052f",
+        "binding_sha256": "2595074c6d97850a4cee73d4df5f61e73ac14c8f0484109860c40fcaa4681456",
+        "boot_scope": "431b2e6803b9cb64409a0bf94f893b3df08df761a32b2e48fb356a5debfc44ac",
+        "boot_id": "49e38a4a-40b9-4335-ad8d-41d0d5523d63",
+        "root_identity": "fs:326c88e4-9a56-46e7-b00b-e2740ebd11ed",
+        "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+        "status": "VERIFIED",
+        "network": {
+          "status": "VERIFIED",
+          "interfaces": [
+            {
+              "mac": "00:50:56:39:90:0b",
+              "ifname": "ens192",
+              "addresses": [
+                "10.10.254.164/16",
+                "fd12:8ea6:72a:69eb:250:56ff:fe39:900b/64",
+                "fe80::250:56ff:fe39:900b/64"
+              ],
+              "mtu": 1500.0,
+              "status": "VERIFIED"
+            }
+          ]
+        },
+        "windows": {
+          "status": "NOT_APPLICABLE"
+        },
+        "mutations": []
+      },
+      "initial_io": {
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69477.json",
+            "sha256": "f1484b24979b67330603985c2dd62955f0809794797d8fdd5aaa19421f4dba0f"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69477.json",
+            "sha256": "f1484b24979b67330603985c2dd62955f0809794797d8fdd5aaa19421f4dba0f"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ],
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:90:0b",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.164",
+                "prefixlen": 16,
+                "metric": 100,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "label": "ens192",
+                "valid_life_time": 7057,
+                "preferred_life_time": 7057
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:900b",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "mngtmpaddr": true,
+                "noprefixroute": true,
+                "valid_life_time": 2591978,
+                "preferred_life_time": 604778
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:900b",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "/dev/mapper/ubuntu--vg-ubuntu--lv /      ext4",
+        "firmware": "efi"
+      },
+      "after_host_move_io": {
+        "proofs": [
+          {
+            "path": "/var/tmp/v2k-issue89-proof-vm-69477.json",
+            "sha256": "f1484b24979b67330603985c2dd62955f0809794797d8fdd5aaa19421f4dba0f"
+          },
+          {
+            "path": "/data/v2k/v2k-issue89-proof-vm-69477.json",
+            "sha256": "f1484b24979b67330603985c2dd62955f0809794797d8fdd5aaa19421f4dba0f"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ],
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:90:0b",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.164",
+                "prefixlen": 16,
+                "metric": 100,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "label": "ens192",
+                "valid_life_time": 7162,
+                "preferred_life_time": 7162
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:900b",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "mngtmpaddr": true,
+                "noprefixroute": true,
+                "valid_life_time": 2591962,
+                "preferred_life_time": 604762
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:900b",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "/dev/mapper/ubuntu--vg-ubuntu--lv /      ext4",
+        "firmware": "efi"
+      },
+      "volumes": [
+        {
+          "id": "f5efbd1b-9887-44d5-b3b1-39d0f0895294",
+          "type": "ROOT",
+          "deviceid": 0,
+          "path": "v2k-i90-ubuntu-scsi-final-20261127-disk0.qcow2",
+          "size": 34359738368,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-26T17:00:57.713900757Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-ubuntu-scsi-final-20261127-disk0.qcow2",
+            "importrequestid": "f5efbd1b-9887-44d5-b3b1-39d0f0895294",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T17:01:01.797609418Z",
+            "importstrategy": "adopt",
+            "importidentity": "1ec1f08092ce62768c0fd18b01ec5563c3b6b3f2405d9f9600b41c1d98f3fc6e",
+            "importverifiedat": "2026-11-26T17:00:57.713892446Z"
+          }
+        },
+        {
+          "id": "42052fd5-398b-4afd-972a-9e033abecd7b",
+          "type": "DATADISK",
+          "deviceid": 1,
+          "path": "v2k-i90-ubuntu-scsi-final-20261127-disk1.qcow2",
+          "size": 8589934592,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-26T17:00:57.871753493Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-ubuntu-scsi-final-20261127-disk1.qcow2",
+            "importrequestid": "42052fd5-398b-4afd-972a-9e033abecd7b",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T17:01:01.805774429Z",
+            "importstrategy": "adopt",
+            "importidentity": "4100fe9710632aa48fbbbef19b46a6e5afe9ef54374aed0796b99a6cbc8d8519",
+            "importverifiedat": "2026-11-26T17:00:57.871745376Z"
+          }
+        }
+      ]
+    },
+    {
+      "case": "windows-ide",
+      "source_name": "v2k-i90-src-win2022-ide-bios",
+      "source_vm_uuid": "423566a0-bd11-f641-a84d-c8f36c46c19c",
+      "source_capture_id": "bbcba221-6560-4905-b3ae-3904dc8ddce7",
+      "source_boot_id": "2026-11-26T14:00:39.5000000Z",
+      "source_os": "windows",
+      "source_os_version": "20348",
+      "target_name": "v2k-i90-windows-ide-20261126",
+      "vm_id": "8f0f6d7c-2b94-475d-9a54-46f16e487e32",
+      "instance": "i-2-307-VM",
+      "current_host": "ablecube13-2",
+      "state": "Running",
+      "firmware": "bios",
+      "controller_plan_hash": "d2e6c586071ba51312affb339c42f2c5466370894f158176bac4b22501d97df3",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "ide0:0",
+          "device_key": "3000",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 68719476736,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "ide0:1",
+          "device_key": "3001",
+          "kind": "ide",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "operation_id": "d2f49182-4d60-40c0-8f22-d9e7a0666de7",
+      "guest_plan_hash": "70cc634b1cb3bef2f4888765c46125e5d83d0062209ff2cde69e37e9b739934d",
+      "root_identity": "mbr:0c98e1bc",
+      "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+      "manual_guest_repairs_before_verified": 0,
+      "first_boot": {
+        "version": 1.0,
+        "mutations": [],
+        "boot_scope": "01e0a2f1964416cd5c21b87700f3ec5c9af7f23ec34d91f034bdf6f309135eed",
+        "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+        "binding_sha256": "79947b140feb76b910582fd5e21a13cc3e81c8d41014b2813da82b2b2f2a371c",
+        "status": "VERIFIED",
+        "vm_uuid": "8f0f6d7c-2b94-475d-9a54-46f16e487e32",
+        "root_identity": "mbr:0c98e1bc",
+        "boot_id": "2026-11-27T00:04:38.5000000Z",
+        "operation_id": "d2f49182-4d60-40c0-8f22-d9e7a0666de7",
+        "plan_hash": "70cc634b1cb3bef2f4888765c46125e5d83d0062209ff2cde69e37e9b739934d",
+        "windows": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:57a037d3-0a6f-4095-86dd-b883a36ae49d",
+              "online": true,
+              "serial": "cdf887e2ca234e3a9d1a",
+              "status": "VERIFIED",
+              "source_disk_id": "ide0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "network": {
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "after_host_move": {
+        "version": 1.0,
+        "mutations": [],
+        "boot_scope": "6e54d0ff3c06e816a4520226f13861e134f4cdc66374e8e8c184edee935b8566",
+        "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+        "binding_sha256": "58875005b843568f53911869f672b6bba34494424e2a98ed78cc3f1fa36c30b9",
+        "status": "VERIFIED",
+        "vm_uuid": "8f0f6d7c-2b94-475d-9a54-46f16e487e32",
+        "root_identity": "mbr:0c98e1bc",
+        "boot_id": "2026-11-26T16:33:03.2967940Z",
+        "operation_id": "d2f49182-4d60-40c0-8f22-d9e7a0666de7",
+        "plan_hash": "70cc634b1cb3bef2f4888765c46125e5d83d0062209ff2cde69e37e9b739934d",
+        "windows": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:57a037d3-0a6f-4095-86dd-b883a36ae49d",
+              "online": true,
+              "serial": "cdf887e2ca234e3a9d1a",
+              "status": "VERIFIED",
+              "source_disk_id": "ide0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "network": {
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "initial_io": {
+        "san_policy": "OfflineShared",
+        "boot": "2026-11-26T16:04:39.3073420Z",
+        "cdrom": [
+          {
+            "Drive": "D:",
+            "MediaLoaded": false
+          },
+          {
+            "Drive": "F:",
+            "MediaLoaded": false
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Guid": null,
+            "Signature": 211345852,
+            "SerialNumber": "8b63631690ea4d3cb34f",
+            "IsBoot": true,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 68719476736
+          },
+          {
+            "Number": 1,
+            "Guid": "{57a037d3-0a6f-4095-86dd-b883a36ae49d}",
+            "Signature": null,
+            "SerialNumber": "cdf887e2ca234e3a9d1a",
+            "IsBoot": false,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 8589934592
+          }
+        ],
+        "proofs": [
+          {
+            "sha256": "c30db8079197b64936a67f2d96409cde1bc17112f551c7b5b351c74c1a93970c",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69478.json"
+          },
+          {
+            "sha256": "c30db8079197b64936a67f2d96409cde1bc17112f551c7b5b351c74c1a93970c",
+            "path": "E:\\v2k-issue89-proof-vm-69478.json"
+          }
+        ],
+        "partitions": [
+          {
+            "DiskNumber": 0,
+            "Guid": null,
+            "DriveLetter": null,
+            "Offset": 1048576,
+            "Size": 104857600,
+            "AccessPaths": [
+              "\\\\?\\Volume{0c98e1bc-0000-0000-0000-100000000000}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": null,
+            "DriveLetter": "C",
+            "Offset": 105906176,
+            "Size": 68062019584,
+            "AccessPaths": [
+              "C:\\",
+              "\\\\?\\Volume{0c98e1bc-0000-0000-0000-500600000000}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": null,
+            "DriveLetter": null,
+            "Offset": 68167925760,
+            "Size": 549453824,
+            "AccessPaths": [
+              "\\\\?\\Volume{0c98e1bc-0000-0000-0000-20df0f000000}\\"
+            ]
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{d2ef5b50-9fb2-4c35-bf66-2d0915fa2785}",
+            "DriveLetter": null,
+            "Offset": 17408,
+            "Size": 16759808,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{a6b66460-d6f4-461f-b7ea-7c517738971f}",
+            "DriveLetter": "E",
+            "Offset": 16777216,
+            "Size": 8572108800,
+            "AccessPaths": [
+              "E:\\",
+              "\\\\?\\Volume{a6b66460-d6f4-461f-b7ea-7c517738971f}\\"
+            ]
+          }
+        ],
+        "rw": [
+          {
+            "directory": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "E:\\",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ]
+      },
+      "after_host_move_io": {
+        "san_policy": "OfflineShared",
+        "boot": "2026-11-26T16:33:03.2967940Z",
+        "cdrom": [
+          {
+            "Drive": "D:",
+            "MediaLoaded": false
+          },
+          {
+            "Drive": "F:",
+            "MediaLoaded": false
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Guid": null,
+            "Signature": 211345852,
+            "SerialNumber": "8b63631690ea4d3cb34f",
+            "IsBoot": true,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 68719476736
+          },
+          {
+            "Number": 1,
+            "Guid": "{57a037d3-0a6f-4095-86dd-b883a36ae49d}",
+            "Signature": null,
+            "SerialNumber": "cdf887e2ca234e3a9d1a",
+            "IsBoot": false,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 8589934592
+          }
+        ],
+        "proofs": [
+          {
+            "sha256": "c30db8079197b64936a67f2d96409cde1bc17112f551c7b5b351c74c1a93970c",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69478.json"
+          },
+          {
+            "sha256": "c30db8079197b64936a67f2d96409cde1bc17112f551c7b5b351c74c1a93970c",
+            "path": "E:\\v2k-issue89-proof-vm-69478.json"
+          }
+        ],
+        "partitions": [
+          {
+            "DiskNumber": 0,
+            "Guid": null,
+            "DriveLetter": null,
+            "Offset": 1048576,
+            "Size": 104857600,
+            "AccessPaths": [
+              "\\\\?\\Volume{0c98e1bc-0000-0000-0000-100000000000}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": null,
+            "DriveLetter": "C",
+            "Offset": 105906176,
+            "Size": 68062019584,
+            "AccessPaths": [
+              "C:\\",
+              "\\\\?\\Volume{0c98e1bc-0000-0000-0000-500600000000}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": null,
+            "DriveLetter": null,
+            "Offset": 68167925760,
+            "Size": 549453824,
+            "AccessPaths": [
+              "\\\\?\\Volume{0c98e1bc-0000-0000-0000-20df0f000000}\\"
+            ]
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{d2ef5b50-9fb2-4c35-bf66-2d0915fa2785}",
+            "DriveLetter": null,
+            "Offset": 17408,
+            "Size": 16759808,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{a6b66460-d6f4-461f-b7ea-7c517738971f}",
+            "DriveLetter": "E",
+            "Offset": 16777216,
+            "Size": 8572108800,
+            "AccessPaths": [
+              "E:\\",
+              "\\\\?\\Volume{a6b66460-d6f4-461f-b7ea-7c517738971f}\\"
+            ]
+          }
+        ],
+        "rw": [
+          {
+            "directory": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "E:\\",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ]
+      },
+      "volumes": [
+        {
+          "id": "8b636316-90ea-4d3c-b34f-fb545b986843",
+          "type": "ROOT",
+          "deviceid": 0,
+          "path": "v2k-i90-windows-ide-20261126-disk0.qcow2",
+          "size": 68719476736,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "68865470464",
+            "observedat": "2026-11-26T16:03:55.195343395Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-windows-ide-20261126-disk0.qcow2",
+            "importrequestid": "8b636316-90ea-4d3c-b34f-fb545b986843",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T16:03:58.970341901Z",
+            "importstrategy": "adopt",
+            "importidentity": "79985e51d103b2f0b5d3240d12d279291e03c61f16a574418ce90cc6a5767b4a",
+            "importverifiedat": "2026-11-26T16:03:55.195333593Z"
+          }
+        },
+        {
+          "id": "cdf887e2-ca23-4e3a-9d1a-67e17624a2e1",
+          "type": "DATADISK",
+          "deviceid": 1,
+          "path": "v2k-i90-windows-ide-20261126-disk1.qcow2",
+          "size": 8589934592,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-26T16:03:55.357703427Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-windows-ide-20261126-disk1.qcow2",
+            "importrequestid": "cdf887e2-ca23-4e3a-9d1a-67e17624a2e1",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T16:03:58.973140346Z",
+            "importstrategy": "adopt",
+            "importidentity": "deb4c49cb205a793b6b8853c10197a9039daf8bee734e97db1e5803aeefeb303",
+            "importverifiedat": "2026-11-26T16:03:55.357693577Z"
+          }
+        }
+      ]
+    },
+    {
+      "case": "windows-sata",
+      "source_name": "v2k-i90-src-win2022-sata-uefi",
+      "source_vm_uuid": "4235bc1a-157f-27a1-572d-6a8fcffa7047",
+      "source_capture_id": "4de40bf4-05dc-4065-9deb-65ceb4475db2",
+      "source_boot_id": "2026-11-26T14:00:41.5000000Z",
+      "source_os": "windows",
+      "source_os_version": "20348",
+      "target_name": "v2k-i90-windows-sata-20261126",
+      "vm_id": "36c898e5-4863-4abf-9090-ed2c4341d91b",
+      "instance": "i-2-308-VM",
+      "current_host": "ablecube13-1",
+      "state": "Running",
+      "firmware": "efi",
+      "controller_plan_hash": "d9c6c68aa041301755dbf44c3e447036d1cfbf6fda5c4926d1397525cadd52a9",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "sata0:1",
+          "device_key": "16001",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 68719476736,
+          "role": "root",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "sata0:2",
+          "device_key": "16002",
+          "kind": "sata",
+          "bus": 0,
+          "unit": 2,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "sata",
+            "model": "ahci",
+            "device": "sdb"
+          }
+        }
+      ],
+      "operation_id": "1cbacb3a-05c0-45a1-86b5-ae040b6054d0",
+      "guest_plan_hash": "d595604aebb45e2cb0a2c6063f63760a725082e8471a2f54b71bbc0e1a129073",
+      "root_identity": "gpt:3e8e48e5-ae77-4b3c-b32b-7c0cbd30f59f",
+      "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+      "manual_guest_repairs_before_verified": 0,
+      "first_boot": {
+        "version": 1.0,
+        "mutations": [],
+        "boot_scope": "0e0316282fb4b90e8da10149eb183982f09550df251e1edc789373951c186144",
+        "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+        "binding_sha256": "b94642ca5a0a0a9b4784701dba4635c91198422c423b793c0c95ac4d37f958b7",
+        "status": "VERIFIED",
+        "vm_uuid": "36c898e5-4863-4abf-9090-ed2c4341d91b",
+        "root_identity": "gpt:3e8e48e5-ae77-4b3c-b32b-7c0cbd30f59f",
+        "boot_id": "2026-11-27T00:05:05.5000000Z",
+        "operation_id": "1cbacb3a-05c0-45a1-86b5-ae040b6054d0",
+        "plan_hash": "d595604aebb45e2cb0a2c6063f63760a725082e8471a2f54b71bbc0e1a129073",
+        "windows": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:b4166274-bd0a-4664-ac5d-e9a493a078d5",
+              "online": true,
+              "serial": "cb26ce756b5441669a1a",
+              "status": "VERIFIED",
+              "source_disk_id": "sata0:2"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "network": {
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "after_host_move": {
+        "version": 1.0,
+        "mutations": [],
+        "boot_scope": "3a875f65060c7e4c0ac20092f32d1c5291ebb69f02d3c9c3d059db4daf85f3bf",
+        "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+        "binding_sha256": "c7e2a863faa5df7ff2dc87979588089641ef75ea6c8ee8a94b7f652be42e5c52",
+        "status": "VERIFIED",
+        "vm_uuid": "36c898e5-4863-4abf-9090-ed2c4341d91b",
+        "root_identity": "gpt:3e8e48e5-ae77-4b3c-b32b-7c0cbd30f59f",
+        "boot_id": "2026-11-27T00:33:08.5000000Z",
+        "operation_id": "1cbacb3a-05c0-45a1-86b5-ae040b6054d0",
+        "plan_hash": "d595604aebb45e2cb0a2c6063f63760a725082e8471a2f54b71bbc0e1a129073",
+        "windows": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:b4166274-bd0a-4664-ac5d-e9a493a078d5",
+              "online": true,
+              "serial": "cb26ce756b5441669a1a",
+              "status": "VERIFIED",
+              "source_disk_id": "sata0:2"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "network": {
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "initial_io": {
+        "san_policy": "OfflineShared",
+        "boot": "2026-11-26T16:05:11.7614290Z",
+        "cdrom": [
+          {
+            "Drive": "D:",
+            "MediaLoaded": false
+          },
+          {
+            "Drive": "F:",
+            "MediaLoaded": false
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Guid": "{3e8e48e5-ae77-4b3c-b32b-7c0cbd30f59f}",
+            "Signature": null,
+            "SerialNumber": "3ee25df4f77c4a18b961",
+            "IsBoot": true,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 68719476736
+          },
+          {
+            "Number": 1,
+            "Guid": "{b4166274-bd0a-4664-ac5d-e9a493a078d5}",
+            "Signature": null,
+            "SerialNumber": "cb26ce756b5441669a1a",
+            "IsBoot": false,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 8589934592
+          }
+        ],
+        "proofs": [
+          {
+            "sha256": "adc762ebb13a647ca36c7255cae822f465deb2556762bc5bf659e08e096f2298",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69479.json"
+          },
+          {
+            "sha256": "adc762ebb13a647ca36c7255cae822f465deb2556762bc5bf659e08e096f2298",
+            "path": "E:\\v2k-issue89-proof-vm-69479.json"
+          }
+        ],
+        "partitions": [
+          {
+            "DiskNumber": 0,
+            "Guid": "{4258f3c9-e6ba-44f2-9359-0ce8acf732f2}",
+            "DriveLetter": null,
+            "Offset": 1048576,
+            "Size": 104857600,
+            "AccessPaths": [
+              "\\\\?\\Volume{4258f3c9-e6ba-44f2-9359-0ce8acf732f2}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{da332ce8-0b1d-48c1-883a-c7be2c2d4376}",
+            "DriveLetter": null,
+            "Offset": 105906176,
+            "Size": 16777216,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{f49ed104-9b07-4a2c-8d7a-3b8a263f3e58}",
+            "DriveLetter": "C",
+            "Offset": 122683392,
+            "Size": 68045242368,
+            "AccessPaths": [
+              "C:\\",
+              "\\\\?\\Volume{f49ed104-9b07-4a2c-8d7a-3b8a263f3e58}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{3a4e66c0-895c-4642-a787-90c62353a0b9}",
+            "DriveLetter": null,
+            "Offset": 68167925760,
+            "Size": 549453824,
+            "AccessPaths": [
+              "\\\\?\\Volume{3a4e66c0-895c-4642-a787-90c62353a0b9}\\"
+            ]
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{595647b0-6dc6-4c10-a506-704bfec3d5d1}",
+            "DriveLetter": null,
+            "Offset": 17408,
+            "Size": 16759808,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{a424253f-ad9d-4d3c-a529-f09ac49e5436}",
+            "DriveLetter": "E",
+            "Offset": 16777216,
+            "Size": 8572108800,
+            "AccessPaths": [
+              "E:\\",
+              "\\\\?\\Volume{a424253f-ad9d-4d3c-a529-f09ac49e5436}\\"
+            ]
+          }
+        ],
+        "rw": [
+          {
+            "directory": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "E:\\",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ]
+      },
+      "after_host_move_io": {
+        "san_policy": "OfflineShared",
+        "boot": "2026-11-26T16:33:08.6780980Z",
+        "cdrom": [
+          {
+            "Drive": "D:",
+            "MediaLoaded": false
+          },
+          {
+            "Drive": "F:",
+            "MediaLoaded": false
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Guid": "{3e8e48e5-ae77-4b3c-b32b-7c0cbd30f59f}",
+            "Signature": null,
+            "SerialNumber": "3ee25df4f77c4a18b961",
+            "IsBoot": true,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 68719476736
+          },
+          {
+            "Number": 1,
+            "Guid": "{b4166274-bd0a-4664-ac5d-e9a493a078d5}",
+            "Signature": null,
+            "SerialNumber": "cb26ce756b5441669a1a",
+            "IsBoot": false,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 8589934592
+          }
+        ],
+        "proofs": [
+          {
+            "sha256": "adc762ebb13a647ca36c7255cae822f465deb2556762bc5bf659e08e096f2298",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69479.json"
+          },
+          {
+            "sha256": "adc762ebb13a647ca36c7255cae822f465deb2556762bc5bf659e08e096f2298",
+            "path": "E:\\v2k-issue89-proof-vm-69479.json"
+          }
+        ],
+        "partitions": [
+          {
+            "DiskNumber": 0,
+            "Guid": "{4258f3c9-e6ba-44f2-9359-0ce8acf732f2}",
+            "DriveLetter": null,
+            "Offset": 1048576,
+            "Size": 104857600,
+            "AccessPaths": [
+              "\\\\?\\Volume{4258f3c9-e6ba-44f2-9359-0ce8acf732f2}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{da332ce8-0b1d-48c1-883a-c7be2c2d4376}",
+            "DriveLetter": null,
+            "Offset": 105906176,
+            "Size": 16777216,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{f49ed104-9b07-4a2c-8d7a-3b8a263f3e58}",
+            "DriveLetter": "C",
+            "Offset": 122683392,
+            "Size": 68045242368,
+            "AccessPaths": [
+              "C:\\",
+              "\\\\?\\Volume{f49ed104-9b07-4a2c-8d7a-3b8a263f3e58}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{3a4e66c0-895c-4642-a787-90c62353a0b9}",
+            "DriveLetter": null,
+            "Offset": 68167925760,
+            "Size": 549453824,
+            "AccessPaths": [
+              "\\\\?\\Volume{3a4e66c0-895c-4642-a787-90c62353a0b9}\\"
+            ]
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{595647b0-6dc6-4c10-a506-704bfec3d5d1}",
+            "DriveLetter": null,
+            "Offset": 17408,
+            "Size": 16759808,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{a424253f-ad9d-4d3c-a529-f09ac49e5436}",
+            "DriveLetter": "E",
+            "Offset": 16777216,
+            "Size": 8572108800,
+            "AccessPaths": [
+              "E:\\",
+              "\\\\?\\Volume{a424253f-ad9d-4d3c-a529-f09ac49e5436}\\"
+            ]
+          }
+        ],
+        "rw": [
+          {
+            "directory": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "E:\\",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ]
+      },
+      "volumes": [
+        {
+          "id": "3ee25df4-f77c-4a18-b961-fff7c56a7939",
+          "type": "ROOT",
+          "deviceid": 0,
+          "path": "v2k-i90-windows-sata-20261126-disk0.qcow2",
+          "size": 68719476736,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "68865470464",
+            "observedat": "2026-11-26T16:04:05.302656343Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-windows-sata-20261126-disk0.qcow2",
+            "importrequestid": "3ee25df4-f77c-4a18-b961-fff7c56a7939",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T16:04:08.862304130Z",
+            "importstrategy": "adopt",
+            "importidentity": "da49c0c23bf6057331c90eee721c79796b98c581aa7df8a1380da10170f452ef",
+            "importverifiedat": "2026-11-26T16:04:05.302645985Z"
+          }
+        },
+        {
+          "id": "cb26ce75-6b54-4166-9a1a-932986fa91e6",
+          "type": "DATADISK",
+          "deviceid": 1,
+          "path": "v2k-i90-windows-sata-20261126-disk1.qcow2",
+          "size": 8589934592,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-26T16:04:05.460224285Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-windows-sata-20261126-disk1.qcow2",
+            "importrequestid": "cb26ce75-6b54-4166-9a1a-932986fa91e6",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T16:04:08.876888635Z",
+            "importstrategy": "adopt",
+            "importidentity": "774ea372eb3b14b25cd6a5cc8d6cced7129453a38bad2a16f34d750b77f881cd",
+            "importverifiedat": "2026-11-26T16:04:05.460211729Z"
+          }
+        }
+      ]
+    },
+    {
+      "case": "windows-scsi-final",
+      "source_name": "v2k-i90-src-win2022-scsi-uefi",
+      "source_vm_uuid": "42350450-b5d2-af82-9ee7-200ba16eff34",
+      "source_capture_id": "bdcb7a54-a8d6-4791-ba89-437fe96af4d6",
+      "source_boot_id": "2026-11-26T16:03:03.5000000Z",
+      "source_os": "windows",
+      "source_os_version": "20348",
+      "target_name": "v2k-i90-windows-scsi-final-20261127",
+      "vm_id": "edb3ee42-b4ad-4c43-9869-aa6b06891975",
+      "instance": "i-2-309-VM",
+      "current_host": "ablecube13-3",
+      "state": "Running",
+      "firmware": "efi",
+      "controller_plan_hash": "12d735185f606c3a44c721f1a9f5a9516d17d0d257e48897451565cf072623c5",
+      "disks": [
+        {
+          "index": 0,
+          "disk_id": "scsi0:0",
+          "device_key": "2000",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 0,
+          "size_bytes": 68719476736,
+          "role": "root",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sda"
+          }
+        },
+        {
+          "index": 1,
+          "disk_id": "scsi0:1",
+          "device_key": "2001",
+          "kind": "scsi",
+          "bus": 0,
+          "unit": 1,
+          "size_bytes": 8589934592,
+          "role": "data",
+          "target": {
+            "bus": "scsi",
+            "model": "virtio-scsi",
+            "device": "sdb"
+          }
+        }
+      ],
+      "operation_id": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+      "guest_plan_hash": "db0465c43703dd514c0a8b2ee021bd76a57360017998a38c887afb7085d52df4",
+      "root_identity": "gpt:a5eb259c-3929-4cbd-9606-9794f48d0f4a",
+      "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+      "manual_guest_repairs_before_verified": 0,
+      "first_boot": {
+        "version": 1.0,
+        "mutations": [
+          {
+            "type": "readonly",
+            "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+            "before": true,
+            "after": false,
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:55.8969015Z"
+          },
+          {
+            "type": "offline",
+            "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+            "before": true,
+            "after": false,
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:56.1934171Z"
+          },
+          {
+            "type": "cdrom-letter",
+            "identity": "\\\\?\\Volume{6f146ef0-e9f7-11f1-b79a-806e6f6e6963}\\",
+            "before": "E:",
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:56.4289772Z"
+          },
+          {
+            "type": "partition-letter",
+            "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd:e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b:16777216",
+            "before": "F",
+            "after": "E",
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:56.6008234Z"
+          }
+        ],
+        "boot_scope": "b56c12e9fcf7620d6e3344b431c005875ae29ac3f30c3036ee1e1d556192fa85",
+        "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+        "binding_sha256": "cbe3966d37fe46a940e648976a9dbc4d1da5d2ff97c535ca767b98b1349c0577",
+        "status": "VERIFIED",
+        "vm_uuid": "edb3ee42-b4ad-4c43-9869-aa6b06891975",
+        "root_identity": "gpt:a5eb259c-3929-4cbd-9606-9794f48d0f4a",
+        "boot_id": "2026-11-27T00:14:42.5000000Z",
+        "operation_id": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+        "plan_hash": "db0465c43703dd514c0a8b2ee021bd76a57360017998a38c887afb7085d52df4",
+        "windows": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+              "online": true,
+              "serial": "a78f21c8c73c45daa3e8",
+              "status": "VERIFIED",
+              "source_disk_id": "scsi0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "network": {
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "after_host_move": {
+        "version": 1.0,
+        "mutations": [
+          {
+            "type": "readonly",
+            "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+            "before": true,
+            "after": false,
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:55.8969015Z"
+          },
+          {
+            "type": "offline",
+            "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+            "before": true,
+            "after": false,
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:56.1934171Z"
+          },
+          {
+            "type": "cdrom-letter",
+            "identity": "\\\\?\\Volume{6f146ef0-e9f7-11f1-b79a-806e6f6e6963}\\",
+            "before": "E:",
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:56.4289772Z"
+          },
+          {
+            "type": "partition-letter",
+            "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd:e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b:16777216",
+            "before": "F",
+            "after": "E",
+            "state": "APPLIED",
+            "boot_id": "2026-11-27T00:14:42.5000000Z",
+            "timestamp": "2026-11-27T00:14:56.6008234Z"
+          }
+        ],
+        "boot_scope": "c11c77fc409a29701b3fa3bc2f4590f7083b442b64c9fc3df6cfc884baf86430",
+        "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+        "binding_sha256": "0231009ac28dad67c4ee9f970a98a8781bdea4574770d20676ba3ab7688512cb",
+        "status": "VERIFIED",
+        "vm_uuid": "edb3ee42-b4ad-4c43-9869-aa6b06891975",
+        "root_identity": "gpt:a5eb259c-3929-4cbd-9606-9794f48d0f4a",
+        "boot_id": "2026-11-26T16:33:08.5012200Z",
+        "operation_id": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+        "plan_hash": "db0465c43703dd514c0a8b2ee021bd76a57360017998a38c887afb7085d52df4",
+        "windows": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+              "online": true,
+              "serial": "a78f21c8c73c45daa3e8",
+              "status": "VERIFIED",
+              "source_disk_id": "scsi0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "network": {
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "initial_io": {
+        "san_policy": "OfflineShared",
+        "boot": "2026-11-26T16:14:43.4811950Z",
+        "cdrom": [
+          {
+            "Drive": "D:",
+            "MediaLoaded": false
+          },
+          {
+            "Drive": "Volume{6f146ef0-e9f7-11f1-b79a-806e6f6e6963}",
+            "MediaLoaded": false
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Guid": "{a5eb259c-3929-4cbd-9606-9794f48d0f4a}",
+            "Signature": null,
+            "SerialNumber": "2a1316ea7f074333ad71",
+            "IsBoot": true,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 68719476736
+          },
+          {
+            "Number": 1,
+            "Guid": "{7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd}",
+            "Signature": null,
+            "SerialNumber": "a78f21c8c73c45daa3e8",
+            "IsBoot": false,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 8589934592
+          }
+        ],
+        "proofs": [
+          {
+            "sha256": "c1cfdec416f5dd0680b3a17ce0d178dc48b1b08a70241fc9f31d16e8238feafb",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69480.json"
+          },
+          {
+            "sha256": "c1cfdec416f5dd0680b3a17ce0d178dc48b1b08a70241fc9f31d16e8238feafb",
+            "path": "E:\\v2k-issue89-proof-vm-69480.json"
+          }
+        ],
+        "partitions": [
+          {
+            "DiskNumber": 0,
+            "Guid": "{4baffeb1-3753-4561-bf6f-c973b9c817e0}",
+            "DriveLetter": null,
+            "Offset": 1048576,
+            "Size": 104857600,
+            "AccessPaths": [
+              "\\\\?\\Volume{4baffeb1-3753-4561-bf6f-c973b9c817e0}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{c425971f-e9a1-11f1-b797-005056399006}",
+            "DriveLetter": null,
+            "Offset": 105906176,
+            "Size": 262144,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{78964150-9a52-4d00-b24f-a35a8be254c4}",
+            "DriveLetter": null,
+            "Offset": 106168320,
+            "Size": 16515072,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{7df204b1-0592-4d9a-80fe-717dff54aff4}",
+            "DriveLetter": "C",
+            "Offset": 122683392,
+            "Size": 68045242368,
+            "AccessPaths": [
+              "C:\\",
+              "\\\\?\\Volume{7df204b1-0592-4d9a-80fe-717dff54aff4}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{26087bd2-5805-4847-b6e7-98753e98acfc}",
+            "DriveLetter": null,
+            "Offset": 68167925760,
+            "Size": 549453824,
+            "AccessPaths": [
+              "\\\\?\\Volume{26087bd2-5805-4847-b6e7-98753e98acfc}\\"
+            ]
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{c4259720-e9a1-11f1-b797-005056399006}",
+            "DriveLetter": null,
+            "Offset": 17408,
+            "Size": 262144,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{711160f8-ee05-4e0a-baea-f55c913b614b}",
+            "DriveLetter": null,
+            "Offset": 279552,
+            "Size": 16497664,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b}",
+            "DriveLetter": "E",
+            "Offset": 16777216,
+            "Size": 8572108800,
+            "AccessPaths": [
+              "E:\\",
+              "\\\\?\\Volume{e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b}\\"
+            ]
+          }
+        ],
+        "rw": [
+          {
+            "directory": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "E:\\",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ]
+      },
+      "after_host_move_io": {
+        "san_policy": "OfflineShared",
+        "boot": "2026-11-26T16:33:08.5012200Z",
+        "cdrom": [
+          {
+            "Drive": "D:",
+            "MediaLoaded": false
+          },
+          {
+            "Drive": "Volume{6f146ef0-e9f7-11f1-b79a-806e6f6e6963}",
+            "MediaLoaded": false
+          }
+        ],
+        "disks": [
+          {
+            "Number": 0,
+            "Guid": "{a5eb259c-3929-4cbd-9606-9794f48d0f4a}",
+            "Signature": null,
+            "SerialNumber": "2a1316ea7f074333ad71",
+            "IsBoot": true,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 68719476736
+          },
+          {
+            "Number": 1,
+            "Guid": "{7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd}",
+            "Signature": null,
+            "SerialNumber": "a78f21c8c73c45daa3e8",
+            "IsBoot": false,
+            "IsOffline": false,
+            "IsReadOnly": false,
+            "Size": 8589934592
+          }
+        ],
+        "proofs": [
+          {
+            "sha256": "c1cfdec416f5dd0680b3a17ce0d178dc48b1b08a70241fc9f31d16e8238feafb",
+            "path": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89\\proof-vm-69480.json"
+          },
+          {
+            "sha256": "c1cfdec416f5dd0680b3a17ce0d178dc48b1b08a70241fc9f31d16e8238feafb",
+            "path": "E:\\v2k-issue89-proof-vm-69480.json"
+          }
+        ],
+        "partitions": [
+          {
+            "DiskNumber": 0,
+            "Guid": "{4baffeb1-3753-4561-bf6f-c973b9c817e0}",
+            "DriveLetter": null,
+            "Offset": 1048576,
+            "Size": 104857600,
+            "AccessPaths": [
+              "\\\\?\\Volume{4baffeb1-3753-4561-bf6f-c973b9c817e0}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{c425971f-e9a1-11f1-b797-005056399006}",
+            "DriveLetter": null,
+            "Offset": 105906176,
+            "Size": 262144,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{78964150-9a52-4d00-b24f-a35a8be254c4}",
+            "DriveLetter": null,
+            "Offset": 106168320,
+            "Size": 16515072,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{7df204b1-0592-4d9a-80fe-717dff54aff4}",
+            "DriveLetter": "C",
+            "Offset": 122683392,
+            "Size": 68045242368,
+            "AccessPaths": [
+              "C:\\",
+              "\\\\?\\Volume{7df204b1-0592-4d9a-80fe-717dff54aff4}\\"
+            ]
+          },
+          {
+            "DiskNumber": 0,
+            "Guid": "{26087bd2-5805-4847-b6e7-98753e98acfc}",
+            "DriveLetter": null,
+            "Offset": 68167925760,
+            "Size": 549453824,
+            "AccessPaths": [
+              "\\\\?\\Volume{26087bd2-5805-4847-b6e7-98753e98acfc}\\"
+            ]
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{c4259720-e9a1-11f1-b797-005056399006}",
+            "DriveLetter": null,
+            "Offset": 17408,
+            "Size": 262144,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{711160f8-ee05-4e0a-baea-f55c913b614b}",
+            "DriveLetter": null,
+            "Offset": 279552,
+            "Size": 16497664,
+            "AccessPaths": null
+          },
+          {
+            "DiskNumber": 1,
+            "Guid": "{e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b}",
+            "DriveLetter": "E",
+            "Offset": 16777216,
+            "Size": 8572108800,
+            "AccessPaths": [
+              "E:\\",
+              "\\\\?\\Volume{e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b}\\"
+            ]
+          }
+        ],
+        "rw": [
+          {
+            "directory": "C:\\ProgramData\\ABLECLOUD-V2K-Issue89",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          },
+          {
+            "directory": "E:\\",
+            "bytes": 4864,
+            "sha256": "a497661aaaf4687fa85ba037566957c956ab3705041b83689d932f179019ee18"
+          }
+        ]
+      },
+      "volumes": [
+        {
+          "id": "2a1316ea-7f07-4333-ad71-8dd2208520e6",
+          "type": "ROOT",
+          "deviceid": 0,
+          "path": "v2k-i90-windows-scsi-final-20261127-disk0.qcow2",
+          "size": 68719476736,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "68865470464",
+            "observedat": "2026-11-26T16:13:47.294107279Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-windows-scsi-final-20261127-disk0.qcow2",
+            "importrequestid": "2a1316ea-7f07-4333-ad71-8dd2208520e6",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T16:13:50.723598343Z",
+            "importstrategy": "adopt",
+            "importidentity": "ca3d96ccfc593038b4bc757d1d8cfc8aef0ba36c76613ff7dabd472abc45f2db",
+            "importverifiedat": "2026-11-26T16:13:47.294080538Z"
+          }
+        },
+        {
+          "id": "a78f21c8-c73c-45da-a3e8-3ede4b636f6a",
+          "type": "DATADISK",
+          "deviceid": 1,
+          "path": "v2k-i90-windows-scsi-final-20261127-disk1.qcow2",
+          "size": 8589934592,
+          "storageid": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-26T16:13:47.439893281Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-windows-scsi-final-20261127-disk1.qcow2",
+            "importrequestid": "a78f21c8-c73c-45da-a3e8-3ede4b636f6a",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-26T16:13:50.726869767Z",
+            "importstrategy": "adopt",
+            "importidentity": "ce72ec25e6606c53b6576cd77bfde49bc3c10e6c0635e284207a95c48cb99b2a",
+            "importverifiedat": "2026-11-26T16:13:47.439884186Z"
+          }
+        }
+      ]
+    }
+  ],
+  "preservation": {
+    "baseline_mold_vm_count": 106,
+    "changed": [],
+    "original_vmware_count": 6,
+    "originals_powered_off_without_snapshots": true,
+    "clones_powered_off_without_snapshots": true,
+    "retained_failed_targets": [
+      {
+        "id": "7e103746-bb11-47a3-a23c-e98782bb505e",
+        "name": "v2k-i90-windows-scsi-20261126",
+        "state": "Stopped"
+      },
+      {
+        "id": "409f257a-4a1a-490a-b608-dbb0139ab092",
+        "name": "v2k-i90-windows-scsi-r3-20261126",
+        "state": "Stopped"
+      }
+    ],
+    "superseded_qualified_trials": [
+      {
+        "id": "5eb8778a-0d6b-44ec-9833-cbb169dcd5f6",
+        "name": "v2k-i90-ubuntu-ide-20261126",
+        "state": "Stopped"
+      },
+      {
+        "id": "20639ac2-98cd-4553-9365-c56fb78ad1d4",
+        "name": "v2k-i90-ubuntu-scsi-20261126",
+        "state": "Stopped"
+      },
+      {
+        "id": "2b185d91-f49e-4f9b-b540-68b6e01a6289",
+        "name": "v2k-i90-ubuntu-sata-20261126",
+        "state": "Stopped"
+      }
+    ]
+  },
+  "post_verified_user_change": {
+    "initially_automatically_verified": true,
+    "injection_and_cleanup": [
+      {
+        "san": "OfflineShared",
+        "drive": "P",
+        "verified_before_test": true,
+        "journal_steps": 4,
+        "action": "change"
+      },
+      {
+        "san": "OfflineShared",
+        "drive": "P",
+        "verified_before_test": true,
+        "journal_steps": 4,
+        "action": "observe"
+      },
+      {
+        "san": "OfflineShared",
+        "drive": "E",
+        "verified_before_test": true,
+        "journal_steps": 4,
+        "action": "cleanup"
+      }
+    ],
+    "reconcile_status": "DRIFT",
+    "exit_code": 78,
+    "after_cleanup_status": "VERIFIED",
+    "same_operation_id": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+    "mutation_count_unchanged": true
+  },
+  "deployment": [
+    {
+      "stage": "final-class-apply-10",
+      "applied": true,
+      "targets": [
+        {
+          "target": "/usr/share/cloudstack-management/lib/cloudstack-4.23.0.0-ABLESTACK.Mold.jar",
+          "before": "cd069afbced0cccb5a90bf2eea2480783905a4a5711ce9a5eec3b55795b9cd2e",
+          "classes": 55,
+          "new_classes": 0,
+          "after": "62f457732b6e4e5d768ce39e02e150806d3a69c1548479b6008a4678c2933cba",
+          "backup": "/var/backups/issue90-final-20261127/cloudstack-4.23.0.0-ABLESTACK.Mold.jar"
+        }
+      ]
+    },
+    {
+      "stage": "final-class-apply-1",
+      "applied": true,
+      "targets": [
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-api-4.23.0.0.jar",
+          "before": "4aae9f6bacf11feca691a0291af0d2630eaf65b400ff56c574e140019a94c1b5",
+          "classes": 5,
+          "new_classes": 0,
+          "after": "71974322391023769d14d0410b1488cc967104fc3dc488ae80e4b817cee9d6ab",
+          "backup": "/var/backups/issue90-final-20261127/cloud-api-4.23.0.0.jar"
+        },
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-core-4.23.0.0.jar",
+          "before": "8028011398a46500fdfd4f869e0cd87948bc3b4f4a5fb6197df884cc78ff2d97",
+          "classes": 2,
+          "new_classes": 0,
+          "after": "e1c876d20a3d73fcb19d1189db21ed2291fb755a12079c4d3853d79056ba1b42",
+          "backup": "/var/backups/issue90-final-20261127/cloud-core-4.23.0.0.jar"
+        },
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-plugin-hypervisor-kvm-4.23.0.0.jar",
+          "before": "32ae74377439f7fcb762a703849ed5480ed8e1d4a3f2ed46ec9e04d765805fe3",
+          "classes": 3,
+          "new_classes": 0,
+          "after": "255a864f50449d73116aa92efa1a39aa31cc5895b7b3337e61c20b671daec201",
+          "backup": "/var/backups/issue90-final-20261127/cloud-plugin-hypervisor-kvm-4.23.0.0.jar"
+        }
+      ]
+    },
+    {
+      "stage": "final-class-apply-2",
+      "applied": true,
+      "targets": [
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-api-4.23.0.0.jar",
+          "before": "0b383e5eae1d956b1a21b0246ac3997ca6ae1aba6c0757d2fcfc2050d25e924a",
+          "classes": 5,
+          "new_classes": 0,
+          "after": "8893ed33079f88a5158f45611b4fd2c715df3c03773c2452e6af0d78442f2c55",
+          "backup": "/var/backups/issue90-final-20261127/cloud-api-4.23.0.0.jar"
+        },
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-core-4.23.0.0.jar",
+          "before": "8cc1957c65fca2c49c4c8507f768947a60bd23bc3fc0446244e2659a7ec801e9",
+          "classes": 2,
+          "new_classes": 0,
+          "after": "83fa565eaea040f43868cc614fbbaf8671ad882a449a015416cbb7dd7db09ee2",
+          "backup": "/var/backups/issue90-final-20261127/cloud-core-4.23.0.0.jar"
+        },
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-plugin-hypervisor-kvm-4.23.0.0.jar",
+          "before": "26520be65d003261cdd82cea1ddf0d5a1f9998f25afc8af19b720ffda0987dc2",
+          "classes": 3,
+          "new_classes": 0,
+          "after": "977d3cba259dc08a8ee0a95092c9eb42fa4bdd1eaa2515702cdf3f673b751d33",
+          "backup": "/var/backups/issue90-final-20261127/cloud-plugin-hypervisor-kvm-4.23.0.0.jar"
+        }
+      ]
+    },
+    {
+      "stage": "final-class-apply-3",
+      "applied": true,
+      "targets": [
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-api-4.23.0.0.jar",
+          "before": "1445c4d8dac0950ca3993722893cc72b6f2a24aeb84ecbbb368366b15b1f403e",
+          "classes": 5,
+          "new_classes": 0,
+          "after": "3d9853a04886521215b961f29be95856ab4d8fd528e8305820e48876c5dd0bc8",
+          "backup": "/var/backups/issue90-final-20261127/cloud-api-4.23.0.0.jar"
+        },
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-core-4.23.0.0.jar",
+          "before": "ba7bed1fadbfe45665c7316a9db178b39b03d06897b13cb5eda2d8345aa451d0",
+          "classes": 2,
+          "new_classes": 0,
+          "after": "2125c4c61777f1e5deb1a7eb1655db558c0eb6a803b00ee4f4e27b148bfc8b5f",
+          "backup": "/var/backups/issue90-final-20261127/cloud-core-4.23.0.0.jar"
+        },
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-plugin-hypervisor-kvm-4.23.0.0.jar",
+          "before": "0261b080b61f0094f2b73a3b4bba01e08790417e5d34ec7c4ea4ae550d78b31a",
+          "classes": 3,
+          "new_classes": 0,
+          "after": "5ac17587bd135a70149dc56d3107905ba1e6fda797a2e6a122f641ea80675219",
+          "backup": "/var/backups/issue90-final-20261127/cloud-plugin-hypervisor-kvm-4.23.0.0.jar"
+        }
+      ]
+    },
+    {
+      "stage": "eof-apply-1",
+      "applied": true,
+      "targets": [
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-plugin-hypervisor-kvm-4.23.0.0.jar",
+          "before": "255a864f50449d73116aa92efa1a39aa31cc5895b7b3337e61c20b671daec201",
+          "classes": 1,
+          "new_classes": 0,
+          "after": "6e50e0eba0a0afc784eff82f42a758d67b2fbe74c1d952affe3f40952684946b",
+          "backup": "/var/backups/issue90-windows-eof-20261127/cloud-plugin-hypervisor-kvm-4.23.0.0.jar"
+        }
+      ]
+    },
+    {
+      "stage": "eof-apply-2",
+      "applied": true,
+      "targets": [
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-plugin-hypervisor-kvm-4.23.0.0.jar",
+          "before": "977d3cba259dc08a8ee0a95092c9eb42fa4bdd1eaa2515702cdf3f673b751d33",
+          "classes": 1,
+          "new_classes": 0,
+          "after": "1efce141c006bc259f884458408a2e927cd363b301b311c6d684c86704a067b7",
+          "backup": "/var/backups/issue90-windows-eof-20261127/cloud-plugin-hypervisor-kvm-4.23.0.0.jar"
+        }
+      ]
+    },
+    {
+      "stage": "eof-apply-3",
+      "applied": true,
+      "targets": [
+        {
+          "target": "/usr/share/cloudstack-agent/lib/cloud-plugin-hypervisor-kvm-4.23.0.0.jar",
+          "before": "5ac17587bd135a70149dc56d3107905ba1e6fda797a2e6a122f641ea80675219",
+          "classes": 1,
+          "new_classes": 0,
+          "after": "9472dad60974233a3b75728c94bb2a7bb9646e01db3a8391d69c307ed09a10ec",
+          "backup": "/var/backups/issue90-windows-eof-20261127/cloud-plugin-hypervisor-kvm-4.23.0.0.jar"
+        }
+      ]
+    }
+  ],
+  "dependencies": {
+    "libguestfs": "1.58.1 upstream private library/guestfish and fixed appliance",
+    "virt_customize": "1.52.2",
+    "windows_qga": "110.2.3",
+    "windows_qga_msi_sha256": "19dcf8abc30f70c2eb6e87282601fd0476e4e0b19936f63d9c80be30db0796ed",
+    "rhsrvany_sha256": "55207505a8050e991c2bb42ef479cd1b866d5e95ba3c3a8374b34965b72007f3",
+    "appliance_archive_sha256": "6779ce3fc820a28c1607729892e53a1ba418be4480f52e0457bb381eab408a72"
+  },
+  "limits": [
+    "Qualified live Linux cases use Ubuntu 22.04 networkd DHCP4 and IPv6 RA; static/multiple NIC policies are unit coverage.",
+    "Windows live cases use basic unencrypted GPT DATA with E; intentional offline/read-only, media conflict and owned compensation are adapter simulation coverage.",
+    "Folder mount paths and complex/authenticated Netplan topology are rejected.",
+    "Runtime source overlay deployment and isolated RPM composition/hash smoke; no official Release or full offline RPM installation certification."
+  ],
+  "observer_wakeup": [
+    {
+      "case": "ubuntu-ide",
+      "stopped": {
+        "path_active": true,
+        "observer_stopped_for_test": true,
+        "network_files": {
+          "/etc/netplan/50-cloud-init.yaml": "363794898f7717540020ed4cb61369cccbd226dd9ae26ad4fc1dea60bd9bb283"
+        },
+        "operation_id": "acbc378e-55a5-4031-b736-1f4ffe09a279"
+      },
+      "reconcile": {
+        "status": "VERIFIED",
+        "plan_hash": "8ab977b621a0391e519379a74955712f9d1475c80dbe6b41b46fa44dc1dd04cc",
+        "operation_id": "acbc378e-55a5-4031-b736-1f4ffe09a279",
+        "payload": {
+          "version": 1,
+          "os": "ubuntu",
+          "os_version": "22.04",
+          "arch": "amd64",
+          "provenance": "official-https-index-sha256",
+          "indexes": [
+            {
+              "suite": "jammy-updates",
+              "component": "main",
+              "index_sha256": "e21c5806a71fb01c305979bc2c252294b5486d953401a33b4d5b05e68c410754",
+              "inrelease_sha256": "2a6ae0b9191b3528e410b48c6be3911623ff596416df799f688d6c1587f23282"
+            },
+            {
+              "suite": "jammy-updates",
+              "component": "universe",
+              "index_sha256": "4d4f80ef15b2664e8795af2bd06501b60aa818e75ad69d6d2467711f9e543e0b",
+              "inrelease_sha256": "2a6ae0b9191b3528e410b48c6be3911623ff596416df799f688d6c1587f23282"
+            },
+            {
+              "suite": "jammy",
+              "component": "main",
+              "index_sha256": "712ee19b50fa5a5963b82b8dd00438f59ef1f088db8e3e042f4306d2b7c89c69",
+              "inrelease_sha256": "c14060cd8c6d625874dfcb9523a35a395bf4865c28b6b6a82569ef326fe92dc6"
+            },
+            {
+              "suite": "jammy",
+              "component": "universe",
+              "index_sha256": "9939f6554c5cbea6607e3886634d7e393d8b0364ae0a43c2549d7191840c66c1",
+              "inrelease_sha256": "c14060cd8c6d625874dfcb9523a35a395bf4865c28b6b6a82569ef326fe92dc6"
+            }
+          ],
+          "files": [
+            {
+              "name": "qemu-guest-agent",
+              "version": "1:6.2+dfsg-2ubuntu6.31",
+              "file": "qemu-guest-agent_6.2+dfsg-2ubuntu6.31_amd64.deb",
+              "sha256": "b7bebec9f3f76458c182d54fe90274480809f8bcb665106252bdff98d9aada56",
+              "url": "https://archive.ubuntu.com/ubuntu/pool/universe/q/qemu/qemu-guest-agent_6.2+dfsg-2ubuntu6.31_amd64.deb"
+            },
+            {
+              "name": "liburing2",
+              "version": "2.1-2build1",
+              "file": "liburing2_2.1-2build1_amd64.deb",
+              "sha256": "f6e9bdf50c9683cd9a74ad92d51dde085f40baf0a5fcd8a56fc68425c1bd3c5f",
+              "url": "https://archive.ubuntu.com/ubuntu/pool/main/libu/liburing/liburing2_2.1-2build1_amd64.deb"
+            }
+          ]
+        },
+        "contractversion": 1,
+        "supported": true,
+        "verified": true,
+        "id": "fe393009-f437-4f40-88fd-55f71700123b",
+        "planhash": "8ab977b621a0391e519379a74955712f9d1475c80dbe6b41b46fa44dc1dd04cc",
+        "operationid": "acbc378e-55a5-4031-b736-1f4ffe09a279",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "8ab977b621a0391e519379a74955712f9d1475c80dbe6b41b46fa44dc1dd04cc",
+          "operation_id": "acbc378e-55a5-4031-b736-1f4ffe09a279",
+          "vm_uuid": "fe393009-f437-4f40-88fd-55f71700123b",
+          "boot_scope": "33820917b639f2abc6b5c31d9a873310f404ef35a8daaee78e6a21905395c057",
+          "binding_sha256": "efab26ed8429e8484a50ed4cd06500b0cd45e0c2eca2bf8edc91fd5d0e500370",
+          "status": "VERIFIED",
+          "report": {
+            "version": 1.0,
+            "operation_id": "acbc378e-55a5-4031-b736-1f4ffe09a279",
+            "plan_hash": "8ab977b621a0391e519379a74955712f9d1475c80dbe6b41b46fa44dc1dd04cc",
+            "vm_uuid": "fe393009-f437-4f40-88fd-55f71700123b",
+            "binding_sha256": "efab26ed8429e8484a50ed4cd06500b0cd45e0c2eca2bf8edc91fd5d0e500370",
+            "boot_scope": "33820917b639f2abc6b5c31d9a873310f404ef35a8daaee78e6a21905395c057",
+            "boot_id": "33ce9ca1-9eb6-4a25-9e87-ce6d795f3a6f",
+            "root_identity": "fs:4eb790e9-4894-486e-bffa-ab56ff2d41c6",
+            "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+            "status": "VERIFIED",
+            "network": {
+              "status": "VERIFIED",
+              "interfaces": [
+                {
+                  "mac": "00:50:56:39:90:09",
+                  "ifname": "ens192",
+                  "addresses": [
+                    "10.10.254.160/16",
+                    "fd12:8ea6:72a:69eb:250:56ff:fe39:9009/64",
+                    "fe80::250:56ff:fe39:9009/64"
+                  ],
+                  "mtu": 1500.0,
+                  "status": "VERIFIED"
+                }
+              ]
+            },
+            "windows": {
+              "status": "NOT_APPLICABLE"
+            },
+            "mutations": []
+          }
+        },
+        "reason": "GUEST_REPORT_STALE_OR_UNBOUND"
+      }
+    },
+    {
+      "case": "ubuntu-sata",
+      "stopped": {
+        "path_active": true,
+        "observer_stopped_for_test": true,
+        "network_files": {
+          "/etc/netplan/50-cloud-init.yaml": "4768d3465f0a4965dab61f98d6127463495f6346fc74437b6d110cb31466272e"
+        },
+        "operation_id": "44219e2e-ebf4-412f-9496-e94236abeea0"
+      },
+      "reconcile": {
+        "status": "VERIFIED",
+        "plan_hash": "e8c77978394b8ab5709da91c1229c19aa7916bbeaf3dfa911e59c9e01b6353ae",
+        "operation_id": "44219e2e-ebf4-412f-9496-e94236abeea0",
+        "payload": {
+          "version": 1,
+          "os": "ubuntu",
+          "os_version": "22.04",
+          "arch": "amd64",
+          "provenance": "official-https-index-sha256",
+          "indexes": [
+            {
+              "suite": "jammy-updates",
+              "component": "main",
+              "index_sha256": "e21c5806a71fb01c305979bc2c252294b5486d953401a33b4d5b05e68c410754",
+              "inrelease_sha256": "2a6ae0b9191b3528e410b48c6be3911623ff596416df799f688d6c1587f23282"
+            },
+            {
+              "suite": "jammy-updates",
+              "component": "universe",
+              "index_sha256": "4d4f80ef15b2664e8795af2bd06501b60aa818e75ad69d6d2467711f9e543e0b",
+              "inrelease_sha256": "2a6ae0b9191b3528e410b48c6be3911623ff596416df799f688d6c1587f23282"
+            },
+            {
+              "suite": "jammy",
+              "component": "main",
+              "index_sha256": "712ee19b50fa5a5963b82b8dd00438f59ef1f088db8e3e042f4306d2b7c89c69",
+              "inrelease_sha256": "c14060cd8c6d625874dfcb9523a35a395bf4865c28b6b6a82569ef326fe92dc6"
+            },
+            {
+              "suite": "jammy",
+              "component": "universe",
+              "index_sha256": "9939f6554c5cbea6607e3886634d7e393d8b0364ae0a43c2549d7191840c66c1",
+              "inrelease_sha256": "c14060cd8c6d625874dfcb9523a35a395bf4865c28b6b6a82569ef326fe92dc6"
+            }
+          ],
+          "files": [
+            {
+              "name": "qemu-guest-agent",
+              "version": "1:6.2+dfsg-2ubuntu6.31",
+              "file": "qemu-guest-agent_6.2+dfsg-2ubuntu6.31_amd64.deb",
+              "sha256": "b7bebec9f3f76458c182d54fe90274480809f8bcb665106252bdff98d9aada56",
+              "url": "https://archive.ubuntu.com/ubuntu/pool/universe/q/qemu/qemu-guest-agent_6.2+dfsg-2ubuntu6.31_amd64.deb"
+            },
+            {
+              "name": "liburing2",
+              "version": "2.1-2build1",
+              "file": "liburing2_2.1-2build1_amd64.deb",
+              "sha256": "f6e9bdf50c9683cd9a74ad92d51dde085f40baf0a5fcd8a56fc68425c1bd3c5f",
+              "url": "https://archive.ubuntu.com/ubuntu/pool/main/libu/liburing/liburing2_2.1-2build1_amd64.deb"
+            }
+          ]
+        },
+        "contractversion": 1,
+        "supported": true,
+        "verified": true,
+        "id": "b4b1a1c4-97a9-462f-a887-3228ea29e114",
+        "planhash": "e8c77978394b8ab5709da91c1229c19aa7916bbeaf3dfa911e59c9e01b6353ae",
+        "operationid": "44219e2e-ebf4-412f-9496-e94236abeea0",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "e8c77978394b8ab5709da91c1229c19aa7916bbeaf3dfa911e59c9e01b6353ae",
+          "operation_id": "44219e2e-ebf4-412f-9496-e94236abeea0",
+          "vm_uuid": "b4b1a1c4-97a9-462f-a887-3228ea29e114",
+          "boot_scope": "171cb932331979c0ec288a960ec34b0a69ab85667883615667d8f498bfc238da",
+          "binding_sha256": "c48eece6e95e68f58c2b62b1005a4f4a408891b5b47fcf2edfc22c1d0f37a618",
+          "status": "VERIFIED",
+          "report": {
+            "version": 1.0,
+            "operation_id": "44219e2e-ebf4-412f-9496-e94236abeea0",
+            "plan_hash": "e8c77978394b8ab5709da91c1229c19aa7916bbeaf3dfa911e59c9e01b6353ae",
+            "vm_uuid": "b4b1a1c4-97a9-462f-a887-3228ea29e114",
+            "binding_sha256": "c48eece6e95e68f58c2b62b1005a4f4a408891b5b47fcf2edfc22c1d0f37a618",
+            "boot_scope": "171cb932331979c0ec288a960ec34b0a69ab85667883615667d8f498bfc238da",
+            "boot_id": "518b3ff4-2fe0-4cd0-b6c2-13fdad0ae694",
+            "root_identity": "fs:4d3cf136-3e70-4ed4-a0a2-483b8721917c",
+            "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+            "status": "VERIFIED",
+            "network": {
+              "status": "VERIFIED",
+              "interfaces": [
+                {
+                  "mac": "00:50:56:39:90:0a",
+                  "ifname": "ens192",
+                  "addresses": [
+                    "10.10.254.165/16",
+                    "fd12:8ea6:72a:69eb:250:56ff:fe39:900a/64",
+                    "fe80::250:56ff:fe39:900a/64"
+                  ],
+                  "mtu": 1500.0,
+                  "status": "VERIFIED"
+                }
+              ]
+            },
+            "windows": {
+              "status": "NOT_APPLICABLE"
+            },
+            "mutations": []
+          }
+        },
+        "reason": "GUEST_REPORT_STALE_OR_UNBOUND"
+      }
+    },
+    {
+      "case": "ubuntu-scsi",
+      "stopped": {
+        "path_active": true,
+        "observer_stopped_for_test": true,
+        "network_files": {
+          "/etc/netplan/50-cloud-init.yaml": "cbc0e6fbf739619f601e7a80668d0041cf790f9ca90b379d9d8503f458bb3c44"
+        },
+        "operation_id": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747"
+      },
+      "reconcile": {
+        "status": "VERIFIED",
+        "plan_hash": "7f8a0a4f696b03c9abcf3a52bd89865e55c51e03ede1379f478a22b504957b7d",
+        "operation_id": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747",
+        "payload": {
+          "version": 1,
+          "os": "ubuntu",
+          "os_version": "22.04",
+          "arch": "amd64",
+          "provenance": "official-https-index-sha256",
+          "indexes": [
+            {
+              "suite": "jammy-updates",
+              "component": "main",
+              "index_sha256": "e21c5806a71fb01c305979bc2c252294b5486d953401a33b4d5b05e68c410754",
+              "inrelease_sha256": "2a6ae0b9191b3528e410b48c6be3911623ff596416df799f688d6c1587f23282"
+            },
+            {
+              "suite": "jammy-updates",
+              "component": "universe",
+              "index_sha256": "4d4f80ef15b2664e8795af2bd06501b60aa818e75ad69d6d2467711f9e543e0b",
+              "inrelease_sha256": "2a6ae0b9191b3528e410b48c6be3911623ff596416df799f688d6c1587f23282"
+            },
+            {
+              "suite": "jammy",
+              "component": "main",
+              "index_sha256": "712ee19b50fa5a5963b82b8dd00438f59ef1f088db8e3e042f4306d2b7c89c69",
+              "inrelease_sha256": "c14060cd8c6d625874dfcb9523a35a395bf4865c28b6b6a82569ef326fe92dc6"
+            },
+            {
+              "suite": "jammy",
+              "component": "universe",
+              "index_sha256": "9939f6554c5cbea6607e3886634d7e393d8b0364ae0a43c2549d7191840c66c1",
+              "inrelease_sha256": "c14060cd8c6d625874dfcb9523a35a395bf4865c28b6b6a82569ef326fe92dc6"
+            }
+          ],
+          "files": [
+            {
+              "name": "qemu-guest-agent",
+              "version": "1:6.2+dfsg-2ubuntu6.31",
+              "file": "qemu-guest-agent_6.2+dfsg-2ubuntu6.31_amd64.deb",
+              "sha256": "b7bebec9f3f76458c182d54fe90274480809f8bcb665106252bdff98d9aada56",
+              "url": "https://archive.ubuntu.com/ubuntu/pool/universe/q/qemu/qemu-guest-agent_6.2+dfsg-2ubuntu6.31_amd64.deb"
+            },
+            {
+              "name": "liburing2",
+              "version": "2.1-2build1",
+              "file": "liburing2_2.1-2build1_amd64.deb",
+              "sha256": "f6e9bdf50c9683cd9a74ad92d51dde085f40baf0a5fcd8a56fc68425c1bd3c5f",
+              "url": "https://archive.ubuntu.com/ubuntu/pool/main/libu/liburing/liburing2_2.1-2build1_amd64.deb"
+            }
+          ]
+        },
+        "contractversion": 1,
+        "supported": true,
+        "verified": true,
+        "id": "0401bc71-bcf6-4cf8-aa48-813f25fe052f",
+        "planhash": "7f8a0a4f696b03c9abcf3a52bd89865e55c51e03ede1379f478a22b504957b7d",
+        "operationid": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "7f8a0a4f696b03c9abcf3a52bd89865e55c51e03ede1379f478a22b504957b7d",
+          "operation_id": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747",
+          "vm_uuid": "0401bc71-bcf6-4cf8-aa48-813f25fe052f",
+          "boot_scope": "2c1f9ba2eb959a8707bda4cee63adc4d9b4466c50224563e6dfb8c903754d1b7",
+          "binding_sha256": "7004c97dfc92fa58e36cecd6ccf80374a3ad2a2747a4573480fecaff7433bfe4",
+          "status": "VERIFIED",
+          "report": {
+            "version": 1.0,
+            "operation_id": "231f2070-ca0d-4fa1-a50f-ecd9f80e5747",
+            "plan_hash": "7f8a0a4f696b03c9abcf3a52bd89865e55c51e03ede1379f478a22b504957b7d",
+            "vm_uuid": "0401bc71-bcf6-4cf8-aa48-813f25fe052f",
+            "binding_sha256": "7004c97dfc92fa58e36cecd6ccf80374a3ad2a2747a4573480fecaff7433bfe4",
+            "boot_scope": "2c1f9ba2eb959a8707bda4cee63adc4d9b4466c50224563e6dfb8c903754d1b7",
+            "boot_id": "781fb0f7-df93-487e-a6d4-0e2c0c04fa5d",
+            "root_identity": "fs:326c88e4-9a56-46e7-b00b-e2740ebd11ed",
+            "helper_sha256": "39fa3902c3e677fff592c24f9fd946921393af175c88970d4804a9ac0eff723f",
+            "status": "VERIFIED",
+            "network": {
+              "status": "VERIFIED",
+              "interfaces": [
+                {
+                  "mac": "00:50:56:39:90:0b",
+                  "ifname": "ens192",
+                  "addresses": [
+                    "10.10.254.164/16",
+                    "fd12:8ea6:72a:69eb:250:56ff:fe39:900b/64",
+                    "fe80::250:56ff:fe39:900b/64"
+                  ],
+                  "mtu": 1500.0,
+                  "status": "VERIFIED"
+                }
+              ]
+            },
+            "windows": {
+              "status": "NOT_APPLICABLE"
+            },
+            "mutations": []
+          }
+        },
+        "reason": "GUEST_REPORT_STALE_OR_UNBOUND"
+      }
+    }
+  ],
+  "service_restart": {
+    "management_service_restarted": true,
+    "agent_service_restarted": true,
+    "windows_reconcile": {
+      "status": "VERIFIED",
+      "plan_hash": "db0465c43703dd514c0a8b2ee021bd76a57360017998a38c887afb7085d52df4",
+      "operation_id": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+      "payload": {
+        "qga_msi_sha256": "19dcf8abc30f70c2eb6e87282601fd0476e4e0b19936f63d9c80be30db0796ed"
+      },
+      "contractversion": 1,
+      "supported": true,
+      "verified": true,
+      "id": "edb3ee42-b4ad-4c43-9869-aa6b06891975",
+      "planhash": "db0465c43703dd514c0a8b2ee021bd76a57360017998a38c887afb7085d52df4",
+      "operationid": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+      "observation": {
+        "supported": true,
+        "fresh_observation": true,
+        "plan_hash": "db0465c43703dd514c0a8b2ee021bd76a57360017998a38c887afb7085d52df4",
+        "operation_id": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+        "vm_uuid": "edb3ee42-b4ad-4c43-9869-aa6b06891975",
+        "boot_scope": "c11c77fc409a29701b3fa3bc2f4590f7083b442b64c9fc3df6cfc884baf86430",
+        "binding_sha256": "0ad493bde3b5b257505184709fa5485a9248964b718b3a86a287f54a62fadbda",
+        "status": "VERIFIED",
+        "report": {
+          "version": 1.0,
+          "mutations": [
+            {
+              "type": "readonly",
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+              "before": true,
+              "after": false,
+              "state": "APPLIED",
+              "boot_id": "2026-11-27T00:14:42.5000000Z",
+              "timestamp": "2026-11-27T00:14:55.8969015Z"
+            },
+            {
+              "type": "offline",
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+              "before": true,
+              "after": false,
+              "state": "APPLIED",
+              "boot_id": "2026-11-27T00:14:42.5000000Z",
+              "timestamp": "2026-11-27T00:14:56.1934171Z"
+            },
+            {
+              "type": "cdrom-letter",
+              "identity": "\\\\?\\Volume{6f146ef0-e9f7-11f1-b79a-806e6f6e6963}\\",
+              "before": "E:",
+              "state": "APPLIED",
+              "boot_id": "2026-11-27T00:14:42.5000000Z",
+              "timestamp": "2026-11-27T00:14:56.4289772Z"
+            },
+            {
+              "type": "partition-letter",
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd:e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b:16777216",
+              "before": "F",
+              "after": "E",
+              "state": "APPLIED",
+              "boot_id": "2026-11-27T00:14:42.5000000Z",
+              "timestamp": "2026-11-27T00:14:56.6008234Z"
+            }
+          ],
+          "boot_scope": "c11c77fc409a29701b3fa3bc2f4590f7083b442b64c9fc3df6cfc884baf86430",
+          "helper_sha256": "5fdf14eff6accc0e9e7eade86674912517d0c748e54b3afe8f72d43ddbf80780",
+          "binding_sha256": "0ad493bde3b5b257505184709fa5485a9248964b718b3a86a287f54a62fadbda",
+          "status": "VERIFIED",
+          "vm_uuid": "edb3ee42-b4ad-4c43-9869-aa6b06891975",
+          "root_identity": "gpt:a5eb259c-3929-4cbd-9606-9794f48d0f4a",
+          "boot_id": "2026-11-26T16:33:08.5012200Z",
+          "operation_id": "ce14951a-8fe9-4bd5-8c08-405e728884e0",
+          "plan_hash": "db0465c43703dd514c0a8b2ee021bd76a57360017998a38c887afb7085d52df4",
+          "windows": {
+            "status": "VERIFIED",
+            "disks": [
+              {
+                "access_paths": [
+                  "E:\\"
+                ],
+                "read_only": false,
+                "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+                "online": true,
+                "serial": "a78f21c8c73c45daa3e8",
+                "status": "VERIFIED",
+                "source_disk_id": "scsi0:1"
+              }
+            ],
+            "san_policy": "OfflineShared"
+          },
+          "network": {
+            "status": "NOT_APPLICABLE"
+          }
+        }
+      },
+      "reason": "GUEST_REPORT_STALE_OR_UNBOUND"
+    }
+  }
+}
