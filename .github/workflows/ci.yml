@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make
+          sudo apt-get install -y make jq qemu-utils libnbd-bin
 
       - name: Run Make (all targets)
         run: |
