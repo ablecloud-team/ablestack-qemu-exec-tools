@@ -21,6 +21,8 @@ set -euo pipefail
 
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/disk_cache.sh"
 
 V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
@@ -408,6 +410,8 @@ v2k_manifest_init() {
         }
       }
   ' > "${manifest}"
+  migration_disk_cache_configure v2k "$manifest" 1 || return $?
+
 }
 
 v2k_manifest_validate_source_disk_controllers() {

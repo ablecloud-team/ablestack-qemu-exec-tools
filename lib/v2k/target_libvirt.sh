@@ -16,6 +16,8 @@
 # ---------------------------------------------------------------------
 
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/disk_cache.sh"
 
 # ---------------------------------------------------------------------
 # Trace helpers
@@ -88,7 +90,8 @@ _v2k_rbd_dev_path_from_uri() {
 }
 
 _v2k_target_disk_xml() {
-  local manifest="$1" idx="$2"
+  local manifest="$1" idx="$2" cache_mode
+  cache_mode="$(migration_disk_cache_value v2k "$manifest")" || return $?
   local path bus dev st fallback_bus
   path="$(jq -r ".disks[$idx].transfer.target_path" "${manifest}")"
   fallback_bus="$(jq -r '.runtime.bootstrap_fallback.bus // empty' "${manifest}" 2>/dev/null || true)"
@@ -118,7 +121,7 @@ _v2k_target_disk_xml() {
     [[ -n "${serial}" ]] || serial="rbd${idx}"
     cat <<EOF
     <disk type='block' device='disk'>
-      <driver name='qemu' type='raw' cache='none' io='io_uring' discard='unmap'/>
+      <driver name='qemu' type='raw' cache='${cache_mode}' io='io_uring' discard='unmap'/>
       <source dev='$(_v2k_escape_xml "${block_path}")' index='${idx}'/>
       <target dev='${dev}' bus='${bus}'/>
       <serial>${serial}</serial>
@@ -130,7 +133,7 @@ EOF
 
   cat <<EOF
     <disk type='file' device='disk'>
-      <driver name='qemu' type='$(jq -r '.target.format // "qcow2"' "${manifest}")' cache='none' io='io_uring'/>
+      <driver name='qemu' type='$(jq -r '.target.format // "qcow2"' "${manifest}")' cache='${cache_mode}' io='io_uring'/>
       <source file='$(_v2k_escape_xml "${path}")'/>
       <target dev='${dev}' bus='${bus}'/>
     </disk>

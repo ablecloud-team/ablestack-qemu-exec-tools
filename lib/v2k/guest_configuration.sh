@@ -117,7 +117,11 @@ v2k_guest_config_reconcile() {
       return 0
     fi
     if [[ "$status" == FAILED || "$status" == DRIFT ]]; then echo "GUEST_CONFIGURATION_$status" >&2; return 78; fi
-    now="$(date +%s)";[[ "$now" -lt "$end" ]] || { echo 'GUEST_CONFIG_TIMEOUT: inspect/reconcile the same operation; source writes remain sealed' >&2; return 78; }
+    now="$(date +%s)";[[ "$now" -lt "$end" ]] || {
+      tmp="$(mktemp "${manifest}.guest-timeout.XXXXXX")" || return $?
+      jq '.runtime.guest_configuration += {observed_status:.runtime.guest_configuration.status,status:"TIMED_OUT",verified:false,reason:"GUEST_CONFIG_TIMEOUT"}' "$manifest" > "$tmp" && mv -- "$tmp" "$manifest" || return $?
+      echo 'GUEST_CONFIG_TIMEOUT: inspect/reconcile the same operation; source writes remain sealed' >&2; return 78;
+    }
     sleep "${V2K_GUEST_CONFIG_POLL_SECONDS:-2}"
   done
 }

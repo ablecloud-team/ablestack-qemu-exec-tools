@@ -290,7 +290,7 @@ v2k_cmd_init "$@"
         for tool in ("v2k", "n2k"):
             for mode in (None, "metadata"):
                 directory = self.case / f"run-{tool}-{mode}"
-                flags = ["--foreground", "--vm", "fixture", "--dst", str(directory / "target"),
+                flags = ["--target-disk-cache", "writeback", "--foreground", "--vm", "fixture", "--dst", str(directory / "target"),
                          "--vcenter" if tool == "v2k" else "--pc", "source.invalid",
                          "--username", "fixture-user", "--password", "fixture-secret", "--split", "phase1"]
                 if mode:
@@ -305,14 +305,15 @@ n2k_event() { :; }
 v2k_compat_resolve_profile() { :; }
 v2k_compat_bootstrap_env() { :; }
 v2k_compat_write_env() { :; }
-v2k_cmd_init() { printf '%s\0' "$@" > "$CASE_DIR/argv"; return 77; }
-n2k_cmd_init() { mkdir -p "$CASE_DIR"; printf '%s\0' "$@" > "$CASE_DIR/argv"; return 77; }
+v2k_cmd_init() { printf '%s' "$V2K_TARGET_DISK_CACHE" > "$CASE_DIR/cache"; printf '%s\0' "$@" > "$CASE_DIR/argv"; return 77; }
+n2k_cmd_init() { mkdir -p "$CASE_DIR"; printf '%s' "$N2K_TARGET_DISK_CACHE" > "$CASE_DIR/cache"; printf '%s\0' "$@" > "$CASE_DIR/argv"; return 77; }
 "${TOOL}_cmd_run" "$@"
 '''
                 result = shell(script, env={"TOOL": tool, "CASE_DIR": str(directory)}, args=flags, ok=False)
                 self.assertNotEqual(result.returncode, 0)
                 capture = directory / "argv"
                 self.assertTrue(capture.exists(), result.stderr)
+                self.assertEqual((directory / "cache").read_text(), "writeback")
                 argv = capture.read_bytes().decode().rstrip("\0").split("\0")
                 self.assertEqual(argv[argv.index("--target-preallocation") + 1], mode or "falloc")
 
@@ -358,7 +359,7 @@ if [[ "$TOOL" == v2k ]]; then source "$REPO/lib/v2k/orchestrator.sh"; fi
                      "--cloud-service-offering-id", "offering", "--cloud-network-id", "network",
                      "--cloud-storage-id", "pool", "--cloud-name", "fixture-target"]
         result = shell(WIZARD, env={"TOOL": tool, "CASE_DIR": str(directory), "INVENTORY": json.dumps(inventory),
-                                   "N2K_GUEST_CONFIG_POLICY": "off", "TEST_TTY": tty, "CANCEL": str(int(cancel))}, args=(*args, *flags),
+                                   "N2K_GUEST_CONFIG_POLICY": "off", "TEST_TTY": tty, "CANCEL": str(int(cancel))}, args=(*args, "--target-disk-cache", "none", *flags),
                        data=selection, ok=False)
         captured = directory / "captured"
         argv = captured.read_bytes().decode().rstrip("\0").split("\0") if captured.exists() else []

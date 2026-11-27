@@ -183,6 +183,7 @@ n2k_cmd_init() {
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-file) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
@@ -546,6 +547,7 @@ n2k_build_preflight_result_from_args() {
       --vm) vm="${2:-}"; shift 2 ;;
       --mode) mode="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
@@ -1199,6 +1201,7 @@ n2k_cmd_run() {
       --insecure) insecure="${2:-}"; shift 2 ;;
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
@@ -1412,6 +1415,7 @@ n2k_cmd_run() {
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"
   if [[ "$target_provider" == ablestack-cloud ]] && n2k_cloud_handoff_started "$N2K_MANIFEST"; then
+    migration_disk_cache_configure n2k "$N2K_MANIFEST" || return $?
     n2k_guest_config_frozen_options "$N2K_MANIFEST" || return $?
     n2k_controller_resume_check "$N2K_MANIFEST" || return $?
     local resume_apply=0 resume_start=0 resume_define=1
@@ -1429,6 +1433,7 @@ n2k_cmd_run() {
   migration_cloud_allocation_check_manifest n2k "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
 
   n2k_controller_resume_check "$N2K_MANIFEST" || return $?
+  migration_disk_cache_configure n2k "$N2K_MANIFEST" || return $?
   n2k_guest_config_frozen_options "$N2K_MANIFEST" || return $?
   n2k_guest_config_configure "$N2K_MANIFEST" || return $?
   n2k_controller_check_target "$N2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
@@ -2382,6 +2387,7 @@ n2k_cmd_cutover() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --define-only) define_only=1; shift 1 ;;
       --apply) apply_define=1; shift 1 ;;
       --start) start_vm=1; shift 1 ;;
@@ -2427,6 +2433,7 @@ n2k_cmd_cutover() {
     export N2K_EVENTS_LOG
   fi
   n2k_require_manifest
+  migration_disk_cache_configure n2k "${N2K_MANIFEST}" || return $?
   n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
   [[ "${start_vm}" -eq 0 || "${apply_define}" -eq 1 ]] || n2k_die "--start requires --apply"
 

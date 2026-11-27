@@ -2977,6 +2977,7 @@ v2k_cmd_init() {
       --compat-profile) compat_profile="${2:-}"; shift 2;;
 
       # --- new options ---
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
@@ -3806,6 +3807,7 @@ v2k_libvirt_redefine_with_bootstrap_fallback() {
 
 v2k_cmd_cutover() {
   v2k_require_manifest
+  migration_disk_cache_configure v2k "${V2K_MANIFEST}" || return $?
   v2k_load_runtime_flags_from_manifest
   v2k_restore_runtime_env_from_workdir
   local shutdown="guest" define_only=0 apply_define=0 start_vm=0
@@ -3832,6 +3834,7 @@ v2k_cmd_cutover() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;

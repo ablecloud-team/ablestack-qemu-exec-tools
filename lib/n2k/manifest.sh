@@ -19,6 +19,8 @@ set -euo pipefail
 
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/disk_cache.sh"
 
 N2K_SCHEMA_ID="ablestack-n2k/manifest-v1"
 
@@ -209,6 +211,8 @@ n2k_manifest_init() {
         last_error: {code: 0, reason: "", ts: ""}
       }
     }' > "${manifest}"
+  migration_disk_cache_configure n2k "$manifest" 1 || return $?
+
 }
 
 n2k_manifest_record_source_controller_validation() {

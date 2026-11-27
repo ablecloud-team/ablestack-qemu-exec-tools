@@ -179,6 +179,7 @@ v2k_cmd_wizard() {
   local split="${V2K_WIZARD_DEFAULT_SPLIT:-phase1}" shutdown="guest" cutover_policy="start" yes=0 print_command=0 target_name inventory_json cloud_choices cloud_storage_json cloud_storage_path cloud_storage_scope cloud_nic_mappings_json
   while [[ $# -gt 0 ]]; do case "$1" in
     --vm) vm="${2:-}"; shift 2;; --vcenter) vcenter_host="${2:-}"; shift 2;; --username) username="${2:-}"; shift 2;; --password) password="${2:-}"; shift 2;; --cred-file) cred_file="${2:-}"; shift 2;; --vddk-cred-file) vddk_cred_file="${2:-}"; shift 2;; --compat-profile) compat_profile="${2:-}"; shift 2;; --insecure) insecure="${2:-}"; shift 2;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
@@ -235,6 +236,7 @@ v2k_cmd_wizard() {
   fi
   if [[ -z "${target_profile}" ]]; then if [[ "${yes}" -eq 1 ]]; then target_profile="cloud-rbd"; else target_profile="$(v2k_interactive_select_tsv "target profile" "$(v2k_interactive_target_profile_choices)" "" 0 1)"; fi; fi
   case "${target_profile}" in cloud-rbd) target_provider="${target_provider:-ablestack-cloud}"; target_storage="${target_storage:-rbd}"; target_format="${target_format:-raw}";; cloud-filesystem|cloud-qcow2) target_profile="cloud-filesystem"; target_provider="${target_provider:-ablestack-cloud}"; target_storage="${target_storage:-file}"; target_format="${target_format:-qcow2}";; libvirt-rbd) target_provider="${target_provider:-libvirt}"; target_storage="${target_storage:-rbd}"; target_format="${target_format:-raw}";; libvirt-qcow2) target_provider="${target_provider:-libvirt}"; target_storage="${target_storage:-file}"; target_format="${target_format:-qcow2}";; *) echo "Invalid --target-profile: ${target_profile}" >&2; return 2;; esac
+  migration_disk_cache_wizard v2k "${V2K_MANIFEST:-}" "$yes" "$print_command" || return $?
   image_preallocation_wizard v2k "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${V2K_MANIFEST:-}" "${yes}" "${print_command}" || return $?
   target_preallocation="${IMAGE_PREALLOCATION_MODE}"
   target_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
@@ -303,6 +305,7 @@ v2k_cmd_wizard() {
   fi
   [[ -n "${cred_file}" ]] && run_args+=(--cred-file "${cred_file}"); [[ -n "${vddk_cred_file}" ]] && run_args+=(--vddk-cred-file "${vddk_cred_file}"); [[ -z "${cred_file}" ]] && run_args+=(--username "${username}" --password "${password}" --insecure "${insecure}"); [[ -n "${target_map_json}" && "${target_map_json}" != "{}" ]] && run_args+=(--target-map-json "${target_map_json}")
   case "${cutover_policy}" in define-only) run_args+=(--kvm-vm-policy define-only);; apply) run_args+=(--cutover-args "--apply");; start) run_args+=(--kvm-vm-policy define-and-start);; esac
+  run_args+=(--target-disk-cache "$V2K_TARGET_DISK_CACHE")
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then run_args+=(--cloud-endpoint "${cloud_endpoint}" --cloud-api-key "${cloud_api_key}" --cloud-secret-key "${cloud_secret_key}" --cloud-zone-id "${cloud_zone_id}" --cloud-service-offering-id "${cloud_service_offering_id}" --cloud-network-ids "${cloud_network_ids}" --cloud-storage-id "${cloud_storage_id}"); [[ -n "${cloud_cred_file}" ]] && run_args+=(--cloud-cred-file "${cloud_cred_file}"); [[ -n "${cloud_disk_offering_id}" ]] && run_args+=(--cloud-disk-offering-id "${cloud_disk_offering_id}"); [[ -n "${cloud_host_id}" ]] && run_args+=(--cloud-host-id "${cloud_host_id}"); [[ -n "${cloud_account}" ]] && run_args+=(--cloud-account "${cloud_account}"); [[ -n "${cloud_domain_id}" ]] && run_args+=(--cloud-domain-id "${cloud_domain_id}"); [[ -n "${cloud_project_id}" ]] && run_args+=(--cloud-project-id "${cloud_project_id}"); [[ -n "${cloud_name}" ]] && run_args+=(--cloud-name "${cloud_name}"); [[ -n "${cloud_display_name}" ]] && run_args+=(--cloud-display-name "${cloud_display_name}"); [[ -n "${cloud_cpu_speed}" ]] && run_args+=(--cloud-cpu-speed "${cloud_cpu_speed}"); fi
   if [[ "${print_command}" -eq 1 ]]; then v2k_interactive_print_command "${run_args[@]}"; return 0; fi
   if [[ "${yes}" -eq 0 ]]; then v2k_interactive_has_tty || { echo "Final confirmation requires a TTY; pass --yes" >&2; return 2; }; v2k_interactive_prompt_confirm "Execute this migration run" "no" || { echo "Migration run cancelled." >&2; return 0; }; fi

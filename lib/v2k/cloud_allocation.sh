@@ -6,6 +6,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
 
 migration_cloud_allocation_error() { printf 'Cloud allocation: %s\n' "$*" >&2; return 2; }
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/disk_cache.sh"
+
 # Resolver API consumed by the Cloud transport and wizard.
 # shellcheck disable=SC2034
 migration_cloud_allocation_intent() {
@@ -76,18 +79,18 @@ migration_cloud_allocation_offering_params() {
 }
 
 migration_cloud_allocation_validate_offering() {
-  local tool="$1" manifest="$2" endpoint="$3" key="$4" secret="$5" offering_id="$6" storage_type="$7" response offering
+  local tool="$1" manifest="$2" endpoint="$3" key="$4" secret="$5" offering_id="$6" storage_type="$7" response offering cache_mode
   migration_cloud_allocation_intent "$manifest" || return $?
-  [[ "$CLOUD_ALLOCATION_ACTIVE" == 1 ]] || return 0
+  cache_mode="$(migration_disk_cache_value "$tool" "$manifest")" || return $?
   response="$("${tool}_cloud_api_get" "$endpoint" "$key" "$secret" listDiskOfferings "$(jq -nc --arg id "$offering_id" '{id:$id,listall:true}')")" || return $?
   offering="$(jq -c '(.listdiskofferingsresponse.diskoffering // [])[0] // {}' <<< "$response")" || return $?
-  if ! jq -e --arg id "$offering_id" --arg policy "$CLOUD_ALLOCATION_MODE" --arg format "$CLOUD_ALLOCATION_FORMAT" --arg st "$storage_type" '
-      .id == $id and .allocation.requestedpolicy == $policy and .allocation.requestedformat == $format
-      and (.allocation.contractversion | tostring) == "1" and .allocation.policyorigin == "explicit"
-      and ((.storagetype // "") | ascii_downcase) == $st and ((.cachemode // "") | ascii_downcase) == "writeback"
+  if ! jq -e --arg id "$offering_id" --arg policy "$CLOUD_ALLOCATION_MODE" --arg format "$CLOUD_ALLOCATION_FORMAT" --arg st "$storage_type" --arg cache "$cache_mode" --argjson allocation "$CLOUD_ALLOCATION_ACTIVE" '
+      .id == $id and (if $allocation == 1 then .allocation.requestedpolicy == $policy and .allocation.requestedformat == $format
+      and (.allocation.contractversion | tostring) == "1" and .allocation.policyorigin == "explicit" else true end)
+      and ((.storagetype // "") | ascii_downcase) == $st and ((.cachemode // "") | ascii_downcase) == $cache
       and ((.state // "Active") | ascii_downcase) == "active" and (.iscustomized // .customized // false) == true
       and ((.tags // "") | tostring | length) == 0' <<< "$offering" >/dev/null; then
-    migration_cloud_allocation_error "ALLOCATION_POLICY_MISMATCH: disk offering $offering_id does not preserve requested policy/format/storage/writeback"; return 2
+    migration_cloud_allocation_error "ALLOCATION_POLICY_MISMATCH: disk offering $offering_id does not preserve requested policy/format/storage/cache=$cache_mode"; return 2
   fi
 }
 
@@ -113,9 +116,10 @@ migration_cloud_allocation_import_params() {
 }
 
 migration_cloud_allocation_verify_final() {
-  local tool="$1" manifest="$2" endpoint="$3" key="$4" secret="$5" count idx id request response volume vm records='[]' tmp
+  local tool="$1" manifest="$2" endpoint="$3" key="$4" secret="$5" count idx id request response volume vm records='[]' tmp cache_mode
   migration_cloud_allocation_intent "$manifest" || return $?
   [[ "$CLOUD_ALLOCATION_ACTIVE" == 1 ]] || return 0
+  cache_mode="$(migration_disk_cache_value "$tool" "$manifest")" || return $?
   vm="$(jq -r '.runtime.cloud.checkpoint.vm_id // empty' "$manifest")"
   [[ -n "$vm" ]] || { migration_cloud_allocation_error 'ALLOCATION_EVIDENCE_REQUIRED: deployed VM identity missing'; return 2; }
   count="$(jq -r '.disks | length' "$manifest")"
@@ -127,12 +131,12 @@ migration_cloud_allocation_verify_final() {
       "$(jq -nc --arg id "$id" --arg policy "$CLOUD_ALLOCATION_MODE" --arg format "$CLOUD_ALLOCATION_FORMAT" --arg request "$request" \
         '{id:$id,allocationpolicy:$policy,allocationformat:$format,allocationrequestid:$request}')")" || return $?
     volume="$(jq -c '.verifyimportedvolumeallocationresponse.volume // .verifyimportedvolumeallocationresponse // {}' <<< "$response")" || return $?
-    if ! jq -e --arg id "$id" --arg policy "$CLOUD_ALLOCATION_MODE" --arg format "$CLOUD_ALLOCATION_FORMAT" --arg vm "$vm" --argjson idx "$idx" --arg storage "$(jq -r '.target.cloud.storage_id' "$manifest")" --argjson copy "$CLOUD_ALLOCATION_COPY" '
+    if ! jq -e --arg id "$id" --arg policy "$CLOUD_ALLOCATION_MODE" --arg format "$CLOUD_ALLOCATION_FORMAT" --arg vm "$vm" --argjson idx "$idx" --arg storage "$(jq -r '.target.cloud.storage_id' "$manifest")" --argjson copy "$CLOUD_ALLOCATION_COPY" --arg cache "$cache_mode" '
         .id == $id and .state == "Ready" and (.path | length) > 0 and .storageid == $storage
         and .virtualmachineid == $vm and (.deviceid | tonumber) == $idx
         and .type == (if $idx == 0 then "ROOT" else "DATADISK" end)
         and .allocation.importpool == $storage and .allocation.importpath == .path
-        and ((.cachemode // "") | ascii_downcase) == "writeback"
+        and ((.cachemode // "") | ascii_downcase) == $cache
         and (.allocation.contractversion | tostring) == "1" and .allocation.policyorigin == "explicit"
         and .allocation.requestedpolicy == $policy and .allocation.requestedformat == $format and .allocation.actualformat == $format
         and .allocation.fixedpolicy == $policy and .allocation.effectivepolicy == $policy and .allocation.evidence == "verified"

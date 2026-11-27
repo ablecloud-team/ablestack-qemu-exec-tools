@@ -258,6 +258,7 @@ v2k_cmd_run_foreground() {
       --incr-args) incr_args_str="${2:-}"; shift 2;;
       --cutover-args) cutover_args_str="${2:-}"; shift 2;;
       --mode) init_mode="${2:-}"; shift 2;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;

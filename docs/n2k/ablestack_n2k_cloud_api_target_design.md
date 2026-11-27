@@ -90,7 +90,7 @@ Observed target resources:
 | RBD pool path | `rbd` |
 | RBD storage provider | `ABLESTACK` |
 | Active KVM hosts | `ablecube22-1`, `ablecube22-2`, `ablecube22-3` |
-| Default disk offering policy | n2k-managed `N2K Migration Writeback`, no tags, `cachemode=writeback` |
+| Default disk offering policy | n2k-managed `N2K Migration None`, no tags, `cachemode=none` |
 
 RBD import path behavior:
 
@@ -188,9 +188,9 @@ The design adds a target provider layer:
       "disk_offering_id": "",
       "resolved_disk_offering": {
         "id": "",
-        "name": "N2K Migration Writeback",
+        "name": "N2K Migration None",
         "storage_type": "shared",
-        "cache_mode": "writeback",
+        "cache_mode": "none",
         "customized": true,
         "created": false
       },
@@ -298,7 +298,7 @@ Responsibilities:
 - Deploy the VM from the imported root volume.
 - Attach data disks.
 - Start and verify the VM.
-- Resolve or create the n2k-managed writeback disk offering.
+- Resolve or create the n2k-managed none cache disk offering.
 - Record Cloud IDs in the manifest.
 - Clean up partially created Cloud resources on failure when safe.
 
@@ -334,10 +334,10 @@ Cloud API cutover replaces libvirt XML generation.
 5. Resolve the disk offering used for imported volumes:
    - if `--cloud-disk-offering-id` is supplied, use that explicit offering ID
    - otherwise query the selected storage pool and choose the n2k-managed
-     writeback offering for `shared` or `local` storage
+     none cache offering for `shared` or `local` storage
    - create the n2k offering when it does not exist
    - fail if a same-name n2k offering exists but is not active, customized,
-     untagged, and `cachemode=writeback`
+     untagged, and `cachemode=none`
 6. Import root disk:
    - importVolume(storageid, path, name, diskofferingid, account/domain/project)
    - wait for async job
@@ -384,8 +384,8 @@ Offering for Volume Import` offering. Instead, when the operator does not supply
 
 | Storage scope | Offering name | Required properties |
 | --- | --- | --- |
-| Shared storage | `N2K Migration Writeback` | customized, no tags, `storagetype=shared`, `cachemode=writeback` |
-| Host-local storage | `N2K Migration Writeback Local` | customized, no tags, `storagetype=local`, `cachemode=writeback` |
+| Shared storage | `N2K Migration None` | customized, no tags, `storagetype=shared`, `cachemode=none` |
+| Host-local storage | `N2K Migration None Local` | customized, no tags, `storagetype=local`, `cachemode=none` |
 
 The offering is intentionally untagged so it can apply to all storage pools of
 the matching Cloud storage type. n2k resolves the target storage pool through
@@ -393,11 +393,11 @@ the matching Cloud storage type. n2k resolves the target storage pool through
 `shared`, then calls `listDiskOfferings`. If the matching n2k offering exists and
 has the required properties, n2k reuses it. If it does not exist, n2k creates it
 with `createDiskOffering(customized=true, provisioningtype=thin,
-cachemode=writeback, storagetype=<shared|local>)`.
+cachemode=none, storagetype=<shared|local>)`.
 
 If an offering with the reserved n2k name and matching storage type already
 exists but is not active, is not customized, has tags, or has a cache mode other
-than `writeback`, n2k fails before `importVolume`. n2k does not silently repair a
+than the requested cache policy (`none` by default), n2k fails before `importVolume`. n2k does not silently repair a
 conflicting operator-managed offering. The operator can either correct or delete
 the conflicting offering, or intentionally override the behavior with
 `--cloud-disk-offering-id`.
@@ -693,3 +693,5 @@ RBD/raw target image
 ```
 
 This gives n2k a Cloud-managed VM outcome while preserving the existing Nutanix source handling and target disk sync engine.
+
+New jobs default to `--target-disk-cache none`; explicit `writeback` uses a separate Writeback offering. Existing handed-off manifests retain their recorded policy. See [cache and retained verification](../migration-cache-retention.md).

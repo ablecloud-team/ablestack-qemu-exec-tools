@@ -22,17 +22,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/guest_configuration.sh"
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/cloud_allocation.sh"
 # shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_retention.sh"
+# shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/controller_policy.sh"
 
 v2k_cloud_target_disk_offering_name() {
-  local storage_type="$1"
-  case "${storage_type}" in
-    local)
-      printf '%s' "${V2K_CLOUD_LOCAL_DISK_OFFERING_NAME:-V2K Migration Writeback Local}"
-      ;;
-    *)
-      printf '%s' "${V2K_CLOUD_SHARED_DISK_OFFERING_NAME:-V2K Migration Writeback}"
-      ;;
+  local storage_type="$1" mode="${2:-none}" base="V2K Migration None"
+  [[ "$mode" != writeback ]] || base="V2K Migration Writeback"
+  case "$storage_type" in
+    local) printf '%s' "${V2K_CLOUD_LOCAL_DISK_OFFERING_NAME:-$base Local}";;
+    *) printf '%s' "${V2K_CLOUD_SHARED_DISK_OFFERING_NAME:-$base}";;
   esac
 }
 
@@ -807,11 +806,11 @@ v2k_cloud_target_disk_offerings_by_name_json() {
 }
 
 v2k_cloud_target_usable_disk_offering_json() {
-  local offerings_json="$1" name="$2" storage_type="$3" expected_mode="${4:-}" expected_format="${5:-}"
+  local offerings_json="$1" name="$2" storage_type="$3" expected_mode="${4:-}" expected_format="${5:-}" expected_cache="${6:-none}"
   printf '%s' "${offerings_json}" | jq -c \
     --arg name "${name}" \
     --arg storage_type "${storage_type}" \
-    --arg policy "${expected_mode}" --arg format "${expected_format}" \
+    --arg policy "${expected_mode}" --arg format "${expected_format}" --arg cache_mode "${expected_cache}" \
     '
       def st: ((.storagetype // "") | tostring | ascii_downcase);
       def cache: ((.cachemode // "") | tostring | ascii_downcase);
@@ -821,7 +820,7 @@ v2k_cloud_target_usable_disk_offering_json() {
       map(select(
         (.name // "") == $name
         and st == $storage_type
-        and cache == "writeback"
+        and cache == $cache_mode
         and state == "active"
         and customized
         and untagged
@@ -869,34 +868,36 @@ v2k_cloud_target_disk_offering_summary_json() {
 v2k_cloud_target_create_v2k_disk_offering() {
   local endpoint="$1" api_key="$2" secret_key="$3" name="$4" storage_type="$5"
   local manifest="${6:-}"
-  local display_text response
-  display_text="${V2K_CLOUD_DISK_OFFERING_DISPLAY_TEXT:-ABLESTACK V2K migration disk offering with writeback cache}"
+  local display_text response cache_mode
+  cache_mode="$(migration_disk_cache_value v2k "$manifest")" || return $?
+  display_text="${V2K_CLOUD_DISK_OFFERING_DISPLAY_TEXT:-ABLESTACK V2K migration disk offering with $cache_mode cache}"
   if ! response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "createDiskOffering" \
     "$(jq -nc \
       --arg name "${name}" \
       --arg displaytext "${display_text}" \
-      --arg storagetype "${storage_type}" \
+      --arg storagetype "${storage_type}" --arg cache_mode "${cache_mode}" \
       '{
         name:$name,
         displaytext:$displaytext,
         customized:true,
         provisioningtype:"thin",
         storagetype:$storagetype,
-        cachemode:"writeback",
+        cachemode:$cache_mode,
         displayoffering:true
       }' | migration_cloud_allocation_offering_params "${manifest}" "$(cat)")")"; then
     return 1
   fi
-  printf '%s\n' "Created Cloud V2K disk offering: ${name} (${storage_type}, writeback)" >&2
+  printf '%s\n' "Created Cloud V2K disk offering: ${name} (${storage_type}, ${cache_mode})" >&2
   printf '%s' "${response}" >/dev/null
 }
 
 v2k_cloud_target_resolve_disk_offering() {
   local endpoint="$1" api_key="$2" secret_key="$3" pool_json="$4"
   local manifest="${5:-}" expected_mode="" expected_format=""
-  local storage_type name offerings offering conflict_count
+  local storage_type name offerings offering conflict_count cache_mode
+  cache_mode="$(migration_disk_cache_value v2k "$manifest")" || return $?
   storage_type="$(v2k_cloud_target_disk_offering_storage_type_from_pool "${pool_json}")"
-  name="$(v2k_cloud_target_disk_offering_name "${storage_type}")"
+  name="$(v2k_cloud_target_disk_offering_name "${storage_type}" "${cache_mode}")"
   migration_cloud_allocation_intent "${manifest}" || return $?
   if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]]; then
     expected_mode="${CLOUD_ALLOCATION_MODE}"; expected_format="${CLOUD_ALLOCATION_FORMAT}"
@@ -904,7 +905,7 @@ v2k_cloud_target_resolve_disk_offering() {
   fi
 
   offerings="$(v2k_cloud_target_disk_offerings_by_name_json "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}")" || return $?
-  offering="$(v2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}" "${expected_mode}" "${expected_format}")"
+  offering="$(v2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}" "${expected_mode}" "${expected_format}" "${cache_mode}")"
   if [[ -n "${offering}" ]]; then
     v2k_cloud_target_disk_offering_summary_json "${offering}" false
     return 0
@@ -912,14 +913,14 @@ v2k_cloud_target_resolve_disk_offering() {
 
   conflict_count="$(v2k_cloud_target_disk_offering_conflict_count "${offerings}" "${name}" "${storage_type}")"
   if [[ "${conflict_count}" -gt 0 ]]; then
-    echo "Cloud V2K disk offering exists but is not compatible: name=${name} storage_type=${storage_type} required_cache=writeback customized=true tags=empty" >&2
+    echo "Cloud V2K disk offering exists but is not compatible: name=${name} storage_type=${storage_type} required_cache=${cache_mode} customized=true tags=empty" >&2
     printf '%s\n' "${offerings}" >&2
     return 2
   fi
 
   v2k_cloud_target_create_v2k_disk_offering "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}" "${manifest}" || return $?
   offerings="$(v2k_cloud_target_disk_offerings_by_name_json "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}")" || return $?
-  offering="$(v2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}" "${expected_mode}" "${expected_format}")"
+  offering="$(v2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}" "${expected_mode}" "${expected_format}" "${cache_mode}")"
   [[ -n "${offering}" ]] || {
     echo "Cloud V2K disk offering was created but could not be verified: name=${name} storage_type=${storage_type}" >&2
     printf '%s\n' "${offerings}" >&2
@@ -1339,7 +1340,7 @@ v2k_cloud_target_preflight_json() {
   jq -nc --argjson ok "${ok}" --argjson apis "${available_json}" '{available:$ok,apis:$apis}'
 }
 
-v2k_cloud_target_cutover() {
+v2k_cloud_target_cutover_impl() {
   local manifest="$1" define_only="$2" apply_define="$3" start_vm="$4"
   v2k_guest_config_frozen_options "$1" || return $?
   local endpoint_arg="${5:-}" api_key_arg="${6:-}" secret_key_arg="${7:-}" cred_file="${8:-}"
@@ -1370,6 +1371,7 @@ v2k_cloud_target_cutover() {
     guest_existing_id="$(jq -r '.runtime.cloud.checkpoint.vm_id' "$manifest")"
     guest_existing_vm="$(v2k_cloud_target_vm_json "$endpoint" "$api_key" "$secret_key" "$guest_existing_id")" || return $?
     if jq -e '.state=="Running"' <<<"$guest_existing_vm" >/dev/null; then
+      migration_disk_cache_verify_cloud v2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
       migration_cloud_allocation_verify_final v2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
       v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
       v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
@@ -1481,6 +1483,7 @@ v2k_cloud_target_cutover() {
       else
         v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
     v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
+        migration_disk_cache_verify_cloud v2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
         migration_cloud_allocation_verify_final v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
         result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
         printf '%s' "${result_json}"
@@ -1515,7 +1518,11 @@ v2k_cloud_target_cutover() {
   fi
 
   migration_cloud_allocation_intent "${manifest}" || return $?
-  if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]]; then
+  if [[ -n "${disk_offering_id}" ]]; then
+    if [[ -z "${pool_json:-}" ]]; then
+      pool_json="$(v2k_cloud_target_storage_pool_json "$endpoint" "$api_key" "$secret_key" "$storage_id")" || return $?
+      [[ -n "$pool_json" ]] || return 2
+    fi
     migration_cloud_allocation_validate_offering v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" "${disk_offering_id}" \
       "$(v2k_cloud_target_disk_offering_storage_type_from_pool "${pool_json}")" || return $?
   fi
@@ -1719,6 +1726,7 @@ v2k_cloud_target_cutover() {
   done
 
   v2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" prestart || return $?
+  migration_disk_cache_verify_cloud v2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
   if ! migration_cloud_allocation_verify_final v2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}"; then
     v2k_cloud_target_record_checkpoint "${manifest}" allocation-unverified '{"complete":false,"inspection_required":true,"allocation_verified":false}' || return 78
     v2k_cloud_target_record_result "${manifest}" '{"status":"blocked","applied":true,"started":false,"validated":false,"inspection_required":true,"reason":"ALLOCATION_EVIDENCE_REQUIRED"}' || return 78
@@ -1821,4 +1829,8 @@ v2k_cloud_target_source_deploy_params_json() {
     fi
     jq -nc --argjson base "$base" --argjson plan "$plan" '$base + $plan'
   else printf '%s' "$base"; fi
+}
+
+v2k_cloud_target_cutover() {
+  migration_cloud_retention_cutover v2k "$@"
 }

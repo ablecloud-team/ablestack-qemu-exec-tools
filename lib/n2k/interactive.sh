@@ -577,6 +577,7 @@ n2k_cmd_wizard() {
       --target-profile|--profile) target_profile="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
@@ -718,6 +719,7 @@ n2k_cmd_wizard() {
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_target_storage "${target_storage}" || n2k_die "Invalid --target-storage: ${target_storage}"
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
+  migration_disk_cache_wizard n2k "${N2K_MANIFEST:-}" "$yes" "$print_command" || return $?
   image_preallocation_wizard n2k "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${yes}" "${print_command}" || return $?
   target_preallocation="${IMAGE_PREALLOCATION_MODE}"
   target_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
@@ -878,6 +880,7 @@ n2k_cmd_wizard() {
   [[ -z "${N2K_GUEST_CONFIG_TIMEOUT:-}" ]] || run_args+=(--guest-config-timeout "$N2K_GUEST_CONFIG_TIMEOUT")
   [[ -z "${N2K_SOURCE_GUEST_PASSWORD_FD:-}" ]] || run_args+=(--source-guest-password-fd "$N2K_SOURCE_GUEST_PASSWORD_FD")
   [[ -z "${N2K_GUEST_CONFIG_MAP_JSON:-}" ]] || run_args+=(--guest-config-map-json "$N2K_GUEST_CONFIG_MAP_JSON")
+  run_args+=(--target-disk-cache "$N2K_TARGET_DISK_CACHE")
   [[ -z "${N2K_SOURCE_GUEST_OS:-}" ]] || run_args+=(--source-guest-os "$N2K_SOURCE_GUEST_OS")
   [[ -z "${N2K_SOURCE_GUEST_USER:-}" ]] || run_args+=(--source-guest-user "$N2K_SOURCE_GUEST_USER")
   [[ -z "${N2K_SOURCE_GUEST_HOST:-}" ]] || run_args+=(--source-guest-host "$N2K_SOURCE_GUEST_HOST")

@@ -181,6 +181,7 @@ Init-stage options:
   --target-format qcow2|raw                 Target image format (default: qcow2)
   --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
   --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
   --guest-config-policy <preserve|off> Restore and verify guest state (new Mold jobs: preserve)
   --guest-config-map-json <file> Validated source desired state without credentials
   --guest-config-timeout <seconds> Current-boot verification deadline (default 600)
@@ -262,6 +263,7 @@ Target profiles:
   --target-format qcow2|raw
   --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
   --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
   --guest-config-policy <preserve|off> Restore and verify guest state (new Mold jobs: preserve)
   --guest-config-map-json <file> Validated source desired state without credentials
   --guest-config-timeout <seconds> Current-boot verification deadline (default 600)
@@ -312,6 +314,7 @@ Options:
   --target-format qcow2|raw                 Target image format (default: qcow2)
   --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
   --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
   --guest-config-policy <preserve|off> Restore and verify guest state (new Mold jobs: preserve)
   --guest-config-map-json <file> Validated source desired state without credentials
   --guest-config-timeout <seconds> Current-boot verification deadline (default 600)

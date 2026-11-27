@@ -36,7 +36,7 @@ elif api=='importVolume':
     id=p['allocationrequestid'];policy=p['allocationpolicy'];fmt=p['allocationformat'];copy=policy in ['metadata','full']
     allocation={'contractversion':'1','requestedpolicy':policy,'requestedformat':fmt,'policyorigin':'explicit','fixedpolicy':policy,'effectivepolicy':policy,'actualformat':fmt,'evidence':'verified','appliedbackend':'GFS2','appliedoperation':'copy' if copy else 'import','appliedmethod':('qemu-preallocation-' if copy else 'import-adopt-')+policy,'evidencescope':'creation-or-copy-time' if copy else 'import-time','importrequestid':id,'importidentity':'0'*64,'importpool':'pool','importverifiedat':'2026-11-26T00:00:00Z','importstrategy':'copy' if copy else 'adopt','observedallocatedbytes':'1075838976'}
     allocation['importpath']=id if copy else Path(p['path']).name
-    value={'id':id,'name':p['name'],'path':id if copy else Path(p['path']).name,'state':'Ready','type':'DATADISK','size':1073741824,'storageid':'pool','cachemode':'writeback','allocation':allocation}
+    value={'id':id,'name':p['name'],'path':id if copy else Path(p['path']).name,'state':'Ready','type':'DATADISK','size':1073741824,'storageid':'pool','cachemode':next(o['cachemode'] for o in state['offerings'] if o['id']==p['diskofferingid']),'allocation':allocation}
     state['volumes'][id]=value;out=result(api.lower(),job({'volume':value}))
 elif api=='queryAsyncJobResult':out=result(api.lower(),{'jobstatus':1,'jobresult':state['jobs'][p['jobid']]})
 elif api=='deployVirtualMachineForVolume':
@@ -53,6 +53,10 @@ elif api=='verifyImportedVolumeAllocation':
     value=json.loads(json.dumps(state['volumes'][p['id']]))
     if os.environ.get('BAD_FINAL')=='1':value['allocation']['effectivepolicy']='off'
     out=result(api.lower(),{'volume':value})
+elif api=='reconcileMigratedGuestConfiguration':
+    status='BOUND' if state['vm'].get('state')!='Running' else os.environ.get('GUEST_STATUS','VERIFIED')
+    if status=='API_ERROR':file.write_text(json.dumps(state));sys.exit(7)
+    out=result(api.lower(),{'migrationguestconfiguration':{'contractversion':p['contractversion'],'supported':True,'id':p['id'],'planhash':p['planhash'],'operationid':p['operationid'],'status':status,'verified':status=='VERIFIED'}})
 elif api=='startVirtualMachine':
     if os.environ.get('BAD_START')=='1':
         file.write_text(json.dumps(state));print(json.dumps({'errorresponse':{'errortext':'fixture rejected start'}}));sys.exit(1)
@@ -70,7 +74,11 @@ export N2K_ROOT_DIR="$REPO" N2K_LIB_DIR="$REPO/lib/n2k" N2K_WORKDIR="$CASE"
 source "$REPO/lib/$TOOL/engine.sh"
 v2k_cloud_api_get() { python3 "$CASE/fake.py" "$4" "$5"; }
 n2k_cloud_api_get() { python3 "$CASE/fake.py" "$4" "$5"; }
-"${TOOL}_cloud_target_cutover" "$CASE/manifest.json" 0 1 1 https://mold.invalid fixture-key fixture-secret ''
+v2k_guest_config_python() { [[ "$1" == guest_configuration.py && "$2" == validate ]]; }
+n2k_guest_config_python() { [[ "$1" == guest_configuration.py && "$2" == validate ]]; }
+export V2K_GUEST_CONFIG_TIMEOUT=1 N2K_GUEST_CONFIG_TIMEOUT=1
+export V2K_GUEST_CONFIG_POLL_SECONDS=0 N2K_GUEST_CONFIG_POLL_SECONDS=0
+"${TOOL}_cloud_target_cutover" "$CASE/manifest.json" "${DEFINE_ONLY:-0}" 1 "${START:-1}" https://mold.invalid fixture-key fixture-secret ''
 if [[ "${REPEAT:-0}" == 1 ]]; then
 "${TOOL}_cloud_target_cutover" "$CASE/manifest.json" 0 1 1 https://mold.invalid fixture-key fixture-secret ''
 fi
@@ -79,12 +87,15 @@ fi
 class Handoff(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='mold-allocation-test-');self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
-    def run_cutover(self,tool,policy='falloc',fmt='qcow2',copy=False,bad_cap=False,bad_final=False,bad_start=False,bad_start_state=False,repeat=False):
+    def run_cutover(self,tool,policy='falloc',fmt='qcow2',copy=False,bad_cap=False,bad_final=False,bad_start=False,bad_start_state=False,repeat=False,cache="none",guest_status=None,define_only=False,guest_off=False):
         case=self.root/(tool+'-'+policy+fmt+str(len(list(self.root.iterdir()))));case.mkdir();(case/'target').mkdir();(case/'fake.py').write_text(FAKE)
         disks=[{'disk_id':'scsi0:'+str(i),'size_bytes':1073741824,'controller':{'kind':'scsi','type':'VirtualLsiLogicSASController'},'transfer':{'base_done':True,'target_path':str(case/'target'/('disk'+str(i)+'.'+fmt))}} for i in range(2)]
-        manifest={'source':{'vm':{'name':'fixture','cpu':1,'memory_mb':1024,'firmware':'bios','nics':[{'key':'nic0','label':'nic0','mac':'52:54:00:87:00:01'}]}},'target':{'provider':'ablestack-cloud','format':fmt,'storage':{'type':'file','preallocation':policy,'preallocation_source':'cli'},'dst_root':str(case/'target'),'cloud':{'endpoint':'https://mold.invalid','zone_id':'zone','service_offering_id':'offering','network_ids':['network'],'storage_id':'pool','name':'fixture','allocation_allow_copy':copy}},'disks':disks}
+        manifest={'source':{'vm':{'name':'fixture','cpu':1,'memory_mb':1024,'firmware':'bios','nics':[{'key':'nic0','label':'nic0','mac':'52:54:00:87:00:01'}]}},'target':{'provider':'ablestack-cloud','format':fmt,'storage':{'type':'file','preallocation':policy,'preallocation_source':'cli',**({'cache_mode':cache} if cache else {})},'dst_root':str(case/'target'),'cloud':{'endpoint':'https://mold.invalid','zone_id':'zone','service_offering_id':'offering','network_ids':['network'],'storage_id':'pool','name':'fixture','allocation_allow_copy':copy}},'disks':disks}
+        if guest_status:
+            manifest['target']['guest_configuration_plan']={'version':1,'hash':'a'*64,'operation_id':'fixture-operation'}
+        if guest_off:manifest['target']['guest_config_policy']='off'
         (case/'manifest.json').write_text(json.dumps(manifest))
-        env={**os.environ,'REPO':str(ROOT),'CASE':str(case),'TOOL':tool,'BAD_CAP':str(int(bad_cap)),'BAD_FINAL':str(int(bad_final)),'BAD_START':str(int(bad_start)),'BAD_START_STATE':str(int(bad_start_state)),'REPEAT':str(int(repeat))}
+        env={**os.environ,'REPO':str(ROOT),'CASE':str(case),'TOOL':tool,'BAD_CAP':str(int(bad_cap)),'BAD_FINAL':str(int(bad_final)),'BAD_START':str(int(bad_start)),'BAD_START_STATE':str(int(bad_start_state)),'REPEAT':str(int(repeat)),'GUEST_STATUS':guest_status or 'VERIFIED','DEFINE_ONLY':str(int(define_only)),'START':str(int(not define_only))}
         r=subprocess.run(['bash','-euo','pipefail','-c',SHELL],env=env,text=True,capture_output=True,timeout=60)
         state=json.loads((case/'mold.json').read_text()) if (case/'mold.json').exists() else {'calls':[]}
         return r,state,json.loads((case/'manifest.json').read_text())
@@ -140,6 +151,7 @@ class Handoff(unittest.TestCase):
             self.assertEqual(manifest['runtime']['cloud']['allocation']['scope'],'historical-first-start')
 
     def test_helper_bundles_match(self):
-        self.assertEqual((ROOT/'lib/v2k/cloud_allocation.sh').read_bytes(),(ROOT/'lib/n2k/cloud_allocation.sh').read_bytes())
+        for name in ["cloud_allocation.sh", "disk_cache.sh", "cloud_retention.sh"]:
+            self.assertEqual((ROOT/("lib/v2k/"+name)).read_bytes(),(ROOT/("lib/n2k/"+name)).read_bytes())
 
 if __name__=='__main__':unittest.main(verbosity=2)

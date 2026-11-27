@@ -101,6 +101,8 @@ _ablestack_v2k()
       COMPREPLY=( $(compgen -W "auto sata virtio-scsi preserve" -- "${cur}") )
       return 0
       ;;
+    --target-disk-cache)
+      COMPREPLY=( $(compgen -W "none writeback" -- "${cur}") ); return ;;
     --guest-config-policy)
       COMPREPLY=( $(compgen -W "preserve off" -- "${cur}") ); return 0 ;;
     --target-preallocation)
@@ -148,7 +150,7 @@ _ablestack_v2k()
         --no-cleanup --keep-snapshots --keep-workdir
         --jobs --chunk --coalesce-gap
         --base-args --incr-args --cutover-args
-        --mode --guest-config-policy --guest-config-map-json --guest-config-timeout --source-guest-user --source-guest-password-fd --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
+        --mode --target-disk-cache --guest-config-policy --guest-config-map-json --guest-config-timeout --source-guest-user --source-guest-password-fd --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
         --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
         --cloud-network-id --cloud-network-ids
@@ -169,7 +171,7 @@ _ablestack_v2k()
         --vm --vcenter --username --password
         --cred-file --vddk-cred-file --compat-profile --insecure
         --target-profile --profile --target-provider
-        --guest-config-policy --guest-config-map-json --guest-config-timeout --source-guest-user --source-guest-password-fd --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json
+        --target-disk-cache --guest-config-policy --guest-config-map-json --guest-config-timeout --source-guest-user --source-guest-password-fd --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json
         --dst --rbd-pool --file-root
         --cloud-endpoint --cloud-api-key --cloud-secret-key --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
@@ -200,7 +202,7 @@ _ablestack_v2k()
       local -a init_opts=(
         --vm --vcenter --dst
         --mode --cred-file --vddk-cred-file --compat-profile
-        --guest-config-policy --guest-config-map-json --guest-config-timeout --source-guest-user --source-guest-password-fd --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
+        --target-disk-cache --guest-config-policy --guest-config-map-json --guest-config-timeout --source-guest-user --source-guest-password-fd --root-disk-id --target-disk-controller --target-format --target-preallocation --cloud-allocation-copy --target-storage --target-map-json --target-provider --force-block-device
         --cloud-endpoint --cloud-cred-file
         --cloud-zone-id --cloud-service-offering-id
         --cloud-network-id --cloud-network-ids
