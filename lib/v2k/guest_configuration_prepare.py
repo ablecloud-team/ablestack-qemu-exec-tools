@@ -300,6 +300,8 @@ def _prepare(manifest_path, payload):
             fail("GUEST_CONFIG_PREPARATION_CONFLICT")
         image.write(base + "/plan.json", canonical(plan))
         if plan["os"] == "linux":
+            # QGA creates binding files with its own mode; keep the entire exchange private.
+            image.call("chmod", "0700", base)
             for file in plan["network"]["files"]:
                 backup = base + "/backup/" + Path(file["path"]).name
                 original = next(

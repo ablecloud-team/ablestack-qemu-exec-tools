@@ -100,7 +100,7 @@ v2k_guest_config_reconcile() {
     jq -e --argjson want "$params" '.reconcilemigratedguestconfigurationresponse.migrationguestconfiguration as $r | $r.contractversion==1 and $r.supported==true and $r.id==$want.id and $r.planhash==$want.planhash and $r.operationid==$want.operationid' <<<"$response" >/dev/null || return 44
     status="$(jq -r '.reconcilemigratedguestconfigurationresponse.migrationguestconfiguration.status' <<<"$response")"
     tmp="$(mktemp "${manifest}.guest-evidence.XXXXXX")" || return $?
-    jq --argjson evidence "$(jq -c '.reconcilemigratedguestconfigurationresponse.migrationguestconfiguration' <<<"$response")" '.runtime.guest_configuration=((.runtime.guest_configuration // {})+$evidence)' "$manifest" > "$tmp" && mv -- "$tmp" "$manifest"
+    jq --argjson evidence "$(jq -c '.reconcilemigratedguestconfigurationresponse.migrationguestconfiguration' <<<"$response")" '.runtime.guest_configuration=((.runtime.guest_configuration // {} | del(.reason))+$evidence)' "$manifest" > "$tmp" && mv -- "$tmp" "$manifest"
     if [[ "$phase" == bind ]]; then [[ "$status" == BOUND || "$status" == VERIFIED ]] && return 0; return 44; fi
     if [[ "$status" == VERIFIED ]] && jq -e '.reconcilemigratedguestconfigurationresponse.migrationguestconfiguration.verified==true' <<<"$response" >/dev/null; then
       v2k_cloud_target_record_checkpoint "$manifest" complete '{"complete":true,"inspection_required":false}' || return $?

@@ -299,6 +299,62 @@ class GuestConfiguration(unittest.TestCase):
             )
             self.assertEqual(self.shell(body).returncode, 44)
 
+    def test_fresh_verified_observation_clears_previous_channel_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            manifest = Path(temp) / "manifest.json"
+            response = Path(temp) / "response.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "target": {
+                            "guest_configuration_plan": {
+                                "version": 1,
+                                "hash": "plan",
+                                "operation_id": "operation",
+                            }
+                        },
+                        "runtime": {
+                            "cloud": {"checkpoint": {"vm_id": "vm"}},
+                            "guest_configuration": {
+                                "status": "UNKNOWN",
+                                "reason": "GUEST_CHANNEL_UNAVAILABLE",
+                                "payload": {"retained": True},
+                            },
+                        },
+                    }
+                )
+            )
+            response.write_text(
+                json.dumps(
+                    {
+                        "reconcilemigratedguestconfigurationresponse": {
+                            "migrationguestconfiguration": {
+                                "contractversion": 1,
+                                "supported": True,
+                                "id": "vm",
+                                "planhash": "plan",
+                                "operationid": "operation",
+                                "status": "VERIFIED",
+                                "verified": True,
+                            }
+                        }
+                    }
+                )
+            )
+            script = (
+                'v2k_guest_config_python(){ return 0; }; v2k_cloud_api_get(){ cat "'
+                + str(response)
+                + '"; }; v2k_guest_config_reconcile "'
+                + str(manifest)
+                + '" endpoint key secret bind'
+            )
+            result = self.shell(script)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = json.loads(manifest.read_text())["runtime"]["guest_configuration"]
+            self.assertEqual(actual["status"], "VERIFIED")
+            self.assertNotIn("reason", actual)
+            self.assertTrue(actual["payload"]["retained"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

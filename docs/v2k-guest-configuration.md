@@ -8,7 +8,7 @@ v1 실기 자격 범위는 13번 GFS2, Ubuntu 22.04의 Netplan Ethernet/networkd
 
 Rocky 9.7은 원본 keyfile의 UUID·DHCP/정적 주소·DNS/routes/MTU를 보존하고 MAC에 연결한다. 전용 systemd .link로 원래 ifname을 유지한다. 원본 게스트에는 PyYAML이나 QGA 설치가 필요하지 않다. Rocky 9.7 vault의 QGA/liburing/numactl-libs RPM을 고정된 공급자 키·RPM 서명·SHA-256으로 확인한 뒤 복제본에만 오프라인 설치한다. 호스트의 `rpmkeys`가 필요하다. 설정이 없는 기존 QGA만 재사용하고 운영자가 설정한 RPC 정책은 자동 완화하지 않는다.
 
-Rocky의 새 QGA에는 Mold 결합에 필요한 guest-file RPC 6개만 vendor allow list에 추가한다. guest-exec 제한을 유지하며, 전용 CIL 모듈은 `/var/lib/ablestack-v2k/guest-config`만 QGA가 읽고 쓸 수 있게 한다. SELinux Enforcing과 전역 boolean을 유지한다. 정책 설치와 restorecon은 첫 Mold 반입 전에 복제본 안에서 실행한다. 새 디스크 초기화·파일시스템 변경·전역 LVM/SAN 정책 변경은 수행하지 않는다.
+Rocky의 새 QGA에는 Mold 결합에 필요한 guest-file RPC 6개만 vendor allow list에 추가한다. guest-exec 제한을 유지하며, 전용 CIL 모듈은 `/var/lib/ablestack-v2k/guest-config`만 QGA가 읽고 쓸 수 있게 한다. SELinux Enforcing과 전역 boolean을 유지한다. Linux 결합 디렉터리는 준비 시와 관측 서비스 시작 시 0700으로 제한한다. QGA가 생성하는 binding 파일의 모드와 무관하게 일반 사용자의 접근을 차단한다. 정책 설치와 restorecon은 첫 Mold 반입 전에 복제본 안에서 실행한다. 새 디스크 초기화·파일시스템 변경·전역 LVM/SAN 정책 변경은 수행하지 않는다.
 
 NetworkManager v1 범위는 단일/다중 Ethernet keyfile이다. ifcfg·bond/bridge/VLAN·인증/VPN·복수 후보 프로필·추정이 필요한 MAC 대응은 차단한다. Rocky 9.8·RHEL·다른 Rocky 버전은 이번 실기 자격 범위가 아니다. 정적/다중 NIC는 단위 검증과 실제 DHCP/IPv6 RA 검증을 구분한다. 공식 형식은 [NetworkManager keyfile](https://www.networkmanager.dev/docs/api/latest/nm-settings-keyfile.html), 이름 고정은 [systemd.link](https://www.freedesktop.org/software/systemd/man/latest/systemd.link.html)를 따른다.
 
