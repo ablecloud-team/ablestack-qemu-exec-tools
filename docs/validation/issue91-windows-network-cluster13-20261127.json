@@ -1,0 +1,4849 @@
+{
+  "cases": [
+    {
+      "kind": "n2k",
+      "source_bus": "ide",
+      "target_bus": "sata",
+      "source_name": "n2k-i91-src-win2022-ide-20261127",
+      "source_vm_uuid": "56f85c28-3eba-46f6-8412-a1b8806c65e3",
+      "target_name": "n2k-i91-win2022-ide-20261127",
+      "target_vm_uuid": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+      "expected_ipv4": "10.10.21.71",
+      "plan": {
+        "version": 2,
+        "policy": "preserve",
+        "operation_id": "aeb3d6f9-b70c-4280-8b74-34215b413ee4",
+        "source_vm_uuid": "56f85c28-3eba-46f6-8412-a1b8806c65e3",
+        "source_capture_id": "77eba7ab-e21b-42dd-8edf-3de629aa8ccd",
+        "controller_plan_hash": "48aac75e1c42a5136f42fdf23c1cad75b8faa07d5a685a6d974d3533ea4f7da7",
+        "os": "windows",
+        "root_identity": "gpt:5a917cdf-7996-4b39-893a-d5283b720d4c",
+        "root_source_disk_id": "1927a353-a50a-43fa-a712-59553e34b6c3",
+        "helper_version": 2,
+        "source_boot_id": "2026-11-27T12:28:29.9248710Z",
+        "source_collected_at": 1795784553,
+        "os_version": "20348",
+        "windows": {
+          "san_policy": "OfflineShared",
+          "disks": [
+            {
+              "size_bytes": 8589934592,
+              "source_serial": "QM00002",
+              "online": true,
+              "partitions": [
+                {
+                  "offset": 1048576,
+                  "size_bytes": 8587837440,
+                  "guid": "b4750ed1-1f35-2942-8f5e-40d88519c5e8",
+                  "type": "Basic",
+                  "access_paths": [
+                    "T:\\"
+                  ]
+                }
+              ],
+              "is_clustered": false,
+              "read_only": false,
+              "identity": "gpt:ff315a88-2354-6443-a185-2b12749d4e84",
+              "partition_style": "GPT",
+              "is_boot": false,
+              "source_disk_id": "09e6a065-5011-4264-bdab-81db9ddab787"
+            }
+          ],
+          "source_cdrom_letters": [
+            "F:",
+            "E:"
+          ],
+          "reserved_letters": [
+            "C:",
+            "E:",
+            "F:",
+            "T:"
+          ]
+        },
+        "required_features": [
+          "windows-network-ipv4-v1"
+        ],
+        "network": {
+          "interfaces": [
+            {
+              "source_interface_guid": "2ae412fe-ff4b-42b2-b19d-aff3482c4030",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:aa:ea:18",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.71"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+              "source_nic_id": "0",
+              "target_mac": "50:6b:8d:aa:ea:18",
+              "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+            }
+          ],
+          "version": 1,
+          "adapter": "windows-nettcpip"
+        },
+        "helper_sha256": "d93ce4eb68fc9ad3f4bd89672bf0307701d515f95b78fde816b35016e9d2aebc",
+        "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+        "network_helper_sha256": "7afc10770b9f0087f945c177013d474f18a9a9a4a51ba546cd0f62fa7912c863",
+        "hash": "b2489d08744dc82a7d3c0de47931ac880afdd403f0e89782c47af3ed7019e7b6"
+      },
+      "migration_status": {
+        "status": "VERIFIED",
+        "verified": true,
+        "reason": null
+      },
+      "volumes": {
+        "root": "985c6c9b-29b7-4f58-bbea-83db4f76947c",
+        "data": {
+          "1": {
+            "import_job_id": "29316844-844c-47e5-bbe6-4dc83cf34c6f",
+            "import_path": "/mnt/glue-gfs/n2k-i91-win2022-ide-20261127-disk1.qcow2",
+            "attached": true,
+            "id": "ec1e0db8-d813-4a31-896a-d064ceef937b",
+            "attach_job_id": "de0f22ed-bb2e-4774-aa83-c239f60f2f52"
+          }
+        }
+      },
+      "phases": {
+        "init": {
+          "done": true,
+          "ts": "2026-11-27T21:53:11+09:00"
+        },
+        "preflight": {
+          "done": false,
+          "ts": ""
+        },
+        "plan": {
+          "done": true,
+          "ts": "2026-11-27T21:53:29+09:00"
+        },
+        "base_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:02:02+09:00"
+        },
+        "incr_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:02:13+09:00"
+        },
+        "final_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:03:11+09:00"
+        },
+        "cutover": {
+          "done": true,
+          "ts": "2026-11-27T22:46:14+09:00"
+        },
+        "cleanup": {
+          "done": false,
+          "ts": ""
+        }
+      },
+      "storage_policy": {
+        "type": "file",
+        "preallocation": "falloc",
+        "preallocation_source": "manifest",
+        "rbd_access_mode": "librbd",
+        "priority": 2,
+        "prepared": false,
+        "map": {
+          "1927a353-a50a-43fa-a712-59553e34b6c3": "/mnt/glue-gfs/n2k-i91-win2022-ide-20261127-disk0.qcow2",
+          "09e6a065-5011-4264-bdab-81db9ddab787": "/mnt/glue-gfs/n2k-i91-win2022-ide-20261127-disk1.qcow2"
+        }
+      },
+      "format": "qcow2",
+      "allocation_receipts": [
+        {
+          "request_id": "985c6c9b-29b7-4f58-bbea-83db4f76947c",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 0,
+          "volume_id": "985c6c9b-29b7-4f58-bbea-83db4f76947c",
+          "path": "n2k-i91-win2022-ide-20261127-disk0.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-27T13:44:23.364836738Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "985c6c9b-29b7-4f58-bbea-83db4f76947c",
+            "importpath": "n2k-i91-win2022-ide-20261127-disk0.qcow2",
+            "importverifiedat": "2026-11-27T13:44:23.364818412Z",
+            "importidentity": "66af24cfe2c968b00e0a0ae69e25dcfd867059cf36bfc649c89651ffb031ad8b",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        },
+        {
+          "request_id": "ec1e0db8-d813-4a31-896a-d064ceef937b",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 1,
+          "volume_id": "ec1e0db8-d813-4a31-896a-d064ceef937b",
+          "path": "n2k-i91-win2022-ide-20261127-disk1.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T13:44:24.242496589Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "ec1e0db8-d813-4a31-896a-d064ceef937b",
+            "importpath": "n2k-i91-win2022-ide-20261127-disk1.qcow2",
+            "importverifiedat": "2026-11-27T13:44:24.242484740Z",
+            "importidentity": "b5a8f0417af6f6d2f91904186c6238f97b8ccbc0cb980de674afd05a68d32ef4",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        }
+      ],
+      "guest_initial": {
+        "operation_id": "aeb3d6f9-b70c-4280-8b74-34215b413ee4",
+        "vm_uuid": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "T:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:ff315a88-2354-6443-a185-2b12749d4e84",
+              "online": true,
+              "serial": "ec1e0db8d8134a31896a",
+              "status": "VERIFIED",
+              "source_disk_id": "09e6a065-5011-4264-bdab-81db9ddab787"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T04:45:39.5000000Z",
+        "boot_scope": "45eab90bd3c2dd03ae8beb5962345606330bda8bb6526cf7d68e8ac4854bb59b",
+        "plan_hash": "b2489d08744dc82a7d3c0de47931ac880afdd403f0e89782c47af3ed7019e7b6",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "T:\\",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 6,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.71",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:aa:ea:18",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.71"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "guest_after_move": {
+        "operation_id": "aeb3d6f9-b70c-4280-8b74-34215b413ee4",
+        "vm_uuid": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "T:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:ff315a88-2354-6443-a185-2b12749d4e84",
+              "online": true,
+              "serial": "ec1e0db8d8134a31896a",
+              "status": "VERIFIED",
+              "source_disk_id": "09e6a065-5011-4264-bdab-81db9ddab787"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T04:50:49.5000000Z",
+        "boot_scope": "f2340186ec9672bfe0b89febfe1f43a00fc19814529935fb23c816e3da5eae45",
+        "plan_hash": "b2489d08744dc82a7d3c0de47931ac880afdd403f0e89782c47af3ed7019e7b6",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "sha256": "d59485224014dfec6c2083ae2542a94c0f20ebdafc9d90de0bd1138ca03e42de",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "T:\\",
+            "sha256": "7184431804209737a8181003689f2b77919d3c304fe3703c98b4f5349ab98cbb",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 5,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.71",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:aa:ea:18",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.71"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "mold_after_move": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": true,
+        "status": "VERIFIED",
+        "id": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+        "planhash": "b2489d08744dc82a7d3c0de47931ac880afdd403f0e89782c47af3ed7019e7b6",
+        "operationid": "aeb3d6f9-b70c-4280-8b74-34215b413ee4",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "b2489d08744dc82a7d3c0de47931ac880afdd403f0e89782c47af3ed7019e7b6",
+          "operation_id": "aeb3d6f9-b70c-4280-8b74-34215b413ee4",
+          "vm_uuid": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+          "boot_scope": "f2340186ec9672bfe0b89febfe1f43a00fc19814529935fb23c816e3da5eae45",
+          "binding_sha256": "883a8fe1d27efb23a9262241a2483bc3e4ced31662bca3cbe33385e3a2c6a782",
+          "status": "VERIFIED",
+          "report": {
+            "version": 2.0,
+            "mutations": [
+              {
+                "type": "network-ghost",
+                "identity": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+                "before": {
+                  "subnets": [
+                    "255.255.0.0"
+                  ],
+                  "addresses": [
+                    "10.10.21.71"
+                  ],
+                  "guid": "2ae412fe-ff4b-42b2-b19d-aff3482c4030",
+                  "gateways": [
+                    "10.10.0.1"
+                  ],
+                  "dns": "8.8.8.8,8.8.4.4"
+                },
+                "after": {
+                  "removed": true
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:45:39.5000000Z",
+                "timestamp": "2026-11-27T13:46:06.4717617Z"
+              },
+              {
+                "type": "network-ipv4",
+                "identity": "50:6b:8d:aa:ea:18",
+                "before": {
+                  "source_interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+                  "admin_enabled": true,
+                  "source_mac": "50:6b:8d:aa:ea:18",
+                  "default_routes": [],
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "dhcp": true,
+                    "addresses": []
+                  },
+                  "dns": {
+                    "servers": [],
+                    "mode": "dhcp"
+                  },
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                },
+                "after": {
+                  "admin_enabled": true,
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "dns": {
+                    "mode": "static",
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ]
+                  },
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "addresses": [
+                      {
+                        "address": "10.10.21.71",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false
+                      }
+                    ],
+                    "dhcp": false
+                  },
+                  "source_interface_guid": "2ae412fe-ff4b-42b2-b19d-aff3482c4030",
+                  "source_mac": "50:6b:8d:aa:ea:18",
+                  "source_nic_id": "0",
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+                  "target_mac": "50:6b:8d:aa:ea:18",
+                  "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:45:39.5000000Z",
+                "timestamp": "2026-11-27T13:46:06.7841857Z"
+              }
+            ],
+            "boot_scope": "f2340186ec9672bfe0b89febfe1f43a00fc19814529935fb23c816e3da5eae45",
+            "helper_sha256": "d93ce4eb68fc9ad3f4bd89672bf0307701d515f95b78fde816b35016e9d2aebc",
+            "binding_sha256": "883a8fe1d27efb23a9262241a2483bc3e4ced31662bca3cbe33385e3a2c6a782",
+            "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+            "status": "VERIFIED",
+            "vm_uuid": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+            "root_identity": "gpt:5a917cdf-7996-4b39-893a-d5283b720d4c",
+            "boot_id": "2026-11-27T04:50:49.5000000Z",
+            "operation_id": "aeb3d6f9-b70c-4280-8b74-34215b413ee4",
+            "plan_hash": "b2489d08744dc82a7d3c0de47931ac880afdd403f0e89782c47af3ed7019e7b6",
+            "windows": {
+              "status": "VERIFIED",
+              "disks": [
+                {
+                  "access_paths": [
+                    "T:\\"
+                  ],
+                  "read_only": false,
+                  "identity": "gpt:ff315a88-2354-6443-a185-2b12749d4e84",
+                  "online": true,
+                  "serial": "ec1e0db8d8134a31896a",
+                  "status": "VERIFIED",
+                  "source_disk_id": "09e6a065-5011-4264-bdab-81db9ddab787"
+                }
+              ],
+              "san_policy": "OfflineShared"
+            },
+            "network_helper_sha256": "7afc10770b9f0087f945c177013d474f18a9a9a4a51ba546cd0f62fa7912c863",
+            "network": {
+              "interfaces": [
+                {
+                  "nic_uuid": "3cfc249a-d1db-479f-8411-25572b8e44b9",
+                  "ipv4": {
+                    "dhcp": false,
+                    "addresses": [
+                      {
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.71"
+                      }
+                    ]
+                  },
+                  "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                  "network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995",
+                  "ifindex": 5.0,
+                  "interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+                  "dns": {
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "mode": "static"
+                  },
+                  "observed": {
+                    "admin_status": "Up",
+                    "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                    "dns_servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "ifindex": 5.0,
+                    "addresses": [
+                      {
+                        "origin": "Manual",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.71",
+                        "state": "Preferred"
+                      }
+                    ],
+                    "intent": {
+                      "source_interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+                      "admin_enabled": true,
+                      "source_mac": "50:6b:8d:aa:ea:18",
+                      "default_routes": [
+                        {
+                          "next_hop": "10.10.0.1",
+                          "persistent": true,
+                          "route_metric": 256.0
+                        }
+                      ],
+                      "interface_metric": {
+                        "automatic": true
+                      },
+                      "ipv4": {
+                        "dhcp": false,
+                        "addresses": [
+                          {
+                            "prefix_length": 16.0,
+                            "skip_as_source": false,
+                            "address": "10.10.21.71"
+                          }
+                        ]
+                      },
+                      "dns": {
+                        "servers": [
+                          "8.8.8.8",
+                          "8.8.4.4"
+                        ],
+                        "mode": "static"
+                      },
+                      "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                    },
+                    "interface_guid": "63770fc1-a7b0-42b0-b602-d7da96c8433d",
+                    "routes": [
+                      {
+                        "next_hop": "10.10.0.1",
+                        "route_metric": 256.0
+                      }
+                    ],
+                    "link_status": "Up"
+                  },
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "status": "VERIFIED",
+                  "target_mac": "50:6b:8d:aa:ea:18",
+                  "interface_metric": {
+                    "automatic": true
+                  }
+                }
+              ],
+              "status": "VERIFIED"
+            }
+          }
+        },
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      },
+      "boot_scope_changed": true,
+      "boot_id_changed": true,
+      "actual_domain": {
+        "name": "n2k-i91-win2022-ide-20261127",
+        "id": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+        "instance": "i-2-328-VM",
+        "firmware": "efi",
+        "disks": [
+          {
+            "device": "sda",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "985c6c9b29b74f58bbea",
+            "source": "/mnt/glue-gfs/n2k-i91-win2022-ide-20261127-disk0.qcow2"
+          },
+          {
+            "device": "sdb",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "ec1e0db8d8134a31896a",
+            "source": "/mnt/glue-gfs/n2k-i91-win2022-ide-20261127-disk1.qcow2"
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:aa:ea:18",
+            "model": "virtio",
+            "bridge": "bridge0"
+          }
+        ],
+        "qga_channel": true,
+        "verified": true
+      },
+      "initial_host": "ablecube13-2",
+      "final_host": "ablecube13-3"
+    },
+    {
+      "kind": "n2k",
+      "source_bus": "sata",
+      "target_bus": "sata",
+      "source_name": "n2k-i91-src-win2022-sata-20261127",
+      "source_vm_uuid": "b7344e07-8dbf-46b2-9d32-97093fa5ccc9",
+      "target_name": "n2k-i91-win2022-sata-20261127",
+      "target_vm_uuid": "062821fe-484f-4c64-a429-a9bddf8a8397",
+      "expected_ipv4": "10.10.21.72",
+      "plan": {
+        "version": 2,
+        "policy": "preserve",
+        "operation_id": "c3c644fc-d49c-428b-8eae-340aca041089",
+        "source_vm_uuid": "b7344e07-8dbf-46b2-9d32-97093fa5ccc9",
+        "source_capture_id": "3a8f843f-b15d-464a-ba6e-fa6788658d21",
+        "controller_plan_hash": "3a1116579f09c454a5b0171f6ad36008ab5c932dd0b12a8d7a342ffe0dfe3732",
+        "os": "windows",
+        "root_identity": "gpt:5bbc3424-c19c-497a-96f9-c6858b30f60e",
+        "root_source_disk_id": "e2b316b2-22f7-49c2-b7d3-5b1c4cfec3d0",
+        "helper_version": 2,
+        "source_boot_id": "2026-11-27T12:28:05.5558680Z",
+        "source_collected_at": 1795787021,
+        "os_version": "20348",
+        "windows": {
+          "san_policy": "OfflineShared",
+          "disks": [
+            {
+              "size_bytes": 8589934592,
+              "source_serial": "QM00007",
+              "online": true,
+              "partitions": [
+                {
+                  "offset": 1048576,
+                  "size_bytes": 8587837440,
+                  "guid": "4bb5a90a-59d7-c14a-881e-2b25e66b1b8b",
+                  "type": "Basic",
+                  "access_paths": [
+                    "T:\\"
+                  ]
+                }
+              ],
+              "is_clustered": false,
+              "read_only": false,
+              "identity": "gpt:188f99c2-8f9e-e340-98fe-adf30898702f",
+              "partition_style": "GPT",
+              "is_boot": false,
+              "source_disk_id": "9d037a46-38d9-42b4-944e-5876ddb4c3ae"
+            }
+          ],
+          "source_cdrom_letters": [
+            "E:",
+            "F:"
+          ],
+          "reserved_letters": [
+            "C:",
+            "E:",
+            "F:",
+            "T:"
+          ]
+        },
+        "required_features": [
+          "windows-network-ipv4-v1"
+        ],
+        "network": {
+          "interfaces": [
+            {
+              "source_interface_guid": "f5c2a97c-ca69-4c33-b8ab-8998512475e1",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:c6:be:e4",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.72"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+              "source_nic_id": "0",
+              "target_mac": "50:6b:8d:c6:be:e4",
+              "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+            }
+          ],
+          "version": 1,
+          "adapter": "windows-nettcpip"
+        },
+        "helper_sha256": "97b5cd87f01f82f3739c5c5f5e08beb8a2c6176a8e6ccfaa499eed3329a9ff7b",
+        "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+        "network_helper_sha256": "a6c6ea0a3d693daa12ab0d2714714e9d2272cb9bf3b9c7eff8b669b5edfb2988",
+        "hash": "593798079d3b57d27d5d07e7c865ae80436e66c26154923622ca97b72cb61844"
+      },
+      "migration_status": {
+        "status": "VERIFIED",
+        "verified": true,
+        "reason": null
+      },
+      "volumes": {
+        "root": "be4b50cd-72fc-4e23-8337-146ec5050dd7",
+        "data": {
+          "1": {
+            "import_job_id": "bb3c48bd-1e64-426b-afbf-dc5672492132",
+            "import_path": "/mnt/glue-gfs/n2k-i91-win2022-sata-20261127-disk1.qcow2",
+            "attached": true,
+            "id": "8be4c10d-e650-49e8-8eff-77afa0ba9d3a",
+            "attach_job_id": "eebb69da-9bdf-49bc-a458-d470f0cdffdc"
+          }
+        }
+      },
+      "phases": {
+        "init": {
+          "done": true,
+          "ts": "2026-11-27T22:26:41+09:00"
+        },
+        "preflight": {
+          "done": false,
+          "ts": ""
+        },
+        "plan": {
+          "done": true,
+          "ts": "2026-11-27T22:27:00+09:00"
+        },
+        "base_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:42:45+09:00"
+        },
+        "incr_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:43:22+09:00"
+        },
+        "final_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:44:41+09:00"
+        },
+        "cutover": {
+          "done": true,
+          "ts": "2026-11-27T22:47:02+09:00"
+        },
+        "cleanup": {
+          "done": true,
+          "ts": "2026-11-27T22:47:04+09:00"
+        }
+      },
+      "storage_policy": {
+        "type": "file",
+        "preallocation": "falloc",
+        "preallocation_source": "default",
+        "rbd_access_mode": "librbd",
+        "priority": 2,
+        "prepared": false,
+        "map": {
+          "e2b316b2-22f7-49c2-b7d3-5b1c4cfec3d0": "/mnt/glue-gfs/n2k-i91-win2022-sata-20261127-disk0.qcow2",
+          "9d037a46-38d9-42b4-944e-5876ddb4c3ae": "/mnt/glue-gfs/n2k-i91-win2022-sata-20261127-disk1.qcow2"
+        }
+      },
+      "format": "qcow2",
+      "allocation_receipts": [
+        {
+          "request_id": "be4b50cd-72fc-4e23-8337-146ec5050dd7",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 0,
+          "volume_id": "be4b50cd-72fc-4e23-8337-146ec5050dd7",
+          "path": "n2k-i91-win2022-sata-20261127-disk0.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-27T13:45:26.774290299Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "be4b50cd-72fc-4e23-8337-146ec5050dd7",
+            "importpath": "n2k-i91-win2022-sata-20261127-disk0.qcow2",
+            "importverifiedat": "2026-11-27T13:45:26.774281452Z",
+            "importidentity": "6b0aa73ee92de3137a5184f830aff62ca10e7233b4b82a28b3ec665474097a77",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        },
+        {
+          "request_id": "8be4c10d-e650-49e8-8eff-77afa0ba9d3a",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 1,
+          "volume_id": "8be4c10d-e650-49e8-8eff-77afa0ba9d3a",
+          "path": "n2k-i91-win2022-sata-20261127-disk1.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T13:45:27.022708832Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "8be4c10d-e650-49e8-8eff-77afa0ba9d3a",
+            "importpath": "n2k-i91-win2022-sata-20261127-disk1.qcow2",
+            "importverifiedat": "2026-11-27T13:45:27.022699345Z",
+            "importidentity": "f517438069736eb86bec6d2b5a850826d74716baa52c657e3dd6b04d24fc73c8",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        }
+      ],
+      "guest_initial": {
+        "operation_id": "c3c644fc-d49c-428b-8eae-340aca041089",
+        "vm_uuid": "062821fe-484f-4c64-a429-a9bddf8a8397",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "T:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:188f99c2-8f9e-e340-98fe-adf30898702f",
+              "online": true,
+              "serial": "8be4c10de65049e88eff",
+              "status": "VERIFIED",
+              "source_disk_id": "9d037a46-38d9-42b4-944e-5876ddb4c3ae"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T04:46:21.5000000Z",
+        "boot_scope": "bf6836b8ea4fe09d9ba75b291b7f6847d284e7e83bd2012444cb8e87361d49e6",
+        "plan_hash": "593798079d3b57d27d5d07e7c865ae80436e66c26154923622ca97b72cb61844",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "T:\\",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 6,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.72",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:c6:be:e4",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.72"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "guest_after_move": {
+        "operation_id": "c3c644fc-d49c-428b-8eae-340aca041089",
+        "vm_uuid": "062821fe-484f-4c64-a429-a9bddf8a8397",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "T:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:188f99c2-8f9e-e340-98fe-adf30898702f",
+              "online": true,
+              "serial": "8be4c10de65049e88eff",
+              "status": "VERIFIED",
+              "source_disk_id": "9d037a46-38d9-42b4-944e-5876ddb4c3ae"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T13:50:59.5347260Z",
+        "boot_scope": "bd3e3e3dfc48ea0a3bb8bd3eb81f927b8c54f66445a29d542b8e530994b61298",
+        "plan_hash": "593798079d3b57d27d5d07e7c865ae80436e66c26154923622ca97b72cb61844",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "sha256": "345a0a4e3f71b282cda6e8a54f90fed6e4dfae428d6379644d1b881b7b689b4e",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "T:\\",
+            "sha256": "77db48c4f22d822931e7f82b744fcae1ba231a1fffd911e07fc387a3c575ea8a",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 6,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.72",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:c6:be:e4",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.72"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "mold_after_move": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": true,
+        "status": "VERIFIED",
+        "id": "062821fe-484f-4c64-a429-a9bddf8a8397",
+        "planhash": "593798079d3b57d27d5d07e7c865ae80436e66c26154923622ca97b72cb61844",
+        "operationid": "c3c644fc-d49c-428b-8eae-340aca041089",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "593798079d3b57d27d5d07e7c865ae80436e66c26154923622ca97b72cb61844",
+          "operation_id": "c3c644fc-d49c-428b-8eae-340aca041089",
+          "vm_uuid": "062821fe-484f-4c64-a429-a9bddf8a8397",
+          "boot_scope": "bd3e3e3dfc48ea0a3bb8bd3eb81f927b8c54f66445a29d542b8e530994b61298",
+          "binding_sha256": "2c7ce83e745ff3930fbb77b0979cdb35e916909e27949273b267d7c55b61379f",
+          "status": "VERIFIED",
+          "report": {
+            "version": 2.0,
+            "mutations": [
+              {
+                "type": "network-ghost",
+                "identity": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+                "before": {
+                  "subnets": [
+                    "255.255.0.0"
+                  ],
+                  "addresses": [
+                    "10.10.21.72"
+                  ],
+                  "guid": "f5c2a97c-ca69-4c33-b8ab-8998512475e1",
+                  "gateways": [
+                    "10.10.0.1"
+                  ],
+                  "dns": "8.8.8.8,8.8.4.4"
+                },
+                "after": {
+                  "removed": true
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:46:21.5000000Z",
+                "timestamp": "2026-11-27T13:46:54.5701881Z"
+              },
+              {
+                "type": "network-ipv4",
+                "identity": "50:6b:8d:c6:be:e4",
+                "before": {
+                  "source_interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+                  "admin_enabled": true,
+                  "source_mac": "50:6b:8d:c6:be:e4",
+                  "default_routes": [],
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "dhcp": true,
+                    "addresses": []
+                  },
+                  "dns": {
+                    "servers": [],
+                    "mode": "dhcp"
+                  },
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                },
+                "after": {
+                  "admin_enabled": true,
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "dns": {
+                    "mode": "static",
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ]
+                  },
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "addresses": [
+                      {
+                        "address": "10.10.21.72",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false
+                      }
+                    ],
+                    "dhcp": false
+                  },
+                  "source_interface_guid": "f5c2a97c-ca69-4c33-b8ab-8998512475e1",
+                  "source_mac": "50:6b:8d:c6:be:e4",
+                  "source_nic_id": "0",
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+                  "target_mac": "50:6b:8d:c6:be:e4",
+                  "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:46:21.5000000Z",
+                "timestamp": "2026-11-27T13:46:54.7889693Z"
+              }
+            ],
+            "boot_scope": "bd3e3e3dfc48ea0a3bb8bd3eb81f927b8c54f66445a29d542b8e530994b61298",
+            "helper_sha256": "97b5cd87f01f82f3739c5c5f5e08beb8a2c6176a8e6ccfaa499eed3329a9ff7b",
+            "binding_sha256": "2c7ce83e745ff3930fbb77b0979cdb35e916909e27949273b267d7c55b61379f",
+            "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+            "status": "VERIFIED",
+            "vm_uuid": "062821fe-484f-4c64-a429-a9bddf8a8397",
+            "root_identity": "gpt:5bbc3424-c19c-497a-96f9-c6858b30f60e",
+            "boot_id": "2026-11-27T13:50:59.5347260Z",
+            "operation_id": "c3c644fc-d49c-428b-8eae-340aca041089",
+            "plan_hash": "593798079d3b57d27d5d07e7c865ae80436e66c26154923622ca97b72cb61844",
+            "windows": {
+              "status": "VERIFIED",
+              "disks": [
+                {
+                  "access_paths": [
+                    "T:\\"
+                  ],
+                  "read_only": false,
+                  "identity": "gpt:188f99c2-8f9e-e340-98fe-adf30898702f",
+                  "online": true,
+                  "serial": "8be4c10de65049e88eff",
+                  "status": "VERIFIED",
+                  "source_disk_id": "9d037a46-38d9-42b4-944e-5876ddb4c3ae"
+                }
+              ],
+              "san_policy": "OfflineShared"
+            },
+            "network_helper_sha256": "a6c6ea0a3d693daa12ab0d2714714e9d2272cb9bf3b9c7eff8b669b5edfb2988",
+            "network": {
+              "interfaces": [
+                {
+                  "nic_uuid": "b8749c81-e4b0-44c1-b501-7ba64f680590",
+                  "ipv4": {
+                    "dhcp": false,
+                    "addresses": [
+                      {
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.72"
+                      }
+                    ]
+                  },
+                  "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                  "network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995",
+                  "ifindex": 6.0,
+                  "interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+                  "dns": {
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "mode": "static"
+                  },
+                  "observed": {
+                    "admin_status": "Up",
+                    "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                    "dns_servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "ifindex": 6.0,
+                    "addresses": [
+                      {
+                        "origin": "Manual",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.72",
+                        "state": "Preferred"
+                      }
+                    ],
+                    "intent": {
+                      "source_interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+                      "admin_enabled": true,
+                      "source_mac": "50:6b:8d:c6:be:e4",
+                      "default_routes": [
+                        {
+                          "next_hop": "10.10.0.1",
+                          "persistent": true,
+                          "route_metric": 256.0
+                        }
+                      ],
+                      "interface_metric": {
+                        "automatic": true
+                      },
+                      "ipv4": {
+                        "dhcp": false,
+                        "addresses": [
+                          {
+                            "prefix_length": 16.0,
+                            "skip_as_source": false,
+                            "address": "10.10.21.72"
+                          }
+                        ]
+                      },
+                      "dns": {
+                        "servers": [
+                          "8.8.8.8",
+                          "8.8.4.4"
+                        ],
+                        "mode": "static"
+                      },
+                      "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                    },
+                    "interface_guid": "bb6c0071-23bc-4bc5-8422-eccf795a15ef",
+                    "routes": [
+                      {
+                        "next_hop": "10.10.0.1",
+                        "route_metric": 256.0
+                      }
+                    ],
+                    "link_status": "Up"
+                  },
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "status": "VERIFIED",
+                  "target_mac": "50:6b:8d:c6:be:e4",
+                  "interface_metric": {
+                    "automatic": true
+                  }
+                }
+              ],
+              "status": "VERIFIED"
+            }
+          }
+        },
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      },
+      "boot_scope_changed": true,
+      "boot_id_changed": true,
+      "actual_domain": {
+        "name": "n2k-i91-win2022-sata-20261127",
+        "id": "062821fe-484f-4c64-a429-a9bddf8a8397",
+        "instance": "i-2-329-VM",
+        "firmware": "efi",
+        "disks": [
+          {
+            "device": "sda",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "be4b50cd72fc4e238337",
+            "source": "/mnt/glue-gfs/n2k-i91-win2022-sata-20261127-disk0.qcow2"
+          },
+          {
+            "device": "sdb",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "8be4c10de65049e88eff",
+            "source": "/mnt/glue-gfs/n2k-i91-win2022-sata-20261127-disk1.qcow2"
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:c6:be:e4",
+            "model": "virtio",
+            "bridge": "bridge0"
+          }
+        ],
+        "qga_channel": true,
+        "verified": true
+      },
+      "initial_host": "ablecube13-3",
+      "final_host": "ablecube13-1"
+    },
+    {
+      "kind": "n2k",
+      "source_bus": "scsi",
+      "target_bus": "virtio-scsi",
+      "source_name": "n2k-i91-src-win2022-scsi-20261127",
+      "source_vm_uuid": "e8f7acbb-3373-4e1c-ad87-abcfcafbf914",
+      "target_name": "n2k-i91-win2022-scsi-20261127",
+      "target_vm_uuid": "cb18d9cd-8ceb-47d0-bcc0-839a2157a7a8",
+      "expected_ipv4": "10.10.21.73",
+      "plan": {
+        "version": 2,
+        "policy": "preserve",
+        "operation_id": "c172463a-7ea5-4b8c-9ad2-44556c826db9",
+        "source_vm_uuid": "e8f7acbb-3373-4e1c-ad87-abcfcafbf914",
+        "source_capture_id": "b85bc3bf-7a63-4c6c-b7e5-14b0cd1f79aa",
+        "controller_plan_hash": "746c0edeaab6e4216be2aa2d2cf0ab23762ceaeb027fb602f20b0790c3fda252",
+        "os": "windows",
+        "root_identity": "gpt:2f3732d1-7895-4600-8130-2a8752829b7a",
+        "root_source_disk_id": "f5948d10-c0fd-42e9-b258-d40cd73e3cd0",
+        "helper_version": 2,
+        "source_boot_id": "2026-11-27T12:28:04.7153440Z",
+        "source_collected_at": 1795787021,
+        "os_version": "20348",
+        "windows": {
+          "san_policy": "OfflineShared",
+          "disks": [
+            {
+              "size_bytes": 8589934592,
+              "source_serial": "NFS_2_0_663_06672f0d_d269_4e88_b664_05566fa95fba",
+              "online": true,
+              "partitions": [
+                {
+                  "offset": 1048576,
+                  "size_bytes": 8587837440,
+                  "guid": "9e61e45b-81fa-0947-8262-65bbf8ded550",
+                  "type": "Basic",
+                  "access_paths": [
+                    "T:\\"
+                  ]
+                }
+              ],
+              "is_clustered": false,
+              "read_only": false,
+              "identity": "gpt:ef069f5c-c077-a54c-9c1c-2c1292b86e67",
+              "partition_style": "GPT",
+              "is_boot": false,
+              "source_disk_id": "cf57089a-b19c-414a-862d-cbc9ecb57fb5"
+            }
+          ],
+          "source_cdrom_letters": [
+            "E:",
+            "D:"
+          ],
+          "reserved_letters": [
+            "C:",
+            "D:",
+            "E:",
+            "T:"
+          ]
+        },
+        "required_features": [
+          "windows-network-ipv4-v1"
+        ],
+        "network": {
+          "interfaces": [
+            {
+              "source_interface_guid": "89ecc2cd-424a-43a0-b935-c20769454f49",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:d9:02:99",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.73"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+              "source_nic_id": "0",
+              "target_mac": "50:6b:8d:d9:02:99",
+              "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+            }
+          ],
+          "version": 1,
+          "adapter": "windows-nettcpip"
+        },
+        "helper_sha256": "97b5cd87f01f82f3739c5c5f5e08beb8a2c6176a8e6ccfaa499eed3329a9ff7b",
+        "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+        "network_helper_sha256": "a6c6ea0a3d693daa12ab0d2714714e9d2272cb9bf3b9c7eff8b669b5edfb2988",
+        "hash": "058eb8872764ee70b535f5b14300b803866623948f083968f622b8df97488b6f"
+      },
+      "migration_status": {
+        "status": "VERIFIED",
+        "verified": true,
+        "reason": null
+      },
+      "volumes": {
+        "root": "6ce261f1-e7cd-4611-8d4c-42d0ada802b1",
+        "data": {
+          "1": {
+            "import_job_id": "12ae5929-0295-4198-baf0-91a2b53ee10f",
+            "import_path": "/mnt/glue-gfs/n2k-i91-win2022-scsi-20261127-disk1.qcow2",
+            "attached": true,
+            "id": "03570581-bf8f-4fa8-b4f8-59983e031f2b",
+            "attach_job_id": "ce7a7daa-62aa-4e7e-a8f6-bd9263847466"
+          }
+        }
+      },
+      "phases": {
+        "init": {
+          "done": true,
+          "ts": "2026-11-27T22:26:41+09:00"
+        },
+        "preflight": {
+          "done": false,
+          "ts": ""
+        },
+        "plan": {
+          "done": true,
+          "ts": "2026-11-27T22:26:59+09:00"
+        },
+        "base_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:42:45+09:00"
+        },
+        "incr_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:43:21+09:00"
+        },
+        "final_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:44:41+09:00"
+        },
+        "cutover": {
+          "done": true,
+          "ts": "2026-11-27T22:47:05+09:00"
+        },
+        "cleanup": {
+          "done": true,
+          "ts": "2026-11-27T22:47:06+09:00"
+        }
+      },
+      "storage_policy": {
+        "type": "file",
+        "preallocation": "falloc",
+        "preallocation_source": "default",
+        "rbd_access_mode": "librbd",
+        "priority": 2,
+        "prepared": false,
+        "map": {
+          "f5948d10-c0fd-42e9-b258-d40cd73e3cd0": "/mnt/glue-gfs/n2k-i91-win2022-scsi-20261127-disk0.qcow2",
+          "cf57089a-b19c-414a-862d-cbc9ecb57fb5": "/mnt/glue-gfs/n2k-i91-win2022-scsi-20261127-disk1.qcow2"
+        }
+      },
+      "format": "qcow2",
+      "allocation_receipts": [
+        {
+          "request_id": "6ce261f1-e7cd-4611-8d4c-42d0ada802b1",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 0,
+          "volume_id": "6ce261f1-e7cd-4611-8d4c-42d0ada802b1",
+          "path": "n2k-i91-win2022-scsi-20261127-disk0.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-27T13:45:26.761770669Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "6ce261f1-e7cd-4611-8d4c-42d0ada802b1",
+            "importpath": "n2k-i91-win2022-scsi-20261127-disk0.qcow2",
+            "importverifiedat": "2026-11-27T13:45:26.761756033Z",
+            "importidentity": "b0e256226e8862e172e4efe342dc0e68602c0fd06aa71f570ba923ccb47716d9",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        },
+        {
+          "request_id": "03570581-bf8f-4fa8-b4f8-59983e031f2b",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 1,
+          "volume_id": "03570581-bf8f-4fa8-b4f8-59983e031f2b",
+          "path": "n2k-i91-win2022-scsi-20261127-disk1.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T13:45:26.987327Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "03570581-bf8f-4fa8-b4f8-59983e031f2b",
+            "importpath": "n2k-i91-win2022-scsi-20261127-disk1.qcow2",
+            "importverifiedat": "2026-11-27T13:45:26.987317825Z",
+            "importidentity": "7d298d1727f3af73786c61feb2126e3024b5fbba2ff461dd3f91b65390062e92",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        }
+      ],
+      "guest_initial": {
+        "operation_id": "c172463a-7ea5-4b8c-9ad2-44556c826db9",
+        "vm_uuid": "cb18d9cd-8ceb-47d0-bcc0-839a2157a7a8",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "T:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:ef069f5c-c077-a54c-9c1c-2c1292b86e67",
+              "online": true,
+              "serial": "03570581bf8f4fa8b4f8",
+              "status": "VERIFIED",
+              "source_disk_id": "cf57089a-b19c-414a-862d-cbc9ecb57fb5"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T04:46:11.5000000Z",
+        "boot_scope": "28214a2cbb2f9a307550cc85ab3cb0091bb3dd5c4d9d82318ec275c435b67987",
+        "plan_hash": "058eb8872764ee70b535f5b14300b803866623948f083968f622b8df97488b6f",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "T:\\",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 7,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.73",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:d9:02:99",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.73"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "guest_after_move": {
+        "operation_id": "c172463a-7ea5-4b8c-9ad2-44556c826db9",
+        "vm_uuid": "cb18d9cd-8ceb-47d0-bcc0-839a2157a7a8",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "T:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:ef069f5c-c077-a54c-9c1c-2c1292b86e67",
+              "online": true,
+              "serial": "03570581bf8f4fa8b4f8",
+              "status": "VERIFIED",
+              "source_disk_id": "cf57089a-b19c-414a-862d-cbc9ecb57fb5"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T13:51:08.4258320Z",
+        "boot_scope": "d68e05606138587bccd51ac0610fe65c7c479dceaae3df5de89ff56cd1fece5e",
+        "plan_hash": "058eb8872764ee70b535f5b14300b803866623948f083968f622b8df97488b6f",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "sha256": "747cecf2262eafee008713873bbe28f1e2b1eaa21efbf42aa68ccb37357d8ea5",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "T:\\",
+            "sha256": "25ff21dcf8e86488fae1c4c1723349eff70598ad3510195ea0a8d452732d46c5",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 6,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.73",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+              "admin_enabled": true,
+              "source_mac": "50:6b:8d:d9:02:99",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.73"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "mold_after_move": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": true,
+        "status": "VERIFIED",
+        "id": "cb18d9cd-8ceb-47d0-bcc0-839a2157a7a8",
+        "planhash": "058eb8872764ee70b535f5b14300b803866623948f083968f622b8df97488b6f",
+        "operationid": "c172463a-7ea5-4b8c-9ad2-44556c826db9",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "058eb8872764ee70b535f5b14300b803866623948f083968f622b8df97488b6f",
+          "operation_id": "c172463a-7ea5-4b8c-9ad2-44556c826db9",
+          "vm_uuid": "cb18d9cd-8ceb-47d0-bcc0-839a2157a7a8",
+          "boot_scope": "d68e05606138587bccd51ac0610fe65c7c479dceaae3df5de89ff56cd1fece5e",
+          "binding_sha256": "8167f529e11774989019013824fd5b375b7d10b4edd1fded4439fe07aeb14c71",
+          "status": "VERIFIED",
+          "report": {
+            "version": 2.0,
+            "mutations": [
+              {
+                "type": "readonly",
+                "identity": "gpt:ef069f5c-c077-a54c-9c1c-2c1292b86e67",
+                "before": true,
+                "after": false,
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:46:11.5000000Z",
+                "timestamp": "2026-11-27T13:46:53.4980851Z"
+              },
+              {
+                "type": "offline",
+                "identity": "gpt:ef069f5c-c077-a54c-9c1c-2c1292b86e67",
+                "before": true,
+                "after": false,
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:46:11.5000000Z",
+                "timestamp": "2026-11-27T13:46:53.8416525Z"
+              },
+              {
+                "type": "network-ghost",
+                "identity": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+                "before": {
+                  "subnets": [
+                    "255.255.0.0"
+                  ],
+                  "addresses": [
+                    "10.10.21.73"
+                  ],
+                  "guid": "89ecc2cd-424a-43a0-b935-c20769454f49",
+                  "gateways": [
+                    "10.10.0.1"
+                  ],
+                  "dns": "8.8.8.8,8.8.4.4"
+                },
+                "after": {
+                  "removed": true
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:46:11.5000000Z",
+                "timestamp": "2026-11-27T13:46:57.7025636Z"
+              },
+              {
+                "type": "network-ipv4",
+                "identity": "50:6b:8d:d9:02:99",
+                "before": {
+                  "source_interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+                  "admin_enabled": true,
+                  "source_mac": "50:6b:8d:d9:02:99",
+                  "default_routes": [],
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "dhcp": true,
+                    "addresses": []
+                  },
+                  "dns": {
+                    "servers": [],
+                    "mode": "dhcp"
+                  },
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                },
+                "after": {
+                  "admin_enabled": true,
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "dns": {
+                    "mode": "static",
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ]
+                  },
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "addresses": [
+                      {
+                        "address": "10.10.21.73",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false
+                      }
+                    ],
+                    "dhcp": false
+                  },
+                  "source_interface_guid": "89ecc2cd-424a-43a0-b935-c20769454f49",
+                  "source_mac": "50:6b:8d:d9:02:99",
+                  "source_nic_id": "0",
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1000&SUBSYS_00011AF4&REV_00\\3&13c0b0c5&0&18",
+                  "target_mac": "50:6b:8d:d9:02:99",
+                  "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T04:46:11.5000000Z",
+                "timestamp": "2026-11-27T13:46:58.0461841Z"
+              }
+            ],
+            "boot_scope": "d68e05606138587bccd51ac0610fe65c7c479dceaae3df5de89ff56cd1fece5e",
+            "helper_sha256": "97b5cd87f01f82f3739c5c5f5e08beb8a2c6176a8e6ccfaa499eed3329a9ff7b",
+            "binding_sha256": "8167f529e11774989019013824fd5b375b7d10b4edd1fded4439fe07aeb14c71",
+            "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+            "status": "VERIFIED",
+            "vm_uuid": "cb18d9cd-8ceb-47d0-bcc0-839a2157a7a8",
+            "root_identity": "gpt:2f3732d1-7895-4600-8130-2a8752829b7a",
+            "boot_id": "2026-11-27T13:51:08.4258320Z",
+            "operation_id": "c172463a-7ea5-4b8c-9ad2-44556c826db9",
+            "plan_hash": "058eb8872764ee70b535f5b14300b803866623948f083968f622b8df97488b6f",
+            "windows": {
+              "status": "VERIFIED",
+              "disks": [
+                {
+                  "access_paths": [
+                    "T:\\"
+                  ],
+                  "read_only": false,
+                  "identity": "gpt:ef069f5c-c077-a54c-9c1c-2c1292b86e67",
+                  "online": true,
+                  "serial": "03570581bf8f4fa8b4f8",
+                  "status": "VERIFIED",
+                  "source_disk_id": "cf57089a-b19c-414a-862d-cbc9ecb57fb5"
+                }
+              ],
+              "san_policy": "OfflineShared"
+            },
+            "network_helper_sha256": "a6c6ea0a3d693daa12ab0d2714714e9d2272cb9bf3b9c7eff8b669b5edfb2988",
+            "network": {
+              "interfaces": [
+                {
+                  "nic_uuid": "c57c3831-bc9c-4084-976b-8abb1f569e74",
+                  "ipv4": {
+                    "dhcp": false,
+                    "addresses": [
+                      {
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.73"
+                      }
+                    ]
+                  },
+                  "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                  "network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995",
+                  "ifindex": 6.0,
+                  "interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+                  "dns": {
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "mode": "static"
+                  },
+                  "observed": {
+                    "admin_status": "Up",
+                    "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                    "dns_servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "ifindex": 6.0,
+                    "addresses": [
+                      {
+                        "origin": "Manual",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.73",
+                        "state": "Preferred"
+                      }
+                    ],
+                    "intent": {
+                      "source_interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+                      "admin_enabled": true,
+                      "source_mac": "50:6b:8d:d9:02:99",
+                      "default_routes": [
+                        {
+                          "next_hop": "10.10.0.1",
+                          "persistent": true,
+                          "route_metric": 256.0
+                        }
+                      ],
+                      "interface_metric": {
+                        "automatic": true
+                      },
+                      "ipv4": {
+                        "dhcp": false,
+                        "addresses": [
+                          {
+                            "prefix_length": 16.0,
+                            "skip_as_source": false,
+                            "address": "10.10.21.73"
+                          }
+                        ]
+                      },
+                      "dns": {
+                        "servers": [
+                          "8.8.8.8",
+                          "8.8.4.4"
+                        ],
+                        "mode": "static"
+                      },
+                      "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                    },
+                    "interface_guid": "ec782177-1330-47a9-89c9-78a845d204df",
+                    "routes": [
+                      {
+                        "next_hop": "10.10.0.1",
+                        "route_metric": 256.0
+                      }
+                    ],
+                    "link_status": "Up"
+                  },
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "status": "VERIFIED",
+                  "target_mac": "50:6b:8d:d9:02:99",
+                  "interface_metric": {
+                    "automatic": true
+                  }
+                }
+              ],
+              "status": "VERIFIED"
+            }
+          }
+        },
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      },
+      "boot_scope_changed": true,
+      "boot_id_changed": true,
+      "actual_domain": {
+        "name": "n2k-i91-win2022-scsi-20261127",
+        "id": "cb18d9cd-8ceb-47d0-bcc0-839a2157a7a8",
+        "instance": "i-2-330-VM",
+        "firmware": "efi",
+        "disks": [
+          {
+            "device": "sda",
+            "bus": "scsi",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "6ce261f1e7cd46118d4c",
+            "source": "/mnt/glue-gfs/n2k-i91-win2022-scsi-20261127-disk0.qcow2"
+          },
+          {
+            "device": "sdb",
+            "bus": "scsi",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "03570581bf8f4fa8b4f8",
+            "source": "/mnt/glue-gfs/n2k-i91-win2022-scsi-20261127-disk1.qcow2"
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:d9:02:99",
+            "model": "virtio",
+            "bridge": "bridge0"
+          }
+        ],
+        "qga_channel": true,
+        "verified": true
+      },
+      "initial_host": "ablecube13-1",
+      "final_host": "ablecube13-2"
+    },
+    {
+      "kind": "v2k",
+      "source_bus": "ide",
+      "target_bus": "sata",
+      "source_name": "v2k-i91-src-win2022-ide-bios",
+      "source_vm_uuid": "4235bf7b-5025-766d-7b3a-a3e8022af333",
+      "target_name": "v2k-i91-win2022-ide-20261127",
+      "target_vm_uuid": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+      "expected_ipv4": "10.10.21.81",
+      "plan": {
+        "version": 2,
+        "policy": "preserve",
+        "operation_id": "c37fca47-7aca-4591-be4a-cbaf33efb4a4",
+        "source_vm_uuid": "4235bf7b-5025-766d-7b3a-a3e8022af333",
+        "source_capture_id": "39b3ec84-b3dc-440a-80eb-bcc0b7eaacd3",
+        "controller_plan_hash": "4eaaf4e403dec9ae48f76c451317213ca9c7a165c243d4fc0ff2d623f9f0c287",
+        "os": "windows",
+        "root_identity": "mbr:0c98e1bc",
+        "root_source_disk_id": "ide0:0",
+        "helper_version": 2,
+        "source_boot_id": "2026-11-27T12:50:44.5000000Z",
+        "source_collected_at": 1795787154,
+        "os_version": "20348",
+        "windows": {
+          "san_policy": "OfflineShared",
+          "disks": [
+            {
+              "size_bytes": 8589934592,
+              "source_serial": "01000000000000000001",
+              "online": true,
+              "partitions": [
+                {
+                  "offset": 17408,
+                  "size_bytes": 16759808,
+                  "guid": "d2ef5b50-9fb2-4c35-bf66-2d0915fa2785",
+                  "type": "Reserved",
+                  "access_paths": []
+                },
+                {
+                  "offset": 16777216,
+                  "size_bytes": 8572108800,
+                  "guid": "a6b66460-d6f4-461f-b7ea-7c517738971f",
+                  "type": "Basic",
+                  "access_paths": [
+                    "E:\\"
+                  ]
+                }
+              ],
+              "is_clustered": false,
+              "read_only": false,
+              "identity": "gpt:57a037d3-0a6f-4095-86dd-b883a36ae49d",
+              "partition_style": "GPT",
+              "is_boot": false,
+              "source_disk_id": "ide0:1"
+            }
+          ],
+          "source_cdrom_letters": [
+            "D:"
+          ],
+          "reserved_letters": [
+            "C:",
+            "D:",
+            "E:"
+          ]
+        },
+        "required_features": [
+          "windows-network-ipv4-v1"
+        ],
+        "network": {
+          "interfaces": [
+            {
+              "source_interface_guid": "9f7c54c2-e874-421e-80f3-b2b629fe27bc",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:b5:fe:7d",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.81"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB5C65E00",
+              "source_nic_id": "4000",
+              "target_mac": "00:50:56:b5:fe:7d",
+              "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+            }
+          ],
+          "version": 1,
+          "adapter": "windows-nettcpip"
+        },
+        "helper_sha256": "97b5cd87f01f82f3739c5c5f5e08beb8a2c6176a8e6ccfaa499eed3329a9ff7b",
+        "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+        "network_helper_sha256": "a6c6ea0a3d693daa12ab0d2714714e9d2272cb9bf3b9c7eff8b669b5edfb2988",
+        "hash": "e19f3e8132dbccbaedf28718235fcdde1ee6fab4fef531f72a932f866186b56b"
+      },
+      "migration_status": {
+        "status": "VERIFIED",
+        "verified": true,
+        "reason": null
+      },
+      "volumes": {
+        "root": "281576b9-1a8e-4166-b25f-f8e693d27f25",
+        "data": {
+          "1": {
+            "import_job_id": "acddced3-a2b9-489e-9fcc-f114bead5436",
+            "import_path": "/mnt/glue-gfs/v2k-i91-win2022-ide-20261127-disk1.qcow2",
+            "attached": true,
+            "id": "050a3172-24eb-468b-aa23-136d445f7c61",
+            "attach_job_id": "b246dfb7-f96b-441c-97ed-c426287c0b93"
+          }
+        }
+      },
+      "phases": {
+        "init": {
+          "done": false,
+          "ts": ""
+        },
+        "cbt_enable": {
+          "done": true,
+          "ts": "2026-11-27T22:35:03+09:00"
+        },
+        "base_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:45:19+09:00"
+        },
+        "incr_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:45:35+09:00"
+        },
+        "final_sync": {
+          "done": true,
+          "ts": "2026-11-27T22:46:15+09:00"
+        },
+        "cutover": {
+          "done": true,
+          "ts": "2026-11-27T22:53:08+09:00"
+        },
+        "base": {
+          "done": true,
+          "ts": "2026-11-27T22:45:19+09:00"
+        },
+        "final_snapshot": {
+          "done": true,
+          "ts": "2026-11-27T22:46:06+09:00"
+        }
+      },
+      "storage_policy": {
+        "type": "file",
+        "preallocation": "falloc",
+        "preallocation_source": "manifest",
+        "map": {
+          "ide0:0": "/mnt/glue-gfs/v2k-i91-win2022-ide-20261127-disk0.qcow2",
+          "ide0:1": "/mnt/glue-gfs/v2k-i91-win2022-ide-20261127-disk1.qcow2"
+        },
+        "force_block_device": false
+      },
+      "format": "qcow2",
+      "allocation_receipts": [
+        {
+          "request_id": "281576b9-1a8e-4166-b25f-f8e693d27f25",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 0,
+          "volume_id": "281576b9-1a8e-4166-b25f-f8e693d27f25",
+          "path": "v2k-i91-win2022-ide-20261127-disk0.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "68865470464",
+            "observedat": "2026-11-27T13:48:38.917902769Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "281576b9-1a8e-4166-b25f-f8e693d27f25",
+            "importpath": "v2k-i91-win2022-ide-20261127-disk0.qcow2",
+            "importverifiedat": "2026-11-27T13:48:38.917888308Z",
+            "importidentity": "17ece9e5e2ad53a703abc6714a907b0eef2fd35ee438e3965ad49e1565a93181",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        },
+        {
+          "request_id": "050a3172-24eb-468b-aa23-136d445f7c61",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 1,
+          "volume_id": "050a3172-24eb-468b-aa23-136d445f7c61",
+          "path": "v2k-i91-win2022-ide-20261127-disk1.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T13:48:39.089520523Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "050a3172-24eb-468b-aa23-136d445f7c61",
+            "importpath": "v2k-i91-win2022-ide-20261127-disk1.qcow2",
+            "importverifiedat": "2026-11-27T13:48:39.089511256Z",
+            "importidentity": "2164cd4c8b8adec04a7b4a2886a63a92da6d1a4b335f98e81397d92deb4bc213",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        }
+      ],
+      "guest_initial": {
+        "operation_id": "c37fca47-7aca-4591-be4a-cbaf33efb4a4",
+        "vm_uuid": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:57a037d3-0a6f-4095-86dd-b883a36ae49d",
+              "online": true,
+              "serial": "050a317224eb468baa23",
+              "status": "VERIFIED",
+              "source_disk_id": "ide0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T13:51:22.5000000Z",
+        "boot_scope": "839781c4e628c7654c194ac943834389c7f160abee20a4174c3d46d21afeedd8",
+        "plan_hash": "e19f3e8132dbccbaedf28718235fcdde1ee6fab4fef531f72a932f866186b56b",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "E:\\",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 4,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.81",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:b5:fe:7d",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.81"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "guest_after_move": {
+        "operation_id": "c37fca47-7aca-4591-be4a-cbaf33efb4a4",
+        "vm_uuid": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:57a037d3-0a6f-4095-86dd-b883a36ae49d",
+              "online": true,
+              "serial": "050a317224eb468baa23",
+              "status": "VERIFIED",
+              "source_disk_id": "ide0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T21:56:41.5000000Z",
+        "boot_scope": "692aeb19e22af23ed2e6a9ce1625051c11ad6a0021b3ea217da2c67709c6f4e2",
+        "plan_hash": "e19f3e8132dbccbaedf28718235fcdde1ee6fab4fef531f72a932f866186b56b",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "sha256": "a6ae85f2bfa306f7745b2ca8c706e75cb3df9922a706ec8254bca1dc02d1326a",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "E:\\",
+            "sha256": "1d6c291c4ae0c9590bc349e34cb2741d416c5accd000396ea11170cae2eb0e10",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 4,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.81",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:b5:fe:7d",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.81"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "mold_after_move": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": true,
+        "status": "VERIFIED",
+        "id": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+        "planhash": "e19f3e8132dbccbaedf28718235fcdde1ee6fab4fef531f72a932f866186b56b",
+        "operationid": "c37fca47-7aca-4591-be4a-cbaf33efb4a4",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "e19f3e8132dbccbaedf28718235fcdde1ee6fab4fef531f72a932f866186b56b",
+          "operation_id": "c37fca47-7aca-4591-be4a-cbaf33efb4a4",
+          "vm_uuid": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+          "boot_scope": "692aeb19e22af23ed2e6a9ce1625051c11ad6a0021b3ea217da2c67709c6f4e2",
+          "binding_sha256": "d56e4849da5f2cdf3c3cebc716eff5e17ee5376586fc05ff00f935c4f6423ee4",
+          "status": "VERIFIED",
+          "report": {
+            "version": 2.0,
+            "mutations": [
+              {
+                "type": "network-ghost",
+                "identity": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB5C65E00",
+                "before": {
+                  "subnets": [
+                    "255.255.0.0"
+                  ],
+                  "addresses": [
+                    "10.10.21.81"
+                  ],
+                  "guid": "9f7c54c2-e874-421e-80f3-b2b629fe27bc",
+                  "gateways": [
+                    "10.10.0.1"
+                  ],
+                  "dns": "8.8.8.8,8.8.4.4"
+                },
+                "after": {
+                  "removed": true
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T13:51:22.5000000Z",
+                "timestamp": "2026-11-27T13:52:51.9050047Z"
+              },
+              {
+                "type": "network-ipv4",
+                "identity": "00:50:56:b5:fe:7d",
+                "before": {
+                  "source_interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+                  "admin_enabled": true,
+                  "source_mac": "00:50:56:b5:fe:7d",
+                  "default_routes": [],
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "dhcp": true,
+                    "addresses": []
+                  },
+                  "dns": {
+                    "servers": [],
+                    "mode": "dhcp"
+                  },
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                },
+                "after": {
+                  "admin_enabled": true,
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "dns": {
+                    "mode": "static",
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ]
+                  },
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "addresses": [
+                      {
+                        "address": "10.10.21.81",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false
+                      }
+                    ],
+                    "dhcp": false
+                  },
+                  "source_interface_guid": "9f7c54c2-e874-421e-80f3-b2b629fe27bc",
+                  "source_mac": "00:50:56:b5:fe:7d",
+                  "source_nic_id": "4000",
+                  "source_pnp_id": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB5C65E00",
+                  "target_mac": "00:50:56:b5:fe:7d",
+                  "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T13:51:22.5000000Z",
+                "timestamp": "2026-11-27T13:52:52.1558337Z"
+              }
+            ],
+            "boot_scope": "692aeb19e22af23ed2e6a9ce1625051c11ad6a0021b3ea217da2c67709c6f4e2",
+            "helper_sha256": "97b5cd87f01f82f3739c5c5f5e08beb8a2c6176a8e6ccfaa499eed3329a9ff7b",
+            "binding_sha256": "d56e4849da5f2cdf3c3cebc716eff5e17ee5376586fc05ff00f935c4f6423ee4",
+            "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+            "status": "VERIFIED",
+            "vm_uuid": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+            "root_identity": "mbr:0c98e1bc",
+            "boot_id": "2026-11-27T21:56:41.5000000Z",
+            "operation_id": "c37fca47-7aca-4591-be4a-cbaf33efb4a4",
+            "plan_hash": "e19f3e8132dbccbaedf28718235fcdde1ee6fab4fef531f72a932f866186b56b",
+            "windows": {
+              "status": "VERIFIED",
+              "disks": [
+                {
+                  "access_paths": [
+                    "E:\\"
+                  ],
+                  "read_only": false,
+                  "identity": "gpt:57a037d3-0a6f-4095-86dd-b883a36ae49d",
+                  "online": true,
+                  "serial": "050a317224eb468baa23",
+                  "status": "VERIFIED",
+                  "source_disk_id": "ide0:1"
+                }
+              ],
+              "san_policy": "OfflineShared"
+            },
+            "network_helper_sha256": "a6c6ea0a3d693daa12ab0d2714714e9d2272cb9bf3b9c7eff8b669b5edfb2988",
+            "network": {
+              "interfaces": [
+                {
+                  "nic_uuid": "3045cbf9-ce42-436b-8447-16ce88241c87",
+                  "ipv4": {
+                    "dhcp": false,
+                    "addresses": [
+                      {
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.81"
+                      }
+                    ]
+                  },
+                  "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                  "network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995",
+                  "ifindex": 4.0,
+                  "interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+                  "dns": {
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "mode": "static"
+                  },
+                  "observed": {
+                    "admin_status": "Up",
+                    "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                    "dns_servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "ifindex": 4.0,
+                    "addresses": [
+                      {
+                        "origin": "Manual",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.81",
+                        "state": "Preferred"
+                      }
+                    ],
+                    "intent": {
+                      "source_interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+                      "admin_enabled": true,
+                      "source_mac": "00:50:56:b5:fe:7d",
+                      "default_routes": [
+                        {
+                          "next_hop": "10.10.0.1",
+                          "persistent": true,
+                          "route_metric": 256.0
+                        }
+                      ],
+                      "interface_metric": {
+                        "automatic": true
+                      },
+                      "ipv4": {
+                        "dhcp": false,
+                        "addresses": [
+                          {
+                            "prefix_length": 16.0,
+                            "skip_as_source": false,
+                            "address": "10.10.21.81"
+                          }
+                        ]
+                      },
+                      "dns": {
+                        "servers": [
+                          "8.8.8.8",
+                          "8.8.4.4"
+                        ],
+                        "mode": "static"
+                      },
+                      "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                    },
+                    "interface_guid": "4a9d9647-b0ec-4119-836a-dddedf2affc5",
+                    "routes": [
+                      {
+                        "next_hop": "10.10.0.1",
+                        "route_metric": 256.0
+                      }
+                    ],
+                    "link_status": "Up"
+                  },
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "status": "VERIFIED",
+                  "target_mac": "00:50:56:b5:fe:7d",
+                  "interface_metric": {
+                    "automatic": true
+                  }
+                }
+              ],
+              "status": "VERIFIED"
+            }
+          }
+        },
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      },
+      "boot_scope_changed": true,
+      "boot_id_changed": true,
+      "actual_domain": {
+        "name": "v2k-i91-win2022-ide-20261127",
+        "id": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+        "instance": "i-2-331-VM",
+        "firmware": "bios",
+        "disks": [
+          {
+            "device": "sda",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "281576b91a8e4166b25f",
+            "source": "/mnt/glue-gfs/v2k-i91-win2022-ide-20261127-disk0.qcow2"
+          },
+          {
+            "device": "sdb",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "050a317224eb468baa23",
+            "source": "/mnt/glue-gfs/v2k-i91-win2022-ide-20261127-disk1.qcow2"
+          }
+        ],
+        "nics": [
+          {
+            "mac": "00:50:56:b5:fe:7d",
+            "model": "virtio",
+            "bridge": "bridge0"
+          }
+        ],
+        "qga_channel": true,
+        "verified": true
+      },
+      "initial_host": "ablecube13-1",
+      "final_host": "ablecube13-2"
+    },
+    {
+      "kind": "v2k",
+      "source_bus": "sata",
+      "target_bus": "sata",
+      "source_name": "v2k-i91-src-win2022-sata-uefi",
+      "source_vm_uuid": "4235fa5c-3394-0c3d-4291-43395f16842d",
+      "target_name": "v2k-i91-win2022-sata-20261127-r2",
+      "target_vm_uuid": "6850c424-ed21-4116-ad56-0e00a00a0539",
+      "expected_ipv4": "10.10.21.82",
+      "plan": {
+        "version": 2,
+        "policy": "preserve",
+        "operation_id": "6012ba10-e4af-4041-8267-66783236334f",
+        "source_vm_uuid": "4235fa5c-3394-0c3d-4291-43395f16842d",
+        "source_capture_id": "b3a699e2-9184-4cee-80c5-1b063bd5955c",
+        "controller_plan_hash": "976642b9b2d052601ee2eee86db5cffe7ac07bab08cee02ef645a16daac592b2",
+        "os": "windows",
+        "root_identity": "gpt:3e8e48e5-ae77-4b3c-b32b-7c0cbd30f59f",
+        "root_source_disk_id": "sata0:1",
+        "helper_version": 2,
+        "source_boot_id": "2026-11-27T14:08:05.5000000Z",
+        "source_collected_at": 1795789107,
+        "os_version": "20348",
+        "windows": {
+          "san_policy": "OfflineShared",
+          "disks": [
+            {
+              "size_bytes": 8589934592,
+              "source_serial": "02000000000000000001",
+              "online": true,
+              "partitions": [
+                {
+                  "offset": 17408,
+                  "size_bytes": 16759808,
+                  "guid": "595647b0-6dc6-4c10-a506-704bfec3d5d1",
+                  "type": "Reserved",
+                  "access_paths": []
+                },
+                {
+                  "offset": 16777216,
+                  "size_bytes": 8572108800,
+                  "guid": "a424253f-ad9d-4d3c-a529-f09ac49e5436",
+                  "type": "Basic",
+                  "access_paths": [
+                    "E:\\"
+                  ]
+                }
+              ],
+              "is_clustered": false,
+              "read_only": false,
+              "identity": "gpt:b4166274-bd0a-4664-ac5d-e9a493a078d5",
+              "partition_style": "GPT",
+              "is_boot": false,
+              "source_disk_id": "sata0:2"
+            }
+          ],
+          "source_cdrom_letters": [
+            "D:"
+          ],
+          "reserved_letters": [
+            "C:",
+            "D:",
+            "E:"
+          ]
+        },
+        "required_features": [
+          "windows-network-ipv4-v1"
+        ],
+        "network": {
+          "interfaces": [
+            {
+              "source_interface_guid": "58fd5235-857b-48a5-9f3d-d3d994e8247e",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:3e:91:82",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.82"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB577CA00",
+              "source_nic_id": "4000",
+              "target_mac": "00:50:56:3e:91:82",
+              "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+            }
+          ],
+          "version": 1,
+          "adapter": "windows-nettcpip"
+        },
+        "helper_sha256": "0ce633bfde82b997fb7b0b3653be43046e2ee648d186218963a1f3e1a041f67c",
+        "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+        "network_helper_sha256": "846a0d801b126aa6fc66a85511c5ee86beddbcbbe04b2a3b091b311b57d6d85f",
+        "hash": "c86d3f9a014bf4c0771b2d911e8b0a96bbd7f0aff78ad1e24a91bb5815ef6bda"
+      },
+      "migration_status": {
+        "status": "VERIFIED",
+        "verified": true,
+        "reason": null
+      },
+      "volumes": {
+        "root": "1c6e3d52-e32b-4248-ae23-2948a04cc237",
+        "data": {
+          "1": {
+            "import_job_id": "6409ff8d-26ac-455a-92ba-bb5af1215810",
+            "import_path": "/mnt/glue-gfs/v2k-i91-win2022-sata-20261127-r2-disk1.qcow2",
+            "attached": true,
+            "id": "0b0b4d0c-4e9e-4278-895d-04fc3b78f3e2",
+            "attach_job_id": "159f492f-abe2-4dc2-8156-65e62651da96"
+          }
+        }
+      },
+      "phases": {
+        "init": {
+          "done": true,
+          "ts": "2026-11-27T23:10:54+09:00"
+        },
+        "cbt_enable": {
+          "done": true,
+          "ts": "2026-11-27T23:10:55+09:00"
+        },
+        "base_sync": {
+          "done": true,
+          "ts": "2026-11-27T23:17:48+09:00"
+        },
+        "incr_sync": {
+          "done": true,
+          "ts": "2026-11-27T23:18:09+09:00"
+        },
+        "final_sync": {
+          "done": true,
+          "ts": "2026-11-27T23:18:46+09:00"
+        },
+        "cutover": {
+          "done": true,
+          "ts": "2026-11-27T23:21:32+09:00"
+        },
+        "base": {
+          "done": true,
+          "ts": "2026-11-27T23:17:48+09:00"
+        },
+        "final_snapshot": {
+          "done": true,
+          "ts": "2026-11-27T23:18:38+09:00"
+        }
+      },
+      "storage_policy": {
+        "type": "file",
+        "preallocation": "falloc",
+        "preallocation_source": "default",
+        "map": {
+          "sata0:1": "/mnt/glue-gfs/v2k-i91-win2022-sata-20261127-r2-disk0.qcow2",
+          "sata0:2": "/mnt/glue-gfs/v2k-i91-win2022-sata-20261127-r2-disk1.qcow2"
+        },
+        "force_block_device": false
+      },
+      "format": "qcow2",
+      "allocation_receipts": [
+        {
+          "request_id": "1c6e3d52-e32b-4248-ae23-2948a04cc237",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 0,
+          "volume_id": "1c6e3d52-e32b-4248-ae23-2948a04cc237",
+          "path": "v2k-i91-win2022-sata-20261127-r2-disk0.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "68865470464",
+            "observedat": "2026-11-27T14:20:08.353623022Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "1c6e3d52-e32b-4248-ae23-2948a04cc237",
+            "importpath": "v2k-i91-win2022-sata-20261127-r2-disk0.qcow2",
+            "importverifiedat": "2026-11-27T14:20:08.353612377Z",
+            "importidentity": "7a6d7eead8a1a20c9ec066afe59303d6bc774e6bf8619284751255132b33ebb4",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        },
+        {
+          "request_id": "0b0b4d0c-4e9e-4278-895d-04fc3b78f3e2",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 1,
+          "volume_id": "0b0b4d0c-4e9e-4278-895d-04fc3b78f3e2",
+          "path": "v2k-i91-win2022-sata-20261127-r2-disk1.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T14:20:08.516601010Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "0b0b4d0c-4e9e-4278-895d-04fc3b78f3e2",
+            "importpath": "v2k-i91-win2022-sata-20261127-r2-disk1.qcow2",
+            "importverifiedat": "2026-11-27T14:20:08.516590776Z",
+            "importidentity": "1897dbe4116f8a97ad3f3ed52c21d629ca688ce0b94dd70567ce0b4150465e2e",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        }
+      ],
+      "guest_initial": {
+        "operation_id": "6012ba10-e4af-4041-8267-66783236334f",
+        "vm_uuid": "6850c424-ed21-4116-ad56-0e00a00a0539",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:b4166274-bd0a-4664-ac5d-e9a493a078d5",
+              "online": true,
+              "serial": "0b0b4d0c4e9e4278895d",
+              "status": "VERIFIED",
+              "source_disk_id": "sata0:2"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T22:21:03.5000000Z",
+        "boot_scope": "24f0801517188c06b973ab7ca302c0d327d4eddd83154b9ef21dbf50b8000415",
+        "plan_hash": "c86d3f9a014bf4c0771b2d911e8b0a96bbd7f0aff78ad1e24a91bb5815ef6bda",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "E:\\",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 7,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.82",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:3e:91:82",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.82"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "guest_after_move": {
+        "operation_id": "6012ba10-e4af-4041-8267-66783236334f",
+        "vm_uuid": "6850c424-ed21-4116-ad56-0e00a00a0539",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:b4166274-bd0a-4664-ac5d-e9a493a078d5",
+              "online": true,
+              "serial": "0b0b4d0c4e9e4278895d",
+              "status": "VERIFIED",
+              "source_disk_id": "sata0:2"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T22:24:53.5000000Z",
+        "boot_scope": "614e919455254d77f92c0dd4b19222f7e520db9149590a1d46162810399ac3e5",
+        "plan_hash": "c86d3f9a014bf4c0771b2d911e8b0a96bbd7f0aff78ad1e24a91bb5815ef6bda",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "sha256": "5055b554722798a2bcec8899f60d02f5065190fde8cec851e74f68fe555d8cf1",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "E:\\",
+            "sha256": "94a80e439828ae9e371a2eaad2c92a1f275809619af90bd59d7581a24804243f",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 6,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.82",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:3e:91:82",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.82"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "mold_after_move": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": true,
+        "status": "VERIFIED",
+        "id": "6850c424-ed21-4116-ad56-0e00a00a0539",
+        "planhash": "c86d3f9a014bf4c0771b2d911e8b0a96bbd7f0aff78ad1e24a91bb5815ef6bda",
+        "operationid": "6012ba10-e4af-4041-8267-66783236334f",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "c86d3f9a014bf4c0771b2d911e8b0a96bbd7f0aff78ad1e24a91bb5815ef6bda",
+          "operation_id": "6012ba10-e4af-4041-8267-66783236334f",
+          "vm_uuid": "6850c424-ed21-4116-ad56-0e00a00a0539",
+          "boot_scope": "614e919455254d77f92c0dd4b19222f7e520db9149590a1d46162810399ac3e5",
+          "binding_sha256": "899cd80c4f8df09aa0f5a15843fa631eb52dfaaeab49d8c8a19d56eb676c67c1",
+          "status": "VERIFIED",
+          "report": {
+            "version": 2.0,
+            "mutations": [
+              {
+                "type": "network-ghost",
+                "identity": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB577CA00",
+                "before": {
+                  "subnets": [
+                    "255.255.0.0"
+                  ],
+                  "addresses": [
+                    "10.10.21.82"
+                  ],
+                  "guid": "58fd5235-857b-48a5-9f3d-d3d994e8247e",
+                  "gateways": [
+                    "10.10.0.1"
+                  ],
+                  "dns": "8.8.8.8,8.8.4.4"
+                },
+                "after": {
+                  "removed": true
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:03.5000000Z",
+                "timestamp": "2026-11-27T22:21:23.1482240Z",
+                "remove_exit_code": 0.0
+              },
+              {
+                "type": "network-ipv4",
+                "identity": "00:50:56:3e:91:82",
+                "before": {
+                  "source_interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+                  "admin_enabled": true,
+                  "source_mac": "00:50:56:3e:91:82",
+                  "default_routes": [],
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "dhcp": true,
+                    "addresses": []
+                  },
+                  "dns": {
+                    "servers": [],
+                    "mode": "dhcp"
+                  },
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                },
+                "after": {
+                  "admin_enabled": true,
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "dns": {
+                    "mode": "static",
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ]
+                  },
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "addresses": [
+                      {
+                        "address": "10.10.21.82",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false
+                      }
+                    ],
+                    "dhcp": false
+                  },
+                  "source_interface_guid": "58fd5235-857b-48a5-9f3d-d3d994e8247e",
+                  "source_mac": "00:50:56:3e:91:82",
+                  "source_nic_id": "4000",
+                  "source_pnp_id": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB577CA00",
+                  "target_mac": "00:50:56:3e:91:82",
+                  "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:03.5000000Z",
+                "timestamp": "2026-11-27T22:21:23.3513459Z"
+              }
+            ],
+            "boot_scope": "614e919455254d77f92c0dd4b19222f7e520db9149590a1d46162810399ac3e5",
+            "helper_sha256": "0ce633bfde82b997fb7b0b3653be43046e2ee648d186218963a1f3e1a041f67c",
+            "binding_sha256": "899cd80c4f8df09aa0f5a15843fa631eb52dfaaeab49d8c8a19d56eb676c67c1",
+            "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+            "status": "VERIFIED",
+            "vm_uuid": "6850c424-ed21-4116-ad56-0e00a00a0539",
+            "root_identity": "gpt:3e8e48e5-ae77-4b3c-b32b-7c0cbd30f59f",
+            "boot_id": "2026-11-27T22:24:53.5000000Z",
+            "operation_id": "6012ba10-e4af-4041-8267-66783236334f",
+            "plan_hash": "c86d3f9a014bf4c0771b2d911e8b0a96bbd7f0aff78ad1e24a91bb5815ef6bda",
+            "windows": {
+              "status": "VERIFIED",
+              "disks": [
+                {
+                  "access_paths": [
+                    "E:\\"
+                  ],
+                  "read_only": false,
+                  "identity": "gpt:b4166274-bd0a-4664-ac5d-e9a493a078d5",
+                  "online": true,
+                  "serial": "0b0b4d0c4e9e4278895d",
+                  "status": "VERIFIED",
+                  "source_disk_id": "sata0:2"
+                }
+              ],
+              "san_policy": "OfflineShared"
+            },
+            "network_helper_sha256": "846a0d801b126aa6fc66a85511c5ee86beddbcbbe04b2a3b091b311b57d6d85f",
+            "network": {
+              "interfaces": [
+                {
+                  "nic_uuid": "38b52f34-af7a-4f4f-a5c8-774aef082ad0",
+                  "ipv4": {
+                    "dhcp": false,
+                    "addresses": [
+                      {
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.82"
+                      }
+                    ]
+                  },
+                  "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                  "network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995",
+                  "ifindex": 6.0,
+                  "interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+                  "dns": {
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "mode": "static"
+                  },
+                  "observed": {
+                    "admin_status": "Up",
+                    "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                    "dns_servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "ifindex": 6.0,
+                    "addresses": [
+                      {
+                        "origin": "Manual",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.82",
+                        "state": "Preferred"
+                      }
+                    ],
+                    "intent": {
+                      "source_interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+                      "admin_enabled": true,
+                      "source_mac": "00:50:56:3e:91:82",
+                      "default_routes": [
+                        {
+                          "next_hop": "10.10.0.1",
+                          "persistent": true,
+                          "route_metric": 256.0
+                        }
+                      ],
+                      "interface_metric": {
+                        "automatic": true
+                      },
+                      "ipv4": {
+                        "dhcp": false,
+                        "addresses": [
+                          {
+                            "prefix_length": 16.0,
+                            "skip_as_source": false,
+                            "address": "10.10.21.82"
+                          }
+                        ]
+                      },
+                      "dns": {
+                        "servers": [
+                          "8.8.8.8",
+                          "8.8.4.4"
+                        ],
+                        "mode": "static"
+                      },
+                      "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                    },
+                    "interface_guid": "d8531ae6-de95-4f7e-8b71-7435c9c5bde7",
+                    "routes": [
+                      {
+                        "next_hop": "10.10.0.1",
+                        "route_metric": 256.0
+                      }
+                    ],
+                    "link_status": "Up"
+                  },
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "status": "VERIFIED",
+                  "target_mac": "00:50:56:3e:91:82",
+                  "interface_metric": {
+                    "automatic": true
+                  }
+                }
+              ],
+              "status": "VERIFIED"
+            }
+          }
+        },
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      },
+      "boot_scope_changed": true,
+      "boot_id_changed": true,
+      "actual_domain": {
+        "name": "v2k-i91-win2022-sata-20261127-r2",
+        "id": "6850c424-ed21-4116-ad56-0e00a00a0539",
+        "instance": "i-2-334-VM",
+        "firmware": "efi",
+        "disks": [
+          {
+            "device": "sda",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "1c6e3d52e32b4248ae23",
+            "source": "/mnt/glue-gfs/v2k-i91-win2022-sata-20261127-r2-disk0.qcow2"
+          },
+          {
+            "device": "sdb",
+            "bus": "sata",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "0b0b4d0c4e9e4278895d",
+            "source": "/mnt/glue-gfs/v2k-i91-win2022-sata-20261127-r2-disk1.qcow2"
+          }
+        ],
+        "nics": [
+          {
+            "mac": "00:50:56:3e:91:82",
+            "model": "virtio",
+            "bridge": "bridge0"
+          }
+        ],
+        "qga_channel": true,
+        "verified": true
+      },
+      "initial_host": "ablecube13-2",
+      "final_host": "ablecube13-3"
+    },
+    {
+      "kind": "v2k",
+      "source_bus": "scsi",
+      "target_bus": "virtio-scsi",
+      "source_name": "v2k-i91-src-win2022-scsi-uefi",
+      "source_vm_uuid": "42352da1-fcf4-d9bf-b93d-a6117f7b7d76",
+      "target_name": "v2k-i91-win2022-scsi-20261127-r2",
+      "target_vm_uuid": "5182a750-b7a4-41b2-afd9-0de91df8d05b",
+      "expected_ipv4": "10.10.21.83",
+      "plan": {
+        "version": 2,
+        "policy": "preserve",
+        "operation_id": "c0f27dab-353c-4a66-9294-e786ddb35928",
+        "source_vm_uuid": "42352da1-fcf4-d9bf-b93d-a6117f7b7d76",
+        "source_capture_id": "1dd0c47c-3fe3-4b83-83c6-dc9c4d6cc88c",
+        "controller_plan_hash": "3a328115bcb61e7c2c69ee789b66a815d69542d1c3e7316fe9185eb2d2f25d9a",
+        "os": "windows",
+        "root_identity": "gpt:a5eb259c-3929-4cbd-9606-9794f48d0f4a",
+        "root_source_disk_id": "scsi0:0",
+        "helper_version": 2,
+        "source_boot_id": "2026-11-27T14:08:06.5000000Z",
+        "source_collected_at": 1795789140,
+        "os_version": "20348",
+        "windows": {
+          "san_policy": "OfflineShared",
+          "disks": [
+            {
+              "size_bytes": 8589934592,
+              "source_serial": "6000c297c3f0489ec71e67a30e56e8ff",
+              "online": true,
+              "partitions": [
+                {
+                  "offset": 17408,
+                  "size_bytes": 262144,
+                  "guid": "c4259720-e9a1-11f1-b797-005056399006",
+                  "type": "Unknown",
+                  "access_paths": []
+                },
+                {
+                  "offset": 279552,
+                  "size_bytes": 16497664,
+                  "guid": "711160f8-ee05-4e0a-baea-f55c913b614b",
+                  "type": "Reserved",
+                  "access_paths": []
+                },
+                {
+                  "offset": 16777216,
+                  "size_bytes": 8572108800,
+                  "guid": "e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b",
+                  "type": "Basic",
+                  "access_paths": [
+                    "E:\\"
+                  ]
+                }
+              ],
+              "is_clustered": false,
+              "read_only": false,
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+              "partition_style": "GPT",
+              "is_boot": false,
+              "source_disk_id": "scsi0:1"
+            }
+          ],
+          "source_cdrom_letters": [
+            "D:"
+          ],
+          "reserved_letters": [
+            "C:",
+            "D:",
+            "E:"
+          ]
+        },
+        "required_features": [
+          "windows-network-ipv4-v1"
+        ],
+        "network": {
+          "interfaces": [
+            {
+              "source_interface_guid": "9b32ac0f-90e9-43e9-8882-804d6bbd6d72",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:3e:91:83",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.83"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB5BDF200",
+              "source_nic_id": "4000",
+              "target_mac": "00:50:56:3e:91:83",
+              "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+            }
+          ],
+          "version": 1,
+          "adapter": "windows-nettcpip"
+        },
+        "helper_sha256": "0ce633bfde82b997fb7b0b3653be43046e2ee648d186218963a1f3e1a041f67c",
+        "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+        "network_helper_sha256": "846a0d801b126aa6fc66a85511c5ee86beddbcbbe04b2a3b091b311b57d6d85f",
+        "hash": "f7bc0a06f2f494162e02b1a9d4ecedc7478c76691855af62ef3c000b2cac61fd"
+      },
+      "migration_status": {
+        "status": "VERIFIED",
+        "verified": true,
+        "reason": null
+      },
+      "volumes": {
+        "root": "1d74e850-139c-4d6e-a9bd-2fd8cf7ab21c",
+        "data": {
+          "1": {
+            "import_job_id": "3603bc0e-d861-4660-99e8-ff28d41b5596",
+            "import_path": "/mnt/glue-gfs/v2k-i91-win2022-scsi-20261127-r2-disk1.qcow2",
+            "attached": true,
+            "id": "e19e5bf6-9305-44d7-8c6e-219fb3124d4f",
+            "attach_job_id": "3f00613a-4161-4b5e-8273-9d3c61d97b7f"
+          }
+        }
+      },
+      "phases": {
+        "init": {
+          "done": true,
+          "ts": "2026-11-27T23:10:54+09:00"
+        },
+        "cbt_enable": {
+          "done": true,
+          "ts": "2026-11-27T23:10:55+09:00"
+        },
+        "base_sync": {
+          "done": true,
+          "ts": "2026-11-27T23:18:22+09:00"
+        },
+        "incr_sync": {
+          "done": true,
+          "ts": "2026-11-27T23:18:43+09:00"
+        },
+        "final_sync": {
+          "done": true,
+          "ts": "2026-11-27T23:19:31+09:00"
+        },
+        "cutover": {
+          "done": true,
+          "ts": "2026-11-27T23:22:11+09:00"
+        },
+        "base": {
+          "done": true,
+          "ts": "2026-11-27T23:18:22+09:00"
+        },
+        "final_snapshot": {
+          "done": true,
+          "ts": "2026-11-27T23:19:11+09:00"
+        }
+      },
+      "storage_policy": {
+        "type": "file",
+        "preallocation": "falloc",
+        "preallocation_source": "default",
+        "map": {
+          "scsi0:0": "/mnt/glue-gfs/v2k-i91-win2022-scsi-20261127-r2-disk0.qcow2",
+          "scsi0:1": "/mnt/glue-gfs/v2k-i91-win2022-scsi-20261127-r2-disk1.qcow2"
+        },
+        "force_block_device": false
+      },
+      "format": "qcow2",
+      "allocation_receipts": [
+        {
+          "request_id": "1d74e850-139c-4d6e-a9bd-2fd8cf7ab21c",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 0,
+          "volume_id": "1d74e850-139c-4d6e-a9bd-2fd8cf7ab21c",
+          "path": "v2k-i91-win2022-scsi-20261127-r2-disk0.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "68865470464",
+            "observedat": "2026-11-27T14:20:56.997217315Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "1d74e850-139c-4d6e-a9bd-2fd8cf7ab21c",
+            "importpath": "v2k-i91-win2022-scsi-20261127-r2-disk0.qcow2",
+            "importverifiedat": "2026-11-27T14:20:56.997207356Z",
+            "importidentity": "888e5753d1395c399a93da9bc3eef7e2adce900bd3da8480a1008ef81fc2ba34",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        },
+        {
+          "request_id": "e19e5bf6-9305-44d7-8c6e-219fb3124d4f",
+          "policy": "falloc",
+          "format": "qcow2",
+          "verified": true,
+          "index": 1,
+          "volume_id": "e19e5bf6-9305-44d7-8c6e-219fb3124d4f",
+          "path": "v2k-i91-win2022-scsi-20261127-r2-disk1.qcow2",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T14:20:57.161866283Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importrequestid": "e19e5bf6-9305-44d7-8c6e-219fb3124d4f",
+            "importpath": "v2k-i91-win2022-scsi-20261127-r2-disk1.qcow2",
+            "importverifiedat": "2026-11-27T14:20:57.161856329Z",
+            "importidentity": "0c3c6b5940ee491f3e8d4dfcafcdc6d504183b57f97bcd8fc562cb96dfec30bb",
+            "importstrategy": "adopt",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a"
+          },
+          "scope": "pre-first-start"
+        }
+      ],
+      "guest_initial": {
+        "operation_id": "c0f27dab-353c-4a66-9294-e786ddb35928",
+        "vm_uuid": "5182a750-b7a4-41b2-afd9-0de91df8d05b",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+              "online": true,
+              "serial": "e19e5bf6930544d78c6e",
+              "status": "VERIFIED",
+              "source_disk_id": "scsi0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T22:21:42.5000000Z",
+        "boot_scope": "e560a4e1c09127f99ff3670a30a9547bb191706421c7f6561efb325ab45cea2a",
+        "plan_hash": "f7bc0a06f2f494162e02b1a9d4ecedc7478c76691855af62ef3c000b2cac61fd",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "E:\\",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 3,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.83",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:3e:91:83",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.83"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "guest_after_move": {
+        "operation_id": "c0f27dab-353c-4a66-9294-e786ddb35928",
+        "vm_uuid": "5182a750-b7a4-41b2-afd9-0de91df8d05b",
+        "data": {
+          "status": "VERIFIED",
+          "disks": [
+            {
+              "access_paths": [
+                "E:\\"
+              ],
+              "read_only": false,
+              "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+              "online": true,
+              "serial": "e19e5bf6930544d78c6e",
+              "status": "VERIFIED",
+              "source_disk_id": "scsi0:1"
+            }
+          ],
+          "san_policy": "OfflineShared"
+        },
+        "boot_id": "2026-11-27T22:24:54.5000000Z",
+        "boot_scope": "66b1921197e41c70f9ae3bc88f71034715398738e7e77427dfced2b58a82aa2c",
+        "plan_hash": "f7bc0a06f2f494162e02b1a9d4ecedc7478c76691855af62ef3c000b2cac61fd",
+        "io": [
+          {
+            "fsync": true,
+            "path": "C:\\Windows\\Temp",
+            "sha256": "0956de364be1d1e4558d7191ec7d528e8250c89941ee7e9ba972f9404044dd66",
+            "bytes": 65536,
+            "readback": true
+          },
+          {
+            "fsync": true,
+            "path": "E:\\",
+            "sha256": "b8ddc01b05c2ea07e82073f62b59dc090c0d4af2ecea15889410449682df17e7",
+            "bytes": 65536,
+            "readback": true
+          }
+        ],
+        "verified": true,
+        "network": [
+          {
+            "admin_status": "Up",
+            "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+            "dns_servers": [
+              "8.8.8.8",
+              "8.8.4.4"
+            ],
+            "ifindex": 3,
+            "addresses": [
+              {
+                "origin": "Manual",
+                "prefix_length": 16,
+                "skip_as_source": false,
+                "address": "10.10.21.83",
+                "state": "Preferred"
+              }
+            ],
+            "intent": {
+              "source_interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+              "admin_enabled": true,
+              "source_mac": "00:50:56:3e:91:83",
+              "default_routes": [
+                {
+                  "next_hop": "10.10.0.1",
+                  "persistent": true,
+                  "route_metric": 256
+                }
+              ],
+              "interface_metric": {
+                "value": null,
+                "automatic": true
+              },
+              "ipv4": {
+                "dhcp": false,
+                "addresses": [
+                  {
+                    "prefix_length": 16,
+                    "skip_as_source": false,
+                    "address": "10.10.21.83"
+                  }
+                ]
+              },
+              "dns": {
+                "servers": [
+                  "8.8.8.8",
+                  "8.8.4.4"
+                ],
+                "mode": "static"
+              },
+              "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+            },
+            "interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+            "routes": [
+              {
+                "next_hop": "10.10.0.1",
+                "route_metric": 256
+              }
+            ],
+            "link_status": "Up"
+          }
+        ],
+        "guest_qga": "Running"
+      },
+      "mold_after_move": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": true,
+        "status": "VERIFIED",
+        "id": "5182a750-b7a4-41b2-afd9-0de91df8d05b",
+        "planhash": "f7bc0a06f2f494162e02b1a9d4ecedc7478c76691855af62ef3c000b2cac61fd",
+        "operationid": "c0f27dab-353c-4a66-9294-e786ddb35928",
+        "observation": {
+          "supported": true,
+          "fresh_observation": true,
+          "plan_hash": "f7bc0a06f2f494162e02b1a9d4ecedc7478c76691855af62ef3c000b2cac61fd",
+          "operation_id": "c0f27dab-353c-4a66-9294-e786ddb35928",
+          "vm_uuid": "5182a750-b7a4-41b2-afd9-0de91df8d05b",
+          "boot_scope": "66b1921197e41c70f9ae3bc88f71034715398738e7e77427dfced2b58a82aa2c",
+          "binding_sha256": "2ec46d152cebff9c2a48bbcdd3b3bc685e8ba72ac68b73a64a445a4986df5d2c",
+          "status": "VERIFIED",
+          "report": {
+            "version": 2.0,
+            "mutations": [
+              {
+                "type": "readonly",
+                "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+                "before": true,
+                "after": false,
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:42.5000000Z",
+                "timestamp": "2026-11-27T22:21:57.3661313Z"
+              },
+              {
+                "type": "offline",
+                "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+                "before": true,
+                "after": false,
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:42.5000000Z",
+                "timestamp": "2026-11-27T22:21:58.2877548Z"
+              },
+              {
+                "type": "cdrom-letter",
+                "identity": "\\\\?\\Volume{d510fcf0-eab0-11f1-b79c-806e6f6e6963}\\",
+                "before": "E:",
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:42.5000000Z",
+                "timestamp": "2026-11-27T22:21:58.9452350Z"
+              },
+              {
+                "type": "partition-letter",
+                "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd:e5c3c4ba-79f1-417b-b3e4-7681b0e05d8b:16777216",
+                "before": "F",
+                "after": "E",
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:42.5000000Z",
+                "timestamp": "2026-11-27T22:21:59.0705803Z"
+              },
+              {
+                "type": "network-ghost",
+                "identity": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB5BDF200",
+                "before": {
+                  "subnets": [
+                    "255.255.0.0"
+                  ],
+                  "addresses": [
+                    "10.10.21.83"
+                  ],
+                  "guid": "9b32ac0f-90e9-43e9-8882-804d6bbd6d72",
+                  "gateways": [
+                    "10.10.0.1"
+                  ],
+                  "dns": "8.8.8.8,8.8.4.4"
+                },
+                "after": {
+                  "removed": true
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:42.5000000Z",
+                "timestamp": "2026-11-27T22:22:01.7735861Z",
+                "remove_exit_code": 0.0
+              },
+              {
+                "type": "network-ipv4",
+                "identity": "00:50:56:3e:91:83",
+                "before": {
+                  "source_interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+                  "admin_enabled": true,
+                  "source_mac": "00:50:56:3e:91:83",
+                  "default_routes": [],
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "dhcp": true,
+                    "addresses": []
+                  },
+                  "dns": {
+                    "servers": [],
+                    "mode": "dhcp"
+                  },
+                  "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                },
+                "after": {
+                  "admin_enabled": true,
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "dns": {
+                    "mode": "static",
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ]
+                  },
+                  "interface_metric": {
+                    "automatic": true
+                  },
+                  "ipv4": {
+                    "addresses": [
+                      {
+                        "address": "10.10.21.83",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false
+                      }
+                    ],
+                    "dhcp": false
+                  },
+                  "source_interface_guid": "9b32ac0f-90e9-43e9-8882-804d6bbd6d72",
+                  "source_mac": "00:50:56:3e:91:83",
+                  "source_nic_id": "4000",
+                  "source_pnp_id": "PCI\\VEN_15AD&DEV_07B0&SUBSYS_07B015AD&REV_01\\005056FFFFB5BDF200",
+                  "target_mac": "00:50:56:3e:91:83",
+                  "target_network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995"
+                },
+                "state": "APPLIED",
+                "boot_id": "2026-11-27T22:21:42.5000000Z",
+                "timestamp": "2026-11-27T22:22:02.0080134Z"
+              }
+            ],
+            "boot_scope": "66b1921197e41c70f9ae3bc88f71034715398738e7e77427dfced2b58a82aa2c",
+            "helper_sha256": "0ce633bfde82b997fb7b0b3653be43046e2ee648d186218963a1f3e1a041f67c",
+            "binding_sha256": "2ec46d152cebff9c2a48bbcdd3b3bc685e8ba72ac68b73a64a445a4986df5d2c",
+            "network_reader_sha256": "8eb6c74f93f194786edffe2770da4237d810a448101d6da8e2fddaabce590960",
+            "status": "VERIFIED",
+            "vm_uuid": "5182a750-b7a4-41b2-afd9-0de91df8d05b",
+            "root_identity": "gpt:a5eb259c-3929-4cbd-9606-9794f48d0f4a",
+            "boot_id": "2026-11-27T22:24:54.5000000Z",
+            "operation_id": "c0f27dab-353c-4a66-9294-e786ddb35928",
+            "plan_hash": "f7bc0a06f2f494162e02b1a9d4ecedc7478c76691855af62ef3c000b2cac61fd",
+            "windows": {
+              "status": "VERIFIED",
+              "disks": [
+                {
+                  "access_paths": [
+                    "E:\\"
+                  ],
+                  "read_only": false,
+                  "identity": "gpt:7c220ce2-e1c5-4230-a3ae-7fb5dcb5e9fd",
+                  "online": true,
+                  "serial": "e19e5bf6930544d78c6e",
+                  "status": "VERIFIED",
+                  "source_disk_id": "scsi0:1"
+                }
+              ],
+              "san_policy": "OfflineShared"
+            },
+            "network_helper_sha256": "846a0d801b126aa6fc66a85511c5ee86beddbcbbe04b2a3b091b311b57d6d85f",
+            "network": {
+              "interfaces": [
+                {
+                  "nic_uuid": "5186ec2e-455c-4105-8c00-2346549e8390",
+                  "ipv4": {
+                    "dhcp": false,
+                    "addresses": [
+                      {
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.83"
+                      }
+                    ]
+                  },
+                  "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                  "network_uuid": "4d9047dc-c8b7-4c80-83bf-2c075adc2995",
+                  "ifindex": 3.0,
+                  "interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+                  "dns": {
+                    "servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "mode": "static"
+                  },
+                  "observed": {
+                    "admin_status": "Up",
+                    "pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011",
+                    "dns_servers": [
+                      "8.8.8.8",
+                      "8.8.4.4"
+                    ],
+                    "ifindex": 3.0,
+                    "addresses": [
+                      {
+                        "origin": "Manual",
+                        "prefix_length": 16.0,
+                        "skip_as_source": false,
+                        "address": "10.10.21.83",
+                        "state": "Preferred"
+                      }
+                    ],
+                    "intent": {
+                      "source_interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+                      "admin_enabled": true,
+                      "source_mac": "00:50:56:3e:91:83",
+                      "default_routes": [
+                        {
+                          "next_hop": "10.10.0.1",
+                          "persistent": true,
+                          "route_metric": 256.0
+                        }
+                      ],
+                      "interface_metric": {
+                        "automatic": true
+                      },
+                      "ipv4": {
+                        "dhcp": false,
+                        "addresses": [
+                          {
+                            "prefix_length": 16.0,
+                            "skip_as_source": false,
+                            "address": "10.10.21.83"
+                          }
+                        ]
+                      },
+                      "dns": {
+                        "servers": [
+                          "8.8.8.8",
+                          "8.8.4.4"
+                        ],
+                        "mode": "static"
+                      },
+                      "source_pnp_id": "PCI\\VEN_1AF4&DEV_1041&SUBSYS_11001AF4&REV_01\\4&15f05328&0&0011"
+                    },
+                    "interface_guid": "23be4ab8-558f-4c5e-88bf-acaee78d37a1",
+                    "routes": [
+                      {
+                        "next_hop": "10.10.0.1",
+                        "route_metric": 256.0
+                      }
+                    ],
+                    "link_status": "Up"
+                  },
+                  "default_routes": [
+                    {
+                      "next_hop": "10.10.0.1",
+                      "persistent": true,
+                      "route_metric": 256.0
+                    }
+                  ],
+                  "status": "VERIFIED",
+                  "target_mac": "00:50:56:3e:91:83",
+                  "interface_metric": {
+                    "automatic": true
+                  }
+                }
+              ],
+              "status": "VERIFIED"
+            }
+          }
+        },
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      },
+      "boot_scope_changed": true,
+      "boot_id_changed": true,
+      "actual_domain": {
+        "name": "v2k-i91-win2022-scsi-20261127-r2",
+        "id": "5182a750-b7a4-41b2-afd9-0de91df8d05b",
+        "instance": "i-2-335-VM",
+        "firmware": "efi",
+        "disks": [
+          {
+            "device": "sda",
+            "bus": "scsi",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "1d74e850139c4d6ea9bd",
+            "source": "/mnt/glue-gfs/v2k-i91-win2022-scsi-20261127-r2-disk0.qcow2"
+          },
+          {
+            "device": "sdb",
+            "bus": "scsi",
+            "format": "qcow2",
+            "cache": "writeback",
+            "serial": "e19e5bf6930544d78c6e",
+            "source": "/mnt/glue-gfs/v2k-i91-win2022-scsi-20261127-r2-disk1.qcow2"
+          }
+        ],
+        "nics": [
+          {
+            "mac": "00:50:56:3e:91:83",
+            "model": "virtio",
+            "bridge": "bridge0"
+          }
+        ],
+        "qga_channel": true,
+        "verified": true
+      },
+      "initial_host": "ablecube13-3",
+      "final_host": "ablecube13-1"
+    }
+  ],
+  "qualified_cases": 6,
+  "validated_date": "2026-11-27",
+  "tools_implementation_commit": "20114b087130efc4cf238ca47dba84e73f736ee3",
+  "cloud_implementation_commit": "55161d9ae325bb74d31a4a55d63b12f62d9f8720",
+  "scope": "Windows Server 2022 build 20348 / Mold cluster13 GFS2 file-qcow2 / L2 IPv4",
+  "gateway": "10.10.0.1",
+  "dns": [
+    "8.8.8.8",
+    "8.8.4.4"
+  ],
+  "baseline": {
+    "baseline_count": 132,
+    "final_count": 140,
+    "baseline_drift_count": 0,
+    "differences": []
+  },
+  "source_states": {
+    "vmware": [
+      {
+        "name": "v2k-tst-ubuntu2204-ide-bios",
+        "uuid": "4235cd4a-30cf-46b6-d99b-b0d892bbd147",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-ubuntu2204-sata-uefi",
+        "uuid": "42356c86-0a37-78a3-a5a0-c43dc55f562d",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-ubuntu2204-scsi-uefi",
+        "uuid": "4235044d-e54b-6093-48ca-1d2a6c6964a2",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-win2022-ide-bios",
+        "uuid": "4235ccb4-7751-4405-f44d-a0cc59250f8f",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-win2022-sata-uefi",
+        "uuid": "423574d2-d33a-44a3-5d14-324aa3861c95",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-win2022-scsi-uefi",
+        "uuid": "42354a9e-847c-cce4-21d1-6c232e0c5dfa",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-rocky97-ide-bios",
+        "uuid": "4235e748-3952-a3c2-f86d-2a5eebddcbf8",
+        "state": "poweredOn",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-rocky97-sata-uefi",
+        "uuid": "42353f0f-0c7c-00f0-aa80-3e963dd65f96",
+        "state": "poweredOn",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-tst-rocky97-scsi-uefi",
+        "uuid": "4235ae3a-da7e-59bd-4d8e-e229f1857fa0",
+        "state": "poweredOn",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-i91-src-win2022-ide-bios",
+        "uuid": "4235bf7b-5025-766d-7b3a-a3e8022af333",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-i91-src-win2022-sata-uefi",
+        "uuid": "4235fa5c-3394-0c3d-4291-43395f16842d",
+        "state": "poweredOff",
+        "snapshots": 0
+      },
+      {
+        "name": "v2k-i91-src-win2022-scsi-uefi",
+        "uuid": "42352da1-fcf4-d9bf-b93d-a6117f7b7d76",
+        "state": "poweredOff",
+        "snapshots": 0
+      }
+    ],
+    "nutanix": [
+      {
+        "name": "n2k-ubuntu-scsi-01",
+        "uuid": "a8f0dfeb-af22-4acc-542b-13ac9d9c8cbc",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-rocky-scsi-01",
+        "uuid": "9fb9705d-8a87-41da-71cc-66e7fc2e58b4",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-i91-src-win2022-sata-20261127",
+        "uuid": "b7344e07-8dbf-46b2-9d32-97093fa5ccc9",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-win2022-ide-01",
+        "uuid": "4444fe27-aebb-4a98-5e1c-8e0bc87251b3",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-win2022-sata-01",
+        "uuid": "c6ca4ef4-ac14-4435-68ae-4ef776a1c18e",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-win2022-scsi-01",
+        "uuid": "342e9837-4861-40cf-46fc-fc5a86cb6f76",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-i91-src-win2022-ide-20261127",
+        "uuid": "56f85c28-3eba-46f6-8412-a1b8806c65e3",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-ubuntu-ide-01",
+        "uuid": "0b1973aa-b20d-4204-7b8a-558f36d08637",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-ubuntu-sata-01",
+        "uuid": "11a856b3-74e6-4c78-6a1f-3c228fd4ce45",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-rocky-ide-01",
+        "uuid": "3118e3a4-e0b1-44f6-46db-eb26171ba800",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-rocky-sata-01",
+        "uuid": "71972fa5-bbf5-4546-519c-83150cb0fa18",
+        "state": "OFF"
+      },
+      {
+        "name": "n2k-i91-src-win2022-scsi-20261127",
+        "uuid": "e8f7acbb-3373-4e1c-ad87-abcfcafbf914",
+        "state": "OFF"
+      }
+    ]
+  },
+  "ip_conflict_check": {
+    "addresses": [
+      "10.10.21.81",
+      "10.10.21.82",
+      "10.10.21.83"
+    ],
+    "inventory_hits": [],
+    "probes": [
+      {
+        "address": "10.10.21.81",
+        "route": {
+          "dst": "10.10.21.81",
+          "dev": "bridge0",
+          "prefsrc": "10.10.13.1",
+          "flags": [],
+          "uid": 0,
+          "cache": []
+        },
+        "arp_dad_exit": 0,
+        "arp_stdout": "ARPING 10.10.21.81 from 0.0.0.0 bridge0\nSent 4 probes (4 broadcast(s))\nReceived 0 response(s)\n",
+        "arp_stderr": "",
+        "icmp_exit": 1,
+        "neighbor": [
+          {
+            "dst": "10.10.21.81",
+            "dev": "bridge0",
+            "state": [
+              "INCOMPLETE"
+            ]
+          }
+        ]
+      },
+      {
+        "address": "10.10.21.82",
+        "route": {
+          "dst": "10.10.21.82",
+          "dev": "bridge0",
+          "prefsrc": "10.10.13.1",
+          "flags": [],
+          "uid": 0,
+          "cache": []
+        },
+        "arp_dad_exit": 0,
+        "arp_stdout": "ARPING 10.10.21.82 from 0.0.0.0 bridge0\nSent 4 probes (4 broadcast(s))\nReceived 0 response(s)\n",
+        "arp_stderr": "",
+        "icmp_exit": 1,
+        "neighbor": [
+          {
+            "dst": "10.10.21.82",
+            "dev": "bridge0",
+            "state": [
+              "INCOMPLETE"
+            ]
+          }
+        ]
+      },
+      {
+        "address": "10.10.21.83",
+        "route": {
+          "dst": "10.10.21.83",
+          "dev": "bridge0",
+          "prefsrc": "10.10.13.1",
+          "flags": [],
+          "uid": 0,
+          "cache": []
+        },
+        "arp_dad_exit": 0,
+        "arp_stdout": "ARPING 10.10.21.83 from 0.0.0.0 bridge0\nSent 4 probes (4 broadcast(s))\nReceived 0 response(s)\n",
+        "arp_stderr": "",
+        "icmp_exit": 1,
+        "neighbor": [
+          {
+            "dst": "10.10.21.83",
+            "dev": "bridge0",
+            "state": [
+              "INCOMPLETE"
+            ]
+          }
+        ]
+      }
+    ],
+    "vcenter_vms_checked": 41,
+    "prism_vms_checked": 13
+  },
+  "credential_audit": {
+    "checked_files": 411,
+    "credential_matches": 0,
+    "paths": []
+  },
+  "linux_v1_regression": {
+    "verified": 6
+  },
+  "cloud_tests": [
+    {
+      "suite": "com.cloud.storage.VolumeAllocationImportTest",
+      "tests": 5,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.MigrationGuestConfigurationPolicyTest",
+      "tests": 3,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.MigrationWindowsNetworkPolicyTest",
+      "tests": 5,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.VolumeAllocationLifecycleTest",
+      "tests": 13,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.VolumeAllocationCloneTest",
+      "tests": 6,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.VolumeAllocationPolicyTest",
+      "tests": 13,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.MigrationDiskControllerPolicyTest",
+      "tests": 5,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.agent.api.MigrationGuestConfigurationCommandTest",
+      "tests": 2,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "org.apache.cloudstack.storage.volume.VolumeImportUnmanageManagerImplTest",
+      "tests": 27,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.MigrationDiskControllerManagerImplTest",
+      "tests": 6,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.VolumeAllocationManagerImplTest",
+      "tests": 30,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.storage.MigrationGuestConfigurationManagerImplTest",
+      "tests": 7,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.hypervisor.kvm.storage.MigrationDiskControllerGuardTest",
+      "tests": 8,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.hypervisor.kvm.storage.Gfs2VolumeAllocationTest",
+      "tests": 44,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.hypervisor.kvm.storage.MigrationGuestConfigurationExchangeTest",
+      "tests": 13,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.cloud.hypervisor.kvm.storage.Gfs2VolumeImportAllocationTest",
+      "tests": 7,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    }
+  ],
+  "ui": "200\nactive",
+  "failed_targets_retained_stopped": [
+    "1adabd06-1e80-4d0b-9775-1bcdcb5963aa",
+    "ee3bc640-acd2-4f5c-aca7-892430c6531b"
+  ],
+  "owned_n2k_point_cleanup": {
+    "source_vm_uuid": "56f85c28-3eba-46f6-8412-a1b8806c65e3",
+    "owned_points": [
+      "bc5bfc05-a50d-4708-aa76-fd5330249034",
+      "4e035138-caa6-4145-a56e-ff16483e87c4",
+      "60c67e64-283b-45b6-b751-0d3a7165de61"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}
