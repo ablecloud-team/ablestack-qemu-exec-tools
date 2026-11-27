@@ -379,7 +379,7 @@ checkpoint="$(n2k_cloud_target_existing_checkpoint_json "${checkpoint_manifest}"
 reentry_manifest="${WORK_DIR}/reentry-manifest.json"
 cat >"${reentry_manifest}" <<'JSON'
 {
-  "target":{"storage":{"type":"rbd"},"format":"raw"},
+  "target":{"provider":"ablestack-cloud","storage":{"type":"rbd"},"format":"raw"},
   "disks":[{"disk_id":"root","transfer":{"target_path":"rbd:pool/root"}}],
   "runtime":{"cloud":{"checkpoint":{"complete":false,"stage":"root-imported","root_volume_id":"root-1"}}}
 }
@@ -400,6 +400,17 @@ n2k_cloud_target_required_config_json() {
 # shellcheck disable=SC2317
 n2k_cloud_target_validate_config() {
   return 0
+}
+# Cache policy is verified even for a legacy RBD handoff without allocation intent.
+# shellcheck disable=SC2317
+n2k_cloud_api_get() {
+  case "$4" in
+    listStoragePools) printf '%s' '{"liststoragepoolsresponse":{"storagepool":[{"id":"storage-1","type":"RBD","scope":"ZONE"}]}}' ;;
+    listDiskOfferings) printf '%s' '{"listdiskofferingsresponse":{"diskoffering":[{"id":"offering-1","storagetype":"shared","cachemode":"writeback","iscustomized":true,"state":"Active"}]}}' ;;
+    listVolumes) printf '%s' '{"listvolumesresponse":{"volume":[{"id":"root-1","virtualmachineid":"vm-resumed","deviceid":0,"state":"Ready","cachemode":"writeback"}]}}' ;;
+    listServiceOfferings) printf '%s' '{"listserviceofferingsresponse":{"serviceoffering":[]}}' ;;
+    *) echo "Unexpected fixture API: $4" >&2; return 91 ;;
+  esac
 }
 # shellcheck disable=SC2317
 n2k_cloud_target_source_deploy_params_json() {
@@ -446,7 +457,11 @@ n2k_cloud_target_cutover \
 jq -e '
   .runtime.cloud.vm_id == "vm-resumed"
   and .runtime.cloud.root_volume_id == "root-1"
-  and .runtime.cloud.checkpoint.complete == true
+  and .runtime.cloud.checkpoint.complete == false
+  and .runtime.cloud.validated == false
+  and .runtime.cloud.retention.status == "RETAINED_UNVERIFIED"
+  and .runtime.cloud.cache.requested == "writeback"
+  and .runtime.cloud.cache.verified == true
 ' "${reentry_manifest}" >/dev/null
 
 echo "[OK] n2k changed-region, cutover, RBD staging, and Cloud checkpoint integrity passed"
