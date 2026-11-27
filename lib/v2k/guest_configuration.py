@@ -13,6 +13,7 @@ import re
 import uuid
 
 from guest_configuration_networkmanager import supported_linux, validate_keyfiles
+from guest_configuration_windows_network import FEATURE, build as windows_network, validate as validate_windows_network
 
 VERSION = 1
 MAX_BYTES = 65536
@@ -46,10 +47,12 @@ def seal(value):
 def verify(plan):
     if (
         not isinstance(plan, dict)
-        or plan.get("version") != VERSION
+        or plan.get("version") not in (1, 2)
         or plan.get("policy") != "preserve"
         or plan.get("os") not in ROOTS
     ):
+        fail("GUEST_CONFIG_PLAN_INVALID")
+    if plan["version"] == 2 and plan["os"] != "windows":
         fail("GUEST_CONFIG_PLAN_INVALID")
     uuid.UUID(plan["operation_id"])
     uuid.UUID(plan["source_vm_uuid"])
@@ -78,6 +81,12 @@ def verify(plan):
         if not seen:
             fail("NIC_MAPPING_AMBIGUOUS")
     else:
+        if plan["version"] == 2:
+            if plan.get("helper_version") != 2 or plan.get("required_features") != [FEATURE] or plan.get("os_version") != "20348":
+                fail("GUEST_CONFIG_PLAN_INVALID")
+            validate_windows_network(plan.get("network"))
+        elif plan.get("network") or plan.get("required_features"):
+            fail("GUEST_CONFIG_PLAN_INVALID")
         ids = set()
         guids = set()
         letters = set()
@@ -265,6 +274,7 @@ def build(manifest, capture, inspected, configs=()):
             "source_cdrom_letters": capture.get("cdrom_letters", []),
             "reserved_letters": capture.get("reserved_letters", []),
         }
+        plan.update(version=2, helper_version=2, required_features=[FEATURE], network=windows_network(manifest, capture))
     return verify(seal(plan))
 
 
@@ -309,6 +319,8 @@ def validate_capture(capture, source_uuid):
                 fail("SOURCE_CONFIG_INVALID")
     elif capture.get("os") != "windows" or str(capture.get("build")) != "20348":
         fail("GUEST_OS_UNSUPPORTED")
+    else:
+        validate_windows_network(capture.get("network"))
     return capture
 
 
@@ -343,6 +355,8 @@ def preview_capture(manifest):
             )
     else:
         print("  Global SAN policy remains " + capture["san_policy"])
+        for nic in windows_network(manifest, capture)["interfaces"]:
+            print("  Windows NIC " + json.dumps(nic, sort_keys=True))
         for disk in capture["disks"]:
             if disk["is_boot"]:
                 continue

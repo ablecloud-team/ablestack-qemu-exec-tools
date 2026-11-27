@@ -15,6 +15,9 @@ on:
       - "tests/v2k_guest_networkmanager_test.py"
       - "tools/v2k/prepare-guest-config-rocky.py"
       - "tests/v2k_windows_storage_test.ps1"
+      - "tests/v2k_windows_network_test.ps1"
+      - "tests/v2k_guest_windows_network_test.py"
+      - "tests/fixtures/v2k/windows-network.json"
       - "tests/v2k_controller_policy_test.py"
       - "tests/v2k_cloud_handoff_resume_test.py"
       - "tests/image_preallocation_test.py"
@@ -78,3 +81,6 @@ jobs:
       - name: Windows storage policy and owned rollback
         shell: powershell
         run: .\tests\v2k_windows_storage_test.ps1
+      - name: Windows network policy, DAD and owned recovery
+        shell: powershell
+        run: .\tests\v2k_windows_network_test.ps1

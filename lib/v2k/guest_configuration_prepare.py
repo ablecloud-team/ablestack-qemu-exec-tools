@@ -277,6 +277,9 @@ def _prepare(manifest_path, payload):
                 / ("linux-helper.py" if plan["os"] == "linux" else "windows-helper.ps1")
             ).read_bytes()
         ).hexdigest()
+        if plan["os"] == "windows" and plan["version"] == 2:
+            for field, name in [("network_reader_sha256", "windows-network-read.ps1"), ("network_helper_sha256", "windows-network.ps1")]:
+                plan[field] = file_sha(payload / name)
         if plan.get("os_id") == "rocky":
             plan["network_preparer_sha256"] = hashlib.sha256((payload / "prepare-networkmanager.py").read_bytes()).hexdigest()
         plan = verify(seal(plan))
@@ -302,6 +305,10 @@ def _prepare(manifest_path, payload):
         fail("GUEST_HELPER_FROZEN_VERSION_CHANGED")
     if plan.get("network_preparer_sha256") and hashlib.sha256((payload / "prepare-networkmanager.py").read_bytes()).hexdigest() != plan["network_preparer_sha256"]:
         fail("GUEST_NETWORK_HELPER_FROZEN_VERSION_CHANGED")
+    if plan["os"] == "windows" and plan["version"] == 2:
+        for field, name in [("network_reader_sha256", "windows-network-read.ps1"), ("network_helper_sha256", "windows-network.ps1")]:
+            if file_sha(payload / name) != plan[field]:
+                fail("GUEST_NETWORK_HELPER_FROZEN_VERSION_CHANGED")
     base = (
         "/var/lib/ablestack-v2k/guest-config"
         if plan["os"] == "linux"
@@ -416,6 +423,9 @@ def _prepare(manifest_path, payload):
                 base + "/payload/qemu-ga-x86_64.msi",
             )
             image.upload(str(payload / "windows-helper.ps1"), base + "/helper.ps1")
+            if plan["version"] == 2:
+                for name in ["windows-network-read.ps1", "windows-network.ps1"]:
+                    image.upload(str(payload / name), base + "/" + name)
             image.upload(
                 str(payload / "windows-bootstrap.ps1"), base + "/bootstrap.ps1"
             )
@@ -441,6 +451,10 @@ def _prepare(manifest_path, payload):
         name = "helper.py" if plan["os"] == "linux" else "helper.ps1"
         if image.call("checksum", "sha256", base + "/" + name) != plan["helper_sha256"]:
             fail("GUEST_HELPER_STAGING_HASH_MISMATCH")
+        if plan["os"] == "windows" and plan["version"] == 2:
+            for field, name in [("network_reader_sha256", "windows-network-read.ps1"), ("network_helper_sha256", "windows-network.ps1")]:
+                if image.call("checksum", "sha256", base + "/" + name) != plan[field]:
+                    fail("GUEST_HELPER_STAGING_HASH_MISMATCH")
     args = ["virt-customize", "--no-network", "--format", fmt, "-a", root_path]
     if plan["os"] == "linux":
         if install and plan.get("os_id") == "rocky":

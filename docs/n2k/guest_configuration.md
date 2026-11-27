@@ -27,3 +27,24 @@ Mold의 실제 XML·ROOT/DATA UUID·형식·슬롯·펌웨어와 QGA 보고서�
 n2k RPM/DEB에는 같은 소스에서 복사한 공통 정책/게스트 helper를 포함한다. 네이티브 libguestfs·appliance·OS별 QGA·Windows catalog payload는 자격 검증된 별도 실행환경이 필요하다. `N2K_PYTHON_BIN`으로 transport interpreter를 지정하거나 설치 경로의 private runtime을 사용할 수 있다. Guest payload 기본 경로는 기존 `/usr/share/ablestack/v2k/guest-config`이며 Ubuntu 버전에 따라 ubuntu22/ubuntu24를 선택한다. wire v1의 V2K 파일 경로는 Mold 호환성을 위해 유지한다.
 
 [13번 GFS2 검증 결과](../validation/issue90-n2k-cluster13-20261127.md)에 최초 실행·보완 코드 반영·재개·다른 호스트 재기동 결과를 구분한다. 공식 Release/전체 오프라인 RPM 설치 인증, 직접 libvirt 및 RAW/RBD의 새 guest 복원 자격과 구분한다.
+
+
+## Windows IPv4 자동 복원 계약 v2 (#91)
+
+신규 Windows Server 2022(build 20348) 작업의 `--guest-config-policy preserve`는 DATA와 함께 NIC의 정적 IPv4/prefix, 기본 게이트웨이·route metric, 자동/수동 interface metric 정책, DNS 방식·서버 순서를 보존한다. 원본이 DHCP이면 lease 숫자를 고정하지 않고 DHCP 방식을 유지한다. IP의 DHCP 여부와 DNS의 자동/수동 여부는 별개다.
+
+공통 읽기 전용 probe는 VMware Tools Guest Operations 또는 Nutanix의 승인된 WinRM으로 실행한다. source NIC MAC·InterfaceGuid·PnP 정보를 수집하고 원본 VM UUID를 검증한다. VMware Windows의 SMBIOS UUID 표현은 원본 vCenter BIOS UUID와 일치하거나 그 UUID의 알려진 byte-order 표현인 경우만 수용하며 원래 guest 표현도 기록한다.
+
+Nutanix는 OS를 계정명으로 추정하지 않는다. 인벤토리에서 OS를 확인할 수 없는 비대화형 작업에는 `--source-guest-os windows` 또는 `linux`를 지정한다. Wizard는 OS를 선택받고 이후 SSH/WinRM 인증을 수집한다. 미리보기는 probe 실행·비밀번호 FD 소비 없이 명령과 미검증 항목을 출력한다.
+
+계획/helper/report/binding의 v2와 `windows-network-ipv4-v1` 기능을 관리 서버·실제 KVM Agent에서 확인한다. 지원 작업은 현재 Mold GFS2/file-qcow2와 L2 네트워크다. IPAM 네트워크는 원본 IP 예약을 지원하는 어댑터가 검증되기 전까지 사전 차단한다. 기존 v1 Linux·Windows DATA-only 계획은 자동 변환하지 않는다.
+
+대상 첫 부팅 SYSTEM 작업은 실제 Mold NIC UUID/network UUID/MAC과 현재 guest 장치를 결합한다. PnP/link 준비를 기다린 후 대상 NIC만 변경한다. 동일 source GUID/PnP/IP의 non-present 이전 장치만 제한적으로 처리하며 다른 NIC의 IP 점유는 충돌로 중단한다. 전체 NIC 초기화나 전역 TCP/IP reset은 수행하지 않는다.
+
+대상 설정은 WinRM/RDP 연결 없이 적용하고, 기존 QGA 파일 RPC로 관측한다. 원본 OFF 확인 후 같은 IP/MAC의 대상을 시작한다. 수동 IPv6, 팀/브리지/VLAN/VPN, 정책 DNS, 모호한 대응은 전용 검증 없이 평탄화하지 않는다. IPv6의 기본 자동 동작은 유지한다.
+
+`complete=true`는 기존 preallocation/controller/DATA와 필요한 모든 Windows NIC의 주소·gateway·DNS가 실제 보고서에서 VERIFIED일 때만 기록한다. 정적 주소의 DAD Preferred와 지속 설정도 확인한다. 재부팅·호스트 이동 시 새 binding/boot scope로 읽기 전용 관측하며 이후 사용자가 바꾼 IP/DNS를 되돌리지 않는다. `off`와 기존 DATA-only 기록은 Windows 네트워크 복원 성공으로 표시하지 않는다.
+
+반입 이후 계획 hash/helper를 교체하거나 관리 이미지를 오프라인 재개방하지 않는다. v2 canonical JSON은 자동 metric의 명시적인 null을 보존한다. 초기 저장 경로에서 누락된 null은 원래 SHA-256이 정확히 재현되는 경우에만 읽기 시 복원하며 정책이나 저장된 hash를 변경하지 않는다.
+
+이전 NIC 제거가 3010(재부팅 필요)으로 끝나거나 비동기 IP 점유 해제가 지연되면, 종료 코드를 journal에 남기고 최대 1회만 제어된 게스트 재부팅을 수행한다. 재부팅 전에는 새 NIC의 IP를 변경하지 않는다. 새 guest boot와 새 binding challenge를 확인한 뒤 같은 계획으로 재개한다. 게스트 내부 재부팅은 QEMU PID가 같을 수 있으므로 Agent는 결합된 재부팅 요청에만 nonce를 한 번 갱신한다. 그 뒤에도 충돌이 남으면 자동 재부팅을 반복하지 않고 복구 필요로 중단한다.

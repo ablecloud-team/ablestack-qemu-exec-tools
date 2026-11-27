@@ -4,6 +4,23 @@
 import argparse,base64,hashlib,json,os,shlex,sys,time,uuid
 from pathlib import Path
 
+def run_fixed_powershell(session, script):
+    """Avoid cmd.exe's encoded-command limit; stage only a private owned probe."""
+    folder=r'C:\Windows\Temp\ABLECLOUD-Capture-'+str(uuid.uuid4())
+    path=folder+r'\probe.ps1'
+    def ps(code):
+        reply=session.run_ps(code)
+        if reply.status_code:raise ValueError('SOURCE_GUEST_PROBE_FAILED')
+        return reply
+    try:
+        ps("$ErrorActionPreference='Stop';$p='"+folder+"';New-Item -ItemType Directory -Path $p|Out-Null;$acl=New-Object Security.AccessControl.DirectorySecurity;$acl.SetSecurityDescriptorSddlForm('O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)');[IO.Directory]::SetAccessControl($p,$acl)")
+        payload=base64.b64encode(script.encode('utf-8-sig')).decode()
+        for offset in range(0,len(payload),1200):
+            ps("[IO.File]::AppendAllText('"+path+".b64','"+payload[offset:offset+1200]+"')")
+        return ps("[IO.File]::WriteAllBytes('"+path+"',[Convert]::FromBase64String([IO.File]::ReadAllText('"+path+".b64'))); & '"+path+"' -OutputMode stdout")
+    finally:
+        session.run_ps("Remove-Item -LiteralPath '"+path+"','"+path+".b64' -Force -ErrorAction SilentlyContinue;if((Test-Path -LiteralPath '"+folder+"') -and @(Get-ChildItem -LiteralPath '"+folder+"' -Force).Count -eq 0){Remove-Item -LiteralPath '"+folder+"' -Force}")
+
 def collect(manifest,common):
     vm=manifest['source']['vm']; expected=str(uuid.UUID(vm['uuid']))
     host=os.environ.get('N2K_SOURCE_GUEST_HOST','')
@@ -12,13 +29,19 @@ def collect(manifest,common):
         if len(addresses)!=1:raise ValueError('SOURCE_GUEST_ADDRESS_REQUIRED')
         host=next(iter(addresses))
     user=os.environ['N2K_SOURCE_GUEST_USER']; password=os.environ['N2K_SOURCE_GUEST_PASSWORD']
-    if user.lower().split('\\')[-1]=='administrator':
+    os_kind=os.environ.get('N2K_SOURCE_GUEST_OS') or manifest['source'].get('guest_configuration',{}).get('os')
+    if not os_kind:
+        family=vm.get('guestFamily','');guest_id=str(vm.get('guest_id','')).lower()
+        if family=='windowsGuest' or guest_id.startswith('win'):os_kind='windows'
+        elif family=='linuxGuest':os_kind='linux'
+    if os_kind not in ['linux','windows']:raise ValueError('SOURCE_GUEST_OS_REQUIRED')
+    if os_kind=='windows':
         import winrm
         session=winrm.Session('http://'+host+':5985/wsman',auth=(user,password),transport='ntlm',operation_timeout_sec=60,read_timeout_sec=75)
-        script=(common/'guest-config/source-windows.ps1').read_text(encoding='utf-8-sig')
-        script=script.replace('param([Parameter(Mandatory=$true)][string]$OutputPath)','')
-        script=script.replace("$r|ConvertTo-Json -Depth 10 -Compress|Out-File -LiteralPath $OutputPath -Encoding UTF8", "$r.source_vm_uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID.ToLower();$r|ConvertTo-Json -Depth 10 -Compress")
-        reply=session.run_ps(script)
+        sys.path.insert(0,str(common))
+        from guest_configuration_windows_network import source_script
+        script=source_script(common)
+        reply=run_fixed_powershell(session,script)
         if reply.status_code:raise ValueError('SOURCE_GUEST_PROBE_FAILED')
         raw=reply.std_out
     else:

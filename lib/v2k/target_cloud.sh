@@ -1365,7 +1365,7 @@ v2k_cloud_target_cutover() {
   storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
   disk_offering_id="$(jq -r '.disk_offering_id // ""' <<<"${cfg}")"
   owner_params="$(v2k_cloud_target_optional_owner_params "${cfg}")"
-  if jq -e '.target.guest_configuration_plan.version==1 and (.runtime.cloud.checkpoint.vm_id // "")!=""' "$manifest" >/dev/null; then
+  if jq -e '(.target.guest_configuration_plan.version==1 or .target.guest_configuration_plan.version==2) and (.runtime.cloud.checkpoint.vm_id // "")!=""' "$manifest" >/dev/null; then
     local guest_existing_id guest_existing_vm
     guest_existing_id="$(jq -r '.runtime.cloud.checkpoint.vm_id' "$manifest")"
     guest_existing_vm="$(v2k_cloud_target_vm_json "$endpoint" "$api_key" "$secret_key" "$guest_existing_id")" || return $?
@@ -1814,7 +1814,7 @@ v2k_cloud_target_source_deploy_params_json() {
   base="$(v2k_cloud_target_source_deploy_params_legacy_json "$@")" || return $?
   if jq -e '.target.disk_controller_plan.version == 1' "$1" >/dev/null; then
     plan="$(v2k_controller_python params --manifest "$1")" || return $?
-    if jq -e ' .target.guest_configuration_plan.version==1' "$1" >/dev/null; then
+    if jq -e ' (.target.guest_configuration_plan.version==1 or .target.guest_configuration_plan.version==2)' "$1" >/dev/null; then
       local guest_params
       guest_params="$(v2k_guest_config_python guest_configuration.py params --manifest "$1")" || return $?
       plan="$(jq -nc --argjson p "$plan" --argjson g "$guest_params" '$p+$g')"

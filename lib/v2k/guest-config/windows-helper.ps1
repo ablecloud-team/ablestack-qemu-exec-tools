@@ -12,6 +12,13 @@ trap {
 
 $plan=Get-Content -LiteralPath "$root\plan.json" -Raw|ConvertFrom-Json
 if((Get-FileHash -Algorithm SHA256 $PSCommandPath).Hash.ToLower() -ne $plan.helper_sha256){throw 'GUEST_HELPER_HASH_MISMATCH'}
+if($plan.version -eq 2){
+ foreach($module in @(@{name='windows-network-read.ps1';hash=$plan.network_reader_sha256},@{name='windows-network.ps1';hash=$plan.network_helper_sha256})){
+  $path=Join-Path $root $module.name
+  if((Get-FileHash -Algorithm SHA256 $path).Hash.ToLower() -ne $module.hash){throw 'GUEST_NETWORK_HELPER_HASH_MISMATCH'}
+  . $path
+ }
+}
 $watch=[Diagnostics.Stopwatch]::StartNew()
 $boot=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
 $journalPath="$root\journal.json"
@@ -80,7 +87,9 @@ function Change-State($type,$id,$before,$after,[scriptblock]$apply){
 }
 if(!$journal.PSObject.Properties['recovery_attempted']){$journal|Add-Member -NotePropertyName recovery_attempted -NotePropertyValue $false}
 if(!$journal.PSObject.Properties['failed']){$journal|Add-Member -NotePropertyName failed -NotePropertyValue $false}
-if(!$journal.verified -and @($journal.steps).Count -gt 0){$journal.failed=$true;Save-Json 'journal.json' $journal}
+if(!$journal.PSObject.Properties['applied']){$journal|Add-Member -NotePropertyName applied -NotePropertyValue $false}
+$controlledResume=(!$journal.verified -and !$journal.failed -and $journal.PSObject.Properties['network_reboot'] -and $journal.network_reboot.awaiting -and $journal.network_reboot.count -eq 1 -and $journal.network_reboot.boot_id -ne $boot)
+if(!$journal.verified -and @($journal.steps).Count -gt 0 -and !$controlledResume){$journal.failed=$true;Save-Json 'journal.json' $journal}
 
 function Recover-OwnedChanges($items){
  for($index=$journal.steps.Count-1;$index -ge 0;$index--){
@@ -120,7 +129,9 @@ function Recover-OwnedChanges($items){
     if(@(Get-CimInstance Win32_Volume|Where-Object {$_.DriveLetter -eq $step.before}).Count){throw 'GUEST_RECOVERY_CONFLICT'}
     $volume[0]|Set-CimInstance -Property @{DriveLetter=$step.before}|Out-Null;$step.state='ROLLED_BACK'
    }
-  }else{throw 'GUEST_RECOVERY_CONFLICT'}
+   }elseif($step.type -in @('network-ipv4','network-ghost')){
+    Recover-V2KNetworkStep $step $script:networkItems
+   }else{throw 'GUEST_RECOVERY_CONFLICT'}
   Save-Json 'journal.json' $journal
  }
 }
@@ -183,19 +194,48 @@ while($true){
   $binding=$envelope.value
   if($last -eq $envelope.sha256){Start-Sleep -Seconds 2;continue}
   Assert-BindingIdentity $binding
+   if($controlledResume){
+    if($binding.vm_uuid -ne $journal.network_reboot.vm_uuid){throw 'GUEST_REBOOT_IDENTITY_MISMATCH'}
+    if($envelope.sha256 -eq $journal.network_reboot.binding_sha256){
+     if($watch.Elapsed.TotalSeconds -ge $TimeoutSeconds){throw 'GUEST_CONFIG_TIMEOUT'}
+     Start-Sleep -Seconds 2;continue
+    }
+    $journal.network_reboot.awaiting=$false;$controlledResume=$false;Save-Json 'journal.json' $journal
+   }
   if(!$journal.verified -and $watch.Elapsed.TotalSeconds -ge $TimeoutSeconds){throw 'GUEST_CONFIG_TIMEOUT'}
   $policy=(Get-StorageSetting).NewDiskPolicy.ToString()
   if($policy -ne $plan.windows.san_policy){throw 'GLOBAL_SAN_POLICY_CHANGED'}
   $items=@(Get-ExpectedDisks $binding)
   if($journal.failed){throw 'GUEST_JOURNAL_RECOVERY_REQUIRED'}
-  if(!$journal.verified){Apply-Data $items $binding}
+   $script:networkItems=@()
+   if($plan.version -eq 2){$script:networkItems=@(Get-V2KExpectedNetwork $binding)}
+   if(!$journal.verified -and !$journal.applied){
+    Apply-Data $items $binding
+    $script:networkRebootRequested=$false
+    if($plan.version -eq 2){Apply-V2KNetwork $script:networkItems}
+    if($script:networkRebootRequested){
+     if($journal.PSObject.Properties['network_reboot']){throw 'WINDOWS_NETWORK_GHOST_RECOVERY_REQUIRED'}
+     $journal|Add-Member -NotePropertyName network_reboot -NotePropertyValue ([pscustomobject]@{count=1;awaiting=$true;boot_id=$boot;vm_uuid=$binding.vm_uuid;binding_sha256=$envelope.sha256;reason='owned-network-ghost'})
+     Save-Json 'journal.json' $journal
+     Save-Json 'report.json' @{version=$plan.version;operation_id=$plan.operation_id;plan_hash=$plan.hash;vm_uuid=$binding.vm_uuid;binding_sha256=$envelope.sha256;boot_scope=$binding.boot_scope;boot_id=$boot;root_identity=$plan.root_identity;helper_sha256=$plan.helper_sha256;status='PENDING';reason='WINDOWS_NETWORK_REBOOT_REQUIRED'}
+     Restart-Computer -Force
+     exit 0
+    }
+    $journal.applied=$true;Save-Json 'journal.json' $journal
+   }
   $observed=@(Observe-Data $items)
+   $network=@{status='NOT_APPLICABLE'}
+   if($plan.version -eq 2){$network=Observe-V2KNetwork $script:networkItems}
   if((Get-StorageSetting).NewDiskPolicy.ToString() -ne $policy){throw 'GLOBAL_SAN_POLICY_CHANGED'}
   $journal.verified=$true;Save-Json 'journal.json' $journal
-  Save-Json 'report.json' @{version=1;operation_id=$plan.operation_id;plan_hash=$plan.hash;vm_uuid=$binding.vm_uuid;binding_sha256=$envelope.sha256;boot_scope=$binding.boot_scope;boot_id=$boot;root_identity=$plan.root_identity;helper_sha256=$plan.helper_sha256;status='VERIFIED';network=@{status='NOT_APPLICABLE'};windows=@{status='VERIFIED';san_policy=$policy;disks=$observed};mutations=$journal.steps}
+   Save-Json 'report.json' @{version=$plan.version;operation_id=$plan.operation_id;plan_hash=$plan.hash;vm_uuid=$binding.vm_uuid;binding_sha256=$envelope.sha256;boot_scope=$binding.boot_scope;boot_id=$boot;root_identity=$plan.root_identity;helper_sha256=$plan.helper_sha256;network_reader_sha256=$plan.network_reader_sha256;network_helper_sha256=$plan.network_helper_sha256;status='VERIFIED';network=$network;windows=@{status='VERIFIED';san_policy=$policy;disks=$observed};mutations=$journal.steps}
   $last=$envelope.sha256
  }catch{
   if(!$binding -and $script:attemptBinding){$binding=$script:attemptBinding;$envelope=@{sha256=$script:attemptHash}}
+   if(!$journal.verified -and $_.Exception.Message -in @('WINDOWS_NETWORK_LINK_PENDING','WINDOWS_NETWORK_ADDRESS_PENDING','WINDOWS_NETWORK_DNS_PENDING') -and $watch.Elapsed.TotalSeconds -lt $TimeoutSeconds){
+    if($binding){Save-Json 'report.json' @{version=$plan.version;operation_id=$plan.operation_id;plan_hash=$plan.hash;vm_uuid=$binding.vm_uuid;binding_sha256=$envelope.sha256;boot_scope=$binding.boot_scope;boot_id=$boot;root_identity=$plan.root_identity;status='PENDING';reason=$_.Exception.Message}}
+    Start-Sleep -Seconds 2;continue
+   }
   if(!$journal.verified -and @($journal.steps).Count -gt 0){
    $journal.failed=$true;Save-Json 'journal.json' $journal
    if($items.Count -gt 0 -and !$journal.recovery_attempted){
@@ -203,7 +243,7 @@ while($true){
     try{Recover-OwnedChanges $items}catch{Save-Json 'journal.json' $journal}
    }
   }
-  if($binding){Save-Json 'report.json' @{version=1;operation_id=$plan.operation_id;plan_hash=$plan.hash;vm_uuid=$binding.vm_uuid;binding_sha256=$envelope.sha256;boot_scope=$binding.boot_scope;boot_id=$boot;root_identity=$plan.root_identity;status=($(if($journal.verified){'DRIFT'}else{'FAILED'}));reason=$_.Exception.Message}}
+   if($binding){Save-Json 'report.json' @{version=$plan.version;operation_id=$plan.operation_id;plan_hash=$plan.hash;vm_uuid=$binding.vm_uuid;binding_sha256=$envelope.sha256;boot_scope=$binding.boot_scope;boot_id=$boot;root_identity=$plan.root_identity;status=($(if($journal.verified){'DRIFT'}else{'FAILED'}));reason=$_.Exception.Message}}
   Start-Sleep -Seconds 2
  }
 }

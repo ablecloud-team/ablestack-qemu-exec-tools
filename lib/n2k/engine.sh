@@ -186,6 +186,7 @@ n2k_cmd_init() {
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
       --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
       --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
       --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
@@ -548,6 +549,7 @@ n2k_build_preflight_result_from_args() {
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
       --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
       --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
       --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
@@ -1200,6 +1202,7 @@ n2k_cmd_run() {
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
       --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
       --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
       --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
@@ -1495,6 +1498,7 @@ n2k_cmd_run() {
   fi
   if ! n2k_guest_config_source_copy_frozen "$N2K_MANIFEST"; then
     n2k_guest_config_collect "$N2K_MANIFEST" || return $?
+  n2k_guest_config_preflight_manifest "$N2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
   fi
 
   if [[ "${split}" == "phase1" || "${split}" == "full" ]]; then
@@ -1568,6 +1572,7 @@ n2k_cmd_run() {
 
   if ! n2k_run_manifest_phase_done "${N2K_MANIFEST}" "final_sync"; then
     n2k_guest_config_collect "$N2K_MANIFEST" || return $?
+  n2k_guest_config_preflight_manifest "$N2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
     case "${shutdown}" in
       none)
         n2k_event WARN "run" "" "shutdown_skipped" '{"policy":"none"}'

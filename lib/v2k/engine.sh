@@ -3237,6 +3237,7 @@ v2k_cmd_init() {
   if [[ "$(jq -r '.target.guest_config_policy // empty' "$V2K_MANIFEST")" == preserve ]]; then
     v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
     v2k_guest_config_collect "$V2K_MANIFEST" || return $?
+  v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
   fi
 
 
@@ -4059,6 +4060,7 @@ v2k_cmd_cutover() {
   if ! v2k_guest_config_source_copy_frozen "$V2K_MANIFEST"; then
   v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
   v2k_guest_config_collect "$V2K_MANIFEST" || return $?
+  v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
   # As approved: default flow is shutdown -> final snapshot -> final sync
   v2k_event INFO "cutover" "" "phase_start" "{\"shutdown\":\"${shutdown}\"}"
 

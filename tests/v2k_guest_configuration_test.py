@@ -109,6 +109,10 @@ class GuestConfiguration(unittest.TestCase):
                 "partitions": [{"guid": part, "offset": 1048576, "size_bytes": 199}],
             },
         ]
+        cap["network"] = json.loads((ROOT / "tests/fixtures/v2k/windows-network.json").read_text())
+        mac = cap["network"]["interfaces"][0]["source_mac"]
+        m["source"]["vm"]["nics"] = [{"mac": mac, "key": "4000"}]
+        m["target"]["cloud"] = {"nic_mappings": [{"mac": mac, "source_key": "4000", "network_id": "22222222-2222-4222-8222-222222222222"}]}
         return m, cap, inspected
 
     def test_windows_identity_does_not_depend_on_number_or_old_serial(self):

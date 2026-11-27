@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # Copyright 2026 ABLECLOUD. Licensed under the Apache License, Version 2.0.
 """Fixed read-only source probe over VMware Tools; all authentication is stdin."""
-import argparse, base64, json, os, shlex, ssl, sys, time, urllib.request
+import argparse, base64, json, os, shlex, ssl, sys, time, urllib.request, re
 from pathlib import Path
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
+from guest_configuration_windows_network import source_script, vmware_uuid_matches
 
 
 def collect(manifest, auth):
@@ -58,6 +59,8 @@ def collect(manifest, auth):
             / "guest-config"
             / ("source-windows.ps1" if windows else "source-linux.py")
         ).read_bytes()
+        if windows:
+            data = source_script(Path(__file__).parent).encode("utf-8")
         attrs = vim.vm.guest.FileManager.FileAttributes()
         url = files.InitiateFileTransferToGuest(
             vm, ga, script, attrs, len(data), True
@@ -98,14 +101,22 @@ def collect(manifest, auth):
                 status = found[0].exitCode
                 break
             time.sleep(1)
-        if status != 0:
-            raise ValueError("SOURCE_GUEST_PROBE_FAILED")
         transfer = files.InitiateFileTransferFromGuest(vm, ga, output)
         if transfer.size > 1048576:
             raise ValueError("SOURCE_CONFIG_TOO_LARGE")
         url = transfer.url.replace("://*:", "://" + host + ":")
         raw = urllib.request.urlopen(url, context=context, timeout=30).read(1048577)
         result = json.loads(raw.decode("utf-8-sig"))
+        if status != 0:
+            code=str(result.get("source_probe_error", ""))
+            line=result.get("source_probe_line", 0)
+            if not re.fullmatch("[A-Z0-9_]{1,96}",code) or not isinstance(line,int):
+                raise ValueError("SOURCE_GUEST_PROBE_FAILED")
+            raise ValueError("SOURCE_GUEST_PROBE_FAILED: " + code + "@" + str(line))
+        if windows:
+            if not vmware_uuid_matches(vm_uuid, result.get("source_vm_uuid", "")):
+                raise ValueError("SOURCE_GUEST_IDENTITY_MISMATCH")
+            result["source_guest_uuid"] = result["source_vm_uuid"]
         result["source_vm_uuid"] = vm_uuid
         result["collected_at"] = int(time.time())
         return result
@@ -132,5 +143,6 @@ if __name__ == "__main__":
         main()
     except Exception as error:
         # SOAP faults and transfer tickets can contain authentication details.
-        print("SOURCE_CONFIG_REQUIRED: " + type(error).__name__, file=sys.stderr)
+        reason=str(error)
+        print(reason if isinstance(error,ValueError) and re.fullmatch(r"SOURCE_[A-Z0-9_]+(?:: [A-Z0-9_]+@[0-9]+)?",reason) else "SOURCE_CONFIG_REQUIRED: " + type(error).__name__, file=sys.stderr)
         sys.exit(44)

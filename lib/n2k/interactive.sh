@@ -580,6 +580,7 @@ n2k_cmd_wizard() {
       --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
       --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
       --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
       --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
       --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
       --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
@@ -877,6 +878,7 @@ n2k_cmd_wizard() {
   [[ -z "${N2K_GUEST_CONFIG_TIMEOUT:-}" ]] || run_args+=(--guest-config-timeout "$N2K_GUEST_CONFIG_TIMEOUT")
   [[ -z "${N2K_SOURCE_GUEST_PASSWORD_FD:-}" ]] || run_args+=(--source-guest-password-fd "$N2K_SOURCE_GUEST_PASSWORD_FD")
   [[ -z "${N2K_GUEST_CONFIG_MAP_JSON:-}" ]] || run_args+=(--guest-config-map-json "$N2K_GUEST_CONFIG_MAP_JSON")
+  [[ -z "${N2K_SOURCE_GUEST_OS:-}" ]] || run_args+=(--source-guest-os "$N2K_SOURCE_GUEST_OS")
   [[ -z "${N2K_SOURCE_GUEST_USER:-}" ]] || run_args+=(--source-guest-user "$N2K_SOURCE_GUEST_USER")
   [[ -z "${N2K_SOURCE_GUEST_HOST:-}" ]] || run_args+=(--source-guest-host "$N2K_SOURCE_GUEST_HOST")
   [[ -z "${N2K_SOURCE_GUEST_HOSTKEY_SHA256:-}" ]] || run_args+=(--source-guest-hostkey-sha256 "$N2K_SOURCE_GUEST_HOSTKEY_SHA256")

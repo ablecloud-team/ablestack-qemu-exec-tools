@@ -1383,7 +1383,7 @@ n2k_cloud_target_cutover() {
   cfg="$(n2k_cloud_target_required_config_json "${manifest}")"
   n2k_cloud_target_validate_config "${manifest}" "${runtime}" || return $?
 
-  if jq -e '.target.guest_configuration_plan.version==1 and ((.runtime.cloud.checkpoint.vm_id // "")!="")' "$manifest" >/dev/null; then
+  if jq -e '(.target.guest_configuration_plan.version==1 or .target.guest_configuration_plan.version==2) and ((.runtime.cloud.checkpoint.vm_id // "")!="")' "$manifest" >/dev/null; then
     local live_id live_vm
     live_id="$(jq -r '.runtime.cloud.checkpoint.vm_id' "$manifest")"
     live_vm="$(n2k_cloud_target_vm_json "$endpoint" "$api_key" "$secret_key" "$live_id")" || return $?
@@ -1828,7 +1828,7 @@ n2k_cloud_target_source_deploy_params_json() {
   base="$(n2k_cloud_target_source_deploy_params_legacy_json "$@")" || return $?
   if jq -e '.target.disk_controller_plan.version == 1' "$1" >/dev/null; then
     plan="$(n2k_controller_python params --manifest "$1")" || return $?
-    if jq -e ' .target.guest_configuration_plan.version==1' "$1" >/dev/null; then
+    if jq -e ' (.target.guest_configuration_plan.version==1 or .target.guest_configuration_plan.version==2)' "$1" >/dev/null; then
       local guest_params
       guest_params="$(n2k_guest_config_python guest_configuration.py params --manifest "$1")" || return $?
       plan="$(jq -nc --argjson p "$plan" --argjson g "$guest_params" '$p+$g')"

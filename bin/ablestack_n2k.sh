@@ -124,6 +124,7 @@ Options:
   --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
   --guest-config-map-json <path>       Explicit validated source guest state
   --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
   --source-guest-user <user>           Separate source guest administrator
   --source-guest-host <address>        SSH/WinRM source guest address
   --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
@@ -200,6 +201,7 @@ Options:
   --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
   --guest-config-map-json <path>       Explicit validated source guest state
   --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
   --source-guest-user <user>           Separate source guest administrator
   --source-guest-host <address>        SSH/WinRM source guest address
   --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
@@ -272,6 +274,7 @@ Options:
   --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
   --guest-config-map-json <path>       Explicit validated source guest state
   --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
   --source-guest-user <user>           Separate source guest administrator
   --source-guest-host <address>        SSH/WinRM source guest address
   --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
@@ -396,6 +399,7 @@ Target convenience options:
   --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
   --guest-config-map-json <path>       Explicit validated source guest state
   --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
   --source-guest-user <user>           Separate source guest administrator
   --source-guest-host <address>        SSH/WinRM source guest address
   --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
@@ -477,6 +481,7 @@ Options:
   --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
   --guest-config-map-json <path>       Explicit validated source guest state
   --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
   --source-guest-user <user>           Separate source guest administrator
   --source-guest-host <address>        SSH/WinRM source guest address
   --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
