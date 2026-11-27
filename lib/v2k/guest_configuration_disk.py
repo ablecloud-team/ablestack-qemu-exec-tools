@@ -61,7 +61,17 @@ class Disk:
     def lines(self, method, *args):
         return self.call(method, *args).splitlines()
 
-    def inspect(self):
+    def inspect(self, allow_whole_filesystem=False):
+        if allow_whole_filesystem:
+            try:
+                fs_type = self.call("vfs-type", "/dev/sda")
+            except ValueError:
+                fs_type = ""
+            if fs_type in ("ext4", "xfs"):
+                fs_uuid = self.call("vfs-uuid", "/dev/sda").lower()
+                if not fs_uuid:
+                    raise ValueError("DATA_IDENTITY_UNSUPPORTED")
+                return {"identity": "fs:" + fs_uuid, "partitions": [], "filesystem": fs_type}
         kind = self.call("part-get-parttype", "/dev/sda")
         parts = []
         for block in re.findall(
@@ -101,6 +111,10 @@ class Disk:
             point, device = line.split(": ", 1)
             mounts.append((point, device))
         for point, device in sorted(mounts, key=lambda x: len(x[0])):
+            if os_kind == "windows" and not self.readonly:
+                state = self.call("ntfs-3g-probe", "true", device)
+                if state != "0":
+                    raise ValueError("WINDOWS_CLEAN_SHUTDOWN_REQUIRED_NTFS_" + state)
             self.call("mount-ro" if self.readonly else "mount", device, point)
         return root, os_kind
 
@@ -133,5 +147,5 @@ def image_inspect(manifest):
         with Disk(
             disk["transfer"]["target_path"], manifest["target"].get("format", "qcow2")
         ) as image:
-            result.append(image.inspect())
+            result.append(image.inspect(manifest.get("source", {}).get("guest_configuration", {}).get("os") == "linux"))
     return result

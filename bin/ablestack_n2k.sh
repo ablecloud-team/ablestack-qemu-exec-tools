@@ -120,6 +120,14 @@ Options:
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --target-provider <p>   libvirt|ablestack-cloud; default libvirt
@@ -188,6 +196,14 @@ Options:
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --target-provider <p>   libvirt|ablestack-cloud; default libvirt
@@ -252,6 +268,14 @@ Options:
   --dst <path>            Destination root
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
@@ -368,6 +392,14 @@ Source options:
 
 Target convenience options:
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-pool <pool>       RBD pool for generated target paths; default rbd
   --file-root <path>      Libvirt file target root; default /var/lib/libvirt/images
@@ -441,6 +473,14 @@ Options:
   --inventory-source <s>  none|fixture|api
   --target-format <fmt>   qcow2|raw
   --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
   --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map

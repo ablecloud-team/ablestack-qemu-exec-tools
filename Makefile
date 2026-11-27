@@ -392,6 +392,8 @@ n2k-deb:
 
 	install -m 0755 bin/ablestack_n2k.sh $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/bin/ablestack_n2k
 	cp -a lib/n2k/* $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/lib/ablestack-qemu-exec-tools/n2k/
+	mkdir -p $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/lib/ablestack-qemu-exec-tools/n2k/migration
+	cp -a lib/v2k/controller_policy.py lib/v2k/guest_configuration*.py lib/v2k/guest-config $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/local/lib/ablestack-qemu-exec-tools/n2k/migration/
 	install -m 0644 completions/ablestack_n2k $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/share/bash-completion/completions/ablestack_n2k
 	cp -a docs/n2k/* $(N2K_NAME)_$(VERSION)-$(RELEASE)/usr/share/doc/$(N2K_NAME)/
 	sed -e "s/\$${VERSION}/$(VERSION)/" \

@@ -71,11 +71,28 @@ n2k_nutanix_api_get() {
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
-  if [[ -n "${username}" || -n "${password}" ]]; then
-    args+=(-u "${username}:${password}")
-  fi
 
-  curl "${args[@]}" "${base}${path}"
+
+  n2k_nutanix_curl "$username" "$password" "${args[@]}" "${base}${path}"
+}
+
+n2k_nutanix_curl() {
+  local username="$1" password="$2"
+  shift 2
+  if [[ -n "$username" || -n "$password" ]]; then
+    curl --config <(n2k_nutanix_curl_auth_config "$username" "$password") "$@"
+  else
+    curl "$@"
+  fi
+}
+
+n2k_nutanix_curl_auth_config() {
+  local value="${1}:${2}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  printf 'user = "%s"\n' "$value"
 }
 
 n2k_nutanix_api_request_raw() {
@@ -91,9 +108,7 @@ n2k_nutanix_api_request_raw() {
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
-  if [[ -n "${username}" || -n "${password}" ]]; then
-    args+=(-u "${username}:${password}")
-  fi
+
   case "${method}" in
     GET) ;;
     POST) args+=(-X POST -H "Content-Type: application/json" -H "NTNX-Request-Id: $(n2k_nutanix_request_id)" -d "${body}") ;;
@@ -106,7 +121,7 @@ n2k_nutanix_api_request_raw() {
   esac
 
   rc=0
-  code="$(curl "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
+  code="$(n2k_nutanix_curl "$username" "$password" "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
   err_text="$(cat "${err_file}" 2>/dev/null || true)"
   N2K_NUTANIX_LAST_HTTP_CODE="${code:-000}"
   N2K_NUTANIX_LAST_ERROR="${err_text}"
@@ -145,9 +160,7 @@ n2k_nutanix_api_request_capture() {
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
-  if [[ -n "${username}" || -n "${password}" ]]; then
-    args+=(-u "${username}:${password}")
-  fi
+
   case "${method}" in
     GET) ;;
     POST) args+=(-X POST -H "Content-Type: application/json" -H "NTNX-Request-Id: $(n2k_nutanix_request_id)" -d "${body}") ;;
@@ -160,7 +173,7 @@ n2k_nutanix_api_request_capture() {
   esac
 
   rc=0
-  code="$(curl "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
+  code="$(n2k_nutanix_curl "$username" "$password" "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
   err_text="$(cat "${err_file}" 2>/dev/null || true)"
   printf -v "${response_var}" '%s' "$(cat "${tmp_file}" 2>/dev/null || true)"
   printf -v "${status_var}" '%s' "${code:-000}"
@@ -184,12 +197,10 @@ n2k_nutanix_api_get_to_file() {
   if [[ "${insecure}" == "1" ]]; then
     args+=(--insecure)
   fi
-  if [[ -n "${username}" || -n "${password}" ]]; then
-    args+=(-u "${username}:${password}")
-  fi
+
 
   rc=0
-  code="$(curl "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
+  code="$(n2k_nutanix_curl "$username" "$password" "${args[@]}" "${base}${path}" 2>"${err_file}")" || rc=$?
   err_text="$(cat "${err_file}" 2>/dev/null || true)"
   if [[ -n "${status_var}" ]]; then
     printf -v "${status_var}" '%s' "${code:-000}"

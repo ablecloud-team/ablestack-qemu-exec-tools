@@ -150,9 +150,9 @@ def validate_network(configs, source_nics, observed):
                 )
                 == 1
             ):
-                candidates = [
-                    {"mac": next(iter(known)), "ifname": value.get("set-name", name)}
-                ]
+                candidates = [n for n in observed if n["mac"].lower() in known]
+                if not candidates:
+                    candidates = [{"mac": next(iter(known)), "ifname": value.get("set-name", name)}]
             if len(candidates) != 1:
                 fail("NIC_MAPPING_AMBIGUOUS")
             mac = candidates[0]["mac"].lower()

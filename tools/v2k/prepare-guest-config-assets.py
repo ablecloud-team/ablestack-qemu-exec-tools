@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--ubuntu-keyring")
     parser.add_argument("--tls-index", action="store_true")
+    parser.add_argument("--ubuntu-version", choices=["22.04", "24.04"], default="22.04")
     args = parser.parse_args()
     if not args.ubuntu_keyring and not args.tls_index:
         parser.error(
@@ -41,7 +42,7 @@ def main():
     wanted = {"qemu-guest-agent", "liburing2"}
     selected = {}
     provenance = []
-    for suite in ["jammy-updates", "jammy"]:
+    for suite in (["noble-updates", "noble"] if args.ubuntu_version == "24.04" else ["jammy-updates", "jammy"]):
         release = fetch(base + "dists/" + suite + "/InRelease")
         if args.ubuntu_keyring:
             with tempfile.NamedTemporaryFile() as f:
@@ -62,7 +63,7 @@ def main():
                     expected = fields[0]
             if not expected:
                 raise RuntimeError("Index SHA256 missing")
-            compressed = fetch(base + "dists/" + suite + "/" + path)
+            compressed = fetch(base + "dists/" + suite + "/" + component + "/binary-amd64/by-hash/SHA256/" + expected)
             if hashlib.sha256(compressed).hexdigest() != expected:
                 raise RuntimeError("Index digest mismatch")
             provenance.append(
@@ -104,7 +105,7 @@ def main():
             {
                 "version": 1,
                 "os": "ubuntu",
-                "os_version": "22.04",
+                "os_version": args.ubuntu_version,
                 "arch": "amd64",
                 "provenance": (
                     "signed-inrelease"

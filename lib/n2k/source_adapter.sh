@@ -2109,6 +2109,8 @@ n2k_source_v3_collect_changed_regions_from_indexes() {
   local file_size manifest_capacity disk_id regions regions_by_disk="{}" mappings="{}" errors="[]" skipped="[]"
   local total_regions=0 total_bytes=0 mapped_count=0
 
+  current_index_json="$(n2k_source_data_snapshot_index "$manifest" "$current_index_json")" || return $?
+  reference_index_json="$(n2k_source_data_snapshot_index "$manifest" "$reference_index_json")" || return $?
   pairs_json="$(n2k_source_legacy_changed_region_candidate_pairs_from_indexes "${current_index_json}" "${reference_index_json}" 200)"
   pair_count="$(printf '%s' "${pairs_json}" | jq -r 'length')"
   expected_disk_count="$(jq -r '.disks | length' "${manifest}")"
@@ -2488,4 +2490,18 @@ n2k_source_probe_capabilities() {
       cold_export:{available:false},
       manual_disk:{available:true}
     }'
+}
+
+# PE v2 reports the physical vDisk UUID independently of the PC device UUID.
+n2k_source_bind_pe_disk_identities() {
+  local manifest="$1" pe="$2" user="$3" password="$4" insecure="$5" response="" http_code="" api_error="" tmp
+  [[ "${N2K_DRY_RUN:-0}" != 1 ]] || return 0
+  n2k_nutanix_api_request_capture GET "$pe" "/PrismGateway/services/rest/v2.0/vms/$(jq -r '.source.vm.uuid' "$manifest")?include_vm_disk_config=true" "$user" "$password" "$insecure" "" response http_code api_error || return $?
+  n2k_nutanix_http_success "$http_code" || { echo 'SOURCE_PE_DISK_IDENTITY_REQUIRED' >&2; return 44; }
+  tmp="$(mktemp "${manifest}.pe-identities.XXXXXX")" || return $?
+  if ! "${N2K_POLICY_PYTHON_BIN:-python3}" "${N2K_LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/nutanix_disk_identity.py" enrich --manifest "$manifest" <<<"$response" > "$tmp"; then rm -f -- "$tmp"; return 44; fi
+  mv -- "$tmp" "$manifest"
+}
+n2k_source_data_snapshot_index() {
+  "${N2K_POLICY_PYTHON_BIN:-python3}" "${N2K_LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/nutanix_disk_identity.py" filter --manifest "$1" <<<"$2"
 }

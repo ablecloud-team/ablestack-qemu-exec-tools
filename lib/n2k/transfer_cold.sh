@@ -212,6 +212,7 @@ n2k_source_map_from_v3_nfs_path_index() {
     echo "NFS host is required to build source-map from v3 path index." >&2
     return 2
   }
+  path_index_json="$(n2k_source_data_snapshot_index "$manifest" "$path_index_json")" || return $?
   entries="$(jq -c '.disks // {} | to_entries' <<<"${path_index_json}")"
   count="$(jq -r 'length' <<<"${entries}")"
   for ((idx=0; idx<count; idx++)); do

@@ -358,7 +358,7 @@ if [[ "$TOOL" == v2k ]]; then source "$REPO/lib/v2k/orchestrator.sh"; fi
                      "--cloud-service-offering-id", "offering", "--cloud-network-id", "network",
                      "--cloud-storage-id", "pool", "--cloud-name", "fixture-target"]
         result = shell(WIZARD, env={"TOOL": tool, "CASE_DIR": str(directory), "INVENTORY": json.dumps(inventory),
-                                   "TEST_TTY": tty, "CANCEL": str(int(cancel))}, args=(*args, *flags),
+                                   "N2K_GUEST_CONFIG_POLICY": "off", "TEST_TTY": tty, "CANCEL": str(int(cancel))}, args=(*args, *flags),
                        data=selection, ok=False)
         captured = directory / "captured"
         argv = captured.read_bytes().decode().rstrip("\0").split("\0") if captured.exists() else []

@@ -368,6 +368,7 @@ n2k_cloud_target_optional_owner_params() {
 
 n2k_cloud_target_prepare_disk_controller_plan() {
   local manifest="$1"
+  if jq -e '.target.disk_controller_plan.version==1' "$manifest" >/dev/null; then n2k_controller_validate "$manifest"; return $?; fi
   local ts tmp status
 
   [[ -f "${manifest}" ]] || return 2
@@ -447,6 +448,7 @@ n2k_cloud_target_prepare_disk_controller_plan() {
 
 n2k_cloud_target_disk_controller_plan_is_valid() {
   local manifest="$1"
+  if jq -e '.target.disk_controller_plan.version==1' "$manifest" >/dev/null; then n2k_controller_validate "$manifest"; return $?; fi
   jq -e '
     def controller($raw):
       ($raw // "" | tostring | ascii_downcase) as $kind
@@ -557,7 +559,7 @@ n2k_cloud_target_force_sata_fallback() {
   mv -f "${tmp}" "${manifest}"
 }
 
-n2k_cloud_target_source_deploy_params_json() {
+n2k_cloud_target_source_deploy_params_legacy_json() {
   local manifest="$1"
   if jq -e '((.target.cloud.disk_controller_plan.status // "") | length) > 0' "${manifest}" >/dev/null 2>&1 \
     && ! n2k_cloud_target_disk_controller_plan_is_valid "${manifest}"; then
@@ -1375,9 +1377,25 @@ n2k_cloud_target_cutover() {
   api_key="$(jq -r '.api_key // ""' <<<"${runtime}")"
   secret_key="$(jq -r '.secret_key // ""' <<<"${runtime}")"
   n2k_cloud_target_ensure_manifest_nic_mappings "${manifest}" || return $?
+  n2k_guest_config_frozen_options "$manifest" || return $?
+  n2k_controller_resume_check "$manifest" || return $?
+  n2k_controller_check_target "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
   cfg="$(n2k_cloud_target_required_config_json "${manifest}")"
   n2k_cloud_target_validate_config "${manifest}" "${runtime}" || return $?
 
+  if jq -e '.target.guest_configuration_plan.version==1 and ((.runtime.cloud.checkpoint.vm_id // "")!="")' "$manifest" >/dev/null; then
+    local live_id live_vm
+    live_id="$(jq -r '.runtime.cloud.checkpoint.vm_id' "$manifest")"
+    live_vm="$(n2k_cloud_target_vm_json "$endpoint" "$api_key" "$secret_key" "$live_id")" || return $?
+    if jq -e '.state=="Running"' <<<"$live_vm" >/dev/null; then
+      migration_cloud_allocation_verify_final n2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
+      n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
+      n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
+      n2k_cloud_target_record_checkpoint "$manifest" complete '{"complete":true,"started":true,"inspection_required":false}' || return $?
+      jq -nc --arg id "$live_id" '{provider:"ablestack-cloud",vm_id:$id,started:true,validated:true,status:"completed",guest_configuration_verified:true}'
+      return 0
+    fi
+  fi
   storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
   storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
   disk_offering_id="$(jq -r '.disk_offering_id // ""' <<<"${cfg}")"
@@ -1476,6 +1494,10 @@ n2k_cloud_target_cutover() {
         checkpoint="$(n2k_cloud_target_existing_checkpoint_json "${manifest}")"
       else
         migration_cloud_allocation_verify_final n2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
+        if [[ "$start_vm" == 1 ]]; then
+          n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
+          n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
+        fi
         result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
         printf '%s' "${result_json}"
         return 0
@@ -1715,14 +1737,17 @@ n2k_cloud_target_cutover() {
       '$jobs + [{kind:"import-data",job_id:$import_job},{kind:"attach-data",job_id:$attach_job}]' <<<"{}")"
   done
 
+  n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" prestart || return $?
   if ! migration_cloud_allocation_verify_final n2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}"; then
     n2k_cloud_target_record_checkpoint "${manifest}" allocation-unverified '{"complete":false,"inspection_required":true,"allocation_verified":false}' || return 78
     n2k_cloud_target_record_result "${manifest}" '{"status":"blocked","applied":true,"started":false,"validated":false,"inspection_required":true,"reason":"ALLOCATION_EVIDENCE_REQUIRED"}' || return 78
     return 2
   fi
 
+  n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" bind || return $?
   if [[ "${start_vm}" -eq 1 && "${inspection_required}" == "false" ]]; then
     if start_result="$(n2k_cloud_target_start_vm "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")"; then
+      n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
       started=true
       n2k_cloud_target_record_checkpoint "${manifest}" "vm-started" \
         "$(jq -nc --arg start_job_id "$(jq -r '.job_id // empty' <<<"${start_result}")" '{start_job_id:$start_job_id,started:true}')" || return 78
@@ -1754,6 +1779,11 @@ n2k_cloud_target_cutover() {
         "$(jq -nc --argjson issues "${issues_json}" '{complete:false,started:false,inspection_required:true,issues:$issues}')" || return 78
       return 2
     fi
+  fi
+
+  if [[ "$started" == true ]] && ! n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify; then
+    n2k_cloud_target_record_checkpoint "$manifest" guest-config-pending '{"complete":false,"started":true,"inspection_required":true}' || return $?
+    return 78
   fi
 
   result_json="$(jq -nc \
@@ -1790,4 +1820,19 @@ n2k_cloud_target_cutover() {
       --argjson started "${started}" \
       '{complete:true,vm_id:$vm_id,root_volume_id:$root_volume_id,started:$started,inspection_required:$inspection_required,issues:$issues}')" || return 78
   printf '%s' "${result_json}"
+}
+
+
+n2k_cloud_target_source_deploy_params_json() {
+  local base plan
+  base="$(n2k_cloud_target_source_deploy_params_legacy_json "$@")" || return $?
+  if jq -e '.target.disk_controller_plan.version == 1' "$1" >/dev/null; then
+    plan="$(n2k_controller_python params --manifest "$1")" || return $?
+    if jq -e ' .target.guest_configuration_plan.version==1' "$1" >/dev/null; then
+      local guest_params
+      guest_params="$(n2k_guest_config_python guest_configuration.py params --manifest "$1")" || return $?
+      plan="$(jq -nc --argjson p "$plan" --argjson g "$guest_params" '$p+$g')"
+    fi
+    jq -nc --argjson base "$base" --argjson plan "$plan" '$base + $plan'
+  else printf '%s' "$base"; fi
 }

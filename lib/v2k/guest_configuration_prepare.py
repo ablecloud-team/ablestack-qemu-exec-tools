@@ -8,6 +8,7 @@ from guest_configuration_disk import Disk, image_inspect
 from guest_configuration_assets import resolve_appliance, file_sha
 from guest_configuration_networkmanager import config_path
 from guest_configuration_rocky_assets import payloads as rocky_payloads
+from guest_configuration_windows_drivers import payloads as windows_driver_payloads
 
 WINDOWS_ROOT = (
     "/usr/share/ablestack/v2k/guest-config/windows"
@@ -32,12 +33,12 @@ def require_unsealed(manifest):
         fail("CLOUD_TARGET_SEALED")
 
 
-def payloads(directory):
+def payloads(directory, expected_version="22.04"):
     path = Path(directory)
     m = json.loads((path / "assets.json").read_text())
     if (
         m.get("os") != "ubuntu"
-        or m.get("os_version") != "22.04"
+        or m.get("os_version") != expected_version
         or m.get("arch") != "amd64"
         or m.get("provenance")
         not in ["signed-inrelease", "official-https-index-sha256"]
@@ -58,6 +59,10 @@ def payloads(directory):
     return out, m
 
 
+def ubuntu_asset_directory(version):
+    return os.environ.get("V2K_GUEST_CONFIG_UBUNTU_ASSETS", "/usr/share/ablestack/v2k/guest-config/" + ("ubuntu24" if version == "24.04" else "ubuntu22"))
+
+
 def preflight(manifest):
     require_unsealed(manifest)
     if (
@@ -70,10 +75,12 @@ def preflight(manifest):
         if not shutil.which(name):
             fail("FIRSTBOOT_CAPABILITY_MISSING")
     source = manifest["source"]["vm"]
-    windows = source.get("guestFamily") == "windowsGuest" or source.get(
+    windows = manifest["source"].get("guest_configuration", {}).get("os") == "windows" or source.get("guestFamily") == "windowsGuest" or source.get(
         "guest_id", ""
     ).lower().startswith("win")
     if windows:
+        if manifest["source"].get("pc"):
+            windows_driver_payloads()
         appliance = Path(
             os.environ.get(
                 "V2K_GUEST_CONFIG_APPLIANCE",
@@ -149,7 +156,14 @@ def preflight(manifest):
             fail("GUEST_AGENT_PAYLOAD_HASH_MISMATCH")
     else:
         os_id = manifest["source"].get("guest_configuration", {}).get("os_id")
-        if os_id == "rocky":
+        captured = manifest["source"].get("guest_configuration", {})
+        existing_qga = captured.get("qga", {})
+        if os_id == "rocky" and existing_qga.get("installed"):
+            if not existing_qga.get("rpm_verified") or not re.fullmatch("[a-f0-9]{64}", existing_qga.get("policy_sha256", "")):
+                fail("EXISTING_QGA_POLICY_REQUIRES_REVIEW")
+        elif os_id == "rocky":
+            if captured.get("os_version") != "9.7":
+                fail("GUEST_AGENT_PAYLOAD_MISSING")
             rocky_payloads(
                 os.environ.get(
                     "V2K_GUEST_CONFIG_ROCKY_ASSETS",
@@ -158,10 +172,7 @@ def preflight(manifest):
             )
         elif os_id == "ubuntu":
             payloads(
-                os.environ.get(
-                    "V2K_GUEST_CONFIG_UBUNTU_ASSETS",
-                    "/usr/share/ablestack/v2k/guest-config/ubuntu22",
-                )
+                ubuntu_asset_directory(captured.get("os_version", "22.04")), captured.get("os_version", "22.04")
             )
         elif not any(
             (Path(os.environ.get(var, default)) / "assets.json").is_file()
@@ -204,6 +215,7 @@ def prepare(manifest_path):
                 ".cmd",
                 ".service",
                 ".path",
+                ".timer",
                 ".cil",
             ]:
                 (snapshot / source.name).write_bytes(source.read_bytes())
@@ -255,7 +267,7 @@ def _prepare(manifest_path, payload):
                         or image.read(p) != file["content"].strip()
                     ):
                         fail("SOURCE_CONFIG_CHANGED")
-                    configs.append({"path": p, "content": file["content"]})
+                    configs.append({"path": p, "content": file["content"], **({"active": file["active"]} if "active" in file else {})})
                 if not configs:
                     fail("SOURCE_CONFIG_REQUIRED")
         plan = build(m, capture, inspection, configs)
@@ -265,6 +277,8 @@ def _prepare(manifest_path, payload):
                 / ("linux-helper.py" if plan["os"] == "linux" else "windows-helper.ps1")
             ).read_bytes()
         ).hexdigest()
+        if plan.get("os_id") == "rocky":
+            plan["network_preparer_sha256"] = hashlib.sha256((payload / "prepare-networkmanager.py").read_bytes()).hexdigest()
         plan = verify(seal(plan))
         m["target"]["guest_config_operation_id"] = plan["operation_id"]
         m["target"]["guest_configuration_plan"] = plan
@@ -286,6 +300,8 @@ def _prepare(manifest_path, payload):
         != plan["helper_sha256"]
     ):
         fail("GUEST_HELPER_FROZEN_VERSION_CHANGED")
+    if plan.get("network_preparer_sha256") and hashlib.sha256((payload / "prepare-networkmanager.py").read_bytes()).hexdigest() != plan["network_preparer_sha256"]:
+        fail("GUEST_NETWORK_HELPER_FROZEN_VERSION_CHANGED")
     base = (
         "/var/lib/ablestack-v2k/guest-config"
         if plan["os"] == "linux"
@@ -331,11 +347,15 @@ def _prepare(manifest_path, payload):
             image.write(config, content)
             image.upload(str(payload / "linux-helper.py"), base + "/helper.py")
             image.call("chmod", "0700", base + "/helper.py")
+            image.upload(str(payload / "prepare-networkmanager.py"), base + "/prepare-networkmanager.py")
+            image.call("chmod", "0700", base + "/prepare-networkmanager.py")
             image.upload(
                 str(payload / "v2k-guest-config.service"),
                 "/etc/systemd/system/v2k-guest-config.service",
             )
             image.call("chmod", "0644", "/etc/systemd/system/v2k-guest-config.service")
+            image.upload(str(payload / "v2k-guest-config.timer"), "/etc/systemd/system/v2k-guest-config.timer")
+            image.call("chmod", "0644", "/etc/systemd/system/v2k-guest-config.timer")
             image.write(
                 "/etc/systemd/system/v2k-guest-config.path",
                 (payload / "v2k-guest-config.path")
@@ -346,18 +366,18 @@ def _prepare(manifest_path, payload):
             rocky = plan.get("os_id") == "rocky"
             if rocky:
                 image.upload(str(payload / "ablestack_v2k_guest_config.cil"), base + "/ablestack_v2k_guest_config.cil")
-                files, asset_info = rocky_payloads(
-                    os.environ.get(
-                        "V2K_GUEST_CONFIG_ROCKY_ASSETS",
-                        "/usr/share/ablestack/v2k/guest-config/rocky97",
-                    )
-                )
+                existing = capture.get("qga", {})
+                if existing.get("installed"):
+                    if not existing.get("rpm_verified") or hashlib.sha256(image.read("/etc/sysconfig/qemu-ga").encode()).hexdigest() != existing.get("policy_sha256"):
+                        # guestfish read strips the trailing newline: compare exact file checksum.
+                        if not existing.get("rpm_verified") or image.call("checksum", "sha256", "/etc/sysconfig/qemu-ga") != existing.get("policy_sha256"):
+                            fail("EXISTING_QGA_POLICY_REQUIRES_REVIEW")
+                    files=[];asset_info={"existing_vendor_qga":existing}
+                else:
+                    files, asset_info = rocky_payloads(os.environ.get("V2K_GUEST_CONFIG_ROCKY_ASSETS", "/usr/share/ablestack/v2k/guest-config/rocky97"))
             else:
                 files, asset_info = payloads(
-                    os.environ.get(
-                        "V2K_GUEST_CONFIG_UBUNTU_ASSETS",
-                        "/usr/share/ablestack/v2k/guest-config/ubuntu22",
-                    )
+                    ubuntu_asset_directory(capture["os_version"]), capture["os_version"]
                 )
             if image.exists("/usr/sbin/qemu-ga") or image.exists("/usr/bin/qemu-ga"):
                 for cfg in [
@@ -368,8 +388,11 @@ def _prepare(manifest_path, payload):
                     if image.exists(cfg) and (
                         "guest-file-" in image.read(cfg) or "RPC" in image.read(cfg)
                     ):
-                        fail("EXISTING_QGA_POLICY_REQUIRES_REVIEW")
+                        if not (rocky and cfg == "/etc/sysconfig/qemu-ga" and capture.get("qga", {}).get("rpm_verified")):
+                            fail("EXISTING_QGA_POLICY_REQUIRES_REVIEW")
                 install = False
+                if rocky:
+                    image.upload(str(payload / "rocky-qga-policy.py"), base + "/rocky-qga-policy.py")
             else:
                 install = True
                 if rocky:
@@ -396,6 +419,11 @@ def _prepare(manifest_path, payload):
             image.upload(
                 str(payload / "windows-bootstrap.ps1"), base + "/bootstrap.ps1"
             )
+            driver_info = None
+            if m["source"].get("pc"):
+                driver_files, driver_info = windows_driver_payloads()
+                for driver in driver_files:
+                    image.upload(str(driver), base + "/payload/vioserial/" + driver.name)
             plan_assets = {
                 "qga_msi_sha256": hashlib.sha256(
                     (
@@ -406,6 +434,8 @@ def _prepare(manifest_path, payload):
                     ).read_bytes()
                 ).hexdigest()
             }
+            if driver_info:
+                plan_assets["serial_driver"] = driver_info
     with Disk(root_path, fmt) as image:
         image.mount_root()
         name = "helper.py" if plan["os"] == "linux" else "helper.ps1"
@@ -424,6 +454,8 @@ def _prepare(manifest_path, payload):
             # Suppress daemon start in the isolated appliance; enable for the real boot.
             script = 'set -e\np=/usr/sbin/policy-rc.d\nsaved=/var/lib/ablestack-v2k/guest-config/policy-rc.d.saved\nif test -e "$p"; then cp -p "$p" "$saved"; fi\nprintf \'#!/bin/sh\\nexit 101\\n\' > "$p"\nchmod 755 "$p"\nrc=0\ndpkg -i /var/lib/ablestack-v2k/guest-config/payload/*.deb || rc=$?\nif test -e "$saved"; then cp -p "$saved" "$p"; else rm -f "$p"; fi\nexit "$rc"\n'
             args += ["--run-command", script]
+        if plan.get("os_id") == "rocky" and not install:
+            args += ["--run-command", "rpm -V qemu-guest-agent && python3 /var/lib/ablestack-v2k/guest-config/rocky-qga-policy.py"]
         if plan.get("os_id") == "rocky":
             # Label only owned files. Keep SELinux enforcing and the source fstab/LVM identities.
             args += [
@@ -438,7 +470,7 @@ def _prepare(manifest_path, payload):
             args += ["--run-command", "netplan generate"]
         args += [
             "--run-command",
-            "systemctl enable v2k-guest-config.service v2k-guest-config.path",
+            "systemctl enable v2k-guest-config.service v2k-guest-config.path v2k-guest-config.timer",
         ]
     else:
         args += ["--firstboot", str(payload / "windows-firstboot.cmd")]

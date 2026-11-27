@@ -131,7 +131,7 @@ def main():
         elif a.action=='params':
             plan=verify(d);value={} if not plan else {**({'details[0].UEFI':'SECURE' if d.get('source',{}).get('vm',{}).get('secure_boot') else 'LEGACY'} if plan['firmware']=='efi' else {'details[0].BIOS':'LEGACY'}),'details[0].'+DETAIL:canonical(plan),'details[0].kvm.guest.os.machine.type':plan['machine'],'details[0].rootDiskController':plan['disks'][0]['target']['bus'],**({'details[0].dataDiskController':plan['disks'][1]['target']['bus']} if len(plan['disks'])>1 else {})}
             vm=d.get('source',{}).get('vm',{})
-            if plan and (vm.get('guestFamily')=='windowsGuest' or str(vm.get('guest_id','')).lower().startswith('win')):
+            if plan and (d.get('source',{}).get('guest_configuration',{}).get('os')=='windows' or vm.get('guestFamily')=='windowsGuest' or str(vm.get('guest_id','')).lower().startswith('win')):
                 value.update({'details[0].kvm.pcie.topology.profile':'q35-windows-16-v1','details[0].kvm.pcie.topology.version':'1'})
         elif a.action=='disk':value=verify(d)['disks'][a.index]['target']
         elif a.action=='xml':validate_xml(d,Path(a.xml).read_text());return

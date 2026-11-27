@@ -8,6 +8,7 @@ Type=simple
 ExecStart=/usr/bin/python3 /var/lib/ablestack-v2k/guest-config/helper.py
 User=root
 ExecStartPre=/usr/bin/chmod 0700 /var/lib/ablestack-v2k/guest-config
+ExecStartPre=/usr/bin/python3 /var/lib/ablestack-v2k/guest-config/prepare-networkmanager.py
 UMask=0077
 TimeoutStartSec=650
 RuntimeMaxSec=650

@@ -16,8 +16,8 @@ def fail(reason):
 def supported_linux(capture):
     return (
         capture.get("os_id") == "ubuntu"
-        and str(capture.get("os_version", "")).startswith("22.04")
-    ) or (capture.get("os_id") == "rocky" and capture.get("os_version") == "9.7")
+        and str(capture.get("os_version", "")).startswith(("22.04", "24.04"))
+    ) or (capture.get("os_id") == "rocky" and capture.get("os_version") in ("9.7", "9.9"))
 
 
 def config_path(path, os_id):
@@ -114,7 +114,10 @@ def validate_keyfiles(configs, source_nics, observed):
     files = []
     generated = []
     profile_ids = set()
+    active_marked = any("active" in file for file in configs)
     for file in configs:
+        if active_marked and file.get("active") is not True:
+            continue
         if not config_path(file["path"], "rocky"):
             fail("NETWORK_CONFIG_UNSUPPORTED")
         cfg, eth = parse_keyfile(file["content"])

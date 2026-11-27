@@ -577,6 +577,14 @@ n2k_cmd_wizard() {
       --target-profile|--profile) target_profile="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
+      --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export N2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
+      --target-disk-controller) n2k_controller_policy_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
       --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
       --target-preallocation)
         image_preallocation_enum "${2-}" || return $?
@@ -863,7 +871,16 @@ n2k_cmd_wizard() {
       <<<"${cloud_nic_mappings_json}" >&2
   fi
 
+  n2k_guest_config_wizard "$target_provider" "${N2K_MANIFEST:-}" "$yes" "$print_command" || return $?
   local -a run_args=(--foreground --vm "${vm}" --pc "${pc}" --username "${username}" --password "${password}" --insecure "${insecure}")
+  [[ -z "${N2K_GUEST_CONFIG_POLICY:-}" ]] || run_args+=(--guest-config-policy "$N2K_GUEST_CONFIG_POLICY")
+  [[ -z "${N2K_GUEST_CONFIG_TIMEOUT:-}" ]] || run_args+=(--guest-config-timeout "$N2K_GUEST_CONFIG_TIMEOUT")
+  [[ -z "${N2K_SOURCE_GUEST_PASSWORD_FD:-}" ]] || run_args+=(--source-guest-password-fd "$N2K_SOURCE_GUEST_PASSWORD_FD")
+  [[ -z "${N2K_GUEST_CONFIG_MAP_JSON:-}" ]] || run_args+=(--guest-config-map-json "$N2K_GUEST_CONFIG_MAP_JSON")
+  [[ -z "${N2K_SOURCE_GUEST_USER:-}" ]] || run_args+=(--source-guest-user "$N2K_SOURCE_GUEST_USER")
+  [[ -z "${N2K_SOURCE_GUEST_HOST:-}" ]] || run_args+=(--source-guest-host "$N2K_SOURCE_GUEST_HOST")
+  [[ -z "${N2K_SOURCE_GUEST_HOSTKEY_SHA256:-}" ]] || run_args+=(--source-guest-hostkey-sha256 "$N2K_SOURCE_GUEST_HOSTKEY_SHA256")
+  [[ -z "${N2K_TARGET_DISK_CONTROLLER:-}" ]] || run_args+=(--target-disk-controller "$N2K_TARGET_DISK_CONTROLLER")
   if [[ -n "${inventory_json}" ]]; then
     run_args+=(--inventory-source fixture --inventory-json "${inventory_json}")
   else
