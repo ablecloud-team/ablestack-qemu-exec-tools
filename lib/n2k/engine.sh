@@ -44,8 +44,11 @@ source "${N2K_LIB_DIR}/transfer_patch.sh"
 source "${N2K_LIB_DIR}/target_libvirt.sh"
 # shellcheck source=/dev/null
 source "${N2K_LIB_DIR}/interactive.sh"
+# shellcheck source=/dev/null
 source "${N2K_LIB_DIR}/migration_common.sh"
+# shellcheck source=/dev/null
 source "${N2K_LIB_DIR}/controller_policy.sh"
+# shellcheck source=/dev/null
 source "${N2K_LIB_DIR}/guest_configuration.sh"
 
 n2k_die() {

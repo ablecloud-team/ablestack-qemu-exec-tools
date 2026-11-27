@@ -3,6 +3,7 @@
 N2K_MIGRATION_LIB_DIR="${N2K_MIGRATION_LIB_DIR:-${N2K_LIB_DIR}/migration}"
 [[ -d "$N2K_MIGRATION_LIB_DIR" ]] || N2K_MIGRATION_LIB_DIR="${N2K_LIB_DIR}/../v2k"
 
+# shellcheck source=/dev/null
 source "${N2K_LIB_DIR}/cloud_handoff.sh"
 
 # Operators may provision a private guest transport runtime without changing Mold.
