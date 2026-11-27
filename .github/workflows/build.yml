@@ -607,6 +607,7 @@ jobs:
           python3 tools/v2k/prepare-guest-config-appliance.py --archive-only --output assets/guest-config/appliance
           bash tools/v2k/build-guest-config-native.sh assets/guest-config/native
           python3 tools/v2k/prepare-guest-config-windows.py --output assets/guest-config/windows
+          python3 tools/v2k/prepare-guest-config-rocky.py --output assets/guest-config/rocky97
 
       - name: Verify V2K Cloud service-offering CPU speed handling
         shell: bash

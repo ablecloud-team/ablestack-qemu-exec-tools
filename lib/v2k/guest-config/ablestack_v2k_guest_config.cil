@@ -1,0 +1,8 @@
+; Copyright 2026 ABLECLOUD. Licensed under the Apache License, Version 2.0.
+; QGA file exchange is restricted to this migration-owned directory.
+(type ablestack_v2k_guest_config_t)
+(typeattributeset file_type (ablestack_v2k_guest_config_t))
+(roletype object_r ablestack_v2k_guest_config_t)
+(allow virt_qemu_ga_t ablestack_v2k_guest_config_t (dir (add_name create getattr open read remove_name search setattr write)))
+(allow virt_qemu_ga_t ablestack_v2k_guest_config_t (file (append create getattr ioctl lock map open read rename setattr unlink write)))
+(filecon "/var/lib/ablestack-v2k/guest-config(/.*)?" any (system_u object_r ablestack_v2k_guest_config_t ((s0) (s0))))

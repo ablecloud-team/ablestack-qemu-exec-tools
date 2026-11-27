@@ -50,6 +50,8 @@ v2k_guest_config_collect() {
   printf '%s' "$capture" | v2k_guest_config_python guest_configuration.py validate-capture --manifest "$manifest" || return $?
   tmp="$(mktemp "${manifest}.guest-source.XXXXXX")" || return $?
   jq --argjson state "$capture" '.source.guest_configuration=$state' "$manifest" > "$tmp" && mv -- "$tmp" "$manifest"
+  # Validate OS-specific offline packages while the source is still running.
+  v2k_guest_config_python guest_configuration_prepare.py preflight --manifest "$manifest" >/dev/null || return $?
   v2k_guest_config_python guest_configuration.py preview --manifest "$manifest" >&2 || return $?
 }
 v2k_guest_config_preflight_manifest() {

@@ -43,6 +43,7 @@ Requires:       qemu-img
 Requires:       libvirt-client
 Requires:       tar
 Requires:       python3-pyyaml
+Requires:       /usr/bin/rpmkeys
 Requires:       /usr/bin/guestfish
 Requires:       /usr/bin/virt-customize
 Requires:       virt-v2v

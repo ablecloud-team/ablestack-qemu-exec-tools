@@ -25,17 +25,19 @@ def observe(plan,bind):
     for want in plan['network']['interfaces']:
         name=want['ifname'];item=actual.get(name)
         if item is None or item.get('address','').lower()!=want['mac'] or want['mac'] not in macs or 'UP' not in item['flags']:raise ValueError('NIC_CONFIGURATION_MISMATCH')
+        if want.get('profile_uuid') and command(['nmcli','-g','GENERAL.CON-UUID','device','show',name])!=want['profile_uuid']:raise ValueError('NIC_PROFILE_MISMATCH')
         cfg=want['config'];addresses={a['local']+'/'+str(a['prefixlen']) for a in item['addr_info']};global_addresses=[a for a in item['addr_info'] if a.get('scope')=='global']
         if not all(str(ipaddress.ip_interface(a)) in addresses for a in cfg.get('addresses',[])):raise ValueError('NIC_STATIC_ADDRESS_MISMATCH')
         for version in [4,6]:
             if cfg.get('dhcp'+str(version)) and not any(a['family']==('inet' if version==4 else 'inet6') and (a.get('dynamic') or a.get('valid_life_time',4294967295)!=4294967295) for a in global_addresses):raise ValueError('NIC_DHCP_LEASE_PENDING')
+        if cfg.get('accept-ra') and not any(a['family']=='inet6' for a in global_addresses):raise ValueError('NIC_IPV6_RA_PENDING')
         if cfg.get('mtu') and item['mtu']!=cfg['mtu']:raise ValueError('NIC_MTU_MISMATCH')
         for route in cfg.get('routes',[]):
-            if not any(v.get('dev')==name and v.get('dst','default')==route['to'] and (not route.get('via') or v.get('gateway')==route['via']) for v in routes):raise ValueError('NIC_ROUTE_MISMATCH')
+            if not any(v.get('dev')==name and v.get('dst','default')==route['to'] and (not route.get('via') or v.get('gateway')==route['via']) and ('metric' not in route or v.get('metric')==route['metric']) for v in routes):raise ValueError('NIC_ROUTE_MISMATCH')
         nameservers=cfg.get('nameservers',{})
         if nameservers:
             if want['renderer']=='networkd':dns=command(['resolvectl','dns',name]);domains=command(['resolvectl','domain',name])
-            else:dns=command(['nmcli','-g','IP4.DNS,IP6.DNS','device','show',name]);domains=command(['nmcli','-g','IP4.DOMAIN,IP6.DOMAIN','device','show',name])
+            else:dns=command(['nmcli','--escape','no','-g','IP4.DNS,IP6.DNS','device','show',name]).replace('\n',' ');domains=command(['nmcli','--escape','no','-g','IP4.DOMAIN,IP6.DOMAIN','device','show',name]).replace('\n',' ')
             if not all(value in dns.split() for value in nameservers.get('addresses',[])) or not all(value in domains.split() for value in nameservers.get('search',[])):raise ValueError('NIC_DNS_MISMATCH')
         result.append({'mac':want['mac'],'ifname':name,'addresses':sorted(addresses),'mtu':item['mtu'],'status':'VERIFIED'})
     return {'status':'VERIFIED','interfaces':result}

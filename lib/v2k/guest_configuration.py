@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 import uuid
 
+from guest_configuration_networkmanager import supported_linux, validate_keyfiles
+
 VERSION = 1
 MAX_BYTES = 65536
 ROOTS = {
@@ -218,11 +220,11 @@ def build(manifest, capture, inspected, configs=()):
         }
     )
     if os_kind == "linux":
-        if capture.get("os_id") != "ubuntu" or not capture.get(
-            "os_version", ""
-        ).startswith("22.04"):
+        if not supported_linux(capture):
             fail("GUEST_OS_UNSUPPORTED")
-        plan["network"] = validate_network(
+        plan["os_id"] = capture["os_id"]
+        adapter = validate_keyfiles if capture["os_id"] == "rocky" else validate_network
+        plan["network"] = adapter(
             configs, manifest["source"]["vm"]["nics"], capture.get("interfaces", [])
         )
     else:
@@ -285,9 +287,7 @@ def validate_capture(capture, source_uuid):
 
     check(capture)
     if capture.get("os") == "linux":
-        if capture.get("os_id") != "ubuntu" or not str(
-            capture.get("os_version", "")
-        ).startswith("22.04"):
+        if not supported_linux(capture):
             fail("GUEST_OS_UNSUPPORTED")
         import yaml
 
@@ -299,7 +299,12 @@ def validate_capture(capture, source_uuid):
             ):
                 fail("SOURCE_CONFIG_CONTAINS_CREDENTIALS")
             try:
-                check(yaml.safe_load(text))
+                if capture["os_id"] == "ubuntu":
+                    check(yaml.safe_load(text))
+                else:
+                    from guest_configuration_networkmanager import parse_keyfile
+
+                    parse_keyfile(text)
             except yaml.YAMLError:
                 fail("SOURCE_CONFIG_INVALID")
     elif capture.get("os") != "windows" or str(capture.get("build")) != "20348":
@@ -315,7 +320,8 @@ def preview_capture(manifest):
         "Guest configuration candidate (final clone identities are checked before import):"
     )
     if capture["os"] == "linux":
-        result = validate_network(
+        adapter = validate_keyfiles if capture["os_id"] == "rocky" else validate_network
+        result = adapter(
             capture["configs"], manifest["source"]["vm"]["nics"], capture["interfaces"]
         )
         for nic in result["interfaces"]:

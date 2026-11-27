@@ -6,6 +6,8 @@ from pathlib import Path
 from guest_configuration import atomic, build, canonical, fail, verify, seal
 from guest_configuration_disk import Disk, image_inspect
 from guest_configuration_assets import resolve_appliance, file_sha
+from guest_configuration_networkmanager import config_path
+from guest_configuration_rocky_assets import payloads as rocky_payloads
 
 WINDOWS_ROOT = (
     "/usr/share/ablestack/v2k/guest-config/windows"
@@ -146,12 +148,35 @@ def preflight(manifest):
         ):
             fail("GUEST_AGENT_PAYLOAD_HASH_MISMATCH")
     else:
-        payloads(
-            os.environ.get(
-                "V2K_GUEST_CONFIG_UBUNTU_ASSETS",
-                "/usr/share/ablestack/v2k/guest-config/ubuntu22",
+        os_id = manifest["source"].get("guest_configuration", {}).get("os_id")
+        if os_id == "rocky":
+            rocky_payloads(
+                os.environ.get(
+                    "V2K_GUEST_CONFIG_ROCKY_ASSETS",
+                    "/usr/share/ablestack/v2k/guest-config/rocky97",
+                )
             )
-        )
+        elif os_id == "ubuntu":
+            payloads(
+                os.environ.get(
+                    "V2K_GUEST_CONFIG_UBUNTU_ASSETS",
+                    "/usr/share/ablestack/v2k/guest-config/ubuntu22",
+                )
+            )
+        elif not any(
+            (Path(os.environ.get(var, default)) / "assets.json").is_file()
+            for var, default in [
+                (
+                    "V2K_GUEST_CONFIG_UBUNTU_ASSETS",
+                    "/usr/share/ablestack/v2k/guest-config/ubuntu22",
+                ),
+                (
+                    "V2K_GUEST_CONFIG_ROCKY_ASSETS",
+                    "/usr/share/ablestack/v2k/guest-config/rocky97",
+                ),
+            ]
+        ):
+            fail("GUEST_AGENT_PAYLOAD_MISSING")
 
 
 def normalize_capture(capture):
@@ -179,6 +204,7 @@ def prepare(manifest_path):
                 ".cmd",
                 ".service",
                 ".path",
+                ".cil",
             ]:
                 (snapshot / source.name).write_bytes(source.read_bytes())
         return _prepare(manifest_path, snapshot)
@@ -207,6 +233,17 @@ def _prepare(manifest_path, payload):
             if kind != capture["os"]:
                 fail("GUEST_OS_IDENTITY_MISMATCH")
             if kind == "linux":
+                os_release = dict(
+                    line.split("=", 1)
+                    for line in image.read("/etc/os-release").splitlines()
+                    if "=" in line
+                )
+                if (
+                    os_release.get("ID", "").strip('"') != capture["os_id"]
+                    or os_release.get("VERSION_ID", "").strip('"')
+                    != capture["os_version"]
+                ):
+                    fail("GUEST_OS_IDENTITY_MISMATCH")
                 root_uuid = image.call("vfs-uuid", root).lower()
                 if root_uuid != capture["root_fs_uuid"].lower():
                     fail("ROOT_IDENTITY_MISMATCH")
@@ -214,7 +251,7 @@ def _prepare(manifest_path, payload):
                 for file in capture.get("configs", []):
                     p = file["path"]
                     if (
-                        not re.fullmatch(r"/etc/netplan/[A-Za-z0-9_.-]+\.yaml", p)
+                        not config_path(p, capture["os_id"])
                         or image.read(p) != file["content"].strip()
                     ):
                         fail("SOURCE_CONFIG_CHANGED")
@@ -278,6 +315,13 @@ def _prepare(manifest_path, payload):
                 if not image.exists(backup):
                     image.write(backup, original)
                 image.write(file["path"], file["content"])
+            for file in plan["network"].get("generated_files", []):
+                if (
+                    image.exists(file["path"])
+                    and image.read(file["path"]) != file["content"].strip()
+                ):
+                    fail("NETWORK_CONFIG_OWNERSHIP_CONFLICT")
+                image.write(file["path"], file["content"], "0644")
             config = "/etc/cloud/cloud.cfg.d/99-v2k-preserve-network.cfg"
             content = "network: {config: disabled}\n"
             if image.exists(config) and image.read(config) != content.strip():
@@ -297,14 +341,28 @@ def _prepare(manifest_path, payload):
                 .replace("@OPERATION_ID@", plan["operation_id"]),
                 "0644",
             )
-            files, asset_info = payloads(
-                os.environ.get(
-                    "V2K_GUEST_CONFIG_UBUNTU_ASSETS",
-                    "/usr/share/ablestack/v2k/guest-config/ubuntu22",
+            rocky = plan.get("os_id") == "rocky"
+            if rocky:
+                image.upload(str(payload / "ablestack_v2k_guest_config.cil"), base + "/ablestack_v2k_guest_config.cil")
+                files, asset_info = rocky_payloads(
+                    os.environ.get(
+                        "V2K_GUEST_CONFIG_ROCKY_ASSETS",
+                        "/usr/share/ablestack/v2k/guest-config/rocky97",
+                    )
                 )
-            )
-            if image.exists("/usr/sbin/qemu-ga"):
-                for cfg in ["/etc/qemu/qemu-ga.conf", "/etc/default/qemu-guest-agent"]:
+            else:
+                files, asset_info = payloads(
+                    os.environ.get(
+                        "V2K_GUEST_CONFIG_UBUNTU_ASSETS",
+                        "/usr/share/ablestack/v2k/guest-config/ubuntu22",
+                    )
+                )
+            if image.exists("/usr/sbin/qemu-ga") or image.exists("/usr/bin/qemu-ga"):
+                for cfg in [
+                    "/etc/qemu/qemu-ga.conf",
+                    "/etc/default/qemu-guest-agent",
+                    "/etc/sysconfig/qemu-ga",
+                ]:
                     if image.exists(cfg) and (
                         "guest-file-" in image.read(cfg) or "RPC" in image.read(cfg)
                     ):
@@ -312,6 +370,11 @@ def _prepare(manifest_path, payload):
                 install = False
             else:
                 install = True
+                if rocky:
+                    image.upload(
+                        str(payload / "rocky-qga-policy.py"),
+                        base + "/rocky-qga-policy.py",
+                    )
                 for f in files:
                     image.upload(str(f), base + "/payload/" + f.name)
             plan_assets = asset_info
@@ -348,13 +411,30 @@ def _prepare(manifest_path, payload):
             fail("GUEST_HELPER_STAGING_HASH_MISMATCH")
     args = ["virt-customize", "--no-network", "--format", fmt, "-a", root_path]
     if plan["os"] == "linux":
-        if install:
+        if install and plan.get("os_id") == "rocky":
+            args += [
+                "--run-command",
+                "rpm -Uvh --replacepkgs /var/lib/ablestack-v2k/guest-config/payload/*.rpm",
+                "--run-command",
+                "python3 /var/lib/ablestack-v2k/guest-config/rocky-qga-policy.py",
+            ]
+        elif install:
             # Suppress daemon start in the isolated appliance; enable for the real boot.
             script = 'set -e\np=/usr/sbin/policy-rc.d\nsaved=/var/lib/ablestack-v2k/guest-config/policy-rc.d.saved\nif test -e "$p"; then cp -p "$p" "$saved"; fi\nprintf \'#!/bin/sh\\nexit 101\\n\' > "$p"\nchmod 755 "$p"\nrc=0\ndpkg -i /var/lib/ablestack-v2k/guest-config/payload/*.deb || rc=$?\nif test -e "$saved"; then cp -p "$saved" "$p"; else rm -f "$p"; fi\nexit "$rc"\n'
             args += ["--run-command", script]
+        if plan.get("os_id") == "rocky":
+            # Label only owned files. Keep SELinux enforcing and the source fstab/LVM identities.
+            args += [
+                "--run-command",
+                "semodule -i /var/lib/ablestack-v2k/guest-config/ablestack_v2k_guest_config.cil",
+                "--run-command",
+                "restorecon -RF /var/lib/ablestack-v2k /etc/NetworkManager/system-connections /etc/systemd/network /etc/systemd/system/v2k-guest-config.* /etc/cloud/cloud.cfg.d/99-v2k-preserve-network.cfg",
+                "--run-command",
+                "systemctl preset qemu-guest-agent.service",
+            ]
+        else:
+            args += ["--run-command", "netplan generate"]
         args += [
-            "--run-command",
-            "netplan generate",
             "--run-command",
             "systemctl enable v2k-guest-config.service v2k-guest-config.path",
         ]

@@ -4,13 +4,19 @@
 
 ## 지원 범위와 준비
 
-v1 실기 자격 범위는 13번 GFS2, Ubuntu 22.04의 Netplan Ethernet/networkd, Windows Server 2022 build 20348의 basic 디스크다. source IDE/BIOS, SATA/EFI, SCSI/EFI를 포함한다. Ubuntu는 검증된 MAC에 원래 ifname을 연결하고 DHCP/정적 주소, routes/DNS/MTU를 보존한다. Windows는 DATA의 원본 GUID/파티션과 실제 대상 serial을 대조해 원래 online/read-only 상태와 드라이브 문자를 복원한다. 추가된 빈 CD-ROM의 문자 충돌만 제한적으로 해제하며 전역 SAN 정책은 변경하지 않는다.
+v1 실기 자격 범위는 13번 GFS2, Ubuntu 22.04의 Netplan Ethernet/networkd, Rocky Linux 9.7의 NetworkManager Ethernet keyfile, Windows Server 2022 build 20348의 basic 디스크다. source IDE/BIOS, SATA/EFI, SCSI/EFI를 포함한다. Ubuntu는 검증된 MAC에 원래 ifname을 연결하고 DHCP/정적 주소, routes/DNS/MTU를 보존한다. Windows는 DATA의 원본 GUID/파티션과 실제 대상 serial을 대조해 원래 online/read-only 상태와 드라이브 문자를 복원한다. 추가된 빈 CD-ROM의 문자 충돌만 제한적으로 해제하며 전역 SAN 정책은 변경하지 않는다.
+
+Rocky 9.7은 원본 keyfile의 UUID·DHCP/정적 주소·DNS/routes/MTU를 보존하고 MAC에 연결한다. 전용 systemd .link로 원래 ifname을 유지한다. 원본 게스트에는 PyYAML이나 QGA 설치가 필요하지 않다. Rocky 9.7 vault의 QGA/liburing/numactl-libs RPM을 고정된 공급자 키·RPM 서명·SHA-256으로 확인한 뒤 복제본에만 오프라인 설치한다. 호스트의 `rpmkeys`가 필요하다. 설정이 없는 기존 QGA만 재사용하고 운영자가 설정한 RPC 정책은 자동 완화하지 않는다.
+
+Rocky의 새 QGA에는 Mold 결합에 필요한 guest-file RPC 6개만 vendor allow list에 추가한다. guest-exec 제한을 유지하며, 전용 CIL 모듈은 `/var/lib/ablestack-v2k/guest-config`만 QGA가 읽고 쓸 수 있게 한다. SELinux Enforcing과 전역 boolean을 유지한다. 정책 설치와 restorecon은 첫 Mold 반입 전에 복제본 안에서 실행한다. 새 디스크 초기화·파일시스템 변경·전역 LVM/SAN 정책 변경은 수행하지 않는다.
+
+NetworkManager v1 범위는 단일/다중 Ethernet keyfile이다. ifcfg·bond/bridge/VLAN·인증/VPN·복수 후보 프로필·추정이 필요한 MAC 대응은 차단한다. Rocky 9.8·RHEL·다른 Rocky 버전은 이번 실기 자격 범위가 아니다. 정적/다중 NIC는 단위 검증과 실제 DHCP/IPv6 RA 검증을 구분한다. 공식 형식은 [NetworkManager keyfile](https://www.networkmanager.dev/docs/api/latest/nm-settings-keyfile.html), 이름 고정은 [systemd.link](https://www.freedesktop.org/software/systemd/man/latest/systemd.link.html)를 따른다.
 
 복잡한 Netplan 토폴로지·인증 설정, 모호한 대응, 폴더 mount path 등 v1 어댑터가 지원하지 않는 구성은 추정하지 않고 차단한다. RBD/raw·직접 libvirt에는 이 자동 복원 어댑터를 적용하지 않는다. 해당 기존 흐름은 명시적 `--guest-config-policy off`로 실행한다.
 
 호스트에는 guestfish, virt-customize, pyYAML, Windows 서비스 firstboot 실행기와 QGA MSI가 필요하다. Windows firstboot는 현재 자격 검증한 guestfs-tools 1.52.2 실행 경로로 제한한다. firstboot 보조 실행기는 배포판 virt-v2v 의존성으로 제공한다. RHEL 계열의 NTFS 제한을 피하기 위해 사설 경로에 upstream libguestfs/guestfish 1.58.1과 SHA-256을 고정한 appliance를 준비한다. 시스템 libguestfs와 기존 ISO는 교체하지 않는다. 네이티브 런타임을 포함하는 v2k RPM은 x86_64 패키지다.
 
-Release CI는 `tools/v2k/prepare-guest-config-assets.py`로 서명된 Ubuntu InRelease/index와 DEB SHA를 검증하고, `prepare-guest-config-appliance.py`, `build-guest-config-native.sh`로 사설 런타임을 준비한다. Windows QGA MSI는 prepare-guest-config-windows.py로 버전/해시를 고정해 준비한다. 큰 appliance는 원본 압축 archive로 RPM에 넣고, SHA 검증 후 사설 캐시에 sparse 파일을 유지하며 푼다. 새 payload와 라이선스/출처 메타데이터는 RPM에 포함한다. 대상 게스트에서 인터넷 다운로드를 요구하지 않는다. 개발 검증용 자산 경로는 `V2K_GUEST_CONFIG_UBUNTU_ASSETS`, `V2K_GUEST_CONFIG_APPLIANCE`, `V2K_GUEST_CONFIG_NATIVE`, `V2K_GUEST_CONFIG_VIRTIO_ROOT`로 지정한다.
+Release CI는 `tools/v2k/prepare-guest-config-assets.py`로 서명된 Ubuntu InRelease/index와 DEB SHA를 검증하고, `prepare-guest-config-appliance.py`, `build-guest-config-native.sh`로 사설 런타임을 준비한다. Windows QGA MSI는 prepare-guest-config-windows.py로 버전/해시를 고정해 준비한다. 큰 appliance는 원본 압축 archive로 RPM에 넣고, SHA 검증 후 사설 캐시에 sparse 파일을 유지하며 푼다. 새 payload와 라이선스/출처 메타데이터는 RPM에 포함한다. 대상 게스트에서 인터넷 다운로드를 요구하지 않는다. 개발 검증용 자산 경로는 `V2K_GUEST_CONFIG_UBUNTU_ASSETS`, `V2K_GUEST_CONFIG_ROCKY_ASSETS`, `V2K_GUEST_CONFIG_APPLIANCE`, `V2K_GUEST_CONFIG_NATIVE`, `V2K_GUEST_CONFIG_VIRTIO_ROOT`로 지정한다.
 
 ## CLI와 Wizard
 

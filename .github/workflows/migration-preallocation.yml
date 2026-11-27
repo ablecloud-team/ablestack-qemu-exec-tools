@@ -12,6 +12,8 @@ on:
       - "lib/n2k/**"
       - "completions/ablestack_*2k"
       - "tests/v2k_guest_configuration_test.py"
+      - "tests/v2k_guest_networkmanager_test.py"
+      - "tools/v2k/prepare-guest-config-rocky.py"
       - "tests/v2k_windows_storage_test.ps1"
       - "tests/v2k_controller_policy_test.py"
       - "tests/v2k_cloud_handoff_resume_test.py"
@@ -61,7 +63,7 @@ jobs:
       - name: V2K guest configuration contract
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python3 tests/v2k_guest_configuration_test.py
+        run: python3 -m unittest discover -s tests -p "v2k_guest*test.py" -v
       - name: N2K Shellcheck
         shell: bash
         run: |
