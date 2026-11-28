@@ -1433,7 +1433,7 @@ v2k_cloud_target_cutover_impl() {
     import_path="$(v2k_cloud_target_import_path "${storage}" "${target_path}")" || return $?
     # Managed/committed imports are reconciled by UUID, never re-probed as unmanaged images.
     # In particular, a completed Running VM must not trigger offline source qemu inspection.
-    if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]] && jq -e --argjson idx "${idx}" '
+    if jq -e --argjson idx "${idx}" '
         .runtime.cloud.checkpoint as $c
         | (if $idx == 0 then ($c.root_volume_id // $c.root_import_job_id // "")
            else ($c.data_volumes[($idx | tostring)].id // $c.data_volumes[($idx | tostring)].import_job_id // "") end)
@@ -1742,9 +1742,14 @@ v2k_cloud_target_cutover_impl() {
         "$(jq -nc --arg start_job_id "$(jq -r '.job_id // empty' <<<"${start_result}")" '{start_job_id:$start_job_id,started:true}')" || return 78
       jobs_json="$(jq -c --argjson jobs "${jobs_json}" --arg start_job "$(jq -r '.job_id' <<<"${start_result}")" '$jobs + [{kind:"start-vm",job_id:$start_job}]' <<<"{}")"
     else
+      local start_rc=$?
       inspection_required=true
       issues_json="$(jq -c --argjson issues "${issues_json}" \
         '$issues + [{component:"boot",stage:"start-vm",reason:"cloud_vm_start_failed"}]' <<<"{}")"
+      v2k_cloud_target_record_checkpoint "$manifest" vm-start-failed \
+        "$(jq -nc --argjson rc "$start_rc" --argjson issues "$issues_json" '{complete:false,started:false,inspection_required:true,exit_code:$rc,issues:$issues}')" || return 78
+      v2k_cloud_target_record_result "$manifest" '{"complete":false,"started":false,"validated":false,"inspection_required":true,"status":"start_failed","reason":"CLOUD_CUTOVER_INCOMPLETE"}' || return 78
+      return "$start_rc"
     fi
   elif [[ "${start_vm}" -eq 1 ]]; then
     issues_json="$(jq -c --argjson issues "${issues_json}" \
@@ -1770,9 +1775,13 @@ v2k_cloud_target_cutover_impl() {
     fi
   fi
 
-  if [[ "$started" == true ]] && ! v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify; then
-    v2k_cloud_target_record_checkpoint "$manifest" guest-config-pending '{"complete":false,"started":true,"inspection_required":true}' || return $?
-    return 78
+  if [[ "$started" == true ]]; then
+    local guest_rc=0
+    v2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || guest_rc=$?
+    if [[ "$guest_rc" != 0 ]]; then
+      v2k_cloud_target_record_checkpoint "$manifest" guest-config-pending '{"complete":false,"started":true,"inspection_required":true}' || return 78
+      return "$guest_rc"
+    fi
   fi
   result_json="$(jq -nc \
     --arg provider "ablestack-cloud" \

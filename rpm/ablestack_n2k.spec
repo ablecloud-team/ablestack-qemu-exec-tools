@@ -35,6 +35,7 @@ Requires:       nfs-utils
 Requires:       python3
 Requires:       python3-pyyaml
 Requires:       python3-paramiko
+Requires:       python3-winrm
 
 %description
 ablestack_n2k provides ABLESTACK Nutanix AHV-to-KVM migration scripts and libraries.

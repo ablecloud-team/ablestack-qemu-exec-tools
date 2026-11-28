@@ -5,6 +5,7 @@ import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from guest_configuration import atomic, build, canonical, fail, verify, seal
 from guest_configuration_disk import Disk, image_inspect
+from guest_configuration_rbd import access_path, verify_identity, spec
 from guest_configuration_assets import resolve_appliance, file_sha
 from guest_configuration_networkmanager import config_path
 from guest_configuration_rocky_assets import payloads as rocky_payloads
@@ -23,6 +24,8 @@ def require_unsealed(manifest):
     checkpoint = manifest.get("runtime", {}).get("cloud", {}).get("checkpoint", {})
     if (
         checkpoint.get("root_volume_id")
+        or checkpoint.get("root_import_job_id")
+        or checkpoint.get("deploy_job_id")
         or checkpoint.get("vm_id")
         or checkpoint.get("data_volumes")
         or any(
@@ -65,13 +68,24 @@ def ubuntu_asset_directory(version):
 
 def preflight(manifest):
     require_unsealed(manifest)
-    if (
-        manifest["target"].get("provider") != "ablestack-cloud"
-        or manifest["target"]["storage"]["type"] != "file"
-        or manifest["target"].get("format") != "qcow2"
-    ):
+    storage = manifest["target"]["storage"]["type"]
+    fmt = manifest["target"].get("format")
+    if manifest["target"].get("provider") != "ablestack-cloud" or (storage, fmt) not in [("file", "qcow2"), ("rbd", "raw")]:
         fail("GUEST_CONFIG_TARGET_UNSUPPORTED")
-    for name in ["guestfish", "virt-customize"]:
+    needed = ["guestfish", "virt-customize"]
+    if storage == "rbd":
+        needed += ["rbd", "udevadm", "blockdev"]
+        if manifest["target"]["storage"].get("rbd_access_mode", "krbd") != "krbd":
+            fail("RBD_GUEST_PREPARATION_ACCESS_MODE_UNSUPPORTED")
+        seen = set()
+        for d in manifest["disks"]:
+            uri = d["transfer"]["target_path"]
+            if spec(uri) in seen:
+                fail("RBD_PREPARATION_DUPLICATE_IMAGE")
+            seen.add(spec(uri))
+            if d["size_bytes"] <= 0 or d["size_bytes"] % (1024 * 1024):
+                fail("RBD_PREPARATION_SIZE_ALIGNMENT_UNSUPPORTED")
+    for name in needed:
         if not shutil.which(name):
             fail("FIRSTBOOT_CAPABILITY_MISSING")
     source = manifest["source"]["vm"]
@@ -240,7 +254,7 @@ def _prepare(manifest_path, payload):
     else:
         inspection = image_inspect(m)
         configs = []
-        with Disk(root_path, fmt) as image:
+        with Disk(root_path, fmt, manifest=m, index=0) as image:
             root, kind = image.mount_root()
             if kind != capture["os"]:
                 fail("GUEST_OS_IDENTITY_MISMATCH")
@@ -314,7 +328,7 @@ def _prepare(manifest_path, payload):
         if plan["os"] == "linux"
         else "/ProgramData/ABLECLOUD/V2K/GuestConfig"
     )
-    with Disk(root_path, fmt, False) as image:
+    with Disk(root_path, fmt, False, manifest=m, index=0) as image:
         image.mount_root()
         if (
             image.exists(base + "/plan.json")
@@ -323,6 +337,10 @@ def _prepare(manifest_path, payload):
             fail("GUEST_CONFIG_PREPARATION_CONFLICT")
         image.write(base + "/plan.json", canonical(plan))
         if plan["os"] == "linux":
+            if m['target']['storage']['type'] == 'rbd':
+                image.write(base + '/controller-plan.json', canonical(m['target']['disk_controller_plan']))
+                image.upload(str(payload / 'prepare-linux-drivers.py'), base + '/prepare-linux-drivers.py')
+                image.call('chmod', '0700', base + '/prepare-linux-drivers.py')
             # QGA creates binding files with its own mode; keep the entire exchange private.
             image.call("chmod", "0700", base)
             for file in plan["network"]["files"]:
@@ -446,7 +464,7 @@ def _prepare(manifest_path, payload):
             }
             if driver_info:
                 plan_assets["serial_driver"] = driver_info
-    with Disk(root_path, fmt) as image:
+    with Disk(root_path, fmt, manifest=m, index=0) as image:
         image.mount_root()
         name = "helper.py" if plan["os"] == "linux" else "helper.ps1"
         if image.call("checksum", "sha256", base + "/" + name) != plan["helper_sha256"]:
@@ -457,6 +475,8 @@ def _prepare(manifest_path, payload):
                     fail("GUEST_HELPER_STAGING_HASH_MISMATCH")
     args = ["virt-customize", "--no-network", "--format", fmt, "-a", root_path]
     if plan["os"] == "linux":
+        if m['target']['storage']['type'] == 'rbd':
+            args += ['--run-command', 'python3 /var/lib/ablestack-v2k/guest-config/prepare-linux-drivers.py']
         if install and plan.get("os_id") == "rocky":
             args += [
                 "--run-command",
@@ -488,12 +508,20 @@ def _prepare(manifest_path, payload):
         ]
     else:
         args += ["--firstboot", str(payload / "windows-firstboot.cmd")]
-    subprocess.run(
-        args,
-        check=True,
-        timeout=900,
-        env={**os.environ, "LIBGUESTFS_BACKEND": "direct"},
-    )
+    with access_path(m, 0, False) as prepared_path:
+        args[args.index("-a") + 1] = prepared_path
+        subprocess.run(args, check=True, timeout=900, env={**os.environ, "LIBGUESTFS_BACKEND": "direct"})
+    if m["target"]["storage"]["type"] == "rbd":
+        images = [verify_identity(m, i) for i in range(len(m["disks"]))]
+        m.setdefault("runtime", {}).setdefault("guest_configuration", {}).update({
+            "adapter": "rbd-krbd-raw-v1", "rbd_images": images})
+        if plan['os'] == 'linux':
+            with Disk(root_path, fmt, manifest=m, index=0) as image:
+                image.mount_root()
+                boot = json.loads(image.read(base + '/driver-preparation.json'))
+            if boot.get('status') != 'VERIFIED' or boot.get('controller_plan_hash') != plan['controller_plan_hash'] or not boot.get('kernels'):
+                fail('INITRAMFS_PREPARATION_UNVERIFIED')
+            m['runtime']['guest_configuration']['boot_preparation'] = boot
     m["target"]["guest_configuration_plan"] = plan
     m.setdefault("runtime", {}).setdefault("guest_configuration", {}).update(
         {

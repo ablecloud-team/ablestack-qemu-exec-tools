@@ -6,6 +6,8 @@ n2k_cloud_handoff_started() {
   local status=0
   jq -e '
     ((.runtime.cloud.checkpoint.root_volume_id // "") | tostring | length) > 0
+    or ((.runtime.cloud.checkpoint.root_import_job_id // "") | tostring | length) > 0
+    or ((.runtime.cloud.checkpoint.deploy_job_id // "") | tostring | length) > 0
     or ((.runtime.cloud.checkpoint.vm_id // "") | tostring | length) > 0
     or ((.runtime.cloud.checkpoint.data_volumes // {}) | length) > 0
     or any(.disks[]?; ((.transfer.cloud_allocation.request_id // "") | tostring | length) > 0)

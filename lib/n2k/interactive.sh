@@ -728,7 +728,7 @@ n2k_cmd_wizard() {
   local N2K_PREALLOCATION_SOURCE="${target_preallocation_source}"
   migration_cloud_allocation_copy_choice n2k "${target_provider}" "${target_storage}" "${target_preallocation}" "${N2K_MANIFEST:-}" "${cloud_allocation_copy}" "${yes}" "${print_command}" || return $?
   cloud_allocation_copy="${CLOUD_ALLOCATION_COPY_CHOICE}"
-  rbd_access_mode="${rbd_access_mode:-librbd}"
+  rbd_access_mode="${rbd_access_mode:-$(if [[ "${target_provider}" == ablestack-cloud ]]; then printf krbd; else printf librbd; fi)}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   if [[ -n "${target_map_json}" ]]; then
     target_map_json="$(printf '%s' "${target_map_json}" | jq -c . 2>/dev/null)" || \

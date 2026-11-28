@@ -3678,16 +3678,13 @@ v2k_windows_winpe_bootstrap_libvirt() {
   fi
 }
 
-v2k_cloud_windows_winpe_bootstrap() {
+v2k_cloud_windows_winpe_bootstrap() (
+  # Image leases and their descriptors belong only to this bootstrap process.
+  trap - EXIT
   local winpe_iso="$1"
   local virtio_iso="$2"
   local winpe_timeout="$3"
-  local tmp_manifest tmp_vm xml_path base_name
-
-  if ! v2k_cutover_prepare_rbd_mappings "${V2K_MANIFEST}"; then
-    echo "Failed to prepare persistent RBD mappings for Cloud WinPE bootstrap." >&2
-    return 66
-  fi
+  local tmp_manifest tmp_vm xml_path base_name owned_krbd=0 lease_fd uri state rc=0
 
   mkdir -p "${V2K_WORKDIR}/artifacts"
   base_name="$(jq -r '.target.cloud.name // .source.vm.name // "v2k-winpe"' "${V2K_MANIFEST}")"
@@ -3696,6 +3693,24 @@ v2k_cloud_windows_winpe_bootstrap() {
   tmp_vm="v2k-winpe-${base_name}"
   tmp_vm="${tmp_vm:0:60}"
   tmp_manifest="${V2K_WORKDIR}/artifacts/${tmp_vm}.manifest.json"
+
+  if jq -e '.target.storage.type=="rbd" and .target.guest_config_policy=="preserve"' "$V2K_MANIFEST" >/dev/null; then
+    owned_krbd=1
+    install -d -m 0700 /var/lock/ablestack-rbd-preparation
+    while IFS= read -r uri; do
+      exec {lease_fd}>"/var/lock/ablestack-rbd-preparation/$(printf '%s' "${uri#rbd:}" | sha256sum | cut -d' ' -f1).lock"
+      flock -n "$lease_fd" || { echo 'RBD_PREPARATION_IMAGE_BUSY' >&2; return 44; }
+    done < <(jq -r '.disks[].transfer.target_path' "$V2K_MANIFEST")
+    state="$(LC_ALL=C virsh -c "${V2K_LIBVIRT_URI:-qemu:///system}" domstate "$tmp_vm" 2>/dev/null || true)"
+    [[ -z "$state" || "$state" == 'shut off' ]] || { echo 'RBD_WINPE_STILL_ACTIVE' >&2; return 44; }
+    v2k_guest_config_python guest_configuration_rbd.py winpe-release --manifest "$V2K_MANIFEST" || return $?
+    v2k_guest_config_python guest_configuration_rbd.py winpe-idle --manifest "$V2K_MANIFEST" || return $?
+  fi
+  v2k_cutover_prepare_rbd_mappings "$V2K_MANIFEST" || rc=$?
+  if [[ "$owned_krbd" == 1 ]]; then
+    v2k_guest_config_python guest_configuration_rbd.py winpe-record --manifest "$V2K_MANIFEST" || return $?
+  fi
+  [[ "$rc" == 0 ]] || { echo 'Failed to prepare Cloud WinPE RBD mappings.' >&2; return 66; }
 
   jq --arg vm "${tmp_vm}" '.target.libvirt.name = $vm' "${V2K_MANIFEST}" > "${tmp_manifest}"
 
@@ -3710,8 +3725,15 @@ v2k_cloud_windows_winpe_bootstrap() {
     return 65
   fi
 
-  v2k_windows_winpe_bootstrap_libvirt "${tmp_manifest}" "${tmp_vm}" "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}" 1
-}
+  v2k_windows_winpe_bootstrap_libvirt "${tmp_manifest}" "${tmp_vm}" "${winpe_iso}" "${virtio_iso}" "${winpe_timeout}" 1 || rc=$?
+  if [[ "$owned_krbd" == 1 ]]; then
+    state="$(LC_ALL=C virsh -c "${V2K_LIBVIRT_URI:-qemu:///system}" domstate "$tmp_vm" 2>/dev/null || true)"
+    if [[ -z "$state" || "$state" == 'shut off' ]]; then
+      v2k_guest_config_python guest_configuration_rbd.py winpe-release --manifest "$V2K_MANIFEST" || return $?
+    fi
+  fi
+  return "$rc"
+)
 
 v2k_bootstrap_fallback_enabled() {
   local policy="${1:-sata}"
@@ -4157,7 +4179,11 @@ v2k_cmd_cutover() {
       fi
     fi
 
-    if [[ "${do_cloud_linux_bootstrap}" -eq 1 ]]; then
+    if [[ "$do_cloud_linux_bootstrap" == 1 ]] && jq -e '.target.storage.type=="rbd" and .target.guest_config_policy=="preserve"' "$V2K_MANIFEST" >/dev/null; then
+      # The private KRBD appliance prepares and verifies every boot image below.
+      # Never activate an RBD guest's volume group in the worker host namespace.
+      v2k_event INFO cutover '' cloud_linux_bootstrap_deferred_to_krbd_appliance '{}'
+    elif [[ "${do_cloud_linux_bootstrap}" -eq 1 ]]; then
       v2k_event INFO "cutover" "" "cloud_linux_bootstrap_requested" "{}"
       if [[ "${V2K_JSON_OUT:-0}" -ne 1 ]]; then
         echo "[v2k] Cloud Linux bootstrap(initramfs) requested (guestFamily=linuxGuest)"
@@ -4231,6 +4257,9 @@ v2k_cmd_cutover() {
   fi
 
   v2k_guest_config_stage "$V2K_MANIFEST" || return $?
+  if jq -e '.target.storage.type=="rbd" and .target.guest_config_policy=="preserve" and .source.guest_configuration.os=="linux" and .runtime.guest_configuration.boot_preparation.status=="VERIFIED"' "$V2K_MANIFEST" >/dev/null; then
+    v2k_cloud_record_boot_readiness_ready "$V2K_MANIFEST" linux rbd-krbd-appliance || return $?
+  fi
 
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     local cloud_result cloud_error_file cloud_rc cloud_error_text cloud_error_json

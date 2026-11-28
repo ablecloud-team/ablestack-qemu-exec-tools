@@ -441,7 +441,7 @@ n2k_transfer_cold_base_one() {
 
       copy_rc=0
       n2k_storage_copy_base \
-        "${source_path}" "${staging_path}" "${target_storage}" "${target_format}" \
+        "${source_path}" "${staging_path}" "${target_storage}" "${target_format}" "${preallocation}" "${manifest}" "${idx}" \
         >"${attempt_log}" 2>&1 || copy_rc=$?
       cat "${attempt_log}" >&2
 
@@ -466,6 +466,9 @@ n2k_transfer_cold_base_one() {
               --argjson publish_rc "${publish_rc}" \
               '{target:$target,staging:$staging,publish_rc:$publish_rc,note:"completed staging image was retained for operator recovery"}')"
           return 76
+        fi
+        if jq -e '.target.guest_config_policy == "preserve"' "$manifest" >/dev/null; then
+          n2k_guest_config_python guest_configuration_rbd.py record --manifest "$manifest" --index "$idx" || return $?
         fi
         staging_path=""
         n2k_event INFO "sync.base" "${disk_id}" "rbd_staging_published" \

@@ -3,16 +3,32 @@
 """Private libguestfs appliance. Never opens a handed-off image."""
 import json, os, re, struct, subprocess, tempfile
 from pathlib import Path
+from guest_configuration_rbd import access_path
 
 
 class Disk:
-    def __init__(self, path, fmt="qcow2", readonly=True):
+    def __init__(self, path, fmt="qcow2", readonly=True, manifest=None, index=0):
         self.path = path
         self.fmt = fmt
         self.readonly = readonly
         self.pid = None
+        self.manifest = manifest
+        self.index = index
+        self.export = None
 
     def __enter__(self):
+        if self.path.startswith("rbd:"):
+            if self.manifest is None or self.fmt != "raw":
+                raise ValueError("RBD_PREPARATION_OWNER_REQUIRED")
+            self.export = access_path(self.manifest, self.index, self.readonly)
+            self.path = self.export.__enter__()
+        try:
+            return self._open()
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def _open(self):
         args = ["guestfish", "--listen", "--format=" + self.fmt, "-a", self.path]
         if self.readonly:
             args.insert(1, "--ro")
@@ -40,13 +56,24 @@ class Disk:
         return self
 
     def __exit__(self, *args):
+        failure = None
         if self.pid:
             try:
                 if not self.readonly:
                     self.call("sync")
-                self.call("exit")
-            except Exception:
-                pass
+            except Exception as error:
+                failure = error
+            finally:
+                try:
+                    self.call("exit")
+                except Exception:
+                    pass
+                self.pid = None
+        if self.export is not None:
+            self.export.__exit__(*args)
+            self.export = None
+        if failure is not None and not any(args):
+            raise failure
 
     def call(self, method, *args, binary=False):
         result = subprocess.run(
@@ -145,7 +172,8 @@ def image_inspect(manifest):
     result = []
     for disk in manifest["disks"]:
         with Disk(
-            disk["transfer"]["target_path"], manifest["target"].get("format", "qcow2")
+            disk["transfer"]["target_path"], manifest["target"].get("format", "qcow2"),
+            manifest=manifest, index=len(result)
         ) as image:
             result.append(image.inspect(manifest.get("source", {}).get("guest_configuration", {}).get("os") == "linux"))
     return result

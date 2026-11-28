@@ -1,90 +1,60 @@
-# 32번 RBD 이관 준비와 게스트 자동 복원 확장 설계
+# RBD 이관의 KRBD 자동 복원 설계와 구현
 
-관련: [이슈 #93](https://github.com/ablecloud-team/ablestack-qemu-exec-tools/issues/93).
+관련: [이슈 #93](https://github.com/ablecloud-team/ablestack-qemu-exec-tools/issues/93), [도구 PR #94](https://github.com/ablecloud-team/ablestack-qemu-exec-tools/pull/94), [Mold PR #2011](https://github.com/ablecloud-team/ablestack-cloud/pull/2011).
 
-이번 PR은 환경 준비와 설계 단계다. 운영자가 **환경 준비·RBD 개선 설계까지**로 범위를 지정했다.
-RBD 자동 복원 코드를 구현하거나 VM 디스크 복사·Mold 반입·cutover를 실행하지 않는다.
-환경과 원본 상태는 [준비 보고서](../validation/issue93-rbd-cluster32-20261128.md)에 기록한다.
+준비 단계 이후 운영자의 구현 승인을 반영한 최종 설계다. 32번 Mold의 디스크 접근 방식인 **KRBD**를 변환·게스트 준비·최종 실행에 적용한다. 준비 당시 환경과 원본 목록은 [준비 보고서](../validation/issue93-rbd-cluster32-20261128.md)에 남긴다.
 
-## 유지할 계약
+## 정책
 
-- 새 캐시 기본값 none, 명시적 writeback, 기존 sealed 작업의 캐시/driver/guest 계획을 유지한다.
-- RBD 이미지는 raw다. 파일형 기본 falloc을 RBD에 전달하거나 Ceph 물리 예약으로 설명하지 않는다.
-- IDE→SATA/AHCI, SATA→SATA/AHCI, SCSI→VirtIO-SCSI의 auto 정책과 원본 BIOS/UEFI를 유지한다.
-- guest plan/helper/binding/report, ROOT/DATA UUID와 현재 boot scope를 검증한다. 실패 시 RETAINED_UNVERIFIED와 실패 종료 코드를 유지하며 대상과 현재 상태를 보존한다.
-- handoff 이후 managed 이미지를 guestfs로 다시 열거나 helper/계획을 교체하지 않는다.
+| 항목 | 적용 정책 |
+|---|---|
+| 저장 형식 | RBD/raw, preallocation은 `not_applicable` |
+| 접근 방식 | Mold 신규 작업은 KRBD 기본값. preserve 준비는 KRBD만 허용 |
+| 캐시 | 신규 기본값 `none`, 명시적 `writeback` 지원, 기존 sealed 값 보존 |
+| 컨트롤러 auto | IDE·SATA → SATA/AHCI, SCSI → VirtIO-SCSI |
+| 펌웨어 | 원본 BIOS/UEFI 유지 |
+| 게스트 | Ubuntu 22.04/24.04, Rocky 9.7, Windows Server 2022 build 20348의 기존 자격과 고정 helper 계약 사용 |
 
-## 현재 제약
+CLI와 wizard는 같은 정책·계획을 사용한다. 기존 file/qcow2의 falloc 정책과 libvirt 대상의 접근 방식 선택은 유지한다. RBD에 파일형 falloc을 적용하거나 Ceph 물리 예약을 보장한다고 표시하지 않는다.
 
-Mold의 RBD controller binding은 pool/image path, 볼륨 UUID 및 실행 XML의 network/rbd source를
-대조하는 코드가 있고 32번의 현재 worker capability를 확인했다. 그러나 클라이언트의
-`guest_configuration_prepare.py:preflight`는 file/qcow2만 허용한다. RBD/raw에 preserve를
-요청하면 복사 전에 GUEST_CONFIG_TARGET_UNSUPPORTED로 거절한다.
+## 복사와 소유권
 
-이 gate를 없애거나 RBD에서 자동 off로 바꾸면 안 된다. Windows DATA·정적 IP/gateway/DNS와
-Linux NIC 자동 복원의 GFS2 실기를 RBD 지원으로 소급 해석하지 않는다. 명시적 off baseline은
-자동 복원과 별도 시험이며, 실행해도 guest 설정의 VERIFIED/완료를 주장하지 않는다.
+원본 UUID·디스크 주소·역할·크기 및 목적지 URI를 확정한 다음 작업 전용 staging 이미지를 만든다. KRBD 장치에 raw 데이터를 복사하고 flush·unmap을 완료한 뒤 기존 목적지를 덮어쓰지 않는 publish를 수행한다. 부분 복사·publish 실패는 기존 사용자 이미지를 변경하지 않는다.
 
-## 후속 실행 단계
+preserve 작업은 publish 직후 `rbd info`의 image ID·크기와 run/source VM/source disk/URI를 `ablecloud.migration.owner.v1` 메타데이터 및 manifest에 기록한다. 게스트 준비에서는 이 기록과 현재 이미지를 다시 대조한다. 이름만 같은 이미지, 소유권 기록이 없는 이미지, 중복 URI, snapshot/namespace/옵션이 들어간 URI와 지원하지 않는 크기는 거부한다.
 
-1. source inventory와 guest 의도를 읽고 ROOT를 확정한다. PC device UUID와 PE 실제 vDisk UUID,
-   CD-ROM을 구분한다. 명확하지 않은 ROOT는 stable selector를 요구한다. 겹치는 MAC/IP의 소스와
-   이전 대상이 동시에 네트워크에 연결되지 않도록 cutover 순서를 기록한다.
-2. 현재 storage worker, raw/RBD data plane, controller/firmware, cache, guest adapter 및 필요한
-   Windows/Linux payload를 각각 협상한다. CLI/wizard/yes/preview가 같은 결과를 보여야 한다.
-   preview는 인증 문자열을 마스킹하고 snapshot·이미지·manifest·Cloud 자원을 만들지 않는다.
-3. 소스를 작업 소유의 private RBD 이미지에 복사하고 복사 무결성을 확인한다. 마지막 원본 동기화와
-   승인된 종료 뒤 guest 준비를 한다. hibernated/dirty NTFS를 임의 수리하지 않는다.
-4. 새 RBD adapter에서 고정된 helper·driver·네트워크/DATA 계획을 적용한다. 아래 후보의 실제
-   libguestfs/QEMU/Ceph 동작을 시험한 뒤 구현 경로를 확정한다.
-5. 필요한 변경과 guest 준비 후검사를 완료한 다중 디스크 집합만 publish한다. 최종 pool/image와
-   immutable RBD image identity, 형식·크기·ROOT/DATA 역할을 작업 manifest에 기록한다.
-6. Mold ROOT/DATA 등록·controller 조립·첫 시작 전에 UUID, image identity, raw, cache와 guest
-   binding을 확인한다. 시작 후 실제 guest의 현재 결과를 확인해야 완료한다. 같은 manifest의
-   재개는 기존 이미지·VM·볼륨을 재사용하며 새 원본 snapshot/복사로 돌아가지 않는다.
+## Mold 인계 전 준비
 
-## 오프라인 RBD adapter 후보
+1. Mold `listVolumesForImport`로 모든 목적지가 해당 primary storage의 미등록 이미지인지 확인한다.
+2. worker 파일 잠금, Ceph watcher와 기존 매핑 확인을 거쳐 새 커널 매핑만 만든다. 장치의 종류·크기·읽기 전용 값·sysfs image ID를 확인한다.
+3. 고정된 private libguestfs appliance에 raw 블록 장치를 전달한다. 게스트 파일시스템과 LVM은 appliance 안에서 처리한다.
+4. Linux의 MAC/인터페이스 이름과 netplan·NetworkManager 설정, Windows의 DATA online/RW/문자 및 정적 IPv4·gateway·DNS 의도를 기존 guest plan으로 준비한다. QGA와 helper 자산은 기존 해시 검증을 거친다.
+5. RBD Linux는 같은 appliance에서 AHCI·VirtIO·SCSI·device-mapper/LVM 부팅 모듈을 준비한다. dracut 또는 update-initramfs 실행 후 각 커널의 실제 모듈·builtin 여부와 이미지 해시를 확인한다. 호스트 LVM 활성화 경로를 사용하지 않는다.
+6. WinPE가 필요한 Windows 경로는 생성한 KRBD 매핑을 별도 기록한다. 임시 VM이 중지된 뒤 같은 image ID의 자기 매핑만 flush·unmap한다. 실행 중 VM과 외부 매핑은 해제하지 않는다.
+7. 준비 결과와 helper/계획 해시를 확인하고 자기 매핑을 해제한 다음 Mold에 ROOT·DATA를 인계한다.
 
-| 후보 | 절차 | 검증할 사항 |
-|---|---|---|
-| private RBD + NBD/block | 작업 전용 이미지를 qemu-nbd 등으로 제한적으로 노출하고 ROOT/DATA를 libguestfs에 전달 | 현행 도구에서 raw/NBD 조합, root inspection, NTFS appliance, SELinux, exclusive access, mapping 소유/해제·프로세스 중단 복구 |
-| local staging 후 publish | 작업 전용 로컬 raw/qcow2에 준비한 뒤 RBD 이미지로 전달하고 publish | 두 표현의 정확한 변환·크기, 임시 파일·공간·복사 비교, 멀티디스크 부분 실패 및 원자적 완료 기록 |
+NTFS용 appliance, OS별 QGA 패키지, VirtIO/WinPE 자산은 worker의 보호된 운영 자산을 사용한다. 코드와 별도로 자격 및 SHA-256을 확인한다. n2k Windows 수집의 전용 Python 환경은 [설치 절차](../n2k/source-runtime.md)를 따른다. 인증 문자열은 계획·자산·로그에 저장하지 않는다.
 
-현재 3개 worker에 qemu-nbd/guestfish/virt-customize가 있고 rbd-nbd는 없다. 존재만으로 adapter가
-검증된 것은 아니다. RBD 접근 키는 기존 보호된 운영 설정을 사용하고 manifest·명령 미리보기·로그에
-값을 넣지 않는다. 임시 device/worker 경로는 실행 관측/lease이며 영구 배치 권한으로 고정하지 않는다.
+## 인계 후 검증과 재개
 
-source raw byte 비교는 guest 준비 이전 복사 경계에서 한다. 준비 뒤에는 의도한 OS 변경을 journal로
-구분하고 원본 사용자 파일의 SHA와 filesystem identity를 검증한다. OS 설정을 변경한 디스크 전체가
-원본과 byte-identical하다고 주장하지 않는다.
+ROOT import job, VM 배포 job 또는 ROOT/VM/DATA 식별자가 기록되면 인계가 시작된 상태로 간주한다. 이후에는 managed 이미지를 오프라인으로 열거나 원본을 다시 복사하거나 고정 helper/계획을 교체하지 않는다. 재개는 기존 작업의 UUID와 job을 대조하며 중복 import·VM 생성을 방지한다.
 
-## 공간·소유·실패와 인계
+Mold/Agent는 첫 기동 전 controller/firmware/volume binding을 검증한다. 실행 후에는 XML의 블록 장치를 실제 KRBD 매핑으로 해석하여 pool/image, 커널 sysfs 및 Ceph image ID를 대조한다. 도구는 이 관측을 인계 전에 기록한 image ID와 비교한다. 준비 단계 장치 번호는 영구 권한으로 사용하지 않는다. 다른 호스트에서도 새 장치 번호를 같은 이미지로 긍정 확인해야 한다.
 
-18대의 원본 가상 디스크 합계는 678 GiB, 최대 VM은 72 GiB다. RBD pool은 관측 시 replica size=2지만
-thin allocation·공유 사용량·quota를 별도로 고려한다. 가상 용량 합계로 물리 공간을 예약했다고
-표시하지 않는다. allocation의 file/falloc receipt를 RBD에 위조해 넘기지 않는다.
+기존 guest v1/v2의 plan/helper/binding/report와 현재 boot scope 검증을 유지한다. Windows static/DHCP 의도, Linux 네트워크, ROOT/DATA 및 캐시 확인이 완료되어야 검증 완료로 표시한다. 기존 RBD 계획에 새 접근 방식 필드를 소급 추가하여 hash를 변경하지 않는다.
 
-현재 worker 로컬 여유 공간은 약 111/192/234 GiB다. local staging 후보는 source staging, output,
-overlay/rollback, appliance, 안전 여유를 합산해야 한다. 특히 32.1에서 최대 VM의 두 전체 표현을
-동시에 보관하는 가정을 해서는 안 된다. 현재 자원 상태로 적격 worker를 선택하며 특정 host를
-필수 바인딩하지 않는다.
+## 실패 보존
 
-임시 이름/namespace, operation UUID, RBD image ID, 작업 소유 receipt를 결합한다. 정리는 작업이
-만든 미인계 자원에만 허용하고 기존 사용자 이미지를 truncate/remove하지 않는다. image별 rename이
-다중 이미지 전체의 원자성을 보장한다고 가정하지 않는다. 모든 디스크가 준비됐다는 durable manifest
-없이 Mold 인계를 시작하지 않는다. async 응답 유실 시에는 계정·pool/image identity와 operation을
-대조해 기존 등록 결과를 재조회하거나 충돌로 차단하며 중복 import로 해결하지 않는다.
+실패·시간 초과는 `RETAINED_UNVERIFIED`로 기록하며 Mold VM·볼륨의 현재 상태와 재개 정보를 보존한다. 실제 start/API/guest 검증 오류의 원래 종료 코드를 전달한다. 의도적으로 선택한 define-only/off는 실행 성공 코드와 별개로 검증 미완료임을 표시한다. 지원 불가를 자동 off나 성공으로 바꾸지 않는다.
 
-## 검증 계획과 완료 기준
+미등록 이미지의 실패 재개는 동일 작업의 소유권을 재확인한다. 인계 이후의 재개는 Mold 관측을 갱신한다. 정상적인 중지·다른 호스트 시작·Agent 재시작 뒤에도 helper와 operation/plan은 고정하고 boot scope를 새로 확인한다.
 
-- VMware/Nutanix 각각 Windows·Ubuntu·Rocky × IDE/SATA/SCSI 9대, 원본 BIOS/UEFI와 RAW/RBD를 검증한다.
-- 기본 none/명시적 writeback, ROOT/DATA 순서·전체 인식, VM·볼륨 UUID, 최종 image path, API/XML 및
-  실제 guest의 disk/firmware/network를 대조한다. Ceph client cache와 file preallocation을 혼동하지 않는다.
-- Linux는 MAC/ifname·netplan/NetworkManager·주소/routes/DNS/MTU·DATA mount, Windows는 DATA online/RW·
-  원래 문자와 정적 IPv4/prefix·gateway/metric·DNS 순서를 확인한다. 원본이 DHCP인 사례로 정적 IP 자격을 대신하지 않는다.
-- 현재 boot scope, stale/unbound 보고서, 관리/Agent/worker 재시작, 부분 복사/import/attach/start,
-  인증·공간·형식·identity 오류 및 재개를 검증한다. 실패를 성공으로 표시하지 않고 자원은 보존한다.
-- 원본 사용자 파일 SHA·fsync/readback, 다른 호스트 stop/start 후 새 관측과 기존 GFS2/libvirt/RBD
-  baseline 회귀를 수행한다. 공유 selector/Agent/배치 코드를 바꾸면 기존 DR 소비자 회귀 gate도 적용한다.
+## 검증 기준
 
-구현과 실제 이관은 후속 지시 후 같은 이슈/작업 PR에서 진행한다. 이번 준비 단계에서 #93을 닫지 않는다.
+- VMware/Nutanix 원본 각 9대의 실제 wizard, ROOT+DATA 반입, 실행 및 자동 복원 `VERIFIED`.
+- 실제 XML의 KRBD/raw, pool/image ID, controller, firmware 및 cachemode 대조. 기본 none 16대와 명시적 writeback 2대를 구분한다.
+- 꺼진 원본을 읽기 전용으로 열어 파일 SHA와 파일시스템 식별자를 확보하고 대상에서 독립 대조한다.
+- ROOT/DATA마다 소유한 64 KiB 텍스트 파일을 fsync·읽기 확인한다. 다른 호스트에서 재기동한 뒤 같은 파일의 해시와 새 boot scope를 확인하고 해당 시험 파일만 제거한다.
+- 미지원 형식·권한/소유권·매핑 충돌·부분 복사·인계 실패·stale/timeout·재개 및 기존 file/libvirt/DR 소비자를 자동 시험한다.
+
+실기 결과, 초기 실패와 보완, 배포한 코드·자산의 범위는 별도 검증 보고서에 기록한다. 과거 GFS2 결과를 RBD 검증 결과로 대신하지 않는다.

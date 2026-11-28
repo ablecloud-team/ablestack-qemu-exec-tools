@@ -37,7 +37,7 @@ n2k_guest_config_configure() {
     return 0
   fi
   tmp="$(mktemp "${manifest}.guest-policy.XXXXXX")" || return $?
-  jq --arg p "$policy" '.target.guest_config_policy=$p' "$manifest" > "$tmp" && mv -- "$tmp" "$manifest"
+  jq --arg p "$policy" '.target.guest_config_policy=$p | if .target.storage.type=="rbd" then .target.storage.rbd_access_mode=(.target.storage.rbd_access_mode // "krbd") else . end' "$manifest" > "$tmp" && mv -- "$tmp" "$manifest"
   [[ "$policy" == preserve ]] || return 0
   n2k_guest_config_python guest_configuration_prepare.py preflight --manifest "$manifest" >/dev/null || return $?
 }
@@ -86,11 +86,24 @@ n2k_guest_config_stage() {
   local manifest="$1" count idx path format size mode
   [[ "$(jq -r '.target.guest_config_policy // empty' "$manifest")" == preserve ]] || return 0
   n2k_cloud_require_unmanaged_target "$manifest" || return $?
+  if [[ "$(jq -r '.target.storage.type' "$manifest")" == rbd ]]; then
+    local rt ep key secret pool uri visible
+    rt="$(n2k_cloud_target_resolve_runtime_json "$manifest" '' '' '')" || return $?
+    ep="$(jq -r .endpoint <<<"$rt")";key="$(jq -r .api_key <<<"$rt")";secret="$(jq -r .secret_key <<<"$rt")";pool="$(jq -r '.target.cloud.storage_id' "$manifest")"
+    while IFS= read -r uri; do
+      visible="$(n2k_cloud_api_get "$ep" "$key" "$secret" listVolumesForImport "$(jq -nc --arg pool "$pool" --arg path "${uri#rbd:}" '{storageid:$pool,path:$path}')")" || return $?
+      jq -e --arg path "${uri#rbd:}" 'to_entries[0].value | (.volume // .volumes // .volumeforimport // []) | any(.[]; .path==$path or .name==($path|split("/")|last) or .fullpath==$path)' <<<"$visible" >/dev/null || { echo 'RBD_PREPARATION_IMAGE_NOT_UNMANAGED' >&2; return 44; }
+    done < <(jq -r '.disks[].transfer.target_path' "$manifest")
+  fi
   n2k_guest_config_python guest_configuration_prepare.py prepare --manifest "$manifest" >/dev/null || return $?
   count="$(jq -r '.disks|length' "$manifest")";format="$(jq -r '.target.format' "$manifest")";mode="$(jq -r '.target.storage.preallocation' "$manifest")"
   for ((idx=0;idx<count;idx++)); do
     path="$(jq -r --argjson i "$idx" '.disks[$i].transfer.target_path' "$manifest")";size="$(jq -r --argjson i "$idx" '.disks[$i].size_bytes' "$manifest")"
-    image_preallocation_verify "$manifest" "$idx" "$path" "$format" "$size" "$mode" guest-config-preparation || return $?
+    if [[ "$(jq -r '.target.storage.type' "$manifest")" == rbd ]]; then
+      n2k_guest_config_python guest_configuration_rbd.py verify --manifest "$manifest" --index "$idx" >/dev/null || return $?
+    else
+      image_preallocation_verify "$manifest" "$idx" "$path" "$format" "$size" "$mode" guest-config-preparation || return $?
+    fi
   done
 }
 n2k_guest_config_reconcile() {

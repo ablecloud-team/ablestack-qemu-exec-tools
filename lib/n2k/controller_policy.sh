@@ -46,6 +46,13 @@ n2k_controller_cloud_verify() {
     | $c.id == $id and $c.contractversion == 1 and $c.planhash == $hash and $c.verified == true
       and (if $phase == "running" then $c.scope == "running-xml" else $c.scope == "pre-first-start" or $c.scope == "running-xml" end)
   ' <<<"$response" >/dev/null || { echo 'DISK_CONTROLLER_MISMATCH: final migration controller contract unverified' >&2; return 44; }
+  if [[ "$phase" == running ]] && jq -e 'any(.disks[]; .transfer.rbd_image != null)' "$manifest" >/dev/null; then
+    jq -e --argjson disks "$(jq -c '.disks' "$manifest")" '
+      .verifymigratedvirtualmachineresponse.migrationdiskcontroller.observation.disks as $observed
+      | ($observed|length)==($disks|length) and all(range(0;$disks|length); . as $i
+          | $observed[$i].rbd_access_mode=="krbd" and $observed[$i].image_id==$disks[$i].transfer.rbd_image.image_id)
+    ' <<<"$response" >/dev/null || { echo 'DISK_CONTROLLER_KRBD_IMAGE_IDENTITY_MISMATCH' >&2; return 44; }
+  fi
   tmp="$(mktemp "${manifest}.controller.XXXXXX")" || return $?
   jq --argjson proof "$(jq -c '.verifymigratedvirtualmachineresponse.migrationdiskcontroller' <<<"$response")" \
     '.runtime.cloud.controller_verification = $proof' "$manifest" > "$tmp" && mv -- "$tmp" "$manifest"
