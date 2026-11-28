@@ -15,6 +15,10 @@
 # limitations under the License.
 # ---------------------------------------------------------------------
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/runtime_credentials.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_handoff.sh"
 
 V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
@@ -44,19 +48,7 @@ v2k_require_vddk_env() {
   v2k_has_govc_bin
 }
 
-v2k_load_vddk_cred_from_manifest() {
-  local manifest="$1"
-  local cred
-  cred="$(jq -r '.source.vddk.cred_file // empty' "${manifest}" 2>/dev/null || true)"
-  [[ -n "${cred}" && -f "${cred}" ]] || {
-    echo "Missing .source.vddk.cred_file in manifest (or file not found). Provide it via init --vddk-cred-file." >&2
-    exit 32
-  }
-  # shellcheck disable=SC1090
-  source "${cred}"
-  : "${VDDK_USER:?missing VDDK_USER in vddk cred file}"
-  : "${VDDK_PASSWORD:?missing VDDK_PASSWORD in vddk cred file}"
-}
+
 
 v2k_transfer_base_retryable_nfc_log() {
   local log_file="$1"
@@ -122,6 +114,9 @@ v2k_transfer_base_run_vddk() {
   local vm_moref="${10}"
   local snap_moref="${11}"
   local vmdk_path="${12}"
+  local password_fd rc=0
+  exec {password_fd}< <(printf '%s' "${VDDK_PASSWORD}")
+  passfile="/proc/self/fd/${password_fd}"
 
   LD_LIBRARY_PATH="${vddk_ld_library_path}" \
   "${nbdkit_bin}" -r -U - "${nbdkit_plugin}" \
@@ -135,7 +130,9 @@ v2k_transfer_base_run_vddk() {
     snapshot="${snap_moref}" \
     transports=nbd:nbdssl \
     file="${vmdk_path}" \
-    --run "${run_str}" >>"${attempt_log}" 2>&1
+    --run "${run_str}" >>"${attempt_log}" 2>&1 || rc=$?
+  exec {password_fd}<&-
+  return "$rc"
 }
 
 v2k_transfer_base_record_failure() {
@@ -160,6 +157,7 @@ v2k_transfer_base_record_failure() {
 
 v2k_transfer_base_all() {
   local manifest="$1" jobs="$2"
+  v2k_cloud_require_unmanaged_target "$manifest" || return $?
   : "${jobs:?}"
   local count
   count="$(jq -r '.disks|length' "${manifest}")"
@@ -167,11 +165,7 @@ v2k_transfer_base_all() {
   mkdir -p /tmp
   v2k_load_vddk_cred_from_manifest "${manifest}"
 
-  local passfile
-  passfile="$(mktemp /tmp/v2k_vddk_pass.XXXXXX)"
-  echo -n "${VDDK_PASSWORD}" > "${passfile}"
-  chmod 600 "${passfile}"
-  trap 'rm -f "${passfile-}" >/dev/null 2>&1 || true' EXIT
+  local passfile="/dev/null"
 
   local server
   # vCenter 중심: vddk.server -> vcenter(host) -> esxi_host
@@ -223,6 +217,7 @@ v2k_transfer_base_all() {
 
 v2k_transfer_base_one() {
   local manifest="$1" idx="$2" server="$3" thumbprint="$4" vm_moref="$5" snap_moref="$6" passfile="$7"
+  v2k_cloud_require_unmanaged_target "$manifest" || return $?
   (
 
     local disk_id vmdk_path target_path
@@ -236,19 +231,22 @@ v2k_transfer_base_one() {
     fmt="$(jq -r '.target.format // "qcow2"' "${manifest}")"
     st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
 
+    image_preallocation_from_manifest "${manifest}" || return $?
+    local preallocation="${IMAGE_PREALLOCATION_MODE}"
+    local base_method="${V2K_BASE_METHOD:-nbdcopy}"
+    base_method="$(printf '%s' "${base_method}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    if [[ "${st}" == rbd || "${base_method}" != nbdcopy ]]; then base_method=qemu-img; fi
+
+    if [[ "${st}" == file && "${V2K_DRY_RUN:-0}" != 1 && "$(jq -r ".disks[${idx}].transfer.base_done // false" "${manifest}")" == true ]]; then
+      image_preallocation_verify "${manifest}" "${idx}" "${target_path}" "${fmt}" "${size_bytes}" "${preallocation}" resume || return $?
+      v2k_event INFO "sync.base" "${disk_id}" "resume_disk_already_complete" '{}'
+      return 0
+    fi
+
     if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
       kind="file-qcow2"
-      mkdir -p "$(dirname "${target_path}")"
-      # qcow2??먼�? 만들?�둬??qemu-nbd attach 가??      
-      if [[ ! -f "${target_path}" ]]; then
-        qemu-img create -f qcow2 "${target_path}" "${size_bytes}" >/dev/null
-      fi
     elif [[ "${st}" == "file" && "${fmt}" == "raw" ]]; then
       kind="file-raw"
-      mkdir -p "$(dirname "${target_path}")"
-      if [[ ! -f "${target_path}" ]]; then
-        truncate -s "${size_bytes}" "${target_path}"
-      fi
     elif [[ "${st}" == "block" ]]; then
       kind="block-device"
       # target_path는 /dev/sdX 같은 디바이스 자체    
@@ -265,8 +263,23 @@ v2k_transfer_base_one() {
 
     if [[ "${V2K_DRY_RUN:-0}" -eq 1 ]]; then
       v2k_event INFO "sync.base" "${disk_id}" "dry_run" "{}"
-      v2k_manifest_mark_base_done "${manifest}" "${idx}"
       return 0
+    fi
+
+    if [[ "${st}" == file ]]; then
+      local prepare_rc=0
+      (
+        image_preallocation_check_tools "${fmt}" "${preallocation}" "${base_method}" || exit $?
+        image_preallocation_claim "${manifest}" "${idx}" "${target_path}" "${preallocation}" "${base_method}" || exit $?
+        if [[ "${base_method}" == nbdcopy ]]; then
+          qemu-img create -f "${fmt}" -o "preallocation=${preallocation}" "${target_path}" "${size_bytes}" >/dev/null || exit $?
+          image_preallocation_record "${manifest}" "${idx}" "${preallocation}" "${base_method}" created || exit $?
+        fi
+      ) || prepare_rc=$?
+      if [[ "${prepare_rc}" != 0 ]]; then
+        v2k_transfer_base_record_failure "${manifest}" "${idx}" "${disk_id}" "${prepare_rc}" preallocation_prepare_failed
+        return "${prepare_rc}"
+      fi
     fi
 
     local logdir="${V2K_WORKDIR}/logs"; mkdir -p "${logdir}"
@@ -332,7 +345,6 @@ v2k_transfer_base_one() {
 
     # - V2K_BASE_METHOD=convert : qemu-img convert
     # - V2K_BASE_METHOD=nbdcopy : nbdcopy
-    local base_method="${V2K_BASE_METHOD:-nbdcopy}"
     if [[ "${st}" == "rbd" ]]; then
       base_method="qemu-img"
     fi
@@ -373,6 +385,12 @@ v2k_transfer_base_one() {
       attempt_log="${logdir}/nbdkit_base_${idx}_attempt_${attempt}.log"
       : > "${attempt_log}"
       convert_sparse_args=""
+      if [[ "${st}" == file ]]; then
+        convert_sparse_args="-o preallocation=${preallocation}"
+        if [[ "${preallocation}" == falloc || "${preallocation}" == full ]]; then
+          convert_sparse_args+=" -S 0"
+        fi
+      fi
 
       if [[ "${st}" == "rbd" ]]; then
         active_staging="$(
@@ -414,8 +432,14 @@ v2k_transfer_base_one() {
           run_str="${child_env_prefix} ${qemu_img_path} convert -p -t none -T none ${convert_sparse_args} -O \"${out_fmt}\" \"\$uri\" \"${out_target}\""
           ;;
         nbdcopy)
-          if [[ "${st}" == "file" && "${fmt}" == "qcow2" ]]; then
-            run_str="${child_env_prefix} ${nbdcopy_path} --progress \"\$uri\" -- \"[\" qemu-nbd -f qcow2 \"${out_target}\" \"]\""
+          local allocated_args=""
+          if [[ "${st}" == file && ( "${preallocation}" == falloc || "${preallocation}" == full ) ]]; then
+            allocated_args="--allocated"
+          fi
+          # NBD destinations cannot be truncated by nbdcopy. Use this for raw
+          # preallocation too, including libnbd versions without --no-truncate.
+          if [[ "${st}" == file && ( "${fmt}" == qcow2 || -n "${allocated_args}" ) ]]; then
+            run_str="${child_env_prefix} ${nbdcopy_path} ${allocated_args} --progress \"\$uri\" -- \"[\" qemu-nbd -f \"${fmt}\" \"${out_target}\" \"]\""
           else
             run_str="${child_env_prefix} ${nbdcopy_path} --progress \"\$uri\" \"${out_target}\""
           fi
@@ -531,6 +555,15 @@ v2k_transfer_base_one() {
         "$(jq -nc --arg target "${target_path}" '{target:$target,atomic:true}')"
       if v2k_rbd_sparse_enabled; then
         v2k_rbd_sparsify "${target_path}"
+      fi
+    fi
+
+    if [[ "${st}" == file ]]; then
+      local allocation_rc=0
+      image_preallocation_verify "${manifest}" "${idx}" "${target_path}" "${fmt}" "${size_bytes}" "${preallocation}" "${base_method}" || allocation_rc=$?
+      if [[ "${allocation_rc}" != 0 ]]; then
+        v2k_transfer_base_record_failure "${manifest}" "${idx}" "${disk_id}" "${allocation_rc}" preallocation_verification_failed
+        return "${allocation_rc}"
       fi
     fi
 

@@ -17,6 +17,9 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+
 n2k_storage_rbd_image_name() {
   local target_path="$1"
   [[ "${target_path}" == rbd:* ]] || {
@@ -227,27 +230,29 @@ n2k_storage_target_size_bytes() {
 
 n2k_storage_copy_base() {
   local source_path="$1" target_path="$2" target_storage="$3" target_format="$4"
+  local preallocation="${5:-off}" manifest="${6:-}" idx="${7:-0}" source_size
+  local -a allocation_args=()
 
   case "${target_storage}" in
     file)
-      mkdir -p "$(dirname "${target_path}")"
-      case "${target_format}" in
-        raw)
-          if [[ -b "${source_path}" ]]; then
-            dd if="${source_path}" of="${target_path}" bs=16M status=none conv=sparse
-          else
-            cp --sparse=always -f "${source_path}" "${target_path}"
-          fi
-          ;;
-        qcow2)
-          n2k_storage_require_command qemu-img "qcow2 base sync"
-          qemu-img convert -p -O qcow2 "${source_path}" "${target_path}"
-          ;;
-        *)
-          echo "Unsupported file target format: ${target_format}" >&2
-          return 2
-          ;;
-      esac
+      image_preallocation_resolve file "${target_format}" "${preallocation}" 1 || return $?
+      image_preallocation_check_tools "${target_format}" "${preallocation}" convert || return $?
+      source_size="$(n2k_storage_source_virtual_size_bytes "${source_path}")" || return $?
+      image_preallocation_claim "${manifest}" "${idx}" "${target_path}" "${preallocation}" convert || return $?
+      if [[ "${target_format}" == raw && "${preallocation}" == off ]]; then
+        if [[ -b "${source_path}" ]]; then
+          dd if="${source_path}" of="${target_path}" bs=16M status=none conv=sparse || return $?
+        else
+          cp --sparse=always -f "${source_path}" "${target_path}" || return $?
+        fi
+      else
+        if [[ "${preallocation}" == falloc || "${preallocation}" == full ]]; then
+          allocation_args=(-S 0)
+        fi
+        qemu-img convert -p -O "${target_format}" -o "preallocation=${preallocation}" \
+          "${allocation_args[@]}" "${source_path}" "${target_path}" || return $?
+      fi
+      image_preallocation_verify "${manifest}" "${idx}" "${target_path}" "${target_format}" "${source_size}" "${preallocation}" convert || return $?
       ;;
     block)
       [[ -b "${target_path}" ]] || {

@@ -19,3 +19,6 @@ rpmbuild_*/
 
 # Generated RPM artifacts
 build/rpm-n2k/*.rpm
+
+# Python runtime bytecode is not source.
+__pycache__/

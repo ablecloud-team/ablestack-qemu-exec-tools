@@ -366,6 +366,7 @@ n2k_preflight_text_summary() {
     "fallback mode: " + (.fallback_mode // "") + "\n" +
     "target provider: " + (.target.provider // "libvirt") + "\n" +
     "target storage: " + (.target.selected_storage // "") + "\n" +
+    "target preallocation: " + (.target.preallocation // "not_applicable") + "\n" +
     "target storage available: " + ((.target.storage_available // false) | tostring) + "\n" +
     "cold-export: " + ((.modes["cold-export"].available // false) | tostring) + "\n" +
     "manual-disk: " + ((.modes["manual-disk"].available // false) | tostring) +
@@ -431,6 +432,7 @@ n2k_plan_text_summary() {
     "Fallback mode: " + (.fallback_mode // "") + "\n" +
     "Target provider: " + (.target.provider // "libvirt") + "\n" +
     "Target storage: " + (.target.selected_storage // "") + "\n" +
+    "Target preallocation: " + (.target.preallocation // "not_applicable") + "\n" +
     "Steps:\n" +
     (if ((.steps // []) | length) > 0 then ((.steps // []) | map("- " + .) | join("\n")) else "- none" end) +
     (if ((.blockers // []) | length) > 0 then "\nBlockers:\n" + ((.blockers // []) | map("- " + .) | join("\n")) else "" end) +

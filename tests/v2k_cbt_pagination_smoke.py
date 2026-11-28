@@ -38,6 +38,10 @@ class VirtualNVMEController:
     pass
 
 
+class VirtualAHCIController(VirtualSATAController):
+    pass
+
+
 class VirtualDisk:
     pass
 
@@ -240,4 +244,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    install_pyvmomi_stubs()
+    helper=load_helper()
+    assert helper._controller_kind(VirtualAHCIController()) == "sata"
+
     main()

@@ -498,7 +498,10 @@ jobs:
             --allowerasing ca-certificates curl-minimal || true
 
           dnf -y --disablerepo="*" --enablerepo="${REPO_PREFIX}-*" install \
-            make rpm-build tar git jq dnf-plugins-core createrepo_c
+            make rpm-build tar git jq dnf-plugins-core createrepo_c python3 gnupg2 binutils xz \
+            gcc make autoconf automake libtool bison flex gperf gettext-devel ocaml ocaml-findlib \
+            libxml2-devel libconfig-devel file-devel libselinux-devel libtirpc-devel \
+            pcre2-devel libzstd-devel augeas-devel json-c-devel ncurses-devel readline-devel
 
       - name: Configure Rocky ${{ matrix.host_os_minor }} build repos + enable EPEL (build-time only)
         run: |
@@ -592,6 +595,20 @@ jobs:
             exit 2
           fi
 
+      - name: Stage Ubuntu 22.04 offline guest agent from signed archive indexes
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Extract the distribution keyring from the pinned Ubuntu archive package.
+          curl --fail --location --proto '=https' --tlsv1.2 -o /tmp/ubuntu-keyring.deb https://archive.ubuntu.com/ubuntu/pool/main/u/ubuntu-keyring/ubuntu-keyring_2021.03.26_all.deb
+          echo '0d0e7ed6b112f5d03eabf3c7eb01ebdacf9c57714b279e90495cfc58c8c4520f  /tmp/ubuntu-keyring.deb' | sha256sum -c -
+          ar p /tmp/ubuntu-keyring.deb data.tar.xz | tar -xJ -C /tmp ./usr/share/keyrings/ubuntu-archive-keyring.gpg
+          python3 tools/v2k/prepare-guest-config-assets.py --output assets/guest-config/ubuntu22 --ubuntu-keyring /tmp/usr/share/keyrings/ubuntu-archive-keyring.gpg
+          python3 tools/v2k/prepare-guest-config-appliance.py --archive-only --output assets/guest-config/appliance
+          bash tools/v2k/build-guest-config-native.sh assets/guest-config/native
+          python3 tools/v2k/prepare-guest-config-windows.py --output assets/guest-config/windows
+          python3 tools/v2k/prepare-guest-config-rocky.py --output assets/guest-config/rocky97
+
       - name: Verify V2K Cloud service-offering CPU speed handling
         shell: bash
         run: bash tests/v2k_cloud_offering_cpu_speed_smoke.sh
@@ -631,7 +648,7 @@ jobs:
           # Collect only installable V2K binary RPMs into the final offline repo.
           # Source RPMs carry the full bundled asset tree and can push the Rocky
           # release ISO over GitHub's 2 GiB single-asset limit.
-          cp -v build/rpm-v2k/ablestack_v2k-*.noarch.rpm "$WORKDIR"/
+          cp -v build/rpm-v2k/ablestack_v2k-*.x86_64.rpm "$WORKDIR"/
 
           echo "[INFO] Collecting runtime deps for Air-Gap (Requires closure minus ABLESTACK baseline)..."
 
@@ -2250,9 +2267,9 @@ jobs:
             release/rpm/rpm-rocky9.*/ablestack-qemu-exec-tools-*.rpm
             release/rpm/hangctl-rpm-rocky9.*/ablestack_vm_hangctl-*.rpm
             release/rpm/ftctl-rpm-rocky9.*/ablestack_vm_ftctl-*.rpm
-            release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.noarch.rpm
-            release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.noarch.rpm
-            release/v2k/v2k-rpm-rocky9.8/ablestack_v2k-*.noarch.rpm
+            release/v2k/v2k-rpm-rocky9.6/ablestack_v2k-*.x86_64.rpm
+            release/v2k/v2k-rpm-rocky9.7/ablestack_v2k-*.x86_64.rpm
+            release/v2k/v2k-rpm-rocky9.8/ablestack_v2k-*.x86_64.rpm
             release/n2k/n2k-rpm-rocky9.6/ablestack_n2k-*.noarch.rpm
             release/n2k/n2k-rpm-rocky9.7/ablestack_n2k-*.noarch.rpm
             release/n2k/n2k-rpm-rocky9.8/ablestack_n2k-*.noarch.rpm
@@ -2313,7 +2330,7 @@ jobs:
             for rpm in "release/rpm/ftctl-rpm-rocky${ver}"/ablestack_vm_ftctl-*.rpm; do
               copy_rpm_with_suffix "${rpm}" "rocky${ver}"
             done
-            for rpm in "release/v2k/v2k-rpm-rocky${ver}"/ablestack_v2k-*.noarch.rpm; do
+            for rpm in "release/v2k/v2k-rpm-rocky${ver}"/ablestack_v2k-*.x86_64.rpm; do
               copy_rpm_with_suffix "${rpm}" "rocky${ver}"
             done
             for rpm in "release/n2k/n2k-rpm-rocky${ver}"/ablestack_n2k-*.noarch.rpm; do

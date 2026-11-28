@@ -19,6 +19,11 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/preallocation.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/disk_cache.sh"
+
 V2K_ROOT_DIR="${V2K_ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 V2K_LIB_DIR="${V2K_LIB_DIR:-${V2K_ROOT_DIR}/lib/v2k}"
 if [[ ! -f "${V2K_LIB_DIR}/compat.sh" ]]; then
@@ -171,6 +176,8 @@ v2k_manifest_init() {
     *) echo "Unsupported storage type: ${storage_type}" >&2; return 2;;
   esac
 
+  image_preallocation_resolve "${storage_type}" "${target_format}" "${V2K_TARGET_PREALLOCATION-}" "${V2K_TARGET_PREALLOCATION_SET:-0}" "" "${V2K_PREALLOCATION_SOURCE:-cli}" || return $?
+
   # inventory JSON은 단일 JSON 객체여야 하며 정규 형식이어야 함(깨지면 즉시 실패)
   local inv_compact
   if ! inv_compact="$(printf '%s' "${inv_json}" | jq -c '.' 2>/dev/null)"; then
@@ -214,6 +221,8 @@ v2k_manifest_init() {
     --arg dst "${dst}" \
     --arg fmt "${target_format}" \
     --arg st "${storage_type}" \
+    --arg preallocation "${IMAGE_PREALLOCATION_MODE}" \
+    --arg preallocation_source "${IMAGE_PREALLOCATION_SOURCE}" \
     --arg target_provider "${target_provider}" \
     --arg force_block_device "${force_block_device}" \
     --arg vcenter_host "${vcenter_host}" \
@@ -327,6 +336,7 @@ v2k_manifest_init() {
           mode:$mode,
           vcenter:$vcenter,
           vm:$inv.vm,
+          controller_plan:($inv.controller_plan // {}),
 
           # ESXi host where the VM is currently running (kept for future use)
           esxi_host: ($inv.esxi_host // ""),
@@ -366,6 +376,8 @@ v2k_manifest_init() {
           dst_root:$dst,
           storage:{
             type:$st,
+            preallocation:(if $preallocation == "" then null else $preallocation end),
+            preallocation_source:$preallocation_source,
             map:$storage_map,
             force_block_device: ($force_block_device == "1")
           },
@@ -398,6 +410,8 @@ v2k_manifest_init() {
         }
       }
   ' > "${manifest}"
+  migration_disk_cache_configure v2k "$manifest" 1 || return $?
+
 }
 
 v2k_manifest_validate_source_disk_controllers() {
@@ -1120,6 +1134,9 @@ v2k_manifest_status_summary() {
         run:.run,
         vm:.source.vm,
         compat:(.source.compat // {}),
+        target:{storage:.target.storage.type,format:.target.format,
+          preallocation:(if .target.storage.type == "file" then (.target.storage.preallocation // "off") else null end),
+          preallocation_source:(.target.storage.preallocation_source // "legacy")},
         phases:.phases,
         disks:(.disks|map({
           disk_id:.disk_id,

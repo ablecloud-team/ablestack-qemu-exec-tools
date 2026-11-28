@@ -119,6 +119,18 @@ Options:
                           Force v3-incremental even when v4 is available
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --target-provider <p>   libvirt|ablestack-cloud; default libvirt
   --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
@@ -134,7 +146,7 @@ Options:
   --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Optional override; default uses N2K writeback offering
+                          Optional override; default uses N2K none cache offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -185,6 +197,18 @@ Options:
                           Force v3-incremental even when v4 is available
   --target-storage <type> auto|rbd|file|block
   --target-format <fmt>   qcow2|raw
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
   --target-provider <p>   libvirt|ablestack-cloud; default libvirt
   --cloud-endpoint <url>  ABLESTACK Cloud API endpoint
@@ -200,7 +224,7 @@ Options:
   --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Optional override; default uses N2K writeback offering
+                          Optional override; default uses N2K none cache offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -247,6 +271,18 @@ Options:
   --mode <mode>           auto|v4-incremental|v3-incremental|legacy-cbt|cold-export|manual-disk
   --dst <path>            Destination root
   --target-format <fmt>   qcow2|raw
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -264,7 +300,7 @@ Options:
   --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Optional override; default uses N2K writeback offering
+                          Optional override; default uses N2K none cache offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -361,6 +397,18 @@ Source options:
   --nfs-mount-root <dir>  Local mount root for Nutanix NFS sources
 
 Target convenience options:
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --rbd-pool <pool>       RBD pool for generated target paths; default rbd
   --file-root <path>      Libvirt file target root; default /var/lib/libvirt/images
                           Cloud FileSystem resolves this from selected storage
@@ -383,7 +431,7 @@ Cloud options:
   --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID; prompt/list when omitted
   --cloud-disk-offering-id <id>
-                          Optional override; default uses N2K writeback offering
+                          Optional override; default uses N2K none cache offering
   --cloud-host-id <id>    Required for local FileSystem profile when multiple hosts exist
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -432,6 +480,18 @@ Options:
   --inventory-file <file> Normalized or raw VM inventory JSON file
   --inventory-source <s>  none|fixture|api
   --target-format <fmt>   qcow2|raw
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --target-disk-controller <auto|sata|virtio-scsi|preserve>  Versioned Mold driver policy
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off>  Supported new Mold runs default to preserve
+  --guest-config-map-json <path>       Explicit validated source guest state
+  --guest-config-timeout <1..1800>     Guest verification deadline (default: 600)
+  --source-guest-os linux|windows      Explicit source OS for guest probe (wizard prompts)
+  --source-guest-user <user>           Separate source guest administrator
+  --source-guest-host <address>        SSH/WinRM source guest address
+  --source-guest-hostkey-sha256 <hex>   Trusted SSH key SHA-256 (64 lowercase hex digits)
+  --source-guest-password-fd <fd>      Runtime-only source guest password descriptor
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-storage <type> file|block|rbd
   --target-map-json <js>  Per-disk target map
   --rbd-access-mode <m>   librbd|krbd for target VM RBD access
@@ -450,7 +510,7 @@ Options:
   --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Optional override; default uses N2K writeback offering
+                          Optional override; default uses N2K none cache offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID
@@ -602,7 +662,7 @@ Options:
   --cloud-network-ids <s> Ordered unique network IDs; one per source NIC
   --cloud-storage-id <id> Cloud primary storage ID for importVolume
   --cloud-disk-offering-id <id>
-                          Optional override; default uses N2K writeback offering
+                          Optional override; default uses N2K none cache offering
   --cloud-host-id <id>    Optional Cloud host ID
   --cloud-account <name>  Optional Cloud account
   --cloud-domain-id <id>  Optional Cloud domain ID

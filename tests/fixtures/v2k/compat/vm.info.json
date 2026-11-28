@@ -39,6 +39,9 @@
         "config": {
           "name": "esxi01.example.local"
         }
+      },
+      "capability": {
+        "changeTrackingSupported": true
       }
     }
   ]

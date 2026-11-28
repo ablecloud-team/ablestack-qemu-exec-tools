@@ -1,0 +1,14 @@
+{
+  "adapter": "windows-nettcpip",
+  "version": 1,
+  "interfaces": [{
+    "source_mac": "00:50:56:39:90:01",
+    "source_interface_guid": "11111111-1111-4111-8111-111111111111",
+    "source_pnp_id": "PCI\\VEN_1AF4&DEV_1000\\0001",
+    "admin_enabled": true,
+    "ipv4": {"dhcp": false, "addresses": [{"address": "192.0.2.10", "prefix_length": 24, "skip_as_source": false}]},
+    "default_routes": [{"next_hop": "192.0.2.1", "route_metric": 10, "persistent": true}],
+    "interface_metric": {"automatic": false, "value": 10},
+    "dns": {"mode": "static", "servers": ["192.0.2.53", "192.0.2.54"]}
+  }]
+}

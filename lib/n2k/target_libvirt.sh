@@ -16,6 +16,8 @@
 # ---------------------------------------------------------------------
 
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/disk_cache.sh"
 
 n2k_xml_escape() {
   local s="$1"
@@ -146,7 +148,8 @@ EOF
 }
 
 n2k_target_disk_xml() {
-  local manifest="$1" idx="$2"
+  local manifest="$1" idx="$2" cache_mode
+  cache_mode="$(migration_disk_cache_value n2k "$manifest")" || return $?
   local storage target_path target_format rbd_access_mode controller_type bus dev auth_xml krbd_device
   storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
   target_path="$(jq -r ".disks[${idx}].transfer.target_path" "${manifest}")"
@@ -163,7 +166,7 @@ n2k_target_disk_xml() {
     file)
       cat <<EOF
     <disk type='file' device='disk'>
-      <driver name='qemu' type='$(n2k_xml_escape "${target_format}")' cache='none'/>
+      <driver name='qemu' type='$(n2k_xml_escape "${target_format}")' cache='${cache_mode}'/>
       <source file='$(n2k_xml_escape "${target_path}")'/>
       <target dev='${dev}' bus='${bus}'/>
     </disk>
@@ -172,7 +175,7 @@ EOF
     block)
       cat <<EOF
     <disk type='block' device='disk'>
-      <driver name='qemu' type='raw' cache='none'/>
+      <driver name='qemu' type='raw' cache='${cache_mode}'/>
       <source dev='$(n2k_xml_escape "${target_path}")'/>
       <target dev='${dev}' bus='${bus}'/>
     </disk>
@@ -184,7 +187,7 @@ EOF
           auth_xml="$(n2k_target_rbd_auth_xml)"
           cat <<EOF
     <disk type='network' device='disk'>
-      <driver name='qemu' type='raw' cache='none'/>
+      <driver name='qemu' type='raw' cache='${cache_mode}'/>
 ${auth_xml}
       <source protocol='rbd' name='$(n2k_xml_escape "${target_path#rbd:}")'/>
       <target dev='${dev}' bus='${bus}'/>
@@ -195,7 +198,7 @@ EOF
           krbd_device="$(n2k_storage_rbd_krbd_device_path "${target_path}")"
           cat <<EOF
     <disk type='block' device='disk'>
-      <driver name='qemu' type='raw' cache='none'/>
+      <driver name='qemu' type='raw' cache='${cache_mode}'/>
       <source dev='$(n2k_xml_escape "${krbd_device}")'/>
       <target dev='${dev}' bus='${bus}'/>
     </disk>

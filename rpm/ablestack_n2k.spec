@@ -32,6 +32,9 @@ Requires:       openssl
 Requires:       qemu-img
 Requires:       libvirt-client
 Requires:       nfs-utils
+Requires:       python3
+Requires:       python3-pyyaml
+Requires:       python3-paramiko
 
 %description
 ablestack_n2k provides ABLESTACK Nutanix AHV-to-KVM migration scripts and libraries.
@@ -47,6 +50,10 @@ install -m 0755 bin/ablestack_n2k.sh %{buildroot}/usr/local/bin/ablestack_n2k
 
 mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/n2k
 cp -a lib/n2k/* %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/n2k/ 2>/dev/null || :
+
+# Use the same versioned migration contract/helper sources as v2k.
+mkdir -p %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/n2k/migration
+cp -a lib/v2k/controller_policy.py lib/v2k/guest_configuration*.py lib/v2k/guest-config %{buildroot}/usr/local/lib/ablestack-qemu-exec-tools/n2k/migration/
 
 mkdir -p %{buildroot}%{_datadir}/bash-completion/completions
 install -m 0644 completions/%{name} %{buildroot}%{_datadir}/bash-completion/completions/%{name}

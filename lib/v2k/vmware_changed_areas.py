@@ -192,7 +192,7 @@ def _controller_kind(device: Any) -> str:
         return "scsi"
     if "idecontroller" in type_name:
         return "ide"
-    if "satacontroller" in type_name:
+    if "satacontroller" in type_name or "ahcicontroller" in type_name:
         return "sata"
     if "nvmecontroller" in type_name:
         return "nvme"

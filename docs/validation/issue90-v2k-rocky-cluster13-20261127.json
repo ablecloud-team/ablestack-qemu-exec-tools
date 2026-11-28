@@ -1,0 +1,1151 @@
+{
+  "date": "2026-11-27",
+  "environment": "13 GFS2",
+  "tools_implementation_commit": "0ee3161fb3c77d8093bce11e0783fb817f83f29a",
+  "cloud_commit": "8992232d27f21561c4547a26e689a69321f8e2a8",
+  "manual_nic_or_disk_repairs": 0,
+  "baseline_mold_vms": 117,
+  "baseline_changes": [],
+  "total_mold_vms": 123,
+  "retained_initial_stopped_targets": [
+    "v2k-i90-rocky-sata-20261127",
+    "v2k-i90-rocky-ide-20261127",
+    "v2k-i90-rocky-scsi-20261127"
+  ],
+  "original_vm_states": [
+    {
+      "name": "v2k-tst-rocky97-scsi-uefi",
+      "uuid": "4235ae3a-da7e-59bd-4d8e-e229f1857fa0",
+      "moref": "vm-69555",
+      "guest_id": "other4xLinux64Guest",
+      "guest_name": "Rocky Linux (64-bit)",
+      "power": "poweredOn",
+      "tools": "guestToolsRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 2000,
+          "controller": "vim.vm.device.VirtualLsiLogicSASController",
+          "unit": 0,
+          "size": 34359738368
+        },
+        {
+          "key": 2001,
+          "controller": "vim.vm.device.VirtualLsiLogicSASController",
+          "unit": 1,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:9f:73",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-rocky97-ide-bios",
+      "uuid": "4235e748-3952-a3c2-f86d-2a5eebddcbf8",
+      "moref": "vm-69553",
+      "guest_id": "other4xLinux64Guest",
+      "guest_name": "Rocky Linux (64-bit)",
+      "power": "poweredOn",
+      "tools": "guestToolsRunning",
+      "firmware": "bios",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 3000,
+          "controller": "vim.vm.device.VirtualIDEController",
+          "unit": 0,
+          "size": 34359738368
+        },
+        {
+          "key": 3001,
+          "controller": "vim.vm.device.VirtualIDEController",
+          "unit": 1,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:bd:4b",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-rocky97-sata-uefi",
+      "uuid": "42353f0f-0c7c-00f0-aa80-3e963dd65f96",
+      "moref": "vm-69554",
+      "guest_id": "other4xLinux64Guest",
+      "guest_name": "Rocky Linux (64-bit)",
+      "power": "poweredOn",
+      "tools": "guestToolsRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 16001,
+          "controller": "vim.vm.device.VirtualAHCIController",
+          "unit": 1,
+          "size": 34359738368
+        },
+        {
+          "key": 16002,
+          "controller": "vim.vm.device.VirtualAHCIController",
+          "unit": 2,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:7a:5c",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-ubuntu2204-sata-uefi",
+      "uuid": "42356c86-0a37-78a3-a5a0-c43dc55f562d",
+      "moref": "vm-69476",
+      "guest_id": "ubuntu64Guest",
+      "guest_name": "Ubuntu Linux (64-bit)",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 16001,
+          "controller": "vim.vm.device.VirtualAHCIController",
+          "unit": 1,
+          "size": 34359738368
+        },
+        {
+          "key": 16002,
+          "controller": "vim.vm.device.VirtualAHCIController",
+          "unit": 2,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:25:ef",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-ubuntu2204-ide-bios",
+      "uuid": "4235cd4a-30cf-46b6-d99b-b0d892bbd147",
+      "moref": "vm-69475",
+      "guest_id": "ubuntu64Guest",
+      "guest_name": "Ubuntu Linux (64-bit)",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "bios",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 3000,
+          "controller": "vim.vm.device.VirtualIDEController",
+          "unit": 0,
+          "size": 34359738368
+        },
+        {
+          "key": 3001,
+          "controller": "vim.vm.device.VirtualIDEController",
+          "unit": 1,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:9c:c0",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-win2022-sata-uefi",
+      "uuid": "423574d2-d33a-44a3-5d14-324aa3861c95",
+      "moref": "vm-69479",
+      "guest_id": "windows9Server64Guest",
+      "guest_name": "Microsoft Windows Server 2022 (64-bit)",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 16001,
+          "controller": "vim.vm.device.VirtualAHCIController",
+          "unit": 1,
+          "size": 68719476736
+        },
+        {
+          "key": 16002,
+          "controller": "vim.vm.device.VirtualAHCIController",
+          "unit": 2,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:77:ca",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-win2022-scsi-uefi",
+      "uuid": "42354a9e-847c-cce4-21d1-6c232e0c5dfa",
+      "moref": "vm-69480",
+      "guest_id": "windows9Server64Guest",
+      "guest_name": "Microsoft Windows Server 2022 (64-bit)",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 2000,
+          "controller": "vim.vm.device.VirtualLsiLogicSASController",
+          "unit": 0,
+          "size": 68719476736
+        },
+        {
+          "key": 2001,
+          "controller": "vim.vm.device.VirtualLsiLogicSASController",
+          "unit": 1,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:bd:f2",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-ubuntu2204-scsi-uefi",
+      "uuid": "4235044d-e54b-6093-48ca-1d2a6c6964a2",
+      "moref": "vm-69477",
+      "guest_id": "ubuntu64Guest",
+      "guest_name": "Ubuntu Linux (64-bit)",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 2000,
+          "controller": "vim.vm.device.VirtualLsiLogicSASController",
+          "unit": 0,
+          "size": 34359738368
+        },
+        {
+          "key": 2001,
+          "controller": "vim.vm.device.VirtualLsiLogicSASController",
+          "unit": 1,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:94:35",
+          "key": 4000
+        }
+      ]
+    },
+    {
+      "name": "v2k-tst-win2022-ide-bios",
+      "uuid": "4235ccb4-7751-4405-f44d-a0cc59250f8f",
+      "moref": "vm-69478",
+      "guest_id": "windows9Server64Guest",
+      "guest_name": "Microsoft Windows Server 2022 (64-bit)",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "bios",
+      "snapshots": false,
+      "disks": [
+        {
+          "key": 3000,
+          "controller": "vim.vm.device.VirtualIDEController",
+          "unit": 0,
+          "size": 68719476736
+        },
+        {
+          "key": 3001,
+          "controller": "vim.vm.device.VirtualIDEController",
+          "unit": 1,
+          "size": 8589934592
+        }
+      ],
+      "nics": [
+        {
+          "mac": "00:50:56:b5:c6:5e",
+          "key": 4000
+        }
+      ]
+    }
+  ],
+  "source_clone_states": [
+    {
+      "name": "v2k-i90-src-rocky97-ide-bios-r2",
+      "uuid": "4235aeef-c5f1-a597-2dea-c6650a1fe8de",
+      "moref": "vm-69577",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "bios",
+      "snapshots": false,
+      "nics": [
+        {
+          "mac": "00:50:56:39:91:11",
+          "connected": false
+        }
+      ]
+    },
+    {
+      "name": "v2k-i90-src-rocky97-sata-uefi",
+      "uuid": "4235f3fe-c093-5091-9f0a-f4c74865bb6f",
+      "moref": "vm-69561",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "nics": [
+        {
+          "mac": "00:50:56:39:91:02",
+          "connected": false
+        }
+      ]
+    },
+    {
+      "name": "v2k-i90-src-rocky97-sata-uefi-r2",
+      "uuid": "4235741c-53a5-a265-205b-3859898c428b",
+      "moref": "vm-69573",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "nics": [
+        {
+          "mac": "00:50:56:39:91:12",
+          "connected": false
+        }
+      ]
+    },
+    {
+      "name": "v2k-i90-src-rocky97-ide-bios",
+      "uuid": "42350f79-4543-2d69-5224-f370c07b950f",
+      "moref": "vm-69559",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "bios",
+      "snapshots": false,
+      "nics": [
+        {
+          "mac": "00:50:56:39:91:01",
+          "connected": false
+        }
+      ]
+    },
+    {
+      "name": "v2k-i90-src-rocky97-scsi-uefi",
+      "uuid": "4235b7c3-85fc-ca39-2df1-868594e39121",
+      "moref": "vm-69562",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "nics": [
+        {
+          "mac": "00:50:56:39:91:03",
+          "connected": false
+        }
+      ]
+    },
+    {
+      "name": "v2k-i90-src-rocky97-scsi-uefi-r2",
+      "uuid": "4235df29-52ce-f994-c384-54466de019f6",
+      "moref": "vm-69576",
+      "power": "poweredOff",
+      "tools": "guestToolsNotRunning",
+      "firmware": "efi",
+      "snapshots": false,
+      "nics": [
+        {
+          "mac": "00:50:56:39:91:13",
+          "connected": false
+        }
+      ]
+    }
+  ],
+  "credential_audit": {
+    "files_scanned": 199,
+    "credential_matches": []
+  },
+  "isolated_selinux_compile": 0,
+  "cases": [
+    {
+      "controller": "ide",
+      "source_uuid": "4235aeef-c5f1-a597-2dea-c6650a1fe8de",
+      "target_id": "7f213c52-6990-46d4-b771-f11b37335070",
+      "target_name": "v2k-i90-rocky-ide-final-20261127",
+      "instance": "i-2-317-VM",
+      "before_host": "ablecube13-3",
+      "after_host": "ablecube13-1",
+      "first_verified": {
+        "status": "VERIFIED",
+        "complete": true,
+        "boot_id": "21df51f9-f01a-4f2d-a4a0-146711edebe7"
+      },
+      "postboot_verified": {
+        "status": "VERIFIED",
+        "complete": true,
+        "boot_id": "bd8fcbf9-6adb-4fd6-846c-705777de4938",
+        "report_boot_id": "bd8fcbf9-6adb-4fd6-846c-705777de4938",
+        "plan_hash": "a00a6122bbe74871091767df74af3146bda5b9d4483afdc64475aaaf6f31d0b1",
+        "operation_id": "5c9c9222-ee02-40f2-9247-95c3648c63e8",
+        "helper_sha256": "2cc9fcc170767da88530c91b17651049cffc3475ebb897082a1a69dd19121e33"
+      },
+      "guest": {
+        "firmware": "bios",
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:91:11",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.211",
+                "prefixlen": 16,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "noprefixroute": true,
+                "label": "ens192",
+                "valid_life_time": 7158,
+                "preferred_life_time": 7158
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:9111",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "noprefixroute": true,
+                "valid_life_time": 2591978,
+                "preferred_life_time": 604778
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:9111",
+                "prefixlen": 64,
+                "scope": "link",
+                "noprefixroute": true,
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "proc /proc proc\nsysfs /sys sysfs\ndevtmpfs /dev devtmpfs\nsecurityfs /sys/kernel/security securityfs\ntmpfs /dev/shm tmpfs\ndevpts /dev/pts devpts\ntmpfs /run tmpfs\ncgroup2 /sys/fs/cgroup cgroup2\npstore /sys/fs/pstore pstore\nbpf /sys/fs/bpf bpf\nconfigfs /sys/kernel/config configfs\n/dev/mapper/rl-root / xfs\nselinuxfs /sys/fs/selinux selinuxfs\nsystemd-1 /proc/sys/fs/binfmt_misc autofs\nhugetlbfs /dev/hugepages hugetlbfs\nmqueue /dev/mqueue mqueue\ntracefs /sys/kernel/tracing tracefs\ndebugfs /sys/kernel/debug debugfs\nnone /run/credentials/systemd-tmpfiles-setup-dev.service ramfs\nfusectl /sys/fs/fuse/connections fusectl\nnone /run/credentials/systemd-sysctl.service ramfs\n/dev/sda1 /boot xfs\n/dev/sdb1 /data/v2k xfs\nnone /run/credentials/systemd-tmpfiles-setup.service ramfs\ntmpfs /run/user/1000 tmpfs",
+        "proofs": [
+          {
+            "path": "/var/lib/ablestack-v2k-validation/rocky-source-proof.txt",
+            "sha256": "99223a3da34668a369f2c6250666aad6ddd55fec93d1f3f78c26e266ebb478f9"
+          },
+          {
+            "path": "/data/v2k/rocky-source-proof.bin",
+            "sha256": "99223a3da34668a369f2c6250666aad6ddd55fec93d1f3f78c26e266ebb478f9"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 65536,
+            "sha256": "5ec3d13ae09474c81e779703431ac2d7cbf0c221af404331acf415c24fc39ad4"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 65536,
+            "sha256": "dd9eaf4caaa647630426025208f92eede0fedd7d81b5b975199a18a8aec7fad4"
+          }
+        ],
+        "selinux": "Enforcing",
+        "workspace_mode": "0o700",
+        "unprivileged_access_denied": true,
+        "qga_booleans": "virt_qemu_ga_read_nonsecurity_files --> off\nvirt_qemu_ga_run_unconfined --> off",
+        "qga_packages": "qemu-guest-agent-9.1.0-29.el9_7.6.x86_64\nliburing-2.5-1.el9.x86_64\nnumactl-libs-2.0.19-3.el9.x86_64",
+        "unit_hash": "2366446b1f6be3b1f9c4bd0b420c9ddc22b9c0a2cadc968673f351e1260d7ad2"
+      },
+      "xml": {
+        "uuid": "7f213c52-6990-46d4-b771-f11b37335070",
+        "name": "i-2-317-VM",
+        "firmware": null,
+        "loader": null,
+        "disks": [
+          {
+            "target": {
+              "dev": "sda",
+              "bus": "sata"
+            },
+            "driver": {
+              "name": "qemu",
+              "type": "qcow2",
+              "cache": "writeback",
+              "io": "io_uring"
+            },
+            "serial": "8f9bf48c76fe432a9bf1",
+            "source": {
+              "file": "/mnt/glue-gfs/v2k-i90-rocky-ide-final-20261127-disk0.qcow2",
+              "index": "4"
+            }
+          },
+          {
+            "target": {
+              "dev": "sdb",
+              "bus": "sata"
+            },
+            "driver": {
+              "name": "qemu",
+              "type": "qcow2",
+              "cache": "writeback",
+              "io": "io_uring"
+            },
+            "serial": "e537ea65f4c9442a9eab",
+            "source": {
+              "file": "/mnt/glue-gfs/v2k-i90-rocky-ide-final-20261127-disk1.qcow2",
+              "index": "3"
+            }
+          }
+        ],
+        "nics": [
+          "00:50:56:39:91:11"
+        ]
+      },
+      "volumes": [
+        {
+          "id": "8f9bf48c-76fe-432a-9bf1-f62f6fb13ec6",
+          "type": "ROOT",
+          "size": 34359738368,
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-27T05:04:15.550800047Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-rocky-ide-final-20261127-disk0.qcow2",
+            "importrequestid": "8f9bf48c-76fe-432a-9bf1-f62f6fb13ec6",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-27T05:04:17.526881601Z",
+            "importstrategy": "adopt",
+            "importidentity": "b2f264fa24b9b53f5c982d095dad40819ab0326075a11af298fa95d85897d138",
+            "importverifiedat": "2026-11-27T05:04:15.550795933Z"
+          }
+        },
+        {
+          "id": "e537ea65-f4c9-442a-9eab-e0e0a1434448",
+          "type": "DATADISK",
+          "size": 8589934592,
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T05:04:15.710750802Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-rocky-ide-final-20261127-disk1.qcow2",
+            "importrequestid": "e537ea65-f4c9-442a-9eab-e0e0a1434448",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-27T05:04:17.529926871Z",
+            "importstrategy": "adopt",
+            "importidentity": "e7523930fd7be6c3af4c9139ed1a43426f0d71738e89a1f14f04d8364b6a977a",
+            "importverifiedat": "2026-11-27T05:04:15.710747799Z"
+          }
+        }
+      ]
+    },
+    {
+      "controller": "sata",
+      "source_uuid": "4235741c-53a5-a265-205b-3859898c428b",
+      "target_id": "6cc596fc-0c3e-4ea9-b235-bd58a20681dd",
+      "target_name": "v2k-i90-rocky-sata-final-20261127",
+      "instance": "i-2-318-VM",
+      "before_host": "ablecube13-1",
+      "after_host": "ablecube13-2",
+      "first_verified": {
+        "status": "VERIFIED",
+        "complete": true,
+        "boot_id": "fff6a30d-a05c-4b60-96e6-675597d12d3b"
+      },
+      "postboot_verified": {
+        "status": "VERIFIED",
+        "complete": true,
+        "boot_id": "18bc8e63-1efa-48d0-9451-9b6f1b1f1e77",
+        "report_boot_id": "18bc8e63-1efa-48d0-9451-9b6f1b1f1e77",
+        "plan_hash": "96bb295fa649f69b6c2b3c34ac8e317f496f209aeb6792bf687ee7d5a03840af",
+        "operation_id": "5d262502-b418-4221-99fe-f0317239b672",
+        "helper_sha256": "2cc9fcc170767da88530c91b17651049cffc3475ebb897082a1a69dd19121e33"
+      },
+      "guest": {
+        "firmware": "efi",
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:91:12",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.212",
+                "prefixlen": 16,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "noprefixroute": true,
+                "label": "ens192",
+                "valid_life_time": 7161,
+                "preferred_life_time": 7161
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:9112",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "noprefixroute": true,
+                "valid_life_time": 2592000,
+                "preferred_life_time": 604800
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:9112",
+                "prefixlen": 64,
+                "scope": "link",
+                "noprefixroute": true,
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "proc /proc proc\nsysfs /sys sysfs\ndevtmpfs /dev devtmpfs\nsecurityfs /sys/kernel/security securityfs\ntmpfs /dev/shm tmpfs\ndevpts /dev/pts devpts\ntmpfs /run tmpfs\ncgroup2 /sys/fs/cgroup cgroup2\npstore /sys/fs/pstore pstore\nefivarfs /sys/firmware/efi/efivars efivarfs\nbpf /sys/fs/bpf bpf\nconfigfs /sys/kernel/config configfs\n/dev/mapper/rl-root / xfs\nselinuxfs /sys/fs/selinux selinuxfs\nsystemd-1 /proc/sys/fs/binfmt_misc autofs\nhugetlbfs /dev/hugepages hugetlbfs\nmqueue /dev/mqueue mqueue\ntracefs /sys/kernel/tracing tracefs\ndebugfs /sys/kernel/debug debugfs\nfusectl /sys/fs/fuse/connections fusectl\nnone /run/credentials/systemd-sysctl.service ramfs\nnone /run/credentials/systemd-tmpfiles-setup-dev.service ramfs\n/dev/sda2 /boot xfs\n/dev/sdb1 /data/v2k xfs\n/dev/sda1 /boot/efi vfat\nnone /run/credentials/systemd-tmpfiles-setup.service ramfs\ntmpfs /run/user/1000 tmpfs",
+        "proofs": [
+          {
+            "path": "/var/lib/ablestack-v2k-validation/rocky-source-proof.txt",
+            "sha256": "99223a3da34668a369f2c6250666aad6ddd55fec93d1f3f78c26e266ebb478f9"
+          },
+          {
+            "path": "/data/v2k/rocky-source-proof.bin",
+            "sha256": "99223a3da34668a369f2c6250666aad6ddd55fec93d1f3f78c26e266ebb478f9"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 65536,
+            "sha256": "4aaab401936e2dcbf5f724e62d4e71979f46e378884b29aa2dbeaf3fc2e3058e"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 65536,
+            "sha256": "18de8848e69751e244a813d5b294843e9b5e1c1d9bca92254f8a79fa5a8dc6d1"
+          }
+        ],
+        "selinux": "Enforcing",
+        "workspace_mode": "0o700",
+        "unprivileged_access_denied": true,
+        "qga_booleans": "virt_qemu_ga_read_nonsecurity_files --> off\nvirt_qemu_ga_run_unconfined --> off",
+        "qga_packages": "qemu-guest-agent-9.1.0-29.el9_7.6.x86_64\nliburing-2.5-1.el9.x86_64\nnumactl-libs-2.0.19-3.el9.x86_64",
+        "unit_hash": "2366446b1f6be3b1f9c4bd0b420c9ddc22b9c0a2cadc968673f351e1260d7ad2"
+      },
+      "xml": {
+        "uuid": "6cc596fc-0c3e-4ea9-b235-bd58a20681dd",
+        "name": "i-2-318-VM",
+        "firmware": null,
+        "loader": "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd",
+        "disks": [
+          {
+            "target": {
+              "dev": "sda",
+              "bus": "sata"
+            },
+            "driver": {
+              "name": "qemu",
+              "type": "qcow2",
+              "cache": "writeback",
+              "io": "io_uring"
+            },
+            "serial": "abbf2d7b53254bff9275",
+            "source": {
+              "file": "/mnt/glue-gfs/v2k-i90-rocky-sata-final-20261127-disk0.qcow2",
+              "index": "4"
+            }
+          },
+          {
+            "target": {
+              "dev": "sdb",
+              "bus": "sata"
+            },
+            "driver": {
+              "name": "qemu",
+              "type": "qcow2",
+              "cache": "writeback",
+              "io": "io_uring"
+            },
+            "serial": "6a2ca3ba244f4ce88989",
+            "source": {
+              "file": "/mnt/glue-gfs/v2k-i90-rocky-sata-final-20261127-disk1.qcow2",
+              "index": "3"
+            }
+          }
+        ],
+        "nics": [
+          "00:50:56:39:91:12"
+        ]
+      },
+      "volumes": [
+        {
+          "id": "abbf2d7b-5325-4bff-9275-2ae69645d693",
+          "type": "ROOT",
+          "size": 34359738368,
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-27T05:05:05.912328305Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-rocky-sata-final-20261127-disk0.qcow2",
+            "importrequestid": "abbf2d7b-5325-4bff-9275-2ae69645d693",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-27T05:05:09.276316330Z",
+            "importstrategy": "adopt",
+            "importidentity": "b20938d308d0b07c985500d521e87205eda3b5c7e5a6fb9f10fefa1daa0507b9",
+            "importverifiedat": "2026-11-27T05:05:05.912324886Z"
+          }
+        },
+        {
+          "id": "6a2ca3ba-244f-4ce8-8989-373467b34843",
+          "type": "DATADISK",
+          "size": 8589934592,
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T05:05:06.069028684Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-rocky-sata-final-20261127-disk1.qcow2",
+            "importrequestid": "6a2ca3ba-244f-4ce8-8989-373467b34843",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-27T05:05:09.278872948Z",
+            "importstrategy": "adopt",
+            "importidentity": "4903fd30a29df1e862fb55fca894c36a2289ba009edf8d731aca6e1c214499e1",
+            "importverifiedat": "2026-11-27T05:05:06.069025644Z"
+          }
+        }
+      ]
+    },
+    {
+      "controller": "scsi",
+      "source_uuid": "4235df29-52ce-f994-c384-54466de019f6",
+      "target_id": "1e8fbff2-a1af-44bd-94d9-13d4aa1a52ec",
+      "target_name": "v2k-i90-rocky-scsi-final-20261127",
+      "instance": "i-2-316-VM",
+      "before_host": "ablecube13-2",
+      "after_host": "ablecube13-3",
+      "first_verified": {
+        "status": "VERIFIED",
+        "complete": true,
+        "boot_id": "d3d20f26-727d-4a11-8ff6-18b67cb51b32"
+      },
+      "postboot_verified": {
+        "status": "VERIFIED",
+        "complete": true,
+        "boot_id": "abb354aa-8ce4-43a9-a007-4c7cf4b7c3c4",
+        "report_boot_id": "abb354aa-8ce4-43a9-a007-4c7cf4b7c3c4",
+        "plan_hash": "d3890dca58dc56b7e4c37826020a2f3b4a16ba63db0b053748af14d0a5fd08a1",
+        "operation_id": "15d54fcd-c6fa-4f8c-bbbc-eff246708945",
+        "helper_sha256": "2cc9fcc170767da88530c91b17651049cffc3475ebb897082a1a69dd19121e33"
+      },
+      "guest": {
+        "firmware": "efi",
+        "network": [
+          {
+            "ifindex": 1,
+            "ifname": "lo",
+            "flags": [
+              "LOOPBACK",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 65536,
+            "qdisc": "noqueue",
+            "operstate": "UNKNOWN",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "loopback",
+            "address": "00:00:00:00:00:00",
+            "broadcast": "00:00:00:00:00:00",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              },
+              {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          },
+          {
+            "ifindex": 2,
+            "ifname": "ens192",
+            "flags": [
+              "BROADCAST",
+              "MULTICAST",
+              "UP",
+              "LOWER_UP"
+            ],
+            "mtu": 1500,
+            "qdisc": "fq_codel",
+            "operstate": "UP",
+            "group": "default",
+            "txqlen": 1000,
+            "link_type": "ether",
+            "address": "00:50:56:39:91:13",
+            "broadcast": "ff:ff:ff:ff:ff:ff",
+            "addr_info": [
+              {
+                "family": "inet",
+                "local": "10.10.254.210",
+                "prefixlen": 16,
+                "broadcast": "10.10.255.255",
+                "scope": "global",
+                "dynamic": true,
+                "noprefixroute": true,
+                "label": "ens192",
+                "valid_life_time": 7160,
+                "preferred_life_time": 7160
+              },
+              {
+                "family": "inet6",
+                "local": "fd12:8ea6:72a:69eb:250:56ff:fe39:9113",
+                "prefixlen": 64,
+                "scope": "global",
+                "dynamic": true,
+                "noprefixroute": true,
+                "valid_life_time": 2592000,
+                "preferred_life_time": 604800
+              },
+              {
+                "family": "inet6",
+                "local": "fe80::250:56ff:fe39:9113",
+                "prefixlen": 64,
+                "scope": "link",
+                "noprefixroute": true,
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+              }
+            ]
+          }
+        ],
+        "mounts": "proc /proc proc\nsysfs /sys sysfs\ndevtmpfs /dev devtmpfs\nsecurityfs /sys/kernel/security securityfs\ntmpfs /dev/shm tmpfs\ndevpts /dev/pts devpts\ntmpfs /run tmpfs\ncgroup2 /sys/fs/cgroup cgroup2\npstore /sys/fs/pstore pstore\nefivarfs /sys/firmware/efi/efivars efivarfs\nbpf /sys/fs/bpf bpf\nconfigfs /sys/kernel/config configfs\n/dev/mapper/rl-root / xfs\nselinuxfs /sys/fs/selinux selinuxfs\nsystemd-1 /proc/sys/fs/binfmt_misc autofs\nhugetlbfs /dev/hugepages hugetlbfs\ndebugfs /sys/kernel/debug debugfs\ntracefs /sys/kernel/tracing tracefs\nmqueue /dev/mqueue mqueue\nfusectl /sys/fs/fuse/connections fusectl\nnone /run/credentials/systemd-sysctl.service ramfs\nnone /run/credentials/systemd-tmpfiles-setup-dev.service ramfs\n/dev/sdb1 /data/v2k xfs\n/dev/sda2 /boot xfs\n/dev/sda1 /boot/efi vfat\nnone /run/credentials/systemd-tmpfiles-setup.service ramfs\ntmpfs /run/user/1000 tmpfs",
+        "proofs": [
+          {
+            "path": "/var/lib/ablestack-v2k-validation/rocky-source-proof.txt",
+            "sha256": "99223a3da34668a369f2c6250666aad6ddd55fec93d1f3f78c26e266ebb478f9"
+          },
+          {
+            "path": "/data/v2k/rocky-source-proof.bin",
+            "sha256": "99223a3da34668a369f2c6250666aad6ddd55fec93d1f3f78c26e266ebb478f9"
+          }
+        ],
+        "rw": [
+          {
+            "directory": "/var/tmp",
+            "bytes": 65536,
+            "sha256": "74a7333fd8a5333c8b09b0837f2b0158f797385c88b8021b001b7a05f77b5b61"
+          },
+          {
+            "directory": "/data/v2k",
+            "bytes": 65536,
+            "sha256": "b7da427be7f3866720dbc5bda6ea7850523fc7694ae72381b6c312d228aa941c"
+          }
+        ],
+        "selinux": "Enforcing",
+        "workspace_mode": "0o700",
+        "unprivileged_access_denied": true,
+        "qga_booleans": "virt_qemu_ga_read_nonsecurity_files --> off\nvirt_qemu_ga_run_unconfined --> off",
+        "qga_packages": "qemu-guest-agent-9.1.0-29.el9_7.6.x86_64\nliburing-2.5-1.el9.x86_64\nnumactl-libs-2.0.19-3.el9.x86_64",
+        "unit_hash": "2366446b1f6be3b1f9c4bd0b420c9ddc22b9c0a2cadc968673f351e1260d7ad2"
+      },
+      "xml": {
+        "uuid": "1e8fbff2-a1af-44bd-94d9-13d4aa1a52ec",
+        "name": "i-2-316-VM",
+        "firmware": null,
+        "loader": "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd",
+        "disks": [
+          {
+            "target": {
+              "dev": "sda",
+              "bus": "scsi"
+            },
+            "driver": {
+              "name": "qemu",
+              "type": "qcow2",
+              "cache": "writeback",
+              "io": "io_uring",
+              "discard": "unmap"
+            },
+            "serial": "857d314c08704964a99d",
+            "source": {
+              "file": "/mnt/glue-gfs/v2k-i90-rocky-scsi-final-20261127-disk0.qcow2",
+              "index": "4"
+            }
+          },
+          {
+            "target": {
+              "dev": "sdb",
+              "bus": "scsi"
+            },
+            "driver": {
+              "name": "qemu",
+              "type": "qcow2",
+              "cache": "writeback",
+              "io": "io_uring",
+              "discard": "unmap"
+            },
+            "serial": "4f92cc973b4e442aba93",
+            "source": {
+              "file": "/mnt/glue-gfs/v2k-i90-rocky-scsi-final-20261127-disk1.qcow2",
+              "index": "3"
+            }
+          }
+        ],
+        "nics": [
+          "00:50:56:39:91:13"
+        ]
+      },
+      "volumes": [
+        {
+          "id": "857d314c-0870-4964-a99d-ce69c25ee1c8",
+          "type": "ROOT",
+          "size": 34359738368,
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "34432843776",
+            "observedat": "2026-11-27T05:03:28.167610375Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-rocky-scsi-final-20261127-disk0.qcow2",
+            "importrequestid": "857d314c-0870-4964-a99d-ce69c25ee1c8",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-27T05:03:31.612034470Z",
+            "importstrategy": "adopt",
+            "importidentity": "3d395f4d7071a4caddd3f91bcac949c35c16e6fc992a81cd08e620fc95ba0d87",
+            "importverifiedat": "2026-11-27T05:03:28.167607096Z"
+          }
+        },
+        {
+          "id": "4f92cc97-3b4e-442a-ba93-5da4eded1784",
+          "type": "DATADISK",
+          "size": 8589934592,
+          "cachemode": "writeback",
+          "allocation": {
+            "contractversion": "1",
+            "requestedpolicy": "falloc",
+            "requestedformat": "qcow2",
+            "policyorigin": "explicit",
+            "fixedpolicy": "falloc",
+            "effectivepolicy": "falloc",
+            "appliedmethod": "import-adopt-falloc",
+            "actualformat": "qcow2",
+            "evidence": "verified",
+            "appliedbackend": "GFS2",
+            "appliedoperation": "import",
+            "evidencescope": "import-time",
+            "observedallocatedbytes": "8608370688",
+            "observedat": "2026-11-27T05:03:28.286503856Z",
+            "observedsource": "stat-st-blocks-times-512",
+            "importpath": "v2k-i90-rocky-scsi-final-20261127-disk1.qcow2",
+            "importrequestid": "4f92cc97-3b4e-442a-ba93-5da4eded1784",
+            "importpool": "90b0c4e3-7078-4372-8da0-9625bc0e806a",
+            "importstartedat": "2026-11-27T05:03:31.615317065Z",
+            "importstrategy": "adopt",
+            "importidentity": "aff734fa2af9ae856182bb77bbf93e93a7d7e5294f13d04ed1f3d0faa39b2ac2",
+            "importverifiedat": "2026-11-27T05:03:28.286501094Z"
+          }
+        }
+      ]
+    }
+  ],
+  "qualification_note": "Initial full Wizard migration used 0ee3161. During postboot validation the observer service asset was deployed to the three test guests to enforce private exchange permissions. NIC, IP, disk or fstab settings were not manually repaired. The final service and current client reconcile were verified after OS reboot on different hosts."
+}

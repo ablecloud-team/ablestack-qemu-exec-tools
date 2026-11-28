@@ -17,6 +17,9 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_allocation.sh"
+
 n2k_interactive_has_tty() {
   [[ -t 0 && ( -t 2 || -t 1 ) ]]
 }
@@ -546,6 +549,8 @@ EOF
 
 n2k_cmd_wizard() {
   local vm="" pc="" username="" password="" cred_file="" insecure="1"
+  local cloud_allocation_copy=0
+  local target_preallocation="" target_preallocation_set=0 target_preallocation_source=""
   local target_profile="" target_provider="" target_storage="" target_format="" dst="" target_map_json=""
   local rbd_pool="${N2K_WIZARD_RBD_POOL:-rbd}" file_root="${N2K_WIZARD_FILE_ROOT:-/var/lib/libvirt/images}"
   local rbd_access_mode=""
@@ -572,6 +577,20 @@ n2k_cmd_wizard() {
       --target-profile|--profile) target_profile="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
+      --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
+      --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
+      --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export N2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
+      --target-disk-controller) n2k_controller_policy_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --dst) dst="${2:-}"; shift 2 ;;
       --target-map-json) target_map_json="${2:-}"; shift 2 ;;
@@ -700,6 +719,15 @@ n2k_cmd_wizard() {
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_target_storage "${target_storage}" || n2k_die "Invalid --target-storage: ${target_storage}"
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
+  migration_disk_cache_wizard n2k "${N2K_MANIFEST:-}" "$yes" "$print_command" || return $?
+  image_preallocation_wizard n2k "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${yes}" "${print_command}" || return $?
+  target_preallocation="${IMAGE_PREALLOCATION_MODE}"
+  target_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
+  # Passed through Bash dynamic scope to the run/init resolver.
+  # shellcheck disable=SC2034
+  local N2K_PREALLOCATION_SOURCE="${target_preallocation_source}"
+  migration_cloud_allocation_copy_choice n2k "${target_provider}" "${target_storage}" "${target_preallocation}" "${N2K_MANIFEST:-}" "${cloud_allocation_copy}" "${yes}" "${print_command}" || return $?
+  cloud_allocation_copy="${CLOUD_ALLOCATION_COPY_CHOICE}"
   rbd_access_mode="${rbd_access_mode:-librbd}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   if [[ -n "${target_map_json}" ]]; then
@@ -839,13 +867,25 @@ n2k_cmd_wizard() {
     "${split}" "${shutdown}" "${cutover_policy}" "${dst}" "${cloud_endpoint}" "${cloud_zone_id}" \
     "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_host_id}" \
     "${cloud_name}" "${target_map_json:-}"
+  printf '  Target preallocation: %s (%s)\n' "${target_preallocation:-not_applicable}" "${target_preallocation_source}" >&2
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     printf '  Cloud NIC mappings:\n' >&2
     jq -r '.[] | "    " + .source_label + " / " + .mac + " -> " + .network_id + (if .default then " (default)" else "" end)' \
       <<<"${cloud_nic_mappings_json}" >&2
   fi
 
+  n2k_guest_config_wizard "$target_provider" "${N2K_MANIFEST:-}" "$yes" "$print_command" || return $?
   local -a run_args=(--foreground --vm "${vm}" --pc "${pc}" --username "${username}" --password "${password}" --insecure "${insecure}")
+  [[ -z "${N2K_GUEST_CONFIG_POLICY:-}" ]] || run_args+=(--guest-config-policy "$N2K_GUEST_CONFIG_POLICY")
+  [[ -z "${N2K_GUEST_CONFIG_TIMEOUT:-}" ]] || run_args+=(--guest-config-timeout "$N2K_GUEST_CONFIG_TIMEOUT")
+  [[ -z "${N2K_SOURCE_GUEST_PASSWORD_FD:-}" ]] || run_args+=(--source-guest-password-fd "$N2K_SOURCE_GUEST_PASSWORD_FD")
+  [[ -z "${N2K_GUEST_CONFIG_MAP_JSON:-}" ]] || run_args+=(--guest-config-map-json "$N2K_GUEST_CONFIG_MAP_JSON")
+  run_args+=(--target-disk-cache "$N2K_TARGET_DISK_CACHE")
+  [[ -z "${N2K_SOURCE_GUEST_OS:-}" ]] || run_args+=(--source-guest-os "$N2K_SOURCE_GUEST_OS")
+  [[ -z "${N2K_SOURCE_GUEST_USER:-}" ]] || run_args+=(--source-guest-user "$N2K_SOURCE_GUEST_USER")
+  [[ -z "${N2K_SOURCE_GUEST_HOST:-}" ]] || run_args+=(--source-guest-host "$N2K_SOURCE_GUEST_HOST")
+  [[ -z "${N2K_SOURCE_GUEST_HOSTKEY_SHA256:-}" ]] || run_args+=(--source-guest-hostkey-sha256 "$N2K_SOURCE_GUEST_HOSTKEY_SHA256")
+  [[ -z "${N2K_TARGET_DISK_CONTROLLER:-}" ]] || run_args+=(--target-disk-controller "$N2K_TARGET_DISK_CONTROLLER")
   if [[ -n "${inventory_json}" ]]; then
     run_args+=(--inventory-source fixture --inventory-json "${inventory_json}")
   else
@@ -854,6 +894,12 @@ n2k_cmd_wizard() {
   run_args+=(--source-api "${source_api}" --split "${split}" --shutdown "${shutdown}")
   [[ "${force_v3}" == "true" ]] && run_args+=(--force-v3)
   run_args+=(--target-provider "${target_provider}" --target-storage "${target_storage}" --target-format "${target_format}" --dst "${dst}")
+  [[ "${cloud_allocation_copy}" != 1 ]] || run_args+=(--cloud-allocation-copy)
+  if [[ "${target_storage}" == file ]]; then
+    run_args+=(--target-preallocation "${target_preallocation}")
+  elif [[ "${target_preallocation_set}" == 1 ]]; then
+    run_args+=(--target-preallocation off)
+  fi
   run_args+=(--rbd-access-mode "${rbd_access_mode}")
   [[ -n "${cred_file}" ]] && run_args+=(--cred-file "${cred_file}")
   [[ -n "${target_map_json}" && "${target_map_json}" != "{}" ]] && run_args+=(--target-map-json "${target_map_json}")

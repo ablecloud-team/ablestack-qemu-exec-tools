@@ -1,0 +1,236 @@
+{
+  "date_kst": "2026-11-28",
+  "issue": "https://github.com/ablecloud-team/ablestack-qemu-exec-tools/issues/92",
+  "scope": "real Mold/GFS2 cache propagation and incomplete-verification retention; negative nonbootable no-QGA fixtures, not OS boot success",
+  "deployment": {
+    "worker": "10.10.13.1",
+    "method": "backed-up text runtime overlay; no management/agent jars, schema or service restart",
+    "backup": "/var/backups/issue92-tools-20261128",
+    "rpm_builds": [
+      {
+        "tool": "v2k",
+        "rpm": "build/rpm-v2k/ablestack_v2k-0.10.0-1.el9.el9.x86_64.rpm",
+        "bytes": 226491336,
+        "sha256": "d4d7b4bbb493a23a4fb0d8645764fec261b43af0b71410b5852460efcf664aff",
+        "runtime_body_matches_source": true,
+        "normalization": "RPM standard bash shebang mangling only"
+      },
+      {
+        "tool": "n2k",
+        "rpm": "build/rpm-n2k/ablestack_n2k-0.10.0-1.el9.el9.noarch.rpm",
+        "bytes": 278267,
+        "sha256": "3f2aeed50eb46498e3d89f787c3206989db95053a82d8afb65c714b230a4e8c6",
+        "runtime_body_matches_source": true,
+        "normalization": "RPM standard bash shebang mangling only"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "tool": "v2k",
+      "vm": {
+        "id": "cade01de-aa54-49f2-9996-13a3ecb2f8de",
+        "name": "v2k-i92-cache-none-retained-20261128",
+        "instancename": "i-2-336-VM",
+        "state": "Running",
+        "hostname": "ablecube13-3"
+      },
+      "volumes": [
+        {
+          "id": "beb324d5-0cf2-4665-8936-4dfd0ffca772",
+          "type": "ROOT",
+          "cachemode": "none",
+          "state": "Ready",
+          "deviceid": 0,
+          "diskofferingname": "V2K Migration None qcow2 falloc",
+          "virtualmachineid": "cade01de-aa54-49f2-9996-13a3ecb2f8de"
+        },
+        {
+          "id": "5cd60d89-0e9b-4eb3-8a39-7939cdc9c7f0",
+          "type": "DATADISK",
+          "cachemode": "none",
+          "state": "Ready",
+          "deviceid": 1,
+          "diskofferingname": "V2K Migration None qcow2 falloc",
+          "virtualmachineid": "cade01de-aa54-49f2-9996-13a3ecb2f8de"
+        }
+      ],
+      "xml_disks": [
+        {
+          "driver": {
+            "name": "qemu",
+            "type": "qcow2",
+            "cache": "none",
+            "io": "io_uring"
+          },
+          "target": {
+            "dev": "sda",
+            "bus": "sata"
+          }
+        },
+        {
+          "driver": {
+            "name": "qemu",
+            "type": "qcow2",
+            "cache": "none",
+            "io": "io_uring"
+          },
+          "target": {
+            "dev": "sdb",
+            "bus": "sata"
+          }
+        }
+      ],
+      "first_exit_code": 78,
+      "retry_exit_code": 78,
+      "same_resource_ids": true,
+      "verification_status": "TIMED_OUT",
+      "retention_status": "RETAINED_UNVERIFIED",
+      "complete": false,
+      "validated": false,
+      "retention_events": 2,
+      "manifest": "/var/tmp/issue92/v2k-i92-cache-none-retained-20261128/manifest.json",
+      "legacy_writeback_resume": {
+        "vm_id": "d3d86ed3-f329-4573-964f-8f97f2cb89d9",
+        "returncode": 0,
+        "intent_unchanged": true,
+        "guest_status": "VERIFIED",
+        "cache": {
+          "requested": "writeback",
+          "verified": true,
+          "volumes": [
+            {
+              "volume_id": "281576b9-1a8e-4166-b25f-f8e693d27f25",
+              "cache_mode": "writeback",
+              "verified": true
+            },
+            {
+              "volume_id": "050a3172-24eb-468b-aa23-136d445f7c61",
+              "cache_mode": "writeback",
+              "verified": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tool": "n2k",
+      "vm": {
+        "id": "6f02a691-fc34-4a94-a78f-e3c3284c7ab4",
+        "name": "n2k-i92-cache-none-retained-20261128",
+        "instancename": "i-2-337-VM",
+        "state": "Running",
+        "hostname": "ablecube13-1"
+      },
+      "volumes": [
+        {
+          "id": "2d3e290b-bf65-4ab4-ac6b-f75b003197f7",
+          "type": "ROOT",
+          "cachemode": "none",
+          "state": "Ready",
+          "deviceid": 0,
+          "diskofferingname": "N2K Migration None qcow2 falloc",
+          "virtualmachineid": "6f02a691-fc34-4a94-a78f-e3c3284c7ab4"
+        },
+        {
+          "id": "1ec81ab6-7b6e-4774-9eda-6060c864bd10",
+          "type": "DATADISK",
+          "cachemode": "none",
+          "state": "Ready",
+          "deviceid": 1,
+          "diskofferingname": "N2K Migration None qcow2 falloc",
+          "virtualmachineid": "6f02a691-fc34-4a94-a78f-e3c3284c7ab4"
+        }
+      ],
+      "xml_disks": [
+        {
+          "driver": {
+            "name": "qemu",
+            "type": "qcow2",
+            "cache": "none",
+            "io": "io_uring"
+          },
+          "target": {
+            "dev": "sda",
+            "bus": "sata"
+          }
+        },
+        {
+          "driver": {
+            "name": "qemu",
+            "type": "qcow2",
+            "cache": "none",
+            "io": "io_uring"
+          },
+          "target": {
+            "dev": "sdb",
+            "bus": "sata"
+          }
+        }
+      ],
+      "first_exit_code": 78,
+      "retry_exit_code": 78,
+      "same_resource_ids": true,
+      "verification_status": "TIMED_OUT",
+      "retention_status": "RETAINED_UNVERIFIED",
+      "complete": false,
+      "validated": false,
+      "retention_events": 2,
+      "manifest": "/var/tmp/issue92/n2k-i92-cache-none-retained-20261128/manifest.json",
+      "legacy_writeback_resume": {
+        "vm_id": "84fcaee4-c488-4572-9f7a-0a2f29a7b7a7",
+        "returncode": 0,
+        "intent_unchanged": true,
+        "guest_status": "VERIFIED",
+        "cache": {
+          "requested": "writeback",
+          "verified": true,
+          "volumes": [
+            {
+              "volume_id": "985c6c9b-29b7-4f58-bbea-83db4f76947c",
+              "cache_mode": "writeback",
+              "verified": true
+            },
+            {
+              "volume_id": "ec1e0db8-d813-4a31-896a-d064ceef937b",
+              "cache_mode": "writeback",
+              "verified": true
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "baseline": {
+    "before": 140,
+    "after": 142,
+    "existing_changed": [],
+    "hosts": [
+      {
+        "name": "ablecube13-1",
+        "state": "Up",
+        "resourcestate": "Enabled"
+      },
+      {
+        "name": "ablecube13-2",
+        "state": "Up",
+        "resourcestate": "Enabled"
+      },
+      {
+        "name": "ablecube13-3",
+        "state": "Up",
+        "resourcestate": "Enabled"
+      }
+    ],
+    "ui_http": "200"
+  },
+  "local_tests": {
+    "mold_handoff": 6,
+    "cache_retention": 6,
+    "image_cli_wizard": 14,
+    "controller": 12,
+    "sealed_resume": 5,
+    "guest_configuration": 40,
+    "shellcheck": "passed"
+  }
+}

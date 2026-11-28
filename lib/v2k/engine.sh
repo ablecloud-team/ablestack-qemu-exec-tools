@@ -45,6 +45,9 @@ source "${V2K_LIB_DIR}/target_libvirt.sh"
 source "${V2K_LIB_DIR}/cloudstack_api.sh"
 # shellcheck source=/dev/null
 source "${V2K_LIB_DIR}/target_cloud.sh"
+source "${V2K_LIB_DIR}/controller_policy.sh"
+# shellcheck source=/dev/null
+source "${V2K_LIB_DIR}/guest_configuration.sh"
 # shellcheck source=/dev/null
 source "${V2K_LIB_DIR}/verify.sh"
 # shellcheck source=/dev/null
@@ -2954,6 +2957,8 @@ v2k_cmd_init() {
 
   # New: target override options (CLI -> env)
   local target_format="" target_storage="" target_map_json=""
+  local cloud_allocation_copy=0
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
@@ -2972,6 +2977,18 @@ v2k_cmd_init() {
       --compat-profile) compat_profile="${2:-}"; shift 2;;
 
       # --- new options ---
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CACHE="$2"; shift 2;;
+      --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-user) export V2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export V2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
+      --root-disk-id) export V2K_ROOT_DISK_ID="${2:-}"; shift 2;;
+      --target-disk-controller) v2k_controller_policy_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2;;
       --target-storage) target_storage="${2:-}"; shift 2;;
       --target-map-json) target_map_json="${2:-}"; shift 2;;
@@ -3042,6 +3059,9 @@ v2k_cmd_init() {
     export V2K_TARGET_STORAGE_MAP_JSON="${map_compact}"
   fi
 
+  image_preallocation_resolve "${V2K_TARGET_STORAGE_TYPE:-file}" "${V2K_TARGET_FORMAT:-qcow2}" "${target_preallocation}" "${target_preallocation_set}" "" "${V2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  export V2K_TARGET_PREALLOCATION="${target_preallocation}" V2K_TARGET_PREALLOCATION_SET="${target_preallocation_set}"
+
   # Safety: block/rbd storage requires map json
   if [[ "${V2K_TARGET_STORAGE_TYPE:-file}" == "block" || "${V2K_TARGET_STORAGE_TYPE:-file}" == "rbd" ]]; then
     if [[ -z "${V2K_TARGET_STORAGE_MAP_JSON:-}" || "${V2K_TARGET_STORAGE_MAP_JSON}" == "{}" ]]; then
@@ -3076,31 +3096,14 @@ v2k_cmd_init() {
   v2k_compat_bootstrap_env "${V2K_MANIFEST:-}" "${V2K_WORKDIR:-}" || true
   v2k_compat_resolve_profile "${V2K_COMPAT_PROFILE:-auto}" "${V2K_WORKDIR:-}" "${V2K_MANIFEST:-}" 0
 
-  # If init was given only a govc credential file, derive a VDDK credential file
-  # so follow-up base/incremental sync commands can reuse the same workdir.
-  if [[ -z "${vddk_cred_file}" && -n "${GOVC_USERNAME:-}" && -n "${GOVC_PASSWORD:-}" ]]; then
-    vddk_cred_file="${V2K_WORKDIR}/vddk.auto.cred"
-    cat > "${vddk_cred_file}" <<EOF
-VDDK_USER=${GOVC_USERNAME}
-VDDK_PASSWORD=${GOVC_PASSWORD}
-VDDK_SERVER=${vcenter}
-EOF
-    chmod 600 "${vddk_cred_file}" 2>/dev/null || true
+  if [[ -z "${vddk_cred_file}" ]]; then
+    export VDDK_USER="${VDDK_USER:-${GOVC_USERNAME:-}}" VDDK_PASSWORD="${VDDK_PASSWORD:-${GOVC_PASSWORD:-}}"
   fi
 
-  # (FIX) Persist VDDK cred file into workdir (productization) AFTER workdir exists
+  # Keep operator-supplied credential files external to the workdir.
   if [[ -n "${vddk_cred_file}" ]]; then
-    local vddk_saved="${V2K_WORKDIR}/vddk.cred"
-    # If src and dst are the same file, skip (idempotent).
-    local src_real dst_real
-    src_real="$(readlink -f "${vddk_cred_file}" 2>/dev/null || echo "${vddk_cred_file}")"
-    dst_real="$(readlink -f "${vddk_saved}"     2>/dev/null || echo "${vddk_saved}")"
-    if [[ "${src_real}" != "${dst_real}" ]]; then
-      install -m 600 "${vddk_cred_file}" "${vddk_saved}"
-    fi
-    export V2K_VDDK_CRED_FILE="${vddk_saved}"
-  else
-    export V2K_VDDK_CRED_FILE=""
+    [[ -r "${vddk_cred_file}" ]] || { echo "VDDK credential file is not readable" >&2; return 32; }
+    export V2K_VDDK_CRED_FILE="${vddk_cred_file}"
   fi
 
   # ---- Resolve the VDDK(vCenter) thumbprint automatically when possible ----
@@ -3145,6 +3148,14 @@ EOF
 
   local inv_json
   inv_json="$(v2k_vmware_inventory_json "${vm}" "${vcenter}")"
+  inv_json="$(v2k_controller_inventory "$inv_json" "${V2K_ROOT_DISK_ID:-}")" || return $?
+  if [[ "${V2K_DRY_RUN:-0}" != 1 ]]; then
+    local cbt_capability
+    cbt_capability="$(jq -r '.vm.cbt_supported // "unknown"' <<<"$inv_json")"
+    if [[ "$cbt_capability" == unknown ]]; then cbt_capability="$(v2k_govc object.collect -s -vm "$vm" capability.changeTrackingSupported)" || return 44; fi
+    [[ "$cbt_capability" == true ]] || { echo 'VMWARE_CBT_UNSUPPORTED: source capability must be positively established before CBT changes' >&2; return 44; }
+  fi
+
   local inv_esxi_version
   inv_esxi_version="$(printf '%s' "${inv_json}" | jq -r '.esxi_version // empty' 2>/dev/null || true)"
   if [[ -n "${inv_esxi_version}" ]]; then
@@ -3160,8 +3171,14 @@ EOF
     "{\"vm\":\"${vm}\",\"vcenter\":\"${vcenter}\",\"dst\":\"${dst}\",\"mode\":\"${mode}\",\"target_provider\":\"${target_provider}\",\"target_format\":\"${V2K_TARGET_FORMAT:-qcow2}\",\"target_storage\":\"${V2K_TARGET_STORAGE_TYPE:-file}\",\"compat_requested_profile\":\"${V2K_COMPAT_PROFILE:-auto}\",\"compat_selected_profile\":\"${V2K_COMPAT_SELECTED_PROFILE:-}\"}"
 
   # Build manifest using inventory json + target settings (from env)
+  if [[ -f "${V2K_MANIFEST}" ]]; then
+    echo 'Manifest already exists; use run with the existing workdir instead of init' >&2
+    return 2
+  fi
   v2k_manifest_init "${V2K_MANIFEST}" "${V2K_RUN_ID}" "${V2K_WORKDIR}" "${vm}" "${vcenter}" "${mode}" "${dst}" "${inv_json}" "${target_provider}" "${cloud_config_json}"
+  migration_cloud_allocation_allow_copy "${V2K_MANIFEST}" "${cloud_allocation_copy}" || return $?
 
+  v2k_controller_prepare "${V2K_MANIFEST}" "${V2K_TARGET_DISK_CONTROLLER:-auto}" || return $?
   local controller_validation_rc=0
   if v2k_manifest_validate_source_disk_controllers "${V2K_MANIFEST}"; then
     controller_validation_rc=0
@@ -3215,6 +3232,16 @@ EOF
   v2k_manifest_set_compat_detected_esxi_version "${V2K_MANIFEST}" "${V2K_COMPAT_DETECTED_ESXI_VERSION:-}"
   v2k_manifest_set_compat_tool_paths "${V2K_MANIFEST}" "${V2K_COMPAT_ROOT:-}" "${V2K_GOVC_BIN:-}" "${V2K_PYTHON_BIN:-}" "${VDDK_LIBDIR:-}" "${V2K_NBDKIT_BIN:-}" "${V2K_NBDKIT_VDDK_PLUGIN:-}"
   v2k_compat_write_env "${V2K_WORKDIR}" || true
+  migration_cloud_allocation_check_manifest v2k "${V2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
+  v2k_controller_check_target "${V2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
+  v2k_guest_config_configure "$V2K_MANIFEST" preserve || return $?
+  if [[ "$(jq -r '.target.guest_config_policy // empty' "$V2K_MANIFEST")" == preserve ]]; then
+    v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
+    v2k_guest_config_collect "$V2K_MANIFEST" || return $?
+  v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
+  fi
+
+
   v2k_manifest_phase_done "${V2K_MANIFEST}" "init"
 
   v2k_event INFO "init" "" "phase_done" "{\"manifest\":\"${V2K_MANIFEST}\",\"workdir\":\"${V2K_WORKDIR}\"}"
@@ -3261,6 +3288,7 @@ v2k_cmd_cbt() {
 
 v2k_cmd_snapshot() {
   v2k_require_manifest
+  v2k_cloud_require_unmanaged_target "$V2K_MANIFEST" || return $?
   v2k_load_runtime_flags_from_manifest
   v2k_restore_runtime_env_from_workdir
   local which="${1:-}" name=""
@@ -3702,6 +3730,11 @@ v2k_select_bootstrap_fallback() {
   local bus="sata" provider
   provider="$(jq -r '.target.provider // "libvirt"' "${manifest}" 2>/dev/null || echo libvirt)"
 
+  if jq -e '.target.disk_controller_plan.version == 1' "$manifest" >/dev/null; then
+    echo "DISK_CONTROLLER_POLICY: bootstrap failed for the frozen target driver; retry with a qualified policy in a new workdir" >&2
+    return 1
+  fi
+
   # Cloud migrations always hand a degraded VM to an engineer for inspection.
   # The opt-out remains available only for direct libvirt targets.
   if [[ "${provider}" != "ablestack-cloud" ]] && ! v2k_bootstrap_fallback_enabled "${policy}"; then
@@ -3774,6 +3807,7 @@ v2k_libvirt_redefine_with_bootstrap_fallback() {
 
 v2k_cmd_cutover() {
   v2k_require_manifest
+  migration_disk_cache_configure v2k "${V2K_MANIFEST}" || return $?
   v2k_load_runtime_flags_from_manifest
   v2k_restore_runtime_env_from_workdir
   local shutdown="guest" define_only=0 apply_define=0 start_vm=0
@@ -3800,6 +3834,12 @@ v2k_cmd_cutover() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export V2K_TARGET_DISK_CACHE="$2"; shift 2;;
+      --guest-config-policy) v2k_guest_config_policy "${2:-}" || return $?; export V2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export V2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) v2k_guest_config_timeout_validate "${2:-}" || return $?; export V2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-user) export V2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export V2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
       --shutdown) shutdown="${2:-}"; shift 2;;
       --shutdown-force) shutdown_force=1; shift 1;;
       --shutdown-timeout) shutdown_timeout="${2:-}"; shift 2;;
@@ -3886,6 +3926,20 @@ v2k_cmd_cutover() {
     define_only=1
   fi
 
+  # Once import has been attempted, reconcile only through Mold APIs.
+  # Never shut down the source again or patch/bootstrap an owned image.
+  if v2k_cloud_handoff_started "$V2K_MANIFEST"; then
+    [[ "$target_provider" == ablestack-cloud ]] || { echo 'CLOUD_TARGET_SEALED: target provider cannot change' >&2; return 44; }
+    if [[ "$define_only" == 0 && "$apply_define" == 0 && "$start_vm" == 0 ]]; then start_vm=1; fi
+    local handoff_result
+    if handoff_result="$(v2k_cloud_target_cutover "$V2K_MANIFEST" "$define_only" "$apply_define" "$start_vm" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file")"; then
+      if jq -e ".complete != false" <<<"$handoff_result" >/dev/null; then v2k_manifest_phase_done "$V2K_MANIFEST" cutover; fi
+      v2k_json_or_text_ok cutover "$handoff_result" 'Mold deployment reconciled without source sync.'
+      return 0
+    else return $?; fi
+  fi
+
+  v2k_guest_config_configure "$V2K_MANIFEST" || return $?
   # -------------------------------------------------------------------
   # Auto WinPE policy:
   # - If source VM is NOT Windows, skip WinPE unless explicitly forced by CLI.
@@ -4006,6 +4060,10 @@ v2k_cmd_cutover() {
     fi
   fi
 
+  if ! v2k_guest_config_source_copy_frozen "$V2K_MANIFEST"; then
+  v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
+  v2k_guest_config_collect "$V2K_MANIFEST" || return $?
+  v2k_guest_config_preflight_manifest "$V2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
   # As approved: default flow is shutdown -> final snapshot -> final sync
   v2k_event INFO "cutover" "" "phase_start" "{\"shutdown\":\"${shutdown}\"}"
 
@@ -4078,6 +4136,10 @@ v2k_cmd_cutover() {
       || true
     echo "Final sync failed. rc=${_rc}" >&2
     exit "${_rc}"
+  fi
+
+  else
+    v2k_event INFO cutover '' guest_config_resume_frozen_copy '{}'
   fi
 
   # Cloud targets also need the Linux storage bootstrap before import/deploy.
@@ -4168,6 +4230,8 @@ v2k_cmd_cutover() {
     start_vm=0
   fi
 
+  v2k_guest_config_stage "$V2K_MANIFEST" || return $?
+
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
     local cloud_result cloud_error_file cloud_rc cloud_error_text cloud_error_json
     cloud_error_file="$(mktemp)"
@@ -4183,7 +4247,7 @@ v2k_cmd_cutover() {
       return "${cloud_rc}"
     fi
     v2k_event INFO "cutover" "" "cloud_target_cutover" "${cloud_result}"
-    if [[ "${define_only}" -eq 1 || "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]]; then
+    if [[ "${define_only}" -eq 1 || "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]] && jq -e ".complete != false" <<<"$cloud_result" >/dev/null; then
       v2k_manifest_phase_done "${V2K_MANIFEST}" "cutover"
     fi
     v2k_json_or_text_ok "cutover" "${cloud_result}" "Cloud cutover completed: $(jq -r '.vm_id // .provider' <<<"${cloud_result}")"
@@ -4348,11 +4412,14 @@ v2k_cmd_cleanup() {
   fi
   v2k_event INFO "cleanup" "" "phase_start" "{\"keep_snapshots\":${keep_snapshots},\"keep_workdir\":${keep_workdir}}"
 
-  # Engine-level idempotent cleanup first (processes/devices/tmp). Never fail.
-  v2k_force_cleanup_run "${V2K_RUN_ID:-}" || true
-
-  # Then delegate to transfer layer cleanup (idempotent expected). Never fail hard.
-  v2k_transfer_cleanup || true
+  # Image-oriented cleanup is closed after Mold may have taken ownership.
+  if v2k_cloud_handoff_started "$V2K_MANIFEST"; then
+    keep_workdir=1
+    v2k_event INFO cleanup "" managed_target_cleanup_skip '{"keep_workdir":true}' || true
+  else
+    v2k_force_cleanup_run "${V2K_RUN_ID:-}" || true
+    v2k_transfer_cleanup || true
+  fi
   if [[ "${keep_snapshots}" -eq 0 ]]; then
     # After final cutover: remove ONLY migration snapshots (name contains "migr-").
     # Default: enabled. To disable: export V2K_PURGE_MIGR_SNAPSHOTS=0

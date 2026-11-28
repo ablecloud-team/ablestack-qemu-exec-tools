@@ -1,0 +1,10 @@
+# Copyright 2026 ABLECLOUD. Licensed under the Apache License, Version 2.0.
+[Unit]
+Description=Rearm bounded guest configuration observation
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+AccuracySec=5s
+Unit=v2k-guest-config.service
+[Install]
+WantedBy=timers.target

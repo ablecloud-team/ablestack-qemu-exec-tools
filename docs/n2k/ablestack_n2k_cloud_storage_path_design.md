@@ -128,11 +128,11 @@ Runtime behavior:
 2. If it is omitted, n2k resolves the selected Cloud storage pool.
 3. Host-scoped storage pools use the `local` n2k offering.
 4. Cluster/zone-scoped storage pools use the `shared` n2k offering.
-5. n2k reuses or creates a visible writeback offering:
-   - `N2K Migration Writeback` for shared storage
-   - `N2K Migration Writeback Local` for local storage
+5. n2k reuses or creates a visible none cache offering:
+   - `N2K Migration None` for shared storage
+   - `N2K Migration None Local` for local storage
 6. The offering must be customized, untagged, active, and
-   `cachemode=writeback`.
+   `cachemode=none`.
 
 The offerings are intentionally untagged so they are suitable for every storage
 pool of the matching storage type. This keeps the storage path fix and the cache
@@ -174,9 +174,9 @@ After resolving the Cloud storage pool, n2k records a non-secret summary:
       },
       "resolved_disk_offering": {
         "id": "...",
-        "name": "N2K Migration Writeback",
+        "name": "N2K Migration None",
         "storage_type": "shared",
-        "cache_mode": "writeback",
+        "cache_mode": "none",
         "customized": true,
         "created": false
       }
@@ -192,3 +192,5 @@ No Cloud API key or secret key is stored in the manifest.
 - `docs/n2k/ablestack_n2k_cloud_api_target_design.md`
 - `docs/n2k/ablestack_n2k_interactive_migration_design.md`
 - `docs/n2k/ablestack_n2k_cloud_api_target_e2e_plan.md`
+
+New jobs default to `--target-disk-cache none`; explicit `writeback` uses a separate Writeback offering. Existing handed-off manifests retain their recorded policy. See [cache and retained verification](../migration-cache-retention.md).

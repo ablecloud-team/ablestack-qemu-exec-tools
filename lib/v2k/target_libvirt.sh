@@ -16,6 +16,8 @@
 # ---------------------------------------------------------------------
 
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/disk_cache.sh"
 
 # ---------------------------------------------------------------------
 # Trace helpers
@@ -58,7 +60,10 @@ _v2k_trace_env_once() {
 # ---------------------------------------------------------------------
 _v2k_letter() {
   local n="$1"
-  printf "%b" "\\$(printf '%03o' "$((97 + n))")"
+  local out="" remainder
+  n=$((n + 1))
+  while (( n > 0 )); do remainder=$(((n - 1) % 26)); out="$(printf "%b" "\\$(printf '%03o' "$((97 + remainder))")")${out}"; n=$(((n - 1) / 26)); done
+  printf '%s' "$out"
 }
 
 _v2k_escape_xml() {
@@ -85,7 +90,8 @@ _v2k_rbd_dev_path_from_uri() {
 }
 
 _v2k_target_disk_xml() {
-  local manifest="$1" idx="$2"
+  local manifest="$1" idx="$2" cache_mode
+  cache_mode="$(migration_disk_cache_value v2k "$manifest")" || return $?
   local path bus dev st fallback_bus
   path="$(jq -r ".disks[$idx].transfer.target_path" "${manifest}")"
   fallback_bus="$(jq -r '.runtime.bootstrap_fallback.bus // empty' "${manifest}" 2>/dev/null || true)"
@@ -93,6 +99,9 @@ _v2k_target_disk_xml() {
     bus="sata"
   else
     bus="$(_v2k_disk_bus_from_controller_type "$(jq -r ".disks[$idx].controller.type // empty" "${manifest}")")"
+  fi
+  if jq -e '.target.disk_controller_plan.version == 1' "$manifest" >/dev/null; then
+    bus="$(v2k_controller_python disk --manifest "$manifest" --index "$idx" | jq -r .bus)" || return $?
   fi
   dev="sd$(_v2k_letter "$idx")"
   st="$(jq -r '.target.storage.type // "file"' "${manifest}")"
@@ -112,7 +121,7 @@ _v2k_target_disk_xml() {
     [[ -n "${serial}" ]] || serial="rbd${idx}"
     cat <<EOF
     <disk type='block' device='disk'>
-      <driver name='qemu' type='raw' cache='none' io='io_uring' discard='unmap'/>
+      <driver name='qemu' type='raw' cache='${cache_mode}' io='io_uring' discard='unmap'/>
       <source dev='$(_v2k_escape_xml "${block_path}")' index='${idx}'/>
       <target dev='${dev}' bus='${bus}'/>
       <serial>${serial}</serial>
@@ -124,7 +133,7 @@ EOF
 
   cat <<EOF
     <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2' cache='none' io='io_uring'/>
+      <driver name='qemu' type='$(jq -r '.target.format // "qcow2"' "${manifest}")' cache='${cache_mode}' io='io_uring'/>
       <source file='$(_v2k_escape_xml "${path}")'/>
       <target dev='${dev}' bus='${bus}'/>
     </disk>
@@ -267,6 +276,12 @@ v2k_target_generate_libvirt_xml() {
     controller_xml="<controller type='sata' index='0'/>"
   else
     controller_xml="<controller type='scsi' index='0' model='virtio-scsi'/>"
+  fi
+  if jq -e '.target.disk_controller_plan.version == 1' "$manifest" >/dev/null; then
+    v2k_controller_validate "$manifest" || return $?
+    controller_xml=""
+    if jq -e 'any(.target.disk_controller_plan.disks[]; .target.bus == "scsi")' "$manifest" >/dev/null; then controller_xml="<controller type='scsi' index='0' model='virtio-scsi'/>"; fi
+    if jq -e 'any(.target.disk_controller_plan.disks[]; .target.bus == "sata")' "$manifest" >/dev/null; then controller_xml+="<controller type='sata' index='0'/>"; fi
   fi
   local count i
   count="$(jq -r '.disks | length' "${manifest}")"

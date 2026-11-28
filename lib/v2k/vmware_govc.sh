@@ -442,6 +442,7 @@ v2k_vmware_inventory_json() {
 
     def boot_disk_device_keys:
       (BOOT.bootOrder // BOOT.boot_order // [])
+      | map(select(((.type // ._type // "") | tostring | length) == 0 or ((.type // ._type // "") | tostring | test("BootableDisk"))))
       | map((.deviceKey // .device_key // .key // empty) | tostring);
 
     def boot_rank($disk; $boot_keys):
@@ -506,6 +507,7 @@ v2k_vmware_inventory_json() {
         name: $vm,
         moref: (VMINFO0.self?.value // ""),
         uuid: (VMINFO0.config?.uuid // ""),
+        cbt_supported: (VMINFO0.capability.changeTrackingSupported // null),
  
         # --- carry-over hardware profile (for libvirt definition) ---
         firmware: vm_firmware,
@@ -539,7 +541,8 @@ v2k_vmware_inventory_json() {
       esxi_name: $esxi_name,
       esxi_version: $esxi_version,
       esxi_thumbprint: $esxi_thumbprint,
-      disks: disks(controllers)
+      disks: disks(controllers),
+      controller_plan: {boot_device_keys:boot_disk_device_keys}
     }'; then
     rc=0
   else

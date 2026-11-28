@@ -23,7 +23,13 @@ License:        Apache-2.0
 URL:            https://github.com/ablecloud-team/ablestack-qemu-exec-tools
 Source0:        %{name}-%{version}.tar.gz
 
-BuildArch:      noarch
+BuildArch:      x86_64
+# Preserve the hashes of bundled private runtime binaries.
+%global debug_package %{nil}
+%global __strip /bin/true
+# Private runtime symbols must not satisfy system libguestfs dependencies.
+%global __provides_exclude ^libguestfs\.so\.0.*$
+%global __requires_exclude ^libguestfs\.so\.0.*$
 Requires:       bash
 Requires:       bash-completion
 Requires:       jq
@@ -36,6 +42,11 @@ Requires:       nbdkit-vddk-plugin
 Requires:       qemu-img
 Requires:       libvirt-client
 Requires:       tar
+Requires:       python3-pyyaml
+Requires:       /usr/bin/rpmkeys
+Requires:       /usr/bin/guestfish
+Requires:       /usr/bin/virt-customize
+Requires:       virt-v2v
 
 %description
 ablestack_v2k provides ABLESTACK VMware-to-KVM (V2K) migration scripts and libraries.
@@ -67,10 +78,21 @@ cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/ 2>/dev/nu
 # Offline runtime asset payload used by %post and by air-gapped repair flows.
 mkdir -p %{buildroot}/usr/share/ablestack/v2k/runtime-assets
 if [ -d assets ]; then
-  cp -a assets %{buildroot}/usr/share/ablestack/v2k/runtime-assets/
+  mkdir -p %{buildroot}/usr/share/ablestack/v2k/runtime-assets/assets
+  for payload in assets/* assets/.[!.]* assets/..?*; do
+    [ -e "$payload" ] || [ -L "$payload" ] || continue
+    [ "$payload" != assets/guest-config ] || continue
+    cp -a "$payload" %{buildroot}/usr/share/ablestack/v2k/runtime-assets/assets/
+  done
 fi
 mkdir -p %{buildroot}/usr/share/ablestack/v2k/runtime-assets/share/ablestack/v2k
 cp -a share/ablestack/v2k/compat %{buildroot}/usr/share/ablestack/v2k/runtime-assets/share/ablestack/v2k/ 2>/dev/null || :
+
+# New offline guest payloads are staged by release CI from signed indexes.
+mkdir -p %{buildroot}/usr/share/ablestack/v2k/guest-config
+if [ -d assets/guest-config ]; then
+  cp -a assets/guest-config/. %{buildroot}/usr/share/ablestack/v2k/guest-config/
+fi
 
 # Optional WinPE ISO payload. Official release builds stage exactly one
 # versioned ISO plus SHA256SUMS and set with_winpe=1. The payload, authoritative
@@ -163,6 +185,7 @@ fi
 /usr/local/bin/v2k_test_install.sh
 /usr/local/lib/ablestack-qemu-exec-tools/v2k/*
 /usr/share/ablestack/v2k/compat
+/usr/share/ablestack/v2k/guest-config
 /usr/share/ablestack/v2k/runtime-assets
 /usr/share/ablestack/v2k/winpe
 %if 0%{?with_winpe}

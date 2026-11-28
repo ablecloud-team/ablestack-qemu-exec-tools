@@ -44,6 +44,12 @@ source "${N2K_LIB_DIR}/transfer_patch.sh"
 source "${N2K_LIB_DIR}/target_libvirt.sh"
 # shellcheck source=/dev/null
 source "${N2K_LIB_DIR}/interactive.sh"
+# shellcheck source=/dev/null
+source "${N2K_LIB_DIR}/migration_common.sh"
+# shellcheck source=/dev/null
+source "${N2K_LIB_DIR}/controller_policy.sh"
+# shellcheck source=/dev/null
+source "${N2K_LIB_DIR}/guest_configuration.sh"
 
 n2k_die() {
   echo "ERROR: $*" >&2
@@ -154,6 +160,8 @@ n2k_cmd_init() {
   local username="" password="" insecure="1"
   local inventory_json_arg="" inventory_source="none"
   local target_format="qcow2" target_storage="file" target_map_json="{}" rbd_access_mode="librbd"
+  local cloud_allocation_copy=0
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt"
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids=""
@@ -175,6 +183,20 @@ n2k_cmd_init() {
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-file) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
+      --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
+      --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
+      --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export N2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
+      --target-disk-controller) n2k_controller_policy_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
       --target-map-json) target_map_json="${2:-}"; shift 2 ;;
@@ -218,6 +240,8 @@ n2k_cmd_init() {
   fi
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
   n2k_valid_target_storage "${target_storage}" || n2k_die "Invalid --target-storage: ${target_storage}"
+  image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  local resolved_preallocation="${IMAGE_PREALLOCATION_MODE}" resolved_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   case "${inventory_source}" in
@@ -291,11 +315,23 @@ n2k_cmd_init() {
     storage_pool_config="$(n2k_cloud_target_storage_pool_config_json "${storage_pool_json}")"
     cloud_config_json="$(jq -c --argjson pool "${storage_pool_config}" '. + {storage_pool:$pool}' <<<"${cloud_config_json}")"
   fi
-  n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}"
+  if [[ -f "${N2K_MANIFEST}" ]]; then
+    echo 'Manifest already exists; use run with the existing workdir instead of init' >&2
+    return 2
+  fi
+  n2k_manifest_init "${N2K_MANIFEST}" "${N2K_RUN_ID}" "${N2K_WORKDIR}" "${vm}" "${pc}" "${mode}" "${dst}" "${target_format}" "${target_storage}" "${target_map_json}" "${inventory_json}" "${rbd_access_mode}" "${target_provider}" "${cloud_config_json}" "${resolved_preallocation}" "${resolved_preallocation_source}"
+  if [[ "$target_provider" == ablestack-cloud ]]; then
+    local guest_policy_temp
+    guest_policy_temp="$(mktemp "${N2K_MANIFEST}.new-guest-policy.XXXXXX")" || return $?
+    jq --arg p "${N2K_GUEST_CONFIG_POLICY:-preserve}" '.target.guest_config_policy=$p' "$N2K_MANIFEST" > "$guest_policy_temp" && mv -- "$guest_policy_temp" "$N2K_MANIFEST"
+  fi
+  migration_cloud_allocation_allow_copy "${N2K_MANIFEST}" "${cloud_allocation_copy}" || return $?
   if [[ -n "${inventory_json}" ]]; then
     local controller_validation_rc=0
     if n2k_manifest_record_source_controller_validation "${N2K_MANIFEST}"; then
-      n2k_event INFO "init" "" "source_disk_controller_validation_passed" \
+      migration_cloud_allocation_check_manifest n2k "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
+
+  n2k_event INFO "init" "" "source_disk_controller_validation_passed" \
         "$(jq -c '{
             supported_controllers:.runtime.source_validation.supported_controllers,
             root_selection:.runtime.source_validation.root_selection,
@@ -329,6 +365,7 @@ n2k_cmd_init() {
     fi
   fi
   if [[ "${target_provider}" == "ablestack-cloud" ]]; then
+    n2k_controller_prepare "$N2K_MANIFEST" "${N2K_TARGET_DISK_CONTROLLER:-auto}" || return $?
     local cloud_controller_plan_rc=0
     if n2k_cloud_target_disk_controller_plan_is_valid "${N2K_MANIFEST}"; then
       n2k_event INFO "init" "" "cloud_disk_controller_plan_ready" \
@@ -494,6 +531,8 @@ n2k_build_preflight_result_from_args() {
   local cred_file="" username="" password="" insecure="1" probe_legacy=false
   local v4_vmm="auto" v4_dp="auto" v4_data_plane="auto" legacy="auto" legacy_verified="auto" cold="auto" manual="auto"
   local target_storage="auto" target_format="qcow2" rbd_access_mode="librbd"
+  local cloud_allocation_copy=0
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt" target_provider_arg_set=0
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
@@ -508,6 +547,20 @@ n2k_build_preflight_result_from_args() {
       --vm) vm="${2:-}"; shift 2 ;;
       --mode) mode="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
+      --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
+      --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
+      --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export N2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
+      --target-disk-controller) n2k_controller_policy_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --rbd-access-mode) rbd_access_mode="${2:-}"; shift 2 ;;
       --target-provider) target_provider="${2:-}"; target_provider_arg_set=1; shift 2 ;;
@@ -621,6 +674,9 @@ n2k_build_preflight_result_from_args() {
     *) n2k_die "Invalid --target-storage: ${target_storage}" ;;
   esac
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
+  if [[ "${target_storage}" != auto ]]; then
+    image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" || return $?
+  fi
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
 
@@ -657,10 +713,18 @@ n2k_build_preflight_result_from_args() {
   fi
   deps_json="$(n2k_detect_host_dependencies)"
 
-  n2k_preflight_result_json "${pc}" "${vm}" "${mode}" "${allow_experimental}" \
+  local result
+  result="$(n2k_preflight_result_json "${pc}" "${vm}" "${mode}" "${allow_experimental}" \
     "${capability_json}" "${deps_json}" \
     "${v4_vmm}" "${v4_dp}" "${v4_data_plane}" "${legacy}" "${legacy_verified}" "${cold}" "${manual}" \
-    "${target_storage}" "${target_format}" "${source_api_policy}" "${target_provider}"
+    "${target_storage}" "${target_format}" "${source_api_policy}" "${target_provider}")" || return $?
+  image_preallocation_resolve "$(jq -r '.target.selected_storage' <<< "${result}")" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  jq -c --arg mode "${IMAGE_PREALLOCATION_MODE}" --arg origin "${IMAGE_PREALLOCATION_SOURCE}" --argjson copy "${cloud_allocation_copy}" '
+    .target.allocation_import_copy_allowed = ($copy == 1)
+    | .target.allocation_import_verified = false
+    | .target.preallocation = (if $mode == "" then null else $mode end)
+    | .target.preallocation_source = $origin
+    | .target.required_space_policy = (if $mode == "falloc" or $mode == "full" then "virtual_size_plus_metadata" else "sparse" end)' <<< "${result}"
 }
 
 n2k_maybe_record_phase_done() {
@@ -1064,6 +1128,9 @@ n2k_run_start_background() {
 }
 
 n2k_cmd_run() {
+  local policy_manifest="${N2K_MANIFEST:-}"
+  [[ -n "${policy_manifest}" || -z "${N2K_WORKDIR:-}" ]] || policy_manifest="${N2K_WORKDIR}/manifest.json"
+  image_preallocation_resolve_args "${policy_manifest}" "${N2K_PREALLOCATION_SOURCE:-cli}" "$@" || return $?
   local -a foreground_run_args=()
   local arg
   for arg in "$@"; do
@@ -1098,6 +1165,8 @@ n2k_cmd_run() {
   local username="" password="" insecure="1" inventory_source="api" inventory_json_arg=""
   local target_format="qcow2" target_storage="file" target_map_json="" rbd_access_mode="librbd"
   local rbd_access_mode_arg_set=0
+  local cloud_allocation_copy=0
+  local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt" target_provider_arg_set=0
   local cloud_endpoint="" cloud_api_key="" cloud_secret_key="" cloud_cred_file=""
   local cloud_zone_id="" cloud_service_offering_id="" cloud_network_ids="" cloud_storage_id=""
@@ -1132,6 +1201,20 @@ n2k_cmd_run() {
       --insecure) insecure="${2:-}"; shift 2 ;;
       --inventory-json) inventory_json_arg="${2:-}"; inventory_source="fixture"; shift 2 ;;
       --inventory-source) inventory_source="${2:-}"; shift 2 ;;
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
+      --guest-config-policy) n2k_guest_config_policy "${2:-}" || return $?; export N2K_GUEST_CONFIG_POLICY="$2"; shift 2;;
+      --guest-config-map-json) export N2K_GUEST_CONFIG_MAP_JSON="${2:-}"; shift 2;;
+      --guest-config-timeout) n2k_guest_config_timeout_validate "${2:-}" || return $?; export N2K_GUEST_CONFIG_TIMEOUT="$2"; shift 2;;
+      --source-guest-os) case "${2:-}" in linux|windows) export N2K_SOURCE_GUEST_OS="$2";; *) echo SOURCE_GUEST_OS_REQUIRED >&2; return 44;; esac; shift 2;;
+      --source-guest-user) export N2K_SOURCE_GUEST_USER="${2:-}"; shift 2;;
+      --source-guest-hostkey-sha256) [[ "${2:-}" =~ ^[a-f0-9]{64}$ ]] || return 44; export N2K_SOURCE_GUEST_HOSTKEY_SHA256="$2"; shift 2;;
+      --source-guest-host) export N2K_SOURCE_GUEST_HOST="${2:-}"; shift 2;;
+      --source-guest-password-fd) [[ "${2:-}" =~ ^[0-9]+$ ]] || return 44; export N2K_SOURCE_GUEST_PASSWORD_FD="$2"; shift 2;;
+      --target-disk-controller) n2k_controller_policy_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CONTROLLER="$2"; shift 2;;
+      --cloud-allocation-copy) cloud_allocation_copy=1; shift ;;
+      --target-preallocation)
+        image_preallocation_enum "${2-}" || return $?
+        target_preallocation="$2"; target_preallocation_set=1; shift 2 ;;
       --target-format) target_format="${2:-}"; shift 2 ;;
       --target-storage) target_storage="${2:-}"; shift 2 ;;
       --target-map-json) target_map_json="${2:-}"; shift 2 ;;
@@ -1258,6 +1341,17 @@ n2k_cmd_run() {
   [[ -n "${password}" ]] && credential_args+=(--password "${password}")
 
   n2k_run_set_manifest_paths_from_workdir
+  if [[ -n "${N2K_MANIFEST:-}" && -f "${N2K_MANIFEST}" ]]; then
+    target_storage="$(jq -r '.target.storage.type // "file"' "${N2K_MANIFEST}")"
+    target_format="$(jq -r '.target.format // "qcow2"' "${N2K_MANIFEST}")"
+  fi
+  image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "${N2K_MANIFEST:-}" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
+  local resolved_preallocation="${IMAGE_PREALLOCATION_MODE}"
+  local N2K_PREALLOCATION_SOURCE="${IMAGE_PREALLOCATION_SOURCE}"
+  if [[ -n "${resolved_preallocation}" && "${N2K_DRY_RUN:-0}" != 1 && "${split}" != phase2 ]] &&
+      { [[ ! -f "${N2K_MANIFEST:-}" ]] || ! image_preallocation_has_targets "${N2K_MANIFEST}"; }; then
+    image_preallocation_check_tools "${target_format}" "${resolved_preallocation}" convert || return $?
+  fi
 
   if [[ "${execution_mode}" == "background" ]]; then
     if [[ "${split}" == "phase2" ]]; then
@@ -1272,6 +1366,10 @@ n2k_cmd_run() {
     return 0
   fi
 
+  if [[ -f "${N2K_MANIFEST:-}" && "${target_preallocation_set}" == 1 && "${N2K_DRY_RUN:-0}" != 1 ]]; then
+    image_preallocation_store "${N2K_MANIFEST}" "${resolved_preallocation}" "${N2K_PREALLOCATION_SOURCE}" || return $?
+  fi
+
   if [[ "${split}" == "phase2" ]]; then
     n2k_require_manifest
     n2k_manifest_split_is_done "${N2K_MANIFEST}" "phase1" || \
@@ -1280,6 +1378,8 @@ n2k_cmd_run() {
     [[ -n "${vm}" ]] || n2k_die "run --split ${split} requires --vm when no manifest exists"
     [[ -n "${pc}" ]] || n2k_die "run --split ${split} requires --pc when no manifest exists"
     local -a init_args=(--vm "${vm}" --pc "${pc}" --mode "${mode}" --inventory-source "${inventory_source}" --target-format "${target_format}" --target-storage "${target_storage}" --rbd-access-mode "${rbd_access_mode}")
+    [[ "${cloud_allocation_copy}" != 1 ]] || init_args+=(--cloud-allocation-copy)
+    [[ -z "${resolved_preallocation}" ]] || init_args+=(--target-preallocation "${resolved_preallocation}")
     [[ -n "${inventory_json_arg}" ]] && init_args+=(--inventory-json "${inventory_json_arg}")
     [[ "${target_provider_arg_set}" -eq 1 ]] && init_args+=(--target-provider "${target_provider}")
     [[ -n "${dst}" ]] && init_args+=(--dst "${dst}")
@@ -1306,16 +1406,38 @@ n2k_cmd_run() {
     n2k_require_manifest
   fi
 
+  if [[ "${N2K_DRY_RUN:-0}" != 1 ]]; then migration_cloud_allocation_allow_copy "${N2K_MANIFEST}" "${cloud_allocation_copy}" || return $?; fi
+
   if [[ "${target_provider_arg_set}" -eq 1 || "${cloud_config_arg_set}" -eq 1 ]]; then
     local cloud_config_json
     cloud_config_json="$(n2k_cloud_target_config_json "${cloud_endpoint}" "${cloud_zone_id}" "${cloud_service_offering_id}" "${cloud_network_ids}" "${cloud_storage_id}" "${cloud_disk_offering_id}" "${cloud_host_id}" "${cloud_account}" "${cloud_domain_id}" "${cloud_project_id}" "${cloud_name}" "${cloud_display_name}" "${cloud_cpu_speed}")"
     n2k_cloud_target_apply_manifest_config "${N2K_MANIFEST}" "$(if [[ "${target_provider_arg_set}" -eq 1 ]]; then printf '%s' "${target_provider}"; else printf ''; fi)" "${cloud_config_json}"
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"
+  if [[ "$target_provider" == ablestack-cloud ]] && n2k_cloud_handoff_started "$N2K_MANIFEST"; then
+    migration_disk_cache_configure n2k "$N2K_MANIFEST" || return $?
+    n2k_guest_config_frozen_options "$N2K_MANIFEST" || return $?
+    n2k_controller_resume_check "$N2K_MANIFEST" || return $?
+    local resume_apply=0 resume_start=0 resume_define=1
+    case "$cutover_policy" in apply) resume_apply=1;resume_define=0;; start) resume_apply=1;resume_start=1;resume_define=0;; esac
+    n2k_cloud_target_cutover "$N2K_MANIFEST" "$resume_define" "$resume_apply" "$resume_start" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
+    n2k_manifest_phase_done "$N2K_MANIFEST" cutover
+    n2k_run_text_or_json "$split" completed 'Mold target reconciled; handed-off images and source snapshots were not reopened.'
+    return 0
+  fi
   n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
   if [[ "${target_provider}" == "ablestack-cloud" && "$(jq -r '.target.storage.type // ""' "${N2K_MANIFEST}")" == "file" ]]; then
     n2k_cloud_target_resolve_file_storage_for_manifest "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" >/dev/null
   fi
+
+  migration_cloud_allocation_check_manifest n2k "${N2K_MANIFEST}" "${cloud_endpoint}" "${cloud_api_key}" "${cloud_secret_key}" "${cloud_cred_file}" || return $?
+
+  n2k_controller_resume_check "$N2K_MANIFEST" || return $?
+  migration_disk_cache_configure n2k "$N2K_MANIFEST" || return $?
+  n2k_guest_config_frozen_options "$N2K_MANIFEST" || return $?
+  n2k_guest_config_configure "$N2K_MANIFEST" || return $?
+  n2k_controller_check_target "$N2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
+  n2k_guest_config_preflight_manifest "$N2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
 
   vm="${vm:-$(n2k_run_manifest_value "${N2K_MANIFEST}" '.source.vm.name // empty')}"
   pc="${pc:-$(n2k_run_manifest_value "${N2K_MANIFEST}" '.source.pc // empty')}"
@@ -1347,6 +1469,7 @@ n2k_cmd_run() {
     local -a plan_args=(--vm "${vm}" --pc "${pc}" --mode "${mode}" --target-format "${target_format}" --target-storage "${target_storage}" --rbd-access-mode "${rbd_access_mode}")
     plan_args+=("${credential_args[@]}")
     plan_args+=(--target-provider "${target_provider}")
+    [[ -z "${resolved_preallocation}" ]] || plan_args+=(--target-preallocation "${resolved_preallocation}")
     [[ -n "${cloud_endpoint}" ]] && plan_args+=(--cloud-endpoint "${cloud_endpoint}")
     [[ -n "${cloud_api_key}" ]] && plan_args+=(--cloud-api-key "${cloud_api_key}")
     [[ -n "${cloud_secret_key}" ]] && plan_args+=(--cloud-secret-key "${cloud_secret_key}")
@@ -1374,6 +1497,14 @@ n2k_cmd_run() {
   local -a sync_common=(--source-map-from-v3-nfs --nfs-host "${nfs_host}")
   [[ -n "${nfs_mount_root}" ]] && sync_common+=(--nfs-mount-root "${nfs_mount_root}")
   sync_common+=("${credential_args[@]}")
+
+  if ! n2k_cloud_handoff_started "$N2K_MANIFEST"; then
+    n2k_source_bind_pe_disk_identities "$N2K_MANIFEST" "$source_endpoint" "$username" "$password" "$insecure" || return $?
+  fi
+  if ! n2k_guest_config_source_copy_frozen "$N2K_MANIFEST"; then
+    n2k_guest_config_collect "$N2K_MANIFEST" || return $?
+  n2k_guest_config_preflight_manifest "$N2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
+  fi
 
   if [[ "${split}" == "phase1" || "${split}" == "full" ]]; then
     if ! n2k_run_manifest_has_recovery_point "${N2K_MANIFEST}" "base"; then
@@ -1445,6 +1576,8 @@ n2k_cmd_run() {
   fi
 
   if ! n2k_run_manifest_phase_done "${N2K_MANIFEST}" "final_sync"; then
+    n2k_guest_config_collect "$N2K_MANIFEST" || return $?
+  n2k_guest_config_preflight_manifest "$N2K_MANIFEST" "${cloud_endpoint:-}" "${cloud_api_key:-}" "${cloud_secret_key:-}" "${cloud_cred_file:-}" || return $?
     case "${shutdown}" in
       none)
         n2k_event WARN "run" "" "shutdown_skipped" '{"policy":"none"}'
@@ -1453,6 +1586,7 @@ n2k_cmd_run() {
         n2k_event INFO "run" "" "shutdown_boundary" '{"policy":"manual","note":"operator must stop or quiesce the source VM before final sync"}'
         ;;
       guest|poweroff)
+        if [[ "$shutdown" == guest ]]; then n2k_guest_config_shutdown "$N2K_MANIFEST" || return $?; fi
         local shutdown_result shutdown_payload shutdown_rc shutdown_transition shutdown_before shutdown_after
         shutdown_rc=0
         n2k_event INFO "run" "" "shutdown_source_start" \
@@ -1486,6 +1620,10 @@ n2k_cmd_run() {
     n2k_cmd_snapshot final "${snapshot_common[@]}" --collect-changed-regions --reference-kind incr
     n2k_event INFO "run" "" "step" '{"step":"sync-final"}'
     n2k_cmd_sync final "${sync_common[@]}"
+  fi
+
+  if ! n2k_cloud_handoff_started "$N2K_MANIFEST" && ! jq -e '.runtime.guest_configuration.status=="STAGED"' "$N2K_MANIFEST" >/dev/null; then
+    n2k_guest_config_stage "$N2K_MANIFEST" || return $?
   fi
 
   local -a cutover_args=()
@@ -1524,7 +1662,7 @@ n2k_cmd_run() {
   [[ -n "${cloud_cpu_speed}" ]] && cutover_args+=(--cloud-cpu-speed "${cloud_cpu_speed}")
   cutover_args+=(--shutdown "${shutdown}")
 
-  if ! n2k_run_manifest_phase_done "${N2K_MANIFEST}" "cutover"; then
+  if ! n2k_run_manifest_phase_done "${N2K_MANIFEST}" "cutover" || { [[ "$target_provider" == ablestack-cloud ]] && n2k_cloud_handoff_started "$N2K_MANIFEST"; }; then
     n2k_event INFO "run" "" "step" '{"step":"cutover"}'
     n2k_cmd_cutover "${cutover_args[@]}"
   fi
@@ -1616,6 +1754,7 @@ n2k_cmd_snapshot() {
     export N2K_EVENTS_LOG
   fi
   n2k_require_manifest
+  n2k_cloud_require_unmanaged_target "$N2K_MANIFEST" || return $?
   n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
 
   local metadata_json="{}"
@@ -1981,6 +2120,7 @@ n2k_cmd_snapshot() {
     "Snapshot reference recorded: ${recovery_point_id}"
 }
 n2k_cmd_sync() {
+  if [[ -f "${N2K_MANIFEST:-}" ]]; then n2k_cloud_require_unmanaged_target "$N2K_MANIFEST" || return $?; fi
   local which="${1:-}"
   [[ -n "${which}" ]] || n2k_die "sync requires base|incr|final"
   shift || true
@@ -2020,6 +2160,7 @@ n2k_cmd_sync() {
     export N2K_EVENTS_LOG
   fi
   n2k_require_manifest
+  n2k_cloud_require_unmanaged_target "$N2K_MANIFEST" || return $?
   n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
 
   case "${insecure}" in
@@ -2246,6 +2387,7 @@ n2k_cmd_cutover() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --target-disk-cache) migration_disk_cache_enum "${2:-}" || return $?; export N2K_TARGET_DISK_CACHE="$2"; shift 2;;
       --define-only) define_only=1; shift 1 ;;
       --apply) apply_define=1; shift 1 ;;
       --start) start_vm=1; shift 1 ;;
@@ -2291,6 +2433,7 @@ n2k_cmd_cutover() {
     export N2K_EVENTS_LOG
   fi
   n2k_require_manifest
+  migration_disk_cache_configure n2k "${N2K_MANIFEST}" || return $?
   n2k_require_disk_controller_integrity "${N2K_MANIFEST}" || return $?
   [[ "${start_vm}" -eq 0 || "${apply_define}" -eq 1 ]] || n2k_die "--start requires --apply"
 
@@ -2318,7 +2461,7 @@ n2k_cmd_cutover() {
   fi
   target_provider="$(jq -r '.target.provider // "libvirt"' "${N2K_MANIFEST}")"
 
-  if [[ "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]]; then
+  if [[ "${apply_define}" -eq 1 || "${start_vm}" -eq 1 ]] && ! n2k_cloud_handoff_started "$N2K_MANIFEST"; then
     local integrity_json
     integrity_json="$(n2k_cutover_integrity_json "${N2K_MANIFEST}")"
     if ! jq -e '.ok == true' <<<"${integrity_json}" >/dev/null; then

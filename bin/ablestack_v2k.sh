@@ -179,6 +179,16 @@ Extra args:
 Init-stage options:
   --mode govc                               Inventory mode (default: govc)
   --target-format qcow2|raw                 Target image format (default: qcow2)
+  --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
+  --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off> Restore and verify guest state (new Mold jobs: preserve)
+  --guest-config-map-json <file> Validated source desired state without credentials
+  --guest-config-timeout <seconds> Current-boot verification deadline (default 600)
+  --source-guest-user <user> Source guest administrator, separate from vCenter
+  --source-guest-password-fd <fd> Read runtime password once from protected FD
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)
   --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>
@@ -251,6 +261,16 @@ Target profiles:
   --target-provider libvirt|ablestack-cloud
   --target-storage file|block|rbd
   --target-format qcow2|raw
+  --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
+  --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off> Restore and verify guest state (new Mold jobs: preserve)
+  --guest-config-map-json <file> Validated source desired state without credentials
+  --guest-config-timeout <seconds> Current-boot verification deadline (default 600)
+  --source-guest-user <user> Source guest administrator, separate from vCenter
+  --source-guest-password-fd <fd> Read runtime password once from protected FD
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --dst <path>
   --target-map-json <json>
   --rbd-pool <pool>                         Default: rbd
@@ -292,6 +312,16 @@ Options:
   --vddk-cred-file <file>
   --compat-profile <id|auto>   Compatibility profile (default: auto)
   --target-format qcow2|raw                 Target image format (default: qcow2)
+  --root-disk-id <disk-id|device-key> Explicit source boot disk when ambiguous
+  --target-disk-controller auto|sata|virtio-scsi|preserve Default: auto
+  --target-disk-cache <none|writeback>  Disk cache (new jobs: none; sealed jobs retain their policy)
+  --guest-config-policy <preserve|off> Restore and verify guest state (new Mold jobs: preserve)
+  --guest-config-map-json <file> Validated source desired state without credentials
+  --guest-config-timeout <seconds> Current-boot verification deadline (default 600)
+  --source-guest-user <user> Source guest administrator, separate from vCenter
+  --source-guest-password-fd <fd> Read runtime password once from protected FD
+  --target-preallocation <off|metadata|falloc|full>  New file default: falloc; metadata: qcow2 only
+  --cloud-allocation-copy                   Permit data-preserving Mold copy required for metadata/full
   --target-provider libvirt|ablestack-cloud Target provider (default: libvirt)
   --target-storage file|block|rbd           Target storage type (default: file)
   --target-map-json <json>

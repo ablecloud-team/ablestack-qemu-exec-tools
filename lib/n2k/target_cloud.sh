@@ -17,15 +17,17 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_allocation.sh"
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/cloud_retention.sh"
+
 n2k_cloud_target_disk_offering_name() {
-  local storage_type="$1"
-  case "${storage_type}" in
-    local)
-      printf '%s' "${N2K_CLOUD_LOCAL_DISK_OFFERING_NAME:-N2K Migration Writeback Local}"
-      ;;
-    *)
-      printf '%s' "${N2K_CLOUD_SHARED_DISK_OFFERING_NAME:-N2K Migration Writeback}"
-      ;;
+  local storage_type="$1" mode="${2:-none}" base="N2K Migration None"
+  [[ "$mode" != writeback ]] || base="N2K Migration Writeback"
+  case "$storage_type" in
+    local) printf '%s' "${N2K_CLOUD_LOCAL_DISK_OFFERING_NAME:-$base Local}";;
+    *) printf '%s' "${N2K_CLOUD_SHARED_DISK_OFFERING_NAME:-$base}";;
   esac
 }
 
@@ -365,6 +367,7 @@ n2k_cloud_target_optional_owner_params() {
 
 n2k_cloud_target_prepare_disk_controller_plan() {
   local manifest="$1"
+  if jq -e '.target.disk_controller_plan.version==1' "$manifest" >/dev/null; then n2k_controller_validate "$manifest"; return $?; fi
   local ts tmp status
 
   [[ -f "${manifest}" ]] || return 2
@@ -444,6 +447,7 @@ n2k_cloud_target_prepare_disk_controller_plan() {
 
 n2k_cloud_target_disk_controller_plan_is_valid() {
   local manifest="$1"
+  if jq -e '.target.disk_controller_plan.version==1' "$manifest" >/dev/null; then n2k_controller_validate "$manifest"; return $?; fi
   jq -e '
     def controller($raw):
       ($raw // "" | tostring | ascii_downcase) as $kind
@@ -554,7 +558,7 @@ n2k_cloud_target_force_sata_fallback() {
   mv -f "${tmp}" "${manifest}"
 }
 
-n2k_cloud_target_source_deploy_params_json() {
+n2k_cloud_target_source_deploy_params_legacy_json() {
   local manifest="$1"
   if jq -e '((.target.cloud.disk_controller_plan.status // "") | length) > 0' "${manifest}" >/dev/null 2>&1 \
     && ! n2k_cloud_target_disk_controller_plan_is_valid "${manifest}"; then
@@ -757,10 +761,11 @@ n2k_cloud_target_disk_offerings_by_name_json() {
 }
 
 n2k_cloud_target_usable_disk_offering_json() {
-  local offerings_json="$1" name="$2" storage_type="$3"
+  local offerings_json="$1" name="$2" storage_type="$3" expected_mode="${4:-}" expected_format="${5:-}" expected_cache="${6:-none}"
   printf '%s' "${offerings_json}" | jq -c \
     --arg name "${name}" \
     --arg storage_type "${storage_type}" \
+    --arg policy "${expected_mode}" --arg format "${expected_format}" --arg cache_mode "${expected_cache}" \
     '
       def st: ((.storagetype // "") | tostring | ascii_downcase);
       def cache: ((.cachemode // "") | tostring | ascii_downcase);
@@ -770,10 +775,12 @@ n2k_cloud_target_usable_disk_offering_json() {
       map(select(
         (.name // "") == $name
         and st == $storage_type
-        and cache == "writeback"
+        and cache == $cache_mode
         and state == "active"
         and customized
         and untagged
+        and ($policy == "" or (.allocation.requestedpolicy == $policy and .allocation.requestedformat == $format
+          and (.allocation.contractversion | tostring) == "1" and .allocation.policyorigin == "explicit"))
       ))
       | .[0] // empty
     '
@@ -815,36 +822,45 @@ n2k_cloud_target_disk_offering_summary_json() {
 
 n2k_cloud_target_create_n2k_disk_offering() {
   local endpoint="$1" api_key="$2" secret_key="$3" name="$4" storage_type="$5"
-  local display_text response
-  display_text="${N2K_CLOUD_DISK_OFFERING_DISPLAY_TEXT:-ABLESTACK N2K migration disk offering with writeback cache}"
+  local manifest="${6:-}"
+  local display_text response cache_mode
+  cache_mode="$(migration_disk_cache_value n2k "$manifest")" || return $?
+  display_text="${N2K_CLOUD_DISK_OFFERING_DISPLAY_TEXT:-ABLESTACK N2K migration disk offering with $cache_mode cache}"
   if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "createDiskOffering" \
     "$(jq -nc \
       --arg name "${name}" \
       --arg displaytext "${display_text}" \
-      --arg storagetype "${storage_type}" \
+      --arg storagetype "${storage_type}" --arg cache_mode "${cache_mode}" \
       '{
         name:$name,
         displaytext:$displaytext,
         customized:true,
         provisioningtype:"thin",
         storagetype:$storagetype,
-        cachemode:"writeback",
+        cachemode:$cache_mode,
         displayoffering:true
-      }')")"; then
+      }' | migration_cloud_allocation_offering_params "${manifest}" "$(cat)")")"; then
     return 1
   fi
-  printf '%s\n' "Created Cloud N2K disk offering: ${name} (${storage_type}, writeback)" >&2
+  printf '%s\n' "Created Cloud N2K disk offering: ${name} (${storage_type}, ${cache_mode})" >&2
   printf '%s' "${response}" >/dev/null
 }
 
 n2k_cloud_target_resolve_disk_offering() {
   local endpoint="$1" api_key="$2" secret_key="$3" pool_json="$4"
-  local storage_type name offerings offering conflict_count
+  local manifest="${5:-}" expected_mode="" expected_format=""
+  local storage_type name offerings offering conflict_count cache_mode
+  cache_mode="$(migration_disk_cache_value n2k "$manifest")" || return $?
   storage_type="$(n2k_cloud_target_disk_offering_storage_type_from_pool "${pool_json}")"
-  name="$(n2k_cloud_target_disk_offering_name "${storage_type}")"
+  name="$(n2k_cloud_target_disk_offering_name "${storage_type}" "${cache_mode}")"
+  migration_cloud_allocation_intent "${manifest}" || return $?
+  if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]]; then
+    expected_mode="${CLOUD_ALLOCATION_MODE}"; expected_format="${CLOUD_ALLOCATION_FORMAT}"
+    name+=" ${expected_format} ${expected_mode}"
+  fi
 
   offerings="$(n2k_cloud_target_disk_offerings_by_name_json "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}")" || return $?
-  offering="$(n2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}")"
+  offering="$(n2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}" "${expected_mode}" "${expected_format}" "${cache_mode}")"
   if [[ -n "${offering}" ]]; then
     n2k_cloud_target_disk_offering_summary_json "${offering}" false
     return 0
@@ -852,14 +868,14 @@ n2k_cloud_target_resolve_disk_offering() {
 
   conflict_count="$(n2k_cloud_target_disk_offering_conflict_count "${offerings}" "${name}" "${storage_type}")"
   if [[ "${conflict_count}" -gt 0 ]]; then
-    echo "Cloud N2K disk offering exists but is not compatible: name=${name} storage_type=${storage_type} required_cache=writeback customized=true tags=empty" >&2
+    echo "Cloud N2K disk offering exists but is not compatible: name=${name} storage_type=${storage_type} required_cache=${cache_mode} customized=true tags=empty" >&2
     printf '%s\n' "${offerings}" >&2
     return 2
   fi
 
-  n2k_cloud_target_create_n2k_disk_offering "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}" || return $?
+  n2k_cloud_target_create_n2k_disk_offering "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}" "${manifest}" || return $?
   offerings="$(n2k_cloud_target_disk_offerings_by_name_json "${endpoint}" "${api_key}" "${secret_key}" "${name}" "${storage_type}")" || return $?
-  offering="$(n2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}")"
+  offering="$(n2k_cloud_target_usable_disk_offering_json "${offerings}" "${name}" "${storage_type}" "${expected_mode}" "${expected_format}" "${cache_mode}")"
   [[ -n "${offering}" ]] || {
     echo "Cloud N2K disk offering was created but could not be verified: name=${name} storage_type=${storage_type}" >&2
     printf '%s\n' "${offerings}" >&2
@@ -974,6 +990,7 @@ n2k_cloud_target_import_volume() {
     --argjson owner "${owner_params}" \
     '{path:$path,storageid:$storageid,name:$name} + $owner
      + (if ($diskofferingid | length) > 0 then {diskofferingid:$diskofferingid} else {} end)')"
+  params="$(migration_cloud_allocation_import_params "${manifest}" "${disk_index}" "${params}")" || return $?
   if ! response="$(n2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "importVolume" "${params}")"; then
     return 1
   fi
@@ -1346,7 +1363,7 @@ n2k_cloud_target_preflight_json() {
   jq -nc --argjson ok "${ok}" --argjson apis "${available_json}" '{available:$ok,apis:$apis}'
 }
 
-n2k_cloud_target_cutover() {
+n2k_cloud_target_cutover_impl() {
   local manifest="$1" define_only="$2" apply_define="$3" start_vm="$4"
   local endpoint_arg="${5:-}" api_key_arg="${6:-}" secret_key_arg="${7:-}" cred_file="${8:-}"
   local runtime cfg endpoint api_key secret_key storage disk_count idx target_path import_path storage_id
@@ -1361,13 +1378,31 @@ n2k_cloud_target_cutover() {
   api_key="$(jq -r '.api_key // ""' <<<"${runtime}")"
   secret_key="$(jq -r '.secret_key // ""' <<<"${runtime}")"
   n2k_cloud_target_ensure_manifest_nic_mappings "${manifest}" || return $?
+  n2k_guest_config_frozen_options "$manifest" || return $?
+  n2k_controller_resume_check "$manifest" || return $?
+  n2k_controller_check_target "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
   cfg="$(n2k_cloud_target_required_config_json "${manifest}")"
   n2k_cloud_target_validate_config "${manifest}" "${runtime}" || return $?
 
+  if jq -e '(.target.guest_configuration_plan.version==1 or .target.guest_configuration_plan.version==2) and ((.runtime.cloud.checkpoint.vm_id // "")!="")' "$manifest" >/dev/null; then
+    local live_id live_vm
+    live_id="$(jq -r '.runtime.cloud.checkpoint.vm_id' "$manifest")"
+    live_vm="$(n2k_cloud_target_vm_json "$endpoint" "$api_key" "$secret_key" "$live_id")" || return $?
+    if jq -e '.state=="Running"' <<<"$live_vm" >/dev/null; then
+      migration_disk_cache_verify_cloud n2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
+      migration_cloud_allocation_verify_final n2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
+      n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
+      n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
+      n2k_cloud_target_record_checkpoint "$manifest" complete '{"complete":true,"started":true,"inspection_required":false}' || return $?
+      jq -nc --arg id "$live_id" '{provider:"ablestack-cloud",vm_id:$id,started:true,validated:true,status:"completed",guest_configuration_verified:true}'
+      return 0
+    fi
+  fi
   storage="$(jq -r '.target.storage.type // "file"' "${manifest}")"
   storage_id="$(jq -r '.storage_id // ""' <<<"${cfg}")"
   disk_offering_id="$(jq -r '.disk_offering_id // ""' <<<"${cfg}")"
   owner_params="$(n2k_cloud_target_optional_owner_params "${cfg}")"
+  migration_cloud_allocation_check_manifest n2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
   source_deploy_params="$(n2k_cloud_target_source_deploy_params_json "${manifest}")" || return $?
   disk_count="$(jq -r '.disks | length' "${manifest}")"
   [[ "${disk_count}" -gt 0 ]] || {
@@ -1406,6 +1441,15 @@ n2k_cloud_target_cutover() {
       return 2
     }
     import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")" || return $?
+    # Managed/committed imports are reconciled by UUID, never re-probed as unmanaged images.
+    # In particular, a completed Running VM must not trigger offline source qemu inspection.
+    if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]] && jq -e --argjson idx "${idx}" '
+        .runtime.cloud.checkpoint as $c
+        | (if $idx == 0 then ($c.root_volume_id // $c.root_import_job_id // "")
+           else ($c.data_volumes[($idx | tostring)].id // $c.data_volumes[($idx | tostring)].import_job_id // "") end)
+        | length > 0' "${manifest}" >/dev/null; then
+      continue
+    fi
     n2k_cloud_target_validate_import_visible "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${import_path}" || {
       echo "Cloud import source is not visible: ${import_path}" >&2
       if [[ "${storage}" == "file" && -n "${pool_path:-}" ]]; then
@@ -1443,9 +1487,24 @@ n2k_cloud_target_cutover() {
   checkpoint_state="$(n2k_cloud_target_checkpoint_reentry_state "${checkpoint}")"
   case "${checkpoint_state}" in
     complete)
-      result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
-      printf '%s' "${result_json}"
-      return 0
+      migration_cloud_allocation_intent "${manifest}" || return $?
+      if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]] &&
+          { jq -e '.inspection_required == true' <<<"${checkpoint}" >/dev/null ||
+             { [[ "${start_vm}" -eq 1 ]] && ! jq -e '.started == true' <<<"${checkpoint}" >/dev/null; }; }; then
+        # An earlier warning/define-only result is not a completed requested first start.
+        n2k_cloud_target_record_checkpoint "${manifest}" deployment-incomplete '{"complete":false}' || return 78
+        checkpoint="$(n2k_cloud_target_existing_checkpoint_json "${manifest}")"
+      else
+        migration_disk_cache_verify_cloud n2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
+        migration_cloud_allocation_verify_final n2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
+        if [[ "$start_vm" == 1 ]]; then
+          n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
+          n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || return $?
+        fi
+        result_json="$(jq -c '.runtime.cloud + {idempotent:true,reused_checkpoint:true}' "${manifest}")"
+        printf '%s' "${result_json}"
+        return 0
+      fi
       ;;
     incomplete)
       echo "Cloud cutover is resuming from an incomplete mutation checkpoint." >&2
@@ -1462,7 +1521,7 @@ n2k_cloud_target_cutover() {
       }
       n2k_cloud_target_record_storage_pool "${manifest}" "${pool_json}"
     fi
-    disk_offering_json="$(n2k_cloud_target_resolve_disk_offering "${endpoint}" "${api_key}" "${secret_key}" "${pool_json}")" || return $?
+    disk_offering_json="$(n2k_cloud_target_resolve_disk_offering "${endpoint}" "${api_key}" "${secret_key}" "${pool_json}" "${manifest}")" || return $?
     disk_offering_id="$(jq -r '.id // empty' <<<"${disk_offering_json}")"
     [[ -n "${disk_offering_id}" ]] || {
       echo "Cloud N2K disk offering resolution did not return an id." >&2
@@ -1472,6 +1531,16 @@ n2k_cloud_target_cutover() {
     n2k_cloud_target_record_disk_offering "${manifest}" "${disk_offering_json}"
   else
     disk_offering_json="$(jq -nc --arg id "${disk_offering_id}" '{id:$id,source:"explicit"}')"
+  fi
+
+  migration_cloud_allocation_intent "${manifest}" || return $?
+  if [[ -n "${disk_offering_id}" ]]; then
+    if [[ -z "${pool_json:-}" ]]; then
+      pool_json="$(n2k_cloud_target_storage_pool_json "$endpoint" "$api_key" "$secret_key" "$storage_id")" || return $?
+      [[ -n "$pool_json" ]] || return 2
+    fi
+    migration_cloud_allocation_validate_offering n2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" "${disk_offering_id}" \
+      "$(n2k_cloud_target_disk_offering_storage_type_from_pool "${pool_json}")" || return $?
   fi
 
   target_path="$(jq -r '.disks[0].transfer.target_path' "${manifest}")"
@@ -1675,8 +1744,18 @@ n2k_cloud_target_cutover() {
       '$jobs + [{kind:"import-data",job_id:$import_job},{kind:"attach-data",job_id:$attach_job}]' <<<"{}")"
   done
 
+  n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" prestart || return $?
+  migration_disk_cache_verify_cloud n2k "$manifest" "$endpoint" "$api_key" "$secret_key" || return $?
+  if ! migration_cloud_allocation_verify_final n2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}"; then
+    n2k_cloud_target_record_checkpoint "${manifest}" allocation-unverified '{"complete":false,"inspection_required":true,"allocation_verified":false}' || return 78
+    n2k_cloud_target_record_result "${manifest}" '{"status":"blocked","applied":true,"started":false,"validated":false,"inspection_required":true,"reason":"ALLOCATION_EVIDENCE_REQUIRED"}' || return 78
+    return 2
+  fi
+
+  n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" bind || return $?
   if [[ "${start_vm}" -eq 1 && "${inspection_required}" == "false" ]]; then
     if start_result="$(n2k_cloud_target_start_vm "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")"; then
+      n2k_controller_cloud_verify "$manifest" "$endpoint" "$api_key" "$secret_key" running || return $?
       started=true
       n2k_cloud_target_record_checkpoint "${manifest}" "vm-started" \
         "$(jq -nc --arg start_job_id "$(jq -r '.job_id // empty' <<<"${start_result}")" '{start_job_id:$start_job_id,started:true}')" || return 78
@@ -1689,6 +1768,30 @@ n2k_cloud_target_cutover() {
   elif [[ "${start_vm}" -eq 1 ]]; then
     issues_json="$(jq -c --argjson issues "${issues_json}" \
       '$issues + [{component:"assembly",stage:"start-vm",reason:"start_skipped_due_to_degraded_target"}]' <<<"{}")"
+  fi
+
+  migration_cloud_allocation_intent "${manifest}" || return $?
+  if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]]; then
+    if [[ "${start_vm}" -eq 1 && "${started}" == true ]]; then
+      local observed_vm
+      if ! observed_vm="$(n2k_cloud_target_vm_json "${endpoint}" "${api_key}" "${secret_key}" "${vm_id}")" ||
+          ! jq -e '.state == "Running"' <<<"${observed_vm}" >/dev/null; then
+        inspection_required=true; started=false
+        issues_json="$(jq -c '. + [{component:"boot",stage:"start-vm",reason:"cloud_vm_not_running"}]' <<<"${issues_json}")"
+      fi
+    fi
+    if [[ "${inspection_required}" == true ]]; then
+      n2k_cloud_target_record_result "${manifest}" \
+        "$(jq -nc --argjson issues "${issues_json}" '{status:"blocked",applied:true,started:false,validated:false,inspection_required:true,reason:"CLOUD_CUTOVER_INCOMPLETE",issues:$issues}')" || return 78
+      n2k_cloud_target_record_checkpoint "${manifest}" deployment-incomplete \
+        "$(jq -nc --argjson issues "${issues_json}" '{complete:false,started:false,inspection_required:true,issues:$issues}')" || return 78
+      return 2
+    fi
+  fi
+
+  if [[ "$started" == true ]] && ! n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify; then
+    n2k_cloud_target_record_checkpoint "$manifest" guest-config-pending '{"complete":false,"started":true,"inspection_required":true}' || return $?
+    return 78
   fi
 
   result_json="$(jq -nc \
@@ -1714,15 +1817,40 @@ n2k_cloud_target_cutover() {
       vm_id:$vm_id,root_volume_id:$root_volume_id,root_volume:$root_volume,root_volume_converted:$root_volume_converted,data_volumes:$data_volumes,jobs:$jobs,deployment_properties:$deployment_properties,nic_verification:$nic_verification}
      + (if ($disk_offering | length) > 0 then {disk_offering:$disk_offering} else {} end)
      + (if ($root_volume_update_job_id | length) > 0 then {root_volume_update_job_id:$root_volume_update_job_id} else {} end)')"
+  local guest_state guest_verified target_complete=true
+  guest_state="$(jq -r '.runtime.guest_configuration.status // "LEGACY_UNVERIFIED"' "$manifest")"
+  guest_verified="$(jq -r '.runtime.guest_configuration.verified // false' "$manifest")"
+  if [[ "$guest_state" == SKIPPED || "$guest_state" == BOUND || "$guest_state" == STAGED ]]; then target_complete=false; fi
+  result_json="$(jq --arg status "$guest_state" --argjson verified "$guest_verified" --argjson complete "$target_complete" '. + {complete:$complete,guest_configuration_status:$status,guest_configuration_verified:$verified} | if $complete then . else .validated=false | .status=(if $status=="SKIPPED" then "guest_config_skipped" else "bound" end) end' <<<"$result_json")"
   n2k_cloud_target_record_result "${manifest}" "${result_json}" || return 78
   n2k_cloud_target_record_checkpoint "${manifest}" \
-    "$(if [[ "${inspection_required}" == "true" ]]; then printf inspection-required; else printf complete; fi)" \
+    "$(if [[ "$target_complete" == false ]]; then printf guest-config-unverified; elif [[ "${inspection_required}" == "true" ]]; then printf inspection-required; else printf complete; fi)" \
     "$(jq -nc \
       --arg vm_id "${vm_id}" \
       --arg root_volume_id "${root_volume_id}" \
       --argjson issues "${issues_json}" \
       --argjson inspection_required "${inspection_required}" \
       --argjson started "${started}" \
-      '{complete:true,vm_id:$vm_id,root_volume_id:$root_volume_id,started:$started,inspection_required:$inspection_required,issues:$issues}')" || return 78
+      --argjson complete "$target_complete" \
+      '{complete:$complete,vm_id:$vm_id,root_volume_id:$root_volume_id,started:$started,inspection_required:$inspection_required,issues:$issues}')" || return 78
   printf '%s' "${result_json}"
+}
+
+
+n2k_cloud_target_source_deploy_params_json() {
+  local base plan
+  base="$(n2k_cloud_target_source_deploy_params_legacy_json "$@")" || return $?
+  if jq -e '.target.disk_controller_plan.version == 1' "$1" >/dev/null; then
+    plan="$(n2k_controller_python params --manifest "$1")" || return $?
+    if jq -e ' (.target.guest_configuration_plan.version==1 or .target.guest_configuration_plan.version==2)' "$1" >/dev/null; then
+      local guest_params
+      guest_params="$(n2k_guest_config_python guest_configuration.py params --manifest "$1")" || return $?
+      plan="$(jq -nc --argjson p "$plan" --argjson g "$guest_params" '$p+$g')"
+    fi
+    jq -nc --argjson base "$base" --argjson plan "$plan" '$base + $plan'
+  else printf '%s' "$base"; fi
+}
+
+n2k_cloud_target_cutover() {
+  migration_cloud_retention_cutover n2k "$@"
 }
