@@ -562,6 +562,9 @@ v2k_cloud_target_source_deploy_params_legacy_json() {
     | (if $root_size_bytes > 0 then ((($root_size_bytes + 1073741823) / 1073741824) | floor) else 0 end) as $root_size_gib
     | ((.target.cloud.cpu_speed // "") | tostring) as $cpu_speed
     | ((($offering.cpuspeed // 0) | tonumber?) // 0) as $offering_cpu_speed
+    | ((($offering.cpunumber // 0) | tonumber?) // 0) as $offering_cpu
+    | ((($offering.memory // 0) | tonumber?) // 0) as $offering_memory
+    | ($offering.iscustomized == false or $offering.customized == false) as $static_offering
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
     | ((.runtime.bootstrap_fallback.bus // "") | tostring | ascii_downcase) as $fallback_bus
@@ -585,11 +588,11 @@ v2k_cloud_target_source_deploy_params_legacy_json() {
         end
       ) as $data_controller
     | {}
-      + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
-      + (if $offering_cpu_speed <= 0 and ($cpu_speed | length) > 0 then {"details[0].cpuSpeed": $cpu_speed} else {} end)
+      + (if ($static_offering | not) and $offering_cpu <= 0 and $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
+      + (if ($static_offering | not) and $offering_cpu_speed <= 0 and ($cpu_speed | length) > 0 then {"details[0].cpuSpeed": $cpu_speed} else {} end)
       + {"details[0].io.policy": "io_uring"}
       + {"details[0].iothreads": "true"}
-      + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
+      + (if ($static_offering | not) and $offering_memory <= 0 and $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
       + (if $root_size_gib > 0 then {"details[0].rootdisksize": ($root_size_gib | tostring)} else {} end)
       + (if ($root_controller | length) > 0 then {"details[0].rootDiskController": $root_controller} else {} end)
       + (if ($data_controller | length) > 0 then {"details[0].dataDiskController": $data_controller} else {} end)
