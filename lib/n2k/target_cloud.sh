@@ -558,14 +558,36 @@ n2k_cloud_target_force_sata_fallback() {
   mv -f "${tmp}" "${manifest}"
 }
 
+n2k_cloud_target_service_offering_json() {
+  local endpoint="$1" api_key="$2" secret_key="$3" service_offering_id="$4"
+  local params response offering
+
+  [[ -n "${service_offering_id}" ]] || return 2
+  params="$(jq -nc --arg id "${service_offering_id}" '{id:$id,issystem:false}')"
+  response="$(n2k_cloud_api_get \
+    "${endpoint}" "${api_key}" "${secret_key}" \
+    "listServiceOfferings" "${params}")" || return $?
+  offering="$(jq -c --arg id "${service_offering_id}" '
+    ((.listserviceofferingsresponse.serviceoffering // [])
+      | map(select((.id // "") == $id))
+      | first) // empty
+  ' <<<"${response}")"
+  [[ -n "${offering}" ]] || {
+    echo "Cloud service offering was not found: ${service_offering_id}" >&2
+    return 2
+  }
+  printf '%s' "${offering}"
+}
+
 n2k_cloud_target_source_deploy_params_legacy_json() {
-  local manifest="$1"
+  local manifest="$1" offering_json="${2:-}"
+  [[ -n "$offering_json" ]] || offering_json='{}'
   if jq -e '((.target.cloud.disk_controller_plan.status // "") | length) > 0' "${manifest}" >/dev/null 2>&1 \
     && ! n2k_cloud_target_disk_controller_plan_is_valid "${manifest}"; then
     echo "Cloud deployment requires a valid disk-controller plan." >&2
     return 44
   fi
-  jq -ce '
+  jq -ce --argjson offering "$offering_json" '
     def controller($raw):
       ($raw // "" | tostring | ascii_downcase) as $s
       | if ($s | test("virtio")) then "virtio"
@@ -582,6 +604,7 @@ n2k_cloud_target_source_deploy_params_legacy_json() {
     | (((.disks[0].size_bytes // .disks[0].disk_size_bytes // .disks[0].capacity_bytes // .disks[0].size // 0) | tonumber? // 0)) as $root_size_bytes
     | (if $root_size_bytes > 0 then ((($root_size_bytes + 1073741823) / 1073741824) | floor) else 0 end) as $root_size_gib
     | ((.target.cloud.cpu_speed // "1000") | tostring) as $cpu_speed
+    | ((($offering.cpuspeed // 0) | tonumber?) // 0) as $offering_cpu_speed
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
     | (.target.cloud.disk_controller_plan // {}) as $controller_plan
@@ -612,7 +635,7 @@ n2k_cloud_target_source_deploy_params_legacy_json() {
       end
     | {}
       + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
-      + {"details[0].cpuSpeed": $cpu_speed}
+      + (if $offering_cpu_speed <= 0 then {"details[0].cpuSpeed": $cpu_speed} else {} end)
       + {"details[0].io.policy": "io_uring"}
       + {"details[0].iothreads": "true"}
       + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
@@ -1403,7 +1426,9 @@ n2k_cloud_target_cutover_impl() {
   disk_offering_id="$(jq -r '.disk_offering_id // ""' <<<"${cfg}")"
   owner_params="$(n2k_cloud_target_optional_owner_params "${cfg}")"
   migration_cloud_allocation_check_manifest n2k "${manifest}" "${endpoint}" "${api_key}" "${secret_key}" || return $?
-  source_deploy_params="$(n2k_cloud_target_source_deploy_params_json "${manifest}")" || return $?
+  local service_offering_json
+  service_offering_json="$(n2k_cloud_target_service_offering_json "$endpoint" "$api_key" "$secret_key" "$(jq -r '.service_offering_id // empty' <<<"$cfg")")" || return $?
+  source_deploy_params="$(n2k_cloud_target_source_deploy_params_json "${manifest}" "$service_offering_json")" || return $?
   disk_count="$(jq -r '.disks | length' "${manifest}")"
   [[ "${disk_count}" -gt 0 ]] || {
     echo "Cloud target cutover requires at least one migrated disk." >&2
@@ -1443,7 +1468,7 @@ n2k_cloud_target_cutover_impl() {
     import_path="$(n2k_cloud_target_import_path "${storage}" "${target_path}")" || return $?
     # Managed/committed imports are reconciled by UUID, never re-probed as unmanaged images.
     # In particular, a completed Running VM must not trigger offline source qemu inspection.
-    if [[ "${CLOUD_ALLOCATION_ACTIVE}" == 1 ]] && jq -e --argjson idx "${idx}" '
+    if jq -e --argjson idx "${idx}" '
         .runtime.cloud.checkpoint as $c
         | (if $idx == 0 then ($c.root_volume_id // $c.root_import_job_id // "")
            else ($c.data_volumes[($idx | tostring)].id // $c.data_volumes[($idx | tostring)].import_job_id // "") end)
@@ -1761,9 +1786,14 @@ n2k_cloud_target_cutover_impl() {
         "$(jq -nc --arg start_job_id "$(jq -r '.job_id // empty' <<<"${start_result}")" '{start_job_id:$start_job_id,started:true}')" || return 78
       jobs_json="$(jq -c --argjson jobs "${jobs_json}" --arg start_job "$(jq -r '.job_id' <<<"${start_result}")" '$jobs + [{kind:"start-vm",job_id:$start_job}]' <<<"{}")"
     else
+      local start_rc=$?
       inspection_required=true
       issues_json="$(jq -c --argjson issues "${issues_json}" \
         '$issues + [{component:"boot",stage:"start-vm",reason:"cloud_vm_start_failed"}]' <<<"{}")"
+      n2k_cloud_target_record_checkpoint "$manifest" vm-start-failed \
+        "$(jq -nc --argjson rc "$start_rc" --argjson issues "$issues_json" '{complete:false,started:false,inspection_required:true,exit_code:$rc,issues:$issues}')" || return 78
+      n2k_cloud_target_record_result "$manifest" '{"complete":false,"started":false,"validated":false,"inspection_required":true,"status":"start_failed","reason":"CLOUD_CUTOVER_INCOMPLETE"}' || return 78
+      return "$start_rc"
     fi
   elif [[ "${start_vm}" -eq 1 ]]; then
     issues_json="$(jq -c --argjson issues "${issues_json}" \
@@ -1789,9 +1819,13 @@ n2k_cloud_target_cutover_impl() {
     fi
   fi
 
-  if [[ "$started" == true ]] && ! n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify; then
-    n2k_cloud_target_record_checkpoint "$manifest" guest-config-pending '{"complete":false,"started":true,"inspection_required":true}' || return $?
-    return 78
+  if [[ "$started" == true ]]; then
+    local guest_rc=0
+    n2k_guest_config_reconcile "$manifest" "$endpoint" "$api_key" "$secret_key" verify || guest_rc=$?
+    if [[ "$guest_rc" != 0 ]]; then
+      n2k_cloud_target_record_checkpoint "$manifest" guest-config-pending '{"complete":false,"started":true,"inspection_required":true}' || return 78
+      return "$guest_rc"
+    fi
   fi
 
   result_json="$(jq -nc \

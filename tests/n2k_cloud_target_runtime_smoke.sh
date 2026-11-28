@@ -128,4 +128,11 @@ summary="$(n2k_cloud_response_error_summary "${body_file}" "${header_file}")"
   exit 1
 }
 
-echo "[OK] n2k Cloud target rootdisksize and API method/error helpers passed"
+# A fixed Mold offering rejects an explicit CPU-speed override even when the
+# configured value is a valid positive number. Keep custom offerings supported.
+fixed_params="$(n2k_cloud_target_source_deploy_params_json "$manifest" '{"cpuspeed":2000}')"
+jq -e 'has("details[0].cpuSpeed") | not' <<<"$fixed_params" >/dev/null
+custom_params="$(n2k_cloud_target_source_deploy_params_json "$manifest" '{"cpuspeed":null}')"
+jq -e '.["details[0].cpuSpeed"]=="1000"' <<<"$custom_params" >/dev/null
+
+echo "[OK] n2k Cloud target rootdisksize, CPU offering and API method/error helpers passed"

@@ -84,13 +84,20 @@ def build(manifest,policy='auto'):
     disks=[dict(x,target={'bus':mapped[i],'model':'virtio-scsi' if mapped[i]=='scsi' else 'ahci','device':'sd'+letter(i)}) for i,x in enumerate(source)]
     plan={'version':VERSION,'policy':policy,'machine':'q35','firmware':manifest.get('source',{}).get('vm',{}).get('firmware') or 'bios','root_selection':manifest.get('source',{}).get('controller_plan',{}).get('root_selection','legacy'),'source_vm_uuid':manifest.get('source',{}).get('vm',{}).get('uuid',''),'disks':disks}
     if plan['firmware'] not in ['bios','efi']:fail('unsupported source firmware')
+    if manifest.get('target',{}).get('provider')=='ablestack-cloud' and manifest['target'].get('storage',{}).get('type')=='rbd':
+        plan['rbd_access_mode']=manifest['target']['storage'].get('rbd_access_mode','krbd')
     plan['hash']=digest(plan)
     return plan
 
 def verify(manifest):
     plan=manifest.get('target',{}).get('disk_controller_plan')
     if not plan:return None
-    if plan!=build(manifest,plan.get('policy')):fail('frozen source identity or target driver policy changed; use a new workdir')
+    expected=build(manifest,plan.get('policy'))
+    # Plans frozen by older versions predate the access-mode contract. Preserve
+    # their original hash; newly created RBD plans always bind the access mode.
+    if 'rbd_access_mode' not in plan and 'rbd_access_mode' in expected:
+        del expected['rbd_access_mode'];del expected['hash'];expected['hash']=digest(expected)
+    if plan!=expected:fail('frozen source identity or target driver policy changed; use a new workdir')
     return plan
 
 def prepare(manifest,policy='auto'):

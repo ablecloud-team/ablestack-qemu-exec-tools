@@ -262,6 +262,31 @@ n2k_storage_copy_base() {
       dd if="${source_path}" of="${target_path}" bs=16M status=none conv=fsync
       ;;
     rbd)
+      local access_mode="${N2K_RBD_ACCESS_MODE:-librbd}"
+      if [[ -n "$manifest" && -f "$manifest" ]]; then access_mode="$(jq -r '.target.storage.rbd_access_mode // "librbd"' "$manifest")"; fi
+      if [[ "$access_mode" == krbd ]]; then
+        (
+          local mapped="" rc=0
+          # The EXIT trap calls this function; newer ShellCheck needs SC2329 too.
+          # shellcheck disable=SC2317,SC2329
+          cleanup_krbd_copy() {
+            rc=$?;trap - EXIT
+            if [[ -n "$mapped" ]]; then
+              blockdev --flushbufs "$mapped" || rc=1
+              rbd unmap "$mapped" || rc=1
+            fi
+            exit "$rc"
+          }
+          trap cleanup_krbd_copy EXIT
+          [[ "$target_path" == rbd:*/*.n2k-stage-* ]] || { echo 'KRBD_COPY_REQUIRES_PRIVATE_STAGE' >&2; exit 44; }
+          ! n2k_storage_rbd_exists "$target_path" || { echo 'KRBD_STAGE_ALREADY_EXISTS' >&2; exit 44; }
+          source_size="$(n2k_storage_source_virtual_size_bytes "$source_path")"
+          n2k_storage_rbd_ensure_image "$target_path" "$source_size"
+          mapped="$(n2k_storage_map_rbd_krbd "$target_path")"
+          qemu-img convert -p -n -t none -T none -S "$(n2k_storage_rbd_sparse_size)" -O raw "$source_path" "$mapped"
+        )
+        return $?
+      fi
       local convert_rc=0
       n2k_storage_require_command qemu-img "RBD base sync"
       [[ "${target_path}" == rbd:* ]] || {

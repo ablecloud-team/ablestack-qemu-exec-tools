@@ -10,8 +10,9 @@ run_v2k_contract() (
   source "${ROOT_DIR}/lib/v2k/cloudstack_api.sh"
   # shellcheck source=/dev/null
   source "${ROOT_DIR}/lib/v2k/target_cloud.sh"
+  source "${ROOT_DIR}/lib/v2k/cloud_handoff.sh"
 
-  local manifest="${WORK_DIR}/v2k.json" result
+  local manifest="${WORK_DIR}/v2k.json" result scenario="${1:-inspection}" requested_start=0 rc=0
   cat >"${manifest}" <<'JSON'
 {
   "source":{"vm":{"name":"v2k-test","nics":[]}},
@@ -40,20 +41,50 @@ JSON
   # shellcheck disable=SC2317
   v2k_cloud_target_deploy_vm_for_volume() { printf '%s' '{"id":"vm-v2k","job_id":"job-vm-v2k"}'; }
   # shellcheck disable=SC2317
-  v2k_cloud_target_wait_for_vm_nic_match() { printf '%s' '{"matched":false,"checks":[]}'; return 1; }
+  v2k_cloud_target_wait_for_vm_nic_match() {
+    if [[ "$scenario" == start-failure ]]; then printf '%s' '{"matched":true,"checks":[]}';return 0;fi
+    printf '%s' '{"matched":false,"checks":[]}';return 1
+  }
+  # shellcheck disable=SC2317
+  v2k_cloud_target_start_vm() { return 37; }
   # shellcheck disable=SC2317
   v2k_cloud_target_ensure_root_volume() { printf '%s' '{"volume":{"id":"root-v2k","type":"ROOT"},"converted":false}'; }
+  # shellcheck disable=SC2317
+  v2k_cloud_target_storage_pool_json() { printf '%s' '{"id":"storage","type":"RBD","path":"pool","scope":"CLUSTER"}'; }
+  # shellcheck disable=SC2317
+  v2k_cloud_target_service_offering_json() { printf '%s' '{"cpuspeed":2000}'; }
+  # shellcheck disable=SC2317
+  v2k_cloud_target_resolve_disk_offering() { printf '%s' '{"id":"offering","source":"explicit"}'; }
+  # shellcheck disable=SC2317
+  v2k_cloud_api_get() {
+    case "$4" in
+      listDiskOfferings) printf '%s' '{"listdiskofferingsresponse":{"diskoffering":[{"id":"offering","cachemode":"writeback","iscustomized":true,"storagetype":"shared"}]}}';;
+      listVolumes) printf '%s' '{"listvolumesresponse":{"volume":[{"id":"root-v2k","type":"ROOT","state":"Ready","deviceid":0,"path":"root","storageid":"storage","virtualmachineid":"vm-v2k","cachemode":"writeback"}]}}';;
+      *) echo "Unexpected fixture API: $4" >&2;return 2;;
+    esac
+  }
 
-  result="$(v2k_cloud_target_cutover "${manifest}" 0 1 0 endpoint key secret '')"
+  if [[ "$scenario" == start-failure ]]; then
+    jq 'del(.runtime.cloud.readiness)' "$manifest" > "$manifest.tmp";mv "$manifest.tmp" "$manifest"
+    requested_start=1
+  fi
+  result="$(v2k_cloud_target_cutover "${manifest}" 0 1 "$requested_start" endpoint key secret '')" || rc=$?
+  if [[ "$scenario" == start-failure ]]; then
+    [[ "$rc" == 37 ]]
+    jq -e '.runtime.cloud.retention.exit_code==37 and .runtime.cloud.checkpoint.vm_id=="vm-v2k" and .runtime.cloud.checkpoint.complete==false and .runtime.cloud.checkpoint.stage=="vm-start-failed"' "$manifest" >/dev/null
+    return 0
+  fi
+  [[ "$rc" == 0 ]]
   jq -e '
-    .status == "completed_with_warning"
+    .status == "retained_unverified"
+    and .retention.status == "RETAINED_UNVERIFIED"
     and .vm_id == "vm-v2k"
     and .inspection_required == true
     and .started == false
   ' <<<"${result}" >/dev/null
   jq -e '
     .runtime.cloud.vm_id == "vm-v2k"
-    and .runtime.cloud.checkpoint.complete == true
+    and .runtime.cloud.checkpoint.complete == false
     and .runtime.cloud.checkpoint.stage == "inspection-required"
   ' "${manifest}" >/dev/null
 )
@@ -63,8 +94,11 @@ run_n2k_contract() (
   source "${ROOT_DIR}/lib/n2k/cloudstack_api.sh"
   # shellcheck source=/dev/null
   source "${ROOT_DIR}/lib/n2k/target_cloud.sh"
+  source "${ROOT_DIR}/lib/n2k/cloud_handoff.sh"
+  source "${ROOT_DIR}/lib/n2k/controller_policy.sh"
+  source "${ROOT_DIR}/lib/n2k/guest_configuration.sh"
 
-  local manifest="${WORK_DIR}/n2k.json" result
+  local manifest="${WORK_DIR}/n2k.json" result scenario="${1:-inspection}" requested_start=0 rc=0
   cat >"${manifest}" <<'JSON'
 {
   "source":{"vm":{"name":"n2k-test","nics":[]}},
@@ -93,20 +127,50 @@ JSON
   # shellcheck disable=SC2317
   n2k_cloud_target_deploy_vm_for_volume() { printf '%s' '{"id":"vm-n2k","job_id":"job-vm-n2k"}'; }
   # shellcheck disable=SC2317
-  n2k_cloud_target_wait_for_vm_nic_match() { printf '%s' '{"matched":false,"checks":[]}'; return 1; }
+  n2k_cloud_target_wait_for_vm_nic_match() {
+    if [[ "$scenario" == start-failure ]]; then printf '%s' '{"matched":true,"checks":[]}';return 0;fi
+    printf '%s' '{"matched":false,"checks":[]}';return 1
+  }
+  # shellcheck disable=SC2317
+  n2k_cloud_target_start_vm() { return 37; }
   # shellcheck disable=SC2317
   n2k_cloud_target_ensure_root_volume() { printf '%s' '{"volume":{"id":"root-n2k","type":"ROOT"},"converted":false}'; }
+  # shellcheck disable=SC2317
+  n2k_cloud_target_storage_pool_json() { printf '%s' '{"id":"storage","type":"RBD","path":"pool","scope":"CLUSTER"}'; }
+  # shellcheck disable=SC2317
+  n2k_cloud_target_service_offering_json() { printf '%s' '{"cpuspeed":2000}'; }
+  # shellcheck disable=SC2317
+  n2k_cloud_target_resolve_disk_offering() { printf '%s' '{"id":"offering","source":"explicit"}'; }
+  # shellcheck disable=SC2317
+  n2k_cloud_api_get() {
+    case "$4" in
+      listDiskOfferings) printf '%s' '{"listdiskofferingsresponse":{"diskoffering":[{"id":"offering","cachemode":"writeback","iscustomized":true,"storagetype":"shared"}]}}';;
+      listVolumes) printf '%s' '{"listvolumesresponse":{"volume":[{"id":"root-n2k","type":"ROOT","state":"Ready","deviceid":0,"path":"root","storageid":"storage","virtualmachineid":"vm-n2k","cachemode":"writeback"}]}}';;
+      *) echo "Unexpected fixture API: $4" >&2;return 2;;
+    esac
+  }
 
-  result="$(n2k_cloud_target_cutover "${manifest}" 0 1 0 endpoint key secret '')"
+  if [[ "$scenario" == start-failure ]]; then
+    jq 'del(.runtime.cloud.readiness)' "$manifest" > "$manifest.tmp";mv "$manifest.tmp" "$manifest"
+    requested_start=1
+  fi
+  result="$(n2k_cloud_target_cutover "${manifest}" 0 1 "$requested_start" endpoint key secret '')" || rc=$?
+  if [[ "$scenario" == start-failure ]]; then
+    [[ "$rc" == 37 ]]
+    jq -e '.runtime.cloud.retention.exit_code==37 and .runtime.cloud.checkpoint.vm_id=="vm-n2k" and .runtime.cloud.checkpoint.complete==false and .runtime.cloud.checkpoint.stage=="vm-start-failed"' "$manifest" >/dev/null
+    return 0
+  fi
+  [[ "$rc" == 0 ]]
   jq -e '
-    .status == "completed_with_warning"
+    .status == "retained_unverified"
+    and .retention.status == "RETAINED_UNVERIFIED"
     and .vm_id == "vm-n2k"
     and .inspection_required == true
     and .started == false
   ' <<<"${result}" >/dev/null
   jq -e '
     .runtime.cloud.vm_id == "vm-n2k"
-    and .runtime.cloud.checkpoint.complete == true
+    and .runtime.cloud.checkpoint.complete == false
     and .runtime.cloud.checkpoint.stage == "inspection-required"
   ' "${manifest}" >/dev/null
 )
@@ -157,6 +221,8 @@ run_n2k_submission_checkpoint() (
 
 run_v2k_contract
 run_n2k_contract
+run_v2k_contract start-failure
+run_n2k_contract start-failure
 run_v2k_submission_checkpoint
 run_n2k_submission_checkpoint
 echo "[OK] v2k/n2k Cloud inspection handoff contract passed"

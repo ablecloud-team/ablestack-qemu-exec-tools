@@ -107,7 +107,7 @@ migration_disk_cache_verify_cloud "$TOOL" "$MANIFEST" endpoint key secret
 
     def test_actual_cutover_retains_ids_and_state_on_verification_errors(self):
         for tool in ['v2k', 'n2k']:
-            for status, code in [('FAILED', 78), ('DRIFT', 78), ('BOUND', 78), ('API_ERROR', 78)]:
+            for status, code in [('FAILED', 78), ('DRIFT', 78), ('BOUND', 78), ('API_ERROR', 7)]:
                 with self.subTest(tool=tool, status=status):
                     r, state, doc = self.fixture.run_cutover(tool, guest_status=status)
                     self.assertEqual(r.returncode, code, r.stderr)

@@ -12,6 +12,8 @@ on:
       - "lib/n2k/**"
       - "completions/ablestack_*2k"
       - "tests/v2k_guest_configuration_test.py"
+      - "tests/v2k_guest_rbd_test.py"
+      - "tests/v2k_guest_linux_drivers_test.py"
       - "tests/v2k_guest_networkmanager_test.py"
       - "tools/v2k/prepare-guest-config-rocky.py"
       - "tests/v2k_windows_storage_test.ps1"
@@ -60,6 +62,7 @@ jobs:
         run: |
           python3 tests/mold_preallocation_handoff_test.py
           python3 tests/migration_cache_retention_test.py
+          bash tests/cloud_target_handoff_contract_smoke.sh
       - name: V2K source identity, firmware and final driver policy
         env:
           PYTHONDONTWRITEBYTECODE: "1"

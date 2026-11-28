@@ -294,6 +294,8 @@ v2k_transfer_base_one() {
     #                    after the full VDDK copy succeeds.
     # ------------------------------------------------------------
     local out_target out_fmt cleanup_cmd target_blockdev active_staging
+    local rbd_access_mode
+    rbd_access_mode="$(jq -r ' .target.storage.rbd_access_mode // (if .target.provider=="ablestack-cloud" then "krbd" else "librbd" end)' "$manifest")"
     out_target=""
     out_fmt=""
     cleanup_cmd=": # no-op"
@@ -333,6 +335,10 @@ v2k_transfer_base_one() {
     cleanup() {
       if [[ -n "${target_blockdev}" && -b "${target_blockdev}" ]]; then
         blockdev --flushbufs "${target_blockdev}" >/dev/null 2>&1 || true
+      fi
+      if [[ "$st" == rbd && "$rbd_access_mode" == krbd && -n "$target_blockdev" ]]; then
+        rbd unmap "$target_blockdev" >/dev/null 2>&1 || true
+        target_blockdev=""
       fi
       if [[ -n "${active_staging}" ]]; then
         v2k_transfer_base_rbd_remove_staging "${active_staging}" >/dev/null 2>&1 || true
@@ -416,6 +422,10 @@ v2k_transfer_base_one() {
           return 75
         fi
         out_target="${active_staging}"
+        if [[ "$rbd_access_mode" == krbd ]]; then
+          target_blockdev="$(v2k_rbd_map "$active_staging")" || return $?
+          out_target="$target_blockdev"
+        fi
         convert_sparse_args="-n -S \"$(v2k_rbd_sparse_size)\""
         v2k_event INFO "sync.base" "${disk_id}" "rbd_staging_ready" \
           "$(jq -nc \
@@ -472,6 +482,11 @@ v2k_transfer_base_one() {
         "${thumbprint}" "${vm_moref}" "${snap_moref}" "${vmdk_path}" \
         || transfer_rc=$?
 
+      if [[ "$st" == rbd && "$rbd_access_mode" == krbd && -n "$target_blockdev" ]]; then
+        blockdev --flushbufs "$target_blockdev" || transfer_rc=74
+        rbd unmap "$target_blockdev" || transfer_rc=74
+        target_blockdev=""
+      fi
       {
         printf '\n===== attempt %s/%s =====\n' "${attempt}" "${max_attempts}"
         cat "${attempt_log}"
@@ -550,10 +565,13 @@ v2k_transfer_base_one() {
           "${manifest}" "${idx}" "${disk_id}" 74 "rbd_staging_publish_failed" "${details_json}"
         return 74
       fi
+      if jq -e '.target.guest_config_policy == "preserve"' "$manifest" >/dev/null; then
+        v2k_guest_config_python guest_configuration_rbd.py record --manifest "$manifest" --index "$idx" || return $?
+      fi
       active_staging=""
       v2k_event INFO "sync.base" "${disk_id}" "rbd_staging_published" \
         "$(jq -nc --arg target "${target_path}" '{target:$target,atomic:true}')"
-      if v2k_rbd_sparse_enabled; then
+      if v2k_rbd_sparse_enabled && [[ "$rbd_access_mode" != krbd ]]; then
         v2k_rbd_sparsify "${target_path}"
       fi
     fi

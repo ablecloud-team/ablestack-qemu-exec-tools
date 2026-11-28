@@ -159,7 +159,7 @@ n2k_cmd_init() {
   local vm="" pc="" dst="" mode="auto" cred_file=""
   local username="" password="" insecure="1"
   local inventory_json_arg="" inventory_source="none"
-  local target_format="qcow2" target_storage="file" target_map_json="{}" rbd_access_mode="librbd"
+  local target_format="qcow2" target_storage="file" target_map_json="{}" rbd_access_mode=""
   local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt"
@@ -243,6 +243,8 @@ n2k_cmd_init() {
   image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" "" "${N2K_PREALLOCATION_SOURCE:-cli}" || return $?
   local resolved_preallocation="${IMAGE_PREALLOCATION_MODE}" resolved_preallocation_source="${IMAGE_PREALLOCATION_SOURCE}"
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
+  rbd_access_mode="${rbd_access_mode:-$(if [[ "${target_provider:-libvirt}" == ablestack-cloud ]]; then printf krbd; else printf librbd; fi)}"
+  export N2K_RBD_ACCESS_MODE="${rbd_access_mode}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   case "${inventory_source}" in
     none|fixture|api) ;;
@@ -530,7 +532,7 @@ n2k_build_preflight_result_from_args() {
   local pc="" vm="" mode="auto" allow_experimental=false capability_json_arg=""
   local cred_file="" username="" password="" insecure="1" probe_legacy=false
   local v4_vmm="auto" v4_dp="auto" v4_data_plane="auto" legacy="auto" legacy_verified="auto" cold="auto" manual="auto"
-  local target_storage="auto" target_format="qcow2" rbd_access_mode="librbd"
+  local target_storage="auto" target_format="qcow2" rbd_access_mode=""
   local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0
   local target_provider="libvirt" target_provider_arg_set=0
@@ -678,6 +680,8 @@ n2k_build_preflight_result_from_args() {
     image_preallocation_resolve "${target_storage}" "${target_format}" "${target_preallocation}" "${target_preallocation_set}" || return $?
   fi
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
+  rbd_access_mode="${rbd_access_mode:-$(if [[ "${target_provider:-libvirt}" == ablestack-cloud ]]; then printf krbd; else printf librbd; fi)}"
+  export N2K_RBD_ACCESS_MODE="${rbd_access_mode}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
 
   local capability_json deps_json probed_json cloud_config_json cloud_probe_json cloud_runtime_json cloud_endpoint_runtime cloud_api_runtime cloud_secret_runtime
@@ -1163,7 +1167,7 @@ n2k_cmd_run() {
 
   local vm="" pc="" dst="" mode="auto" cred_file=""
   local username="" password="" insecure="1" inventory_source="api" inventory_json_arg=""
-  local target_format="qcow2" target_storage="file" target_map_json="" rbd_access_mode="librbd"
+  local target_format="qcow2" target_storage="file" target_map_json="" rbd_access_mode=""
   local rbd_access_mode_arg_set=0
   local cloud_allocation_copy=0
   local target_preallocation="" target_preallocation_set=0
@@ -1324,6 +1328,8 @@ n2k_cmd_run() {
   n2k_valid_target_format "${target_format}" || n2k_die "Invalid --target-format: ${target_format}"
   n2k_valid_target_storage "${target_storage}" || n2k_die "Invalid --target-storage: ${target_storage}"
   n2k_valid_target_provider "${target_provider}" || n2k_die "Invalid --target-provider: ${target_provider}"
+  rbd_access_mode="${rbd_access_mode:-$(if [[ "${target_provider:-libvirt}" == ablestack-cloud ]]; then printf krbd; else printf librbd; fi)}"
+  export N2K_RBD_ACCESS_MODE="${rbd_access_mode}"
   n2k_valid_rbd_access_mode "${rbd_access_mode}" || n2k_die "Invalid --rbd-access-mode: ${rbd_access_mode}"
   [[ "${source_map_from_v3_nfs}" == "true" ]] || n2k_die "run --source-api v3 requires --source-map-from-v3-nfs"
 

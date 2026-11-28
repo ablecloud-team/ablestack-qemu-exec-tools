@@ -395,7 +395,7 @@ n2k_cloud_target_ensure_manifest_nic_mappings() {
 }
 # shellcheck disable=SC2317
 n2k_cloud_target_required_config_json() {
-  printf '%s' '{"storage_id":"storage-1","disk_offering_id":"offering-1","network_ids":[]}'
+  printf '%s' '{"storage_id":"storage-1","disk_offering_id":"offering-1","service_offering_id":"compute-1","network_ids":[]}'
 }
 # shellcheck disable=SC2317
 n2k_cloud_target_validate_config() {
@@ -408,7 +408,7 @@ n2k_cloud_api_get() {
     listStoragePools) printf '%s' '{"liststoragepoolsresponse":{"storagepool":[{"id":"storage-1","type":"RBD","scope":"ZONE"}]}}' ;;
     listDiskOfferings) printf '%s' '{"listdiskofferingsresponse":{"diskoffering":[{"id":"offering-1","storagetype":"shared","cachemode":"writeback","iscustomized":true,"state":"Active"}]}}' ;;
     listVolumes) printf '%s' '{"listvolumesresponse":{"volume":[{"id":"root-1","virtualmachineid":"vm-resumed","deviceid":0,"state":"Ready","cachemode":"writeback"}]}}' ;;
-    listServiceOfferings) printf '%s' '{"listserviceofferingsresponse":{"serviceoffering":[]}}' ;;
+    listServiceOfferings) printf '%s' '{"listserviceofferingsresponse":{"serviceoffering":[{"id":"compute-1","cpuspeed":2000}]}}' ;;
     *) echo "Unexpected fixture API: $4" >&2; return 91 ;;
   esac
 }
