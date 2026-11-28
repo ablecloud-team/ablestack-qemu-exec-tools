@@ -1,0 +1,1244 @@
+{
+  "schema": "rbd-readiness-v1",
+  "date_kst": "2026-11-28",
+  "scope": "environment preparation and RBD design only; migration and guest adapter implementation not executed",
+  "issue": "https://github.com/ablecloud-team/ablestack-qemu-exec-tools/issues/93",
+  "tools_base": "fa00e0d1a34c38e17a3230f35a9aef662e742e98",
+  "mold_comparison_base": "49b70d9bd1aef98c91e23e56b5f8286a60318fa2",
+  "source_inventory": {
+    "vmware": [
+      {
+        "name": "v2k-tst-rocky97-scsi-uefi",
+        "uuid": "4235ae3a-da7e-59bd-4d8e-e229f1857fa0",
+        "power": "poweredOn",
+        "firmware": "efi",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:9f:73",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "10.10.254.201",
+          "fd12:8ea6:72a:69eb:250:56ff:feb5:9f73",
+          "fe80::250:56ff:feb5:9f73"
+        ],
+        "disks": [
+          {
+            "key": 2000,
+            "kind": "scsi",
+            "controller": "vim.vm.device.VirtualLsiLogicSASController",
+            "bus": 0,
+            "unit": 0,
+            "bytes": 34359738368
+          },
+          {
+            "key": 2001,
+            "kind": "scsi",
+            "controller": "vim.vm.device.VirtualLsiLogicSASController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-rocky97-ide-bios",
+        "uuid": "4235e748-3952-a3c2-f86d-2a5eebddcbf8",
+        "power": "poweredOn",
+        "firmware": "bios",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:bd:4b",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "10.10.254.200",
+          "fd12:8ea6:72a:69eb:250:56ff:feb5:bd4b",
+          "fe80::250:56ff:feb5:bd4b"
+        ],
+        "disks": [
+          {
+            "key": 3000,
+            "kind": "ide",
+            "controller": "vim.vm.device.VirtualIDEController",
+            "bus": 0,
+            "unit": 0,
+            "bytes": 34359738368
+          },
+          {
+            "key": 3001,
+            "kind": "ide",
+            "controller": "vim.vm.device.VirtualIDEController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-rocky97-sata-uefi",
+        "uuid": "42353f0f-0c7c-00f0-aa80-3e963dd65f96",
+        "power": "poweredOn",
+        "firmware": "efi",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:7a:5c",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "10.10.254.202",
+          "fd12:8ea6:72a:69eb:250:56ff:feb5:7a5c",
+          "fe80::250:56ff:feb5:7a5c"
+        ],
+        "disks": [
+          {
+            "key": 16001,
+            "kind": "sata",
+            "controller": "vim.vm.device.VirtualAHCIController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 34359738368
+          },
+          {
+            "key": 16002,
+            "kind": "sata",
+            "controller": "vim.vm.device.VirtualAHCIController",
+            "bus": 0,
+            "unit": 2,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-ubuntu2204-sata-uefi",
+        "uuid": "42356c86-0a37-78a3-a5a0-c43dc55f562d",
+        "power": "poweredOn",
+        "firmware": "efi",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:25:ef",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "10.10.254.222",
+          "fd12:8ea6:72a:69eb:250:56ff:feb5:25ef",
+          "fe80::250:56ff:feb5:25ef"
+        ],
+        "disks": [
+          {
+            "key": 16001,
+            "kind": "sata",
+            "controller": "vim.vm.device.VirtualAHCIController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 34359738368
+          },
+          {
+            "key": 16002,
+            "kind": "sata",
+            "controller": "vim.vm.device.VirtualAHCIController",
+            "bus": 0,
+            "unit": 2,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-ubuntu2204-ide-bios",
+        "uuid": "4235cd4a-30cf-46b6-d99b-b0d892bbd147",
+        "power": "poweredOn",
+        "firmware": "bios",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:9c:c0",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "10.10.254.220",
+          "fd12:8ea6:72a:69eb:250:56ff:feb5:9cc0",
+          "fe80::250:56ff:feb5:9cc0"
+        ],
+        "disks": [
+          {
+            "key": 3000,
+            "kind": "ide",
+            "controller": "vim.vm.device.VirtualIDEController",
+            "bus": 0,
+            "unit": 0,
+            "bytes": 34359738368
+          },
+          {
+            "key": 3001,
+            "kind": "ide",
+            "controller": "vim.vm.device.VirtualIDEController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-win2022-sata-uefi",
+        "uuid": "423574d2-d33a-44a3-5d14-324aa3861c95",
+        "power": "poweredOn",
+        "firmware": "efi",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:77:ca",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "fd12:8ea6:72a:69eb:cd20:230:5481:b7d9",
+          "fe80::cd20:230:5481:b7d9",
+          "10.10.254.191"
+        ],
+        "disks": [
+          {
+            "key": 16001,
+            "kind": "sata",
+            "controller": "vim.vm.device.VirtualAHCIController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 68719476736
+          },
+          {
+            "key": 16002,
+            "kind": "sata",
+            "controller": "vim.vm.device.VirtualAHCIController",
+            "bus": 0,
+            "unit": 2,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-win2022-scsi-uefi",
+        "uuid": "42354a9e-847c-cce4-21d1-6c232e0c5dfa",
+        "power": "poweredOn",
+        "firmware": "efi",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:bd:f2",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "fd12:8ea6:72a:69eb:d4e9:6716:9159:7754",
+          "fe80::d4e9:6716:9159:7754",
+          "10.10.254.162"
+        ],
+        "disks": [
+          {
+            "key": 2000,
+            "kind": "scsi",
+            "controller": "vim.vm.device.VirtualLsiLogicSASController",
+            "bus": 0,
+            "unit": 0,
+            "bytes": 68719476736
+          },
+          {
+            "key": 2001,
+            "kind": "scsi",
+            "controller": "vim.vm.device.VirtualLsiLogicSASController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-ubuntu2204-scsi-uefi",
+        "uuid": "4235044d-e54b-6093-48ca-1d2a6c6964a2",
+        "power": "poweredOn",
+        "firmware": "efi",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:94:35",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "10.10.254.223",
+          "fd12:8ea6:72a:69eb:250:56ff:feb5:9435",
+          "fe80::250:56ff:feb5:9435"
+        ],
+        "disks": [
+          {
+            "key": 2000,
+            "kind": "scsi",
+            "controller": "vim.vm.device.VirtualLsiLogicSASController",
+            "bus": 0,
+            "unit": 0,
+            "bytes": 34359738368
+          },
+          {
+            "key": 2001,
+            "kind": "scsi",
+            "controller": "vim.vm.device.VirtualLsiLogicSASController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 8589934592
+          }
+        ]
+      },
+      {
+        "name": "v2k-tst-win2022-ide-bios",
+        "uuid": "4235ccb4-7751-4405-f44d-a0cc59250f8f",
+        "power": "poweredOn",
+        "firmware": "bios",
+        "tools_running": "guestToolsRunning",
+        "guest_operations_ready": true,
+        "nics": [
+          {
+            "mac": "00:50:56:b5:c6:5e",
+            "connected": true,
+            "start_connected": true
+          }
+        ],
+        "guest_ips": [
+          "fd12:8ea6:72a:69eb:98c2:cb17:773a:f424",
+          "fe80::98c2:cb17:773a:f424",
+          "10.10.254.161"
+        ],
+        "disks": [
+          {
+            "key": 3000,
+            "kind": "ide",
+            "controller": "vim.vm.device.VirtualIDEController",
+            "bus": 0,
+            "unit": 0,
+            "bytes": 68719476736
+          },
+          {
+            "key": 3001,
+            "kind": "ide",
+            "controller": "vim.vm.device.VirtualIDEController",
+            "bus": 0,
+            "unit": 1,
+            "bytes": 8589934592
+          }
+        ]
+      }
+    ],
+    "nutanix": [
+      {
+        "name": "n2k-ubuntu-ide-01",
+        "uuid": "0b1973aa-b20d-4204-7b8a-558f36d08637",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "9e7a7775-1dcc-405a-8e3c-3ab9051ea7f9",
+            "address": {
+              "adapter_type": "IDE",
+              "device_index": 0
+            },
+            "bytes": 8589934592
+          },
+          {
+            "uuid": "8114a529-4c22-41e6-bb96-8b2b6cc44219",
+            "address": {
+              "adapter_type": "IDE",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:c4:4d:6b",
+            "ips": [
+              "10.10.21.74"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-ubuntu-scsi-01",
+        "uuid": "a8f0dfeb-af22-4acc-542b-13ac9d9c8cbc",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "ac227d1a-b423-40a0-82d6-684f9af278e4",
+            "address": {
+              "adapter_type": "SCSI",
+              "device_index": 0
+            },
+            "bytes": 8589934592
+          },
+          {
+            "uuid": "e2e50e77-9fef-4723-af67-fcfe6fdd960b",
+            "address": {
+              "adapter_type": "SCSI",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:f8:50:3e",
+            "ips": [
+              "10.10.21.76"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-rocky-ide-01",
+        "uuid": "3118e3a4-e0b1-44f6-46db-eb26171ba800",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "6407442c-cdc6-4f81-91c9-4fe3a73a5ea8",
+            "address": {
+              "adapter_type": "IDE",
+              "device_index": 0
+            },
+            "bytes": 10737418240
+          },
+          {
+            "uuid": "384a1abe-b687-41c1-a99a-37ac6c06b2d9",
+            "address": {
+              "adapter_type": "IDE",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:df:c5:d2",
+            "ips": [
+              "10.10.21.77",
+              "10.10.254.195"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-win2022-scsi-01",
+        "uuid": "342e9837-4861-40cf-46fc-fc5a86cb6f76",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "bd21846c-5dcb-4da6-9113-188383a1ff0a",
+            "address": {
+              "adapter_type": "SCSI",
+              "device_index": 0
+            },
+            "bytes": 34359738368
+          },
+          {
+            "uuid": "d53e89ec-cc88-42b2-8775-f045e06290ac",
+            "address": {
+              "adapter_type": "SCSI",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:c9:21:63",
+            "ips": [
+              "169.254.77.125"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-ubuntu-sata-01",
+        "uuid": "11a856b3-74e6-4c78-6a1f-3c228fd4ce45",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "0d2f0c10-a776-4c9c-b589-cead8d409e1d",
+            "address": {
+              "adapter_type": "SATA",
+              "device_index": 0
+            },
+            "bytes": 8589934592
+          },
+          {
+            "uuid": "c21d822f-4467-4643-9d47-cb7b76186ba1",
+            "address": {
+              "adapter_type": "SATA",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:9c:67:24",
+            "ips": [
+              "10.10.21.75"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-rocky-sata-01",
+        "uuid": "71972fa5-bbf5-4546-519c-83150cb0fa18",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "3d21d8e2-7927-4fb6-93c3-f0b78c4823f6",
+            "address": {
+              "adapter_type": "SATA",
+              "device_index": 0
+            },
+            "bytes": 10737418240
+          },
+          {
+            "uuid": "ac6f43f9-bbf8-4bec-a3a8-05a52ddf06be",
+            "address": {
+              "adapter_type": "SATA",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:a5:18:40",
+            "ips": [
+              "10.10.21.78",
+              "10.10.254.215"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-rocky-scsi-01",
+        "uuid": "9fb9705d-8a87-41da-71cc-66e7fc2e58b4",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "84c20cc8-aa5f-4dd3-8e27-a005abf2912e",
+            "address": {
+              "adapter_type": "SCSI",
+              "device_index": 0
+            },
+            "bytes": 10737418240
+          },
+          {
+            "uuid": "47a4bf3e-17f8-4fc7-bff9-9638d77448cf",
+            "address": {
+              "adapter_type": "SCSI",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:90:5b:d7",
+            "ips": [
+              "10.10.21.79",
+              "10.10.254.194"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-win2022-ide-01",
+        "uuid": "4444fe27-aebb-4a98-5e1c-8e0bc87251b3",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "c69c428a-8ecb-4604-a6f3-55e6bfb6aa0a",
+            "address": {
+              "adapter_type": "IDE",
+              "device_index": 0
+            },
+            "bytes": 34359738368
+          },
+          {
+            "uuid": "847e7067-7a08-4413-baab-dbf1410a7dd0",
+            "address": {
+              "adapter_type": "IDE",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:87:cb:50",
+            "ips": [
+              "169.254.208.197"
+            ],
+            "connected": true
+          }
+        ]
+      },
+      {
+        "name": "n2k-win2022-sata-01",
+        "uuid": "c6ca4ef4-ac14-4435-68ae-4ef776a1c18e",
+        "power": "ON",
+        "firmware": "UEFI",
+        "disks": [
+          {
+            "uuid": "b1302944-af28-43fd-ba21-8804fc6ea41d",
+            "address": {
+              "adapter_type": "SATA",
+              "device_index": 0
+            },
+            "bytes": 34359738368
+          },
+          {
+            "uuid": "4e7c8155-ef55-4d41-945b-6dcde5de9398",
+            "address": {
+              "adapter_type": "SATA",
+              "device_index": 1
+            },
+            "bytes": 8589934592
+          }
+        ],
+        "nics": [
+          {
+            "mac": "50:6b:8d:b7:0d:87",
+            "ips": [
+              "169.254.227.139"
+            ],
+            "connected": true
+          }
+        ]
+      }
+    ]
+  },
+  "source_virtual_bytes": 727996956672,
+  "target": {
+    "endpoint": "http://10.10.32.10:8080/client/api",
+    "zone_id": "991d2f57-0f37-4445-b956-09773d064816",
+    "pool_id": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+    "pool_name": "rbd",
+    "pool_type": "RBD",
+    "network_id": "78aabc42-0648-49c9-9d39-4cd6b212ebe8",
+    "network_name": "ADMIN-L2-Network",
+    "compute_offering_id": "601d6b07-f649-4781-95a1-a522d3cd7125"
+  },
+  "mold_comparison": {
+    "runtime_jar_sha256": "94d2a25767baed14a21c18e2296058fb24ef80c4f3e67887918476cb9bd83ddf",
+    "package": "cloudstack-management-4.23.0.0-1.x86_64",
+    "classes": {
+      "com/cloud/storage/MigrationDiskControllerPolicy.class": {
+        "matches_merged": true,
+        "expected": "231cd0847f69b7f35103405dc4feaf57d343122c459ea548dc0f059cc9d20633",
+        "observed": "231cd0847f69b7f35103405dc4feaf57d343122c459ea548dc0f059cc9d20633"
+      },
+      "com/cloud/storage/MigrationGuestConfigurationPolicy.class": {
+        "matches_merged": true,
+        "expected": "07e96d674c90ef66a02878c28069c649237e1490685be2299c9fd17df4b3e6c7",
+        "observed": "07e96d674c90ef66a02878c28069c649237e1490685be2299c9fd17df4b3e6c7"
+      },
+      "com/cloud/storage/MigrationGuestConfigurationManagerImpl.class": {
+        "matches_merged": true,
+        "expected": "4a495d09238e4571f4f5446e7e2c665cfb16b4021e622d2a975f347867a808a3",
+        "observed": "4a495d09238e4571f4f5446e7e2c665cfb16b4021e622d2a975f347867a808a3"
+      },
+      "com/cloud/storage/MigrationDiskControllerManagerImpl.class": {
+        "matches_merged": true,
+        "expected": "1acbf1795c2713074d6b7ef5436bd461b12b57debbdc31a1e7cc507e7f0f7738",
+        "observed": "1acbf1795c2713074d6b7ef5436bd461b12b57debbdc31a1e7cc507e7f0f7738"
+      }
+    }
+  },
+  "capabilities": [
+    {
+      "probe": "host-cap-1-bios",
+      "response": {
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "machine": "q35",
+        "firmware": "bios",
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "buses": [
+          "scsi",
+          "sata"
+        ]
+      }
+    },
+    {
+      "probe": "host-cap-1-efi",
+      "response": {
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "machine": "q35",
+        "firmware": "efi",
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "buses": [
+          "scsi",
+          "sata"
+        ]
+      }
+    },
+    {
+      "probe": "host-guest-cap-1-1",
+      "response": {
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "status": "SUPPORTED",
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "features": [],
+        "supportedplanversions": [
+          1
+        ],
+        "supportedwindowsbuilds": []
+      }
+    },
+    {
+      "probe": "host-guest-cap-1-2",
+      "response": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": false,
+        "status": "SUPPORTED",
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      }
+    },
+    {
+      "probe": "host-cap-2-bios",
+      "response": {
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "machine": "q35",
+        "firmware": "bios",
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "buses": [
+          "scsi",
+          "sata"
+        ]
+      }
+    },
+    {
+      "probe": "host-cap-2-efi",
+      "response": {
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "machine": "q35",
+        "firmware": "efi",
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "buses": [
+          "scsi",
+          "sata"
+        ]
+      }
+    },
+    {
+      "probe": "host-guest-cap-2-1",
+      "response": {
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "status": "SUPPORTED",
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "features": [],
+        "supportedplanversions": [
+          1
+        ],
+        "supportedwindowsbuilds": []
+      }
+    },
+    {
+      "probe": "host-guest-cap-2-2",
+      "response": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": false,
+        "status": "SUPPORTED",
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      }
+    },
+    {
+      "probe": "host-cap-3-bios",
+      "response": {
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "machine": "q35",
+        "firmware": "bios",
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "buses": [
+          "scsi",
+          "sata"
+        ]
+      }
+    },
+    {
+      "probe": "host-cap-3-efi",
+      "response": {
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "machine": "q35",
+        "firmware": "efi",
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "buses": [
+          "scsi",
+          "sata"
+        ]
+      }
+    },
+    {
+      "probe": "host-guest-cap-3-1",
+      "response": {
+        "contractversion": 1,
+        "supported": true,
+        "verified": false,
+        "status": "SUPPORTED",
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "features": [],
+        "supportedplanversions": [
+          1
+        ],
+        "supportedwindowsbuilds": []
+      }
+    },
+    {
+      "probe": "host-guest-cap-3-2",
+      "response": {
+        "contractversion": 2,
+        "supported": true,
+        "verified": false,
+        "status": "SUPPORTED",
+        "storageid": "91cae554-3fce-3f93-89d1-cefaf9bf8122",
+        "features": [
+          "windows-network-ipv4-v1"
+        ],
+        "supportedplanversions": [
+          1,
+          2
+        ],
+        "supportedwindowsbuilds": [
+          "20348"
+        ]
+      }
+    }
+  ],
+  "installation": [
+    {
+      "host": "10.10.32.1",
+      "packages": [
+        "ablestack_v2k-0.10.0-1.el9.el9.x86_64",
+        "ablestack_n2k-0.10.0-1.el9.el9.noarch"
+      ],
+      "cache_default": "none",
+      "program_files_match_rpm": true,
+      "compatibility_profiles_validated": true,
+      "generated_profile_deviations": 15
+    },
+    {
+      "host": "10.10.32.2",
+      "packages": [
+        "ablestack_v2k-0.10.0-1.el9.el9.x86_64",
+        "ablestack_n2k-0.10.0-1.el9.el9.noarch"
+      ],
+      "cache_default": "none",
+      "program_files_match_rpm": true,
+      "compatibility_profiles_validated": true,
+      "generated_profile_deviations": 15
+    },
+    {
+      "host": "10.10.32.3",
+      "packages": [
+        "ablestack_v2k-0.10.0-1.el9.el9.x86_64",
+        "ablestack_n2k-0.10.0-1.el9.el9.noarch"
+      ],
+      "cache_default": "none",
+      "program_files_match_rpm": true,
+      "compatibility_profiles_validated": true,
+      "generated_profile_deviations": 15
+    }
+  ],
+  "assets": [
+    {
+      "host": "10.10.32.1",
+      "metadata": [
+        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
+      ]
+    },
+    {
+      "host": "10.10.32.2",
+      "metadata": [
+        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
+      ]
+    },
+    {
+      "host": "10.10.32.3",
+      "metadata": [
+        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
+      ]
+    }
+  ],
+  "quarantined_gfs2_targets": [
+    {
+      "id": "ba1bdff1-5919-4f04-8f6b-8655b324c360",
+      "name": "v2k-89-ubuntu2204-ide-bios-20261126",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "00:50:56:b5:9c:c0",
+          "ip": null,
+          "source": "v2k-tst-ubuntu2204-ide-bios"
+        }
+      ]
+    },
+    {
+      "id": "1a9f127d-e7b3-4a84-95a6-0d07a7037b1b",
+      "name": "v2k-89-win2022-sata-uefi-20261126",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "00:50:56:b5:77:ca",
+          "ip": null,
+          "source": "v2k-tst-win2022-sata-uefi"
+        }
+      ]
+    },
+    {
+      "id": "577ce0a3-483d-44b1-9600-863e53444e9c",
+      "name": "v2k-89-ubuntu2204-sata-uefi-20261126",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "00:50:56:b5:25:ef",
+          "ip": null,
+          "source": "v2k-tst-ubuntu2204-sata-uefi"
+        }
+      ]
+    },
+    {
+      "id": "c9b364bc-25f6-4858-8a5a-3fe8911c7cec",
+      "name": "v2k-89-win2022-ide-bios-20261126",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "00:50:56:b5:c6:5e",
+          "ip": null,
+          "source": "v2k-tst-win2022-ide-bios"
+        }
+      ]
+    },
+    {
+      "id": "8a3ac2ab-0335-4d89-8267-bf95790167a2",
+      "name": "v2k-89-ubuntu2204-scsi-uefi-20261126",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "00:50:56:b5:94:35",
+          "ip": null,
+          "source": "v2k-tst-ubuntu2204-scsi-uefi"
+        }
+      ]
+    },
+    {
+      "id": "a6dc8aa7-1c2c-4187-bebf-21128daecbfc",
+      "name": "v2k-89-win2022-scsi-uefi-r2-20261126",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "00:50:56:b5:bd:f2",
+          "ip": null,
+          "source": "v2k-tst-win2022-scsi-uefi"
+        }
+      ]
+    },
+    {
+      "id": "81f30ab2-6da7-49f9-bb3e-2284a0ee535a",
+      "name": "n2k-i90-ce21-ubuntu-ide-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:c4:4d:6b",
+          "ip": "10.10.21.74",
+          "source": "n2k-ubuntu-ide-01"
+        }
+      ]
+    },
+    {
+      "id": "9eeb92c5-f622-497b-b587-6ee65a81a8f1",
+      "name": "n2k-i90-ce21-rocky-ide-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:df:c5:d2",
+          "ip": "10.10.21.77",
+          "source": "n2k-rocky-ide-01"
+        }
+      ]
+    },
+    {
+      "id": "072a050a-8582-44d7-9edd-b0ff10c333ab",
+      "name": "n2k-i90-ce21-ubuntu-sata-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:9c:67:24",
+          "ip": "10.10.21.75",
+          "source": "n2k-ubuntu-sata-01"
+        }
+      ]
+    },
+    {
+      "id": "e139c4f9-c813-4d16-95a0-6bdd9bc6ce3c",
+      "name": "n2k-i90-ce21-ubuntu-scsi-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:f8:50:3e",
+          "ip": "10.10.21.76",
+          "source": "n2k-ubuntu-scsi-01"
+        }
+      ]
+    },
+    {
+      "id": "fcba80ae-451f-42a3-bbbc-f9e1313a2c1a",
+      "name": "n2k-i90-ce21-rocky-scsi-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:90:5b:d7",
+          "ip": "10.10.21.79",
+          "source": "n2k-rocky-scsi-01"
+        }
+      ]
+    },
+    {
+      "id": "60265de8-9534-47a2-beaf-c33150124a15",
+      "name": "n2k-i90-ce21-rocky-sata-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:a5:18:40",
+          "ip": "10.10.21.78",
+          "source": "n2k-rocky-sata-01"
+        }
+      ]
+    },
+    {
+      "id": "b983fc13-304d-4a96-8d35-649659ba4ecf",
+      "name": "n2k-i90-ce21-win2022-scsi-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:c9:21:63",
+          "ip": "10.10.254.181",
+          "source": "n2k-win2022-scsi-01"
+        }
+      ]
+    },
+    {
+      "id": "9bc36fcb-b340-4fb4-9c78-1e3edf8b8333",
+      "name": "n2k-i90-ce21-win2022-sata-20261127",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:b7:0d:87",
+          "ip": "10.10.254.182",
+          "source": "n2k-win2022-sata-01"
+        }
+      ]
+    },
+    {
+      "id": "eb6525bf-4678-476f-af01-347a0afee7f5",
+      "name": "n2k-i90-ce21-win2022-ide-20261127-r2",
+      "state": "Running",
+      "hits": [
+        {
+          "mac": "50:6b:8d:87:cb:50",
+          "ip": "10.10.254.183",
+          "source": "n2k-win2022-ide-01"
+        }
+      ]
+    }
+  ],
+  "remaining_observed_ip_conflicts": [],
+  "wizard_previews": [
+    {
+      "tool": "v2k",
+      "source": "v2k-tst-ubuntu2204-ide-bios",
+      "returncode": 0,
+      "manifest_created": false
+    },
+    {
+      "tool": "n2k",
+      "source": "n2k-ubuntu-ide-01",
+      "returncode": 0,
+      "manifest_created": false
+    }
+  ],
+  "guest_adapter_gate": {
+    "exit_code": 0,
+    "stdout": "{\"rbd_preserve_rejected_before_image_work\": true, \"exit\": 44, \"reason\": \"GUEST_CONFIG_TARGET_UNSUPPORTED\"}\n",
+    "stderr": ""
+  },
+  "preservation": {
+    "cluster32_vm_count": 60,
+    "cluster32_vm_ids_names_states_hosts_unchanged": true,
+    "rbd_image_count_before": 124,
+    "rbd_image_count_after": 124,
+    "migration_started": false,
+    "source_snapshots_created": 0,
+    "target_vm_created": 0,
+    "target_rbd_images_created": 0,
+    "cluster13_vm_count": 142,
+    "cluster13_expected_stopped_ids": [
+      "072a050a-8582-44d7-9edd-b0ff10c333ab",
+      "1a9f127d-e7b3-4a84-95a6-0d07a7037b1b",
+      "577ce0a3-483d-44b1-9600-863e53444e9c",
+      "60265de8-9534-47a2-beaf-c33150124a15",
+      "81f30ab2-6da7-49f9-bb3e-2284a0ee535a",
+      "8a3ac2ab-0335-4d89-8267-bf95790167a2",
+      "9bc36fcb-b340-4fb4-9c78-1e3edf8b8333",
+      "9eeb92c5-f622-497b-b587-6ee65a81a8f1",
+      "a6dc8aa7-1c2c-4187-bebf-21128daecbfc",
+      "b983fc13-304d-4a96-8d35-649659ba4ecf",
+      "ba1bdff1-5919-4f04-8f6b-8655b324c360",
+      "c9b364bc-25f6-4858-8a5a-3fe8911c7cec",
+      "e139c4f9-c813-4d16-95a0-6bdd9bc6ce3c",
+      "eb6525bf-4678-476f-af01-347a0afee7f5",
+      "fcba80ae-451f-42a3-bbbc-f9e1313a2c1a"
+    ],
+    "cluster13_other_vms_unchanged": true
+  },
+  "assets_are_pre_winpe_staging_observations": true,
+  "winpe_assets": [
+    {
+      "host": "10.10.32.1",
+      "path": "/usr/share/ablestack/v2k/winpe/winpe-ablestack-v2k-v0.9.5-amd64.iso",
+      "sha256": "4ca45e7bc407e03a678f3ab6f3fdf4380f4de24443e8e660eeaa3d9c6ecebf78",
+      "bytes": 399939584,
+      "official_release": "v0.9.5",
+      "resolver_verified": true,
+      "virtio_iso_resolved": true
+    },
+    {
+      "host": "10.10.32.2",
+      "path": "/usr/share/ablestack/v2k/winpe/winpe-ablestack-v2k-v0.9.5-amd64.iso",
+      "sha256": "4ca45e7bc407e03a678f3ab6f3fdf4380f4de24443e8e660eeaa3d9c6ecebf78",
+      "bytes": 399939584,
+      "official_release": "v0.9.5",
+      "resolver_verified": true,
+      "virtio_iso_resolved": true
+    },
+    {
+      "host": "10.10.32.3",
+      "path": "/usr/share/ablestack/v2k/winpe/winpe-ablestack-v2k-v0.9.5-amd64.iso",
+      "sha256": "4ca45e7bc407e03a678f3ab6f3fdf4380f4de24443e8e660eeaa3d9c6ecebf78",
+      "bytes": 399939584,
+      "official_release": "v0.9.5",
+      "resolver_verified": true,
+      "virtio_iso_resolved": true
+    }
+  ],
+  "ceph_health": [
+    {
+      "health": "HEALTH_OK",
+      "osds": {
+        "epoch": 3892,
+        "num_osds": 15,
+        "num_up_osds": 15,
+        "osd_up_since": 1789623746,
+        "num_in_osds": 15,
+        "osd_in_since": 1789608760,
+        "num_remapped_pgs": 0
+      },
+      "pgs": [
+        {
+          "state_name": "active+clean",
+          "count": 1057
+        }
+      ],
+      "bytes_avail": 27378625646592
+    },
+    {
+      "rbd_image_count": 124
+    }
+  ],
+  "readiness": {
+    "environment_ready": true,
+    "sources_running": 18,
+    "baseline_cli_preview_ready": true,
+    "rbd_preserve_execution_ready": false,
+    "reason": "GUEST_CONFIG_TARGET_UNSUPPORTED",
+    "migration_started": false
+  }
+}
