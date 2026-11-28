@@ -52,7 +52,7 @@ Mold/Agent는 첫 기동 전 controller/firmware/volume binding을 검증한다.
 ## 검증 기준
 
 - VMware/Nutanix 원본 각 9대의 실제 wizard, ROOT+DATA 반입, 실행 및 자동 복원 `VERIFIED`.
-- 실제 XML의 KRBD/raw, pool/image ID, controller, firmware 및 cachemode 대조. 기본 none 16대와 명시적 writeback 2대를 구분한다.
+- 실제 XML의 KRBD/raw, pool/image ID, controller, firmware 및 cachemode 대조. none 정책 16대와 명시적 writeback 2대를 구분하고, 기본값은 CLI/wizard 자동 시험으로 확인한다.
 - 꺼진 원본을 읽기 전용으로 열어 파일 SHA와 파일시스템 식별자를 확보하고 대상에서 독립 대조한다.
 - ROOT/DATA마다 소유한 64 KiB 텍스트 파일을 fsync·읽기 확인한다. 다른 호스트에서 재기동한 뒤 같은 파일의 해시와 새 boot scope를 확인하고 해당 시험 파일만 제거한다.
 - 미지원 형식·권한/소유권·매핑 충돌·부분 복사·인계 실패·stale/timeout·재개 및 기존 file/libvirt/DR 소비자를 자동 시험한다.
