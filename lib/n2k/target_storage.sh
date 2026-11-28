@@ -267,7 +267,8 @@ n2k_storage_copy_base() {
       if [[ "$access_mode" == krbd ]]; then
         (
           local mapped="" rc=0
-          # shellcheck disable=SC2317
+          # The EXIT trap calls this function; newer ShellCheck needs SC2329 too.
+          # shellcheck disable=SC2317,SC2329
           cleanup_krbd_copy() {
             rc=$?;trap - EXIT
             if [[ -n "$mapped" ]]; then
