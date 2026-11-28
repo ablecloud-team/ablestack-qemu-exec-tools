@@ -922,32 +922,6 @@
       "generated_profile_deviations": 15
     }
   ],
-  "assets": [
-    {
-      "host": "10.10.32.1",
-      "metadata": [
-        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
-        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
-        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
-      ]
-    },
-    {
-      "host": "10.10.32.2",
-      "metadata": [
-        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
-        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
-        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
-      ]
-    },
-    {
-      "host": "10.10.32.3",
-      "metadata": [
-        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
-        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
-        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
-      ]
-    }
-  ],
   "quarantined_gfs2_targets": [
     {
       "id": "ba1bdff1-5919-4f04-8f6b-8655b324c360",
@@ -1179,7 +1153,6 @@
     ],
     "cluster13_other_vms_unchanged": true
   },
-  "assets_are_pre_winpe_staging_observations": true,
   "winpe_assets": [
     {
       "host": "10.10.32.1",
@@ -1240,5 +1213,31 @@
     "rbd_preserve_execution_ready": false,
     "reason": "GUEST_CONFIG_TARGET_UNSUPPORTED",
     "migration_started": false
-  }
+  },
+  "initial_asset_inventory": [
+    {
+      "host": "10.10.32.1",
+      "metadata": [
+        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
+      ]
+    },
+    {
+      "host": "10.10.32.2",
+      "metadata": [
+        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
+      ]
+    },
+    {
+      "host": "10.10.32.3",
+      "metadata": [
+        "{\"commands\": {\"qemu-img\": \"/usr/bin/qemu-img\", \"rbd\": \"/usr/bin/rbd\", \"rbd-nbd\": null, \"qemu-nbd\": \"/usr/bin/qemu-nbd\", \"guestfish\": \"/usr/bin/guestfish\", \"virt-customize\": \"/usr/bin/virt-customize\", \"nbdkit\": \"/usr/sbin/nbdkit\"}}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe.iso\", \"exists\": false, \"bytes\": null, \"symlink\": false}",
+        "{\"path\": \"/usr/share/ablestack/v2k/winpe/current.json\", \"exists\": false, \"bytes\": null, \"symlink\": false}"
+      ]
+    }
+  ]
 }

@@ -89,7 +89,7 @@ WinPE가 없어 공식 [v0.9.5 릴리스](https://github.com/ablecloud-team/able
 
 - SHA-256: `4ca45e7bc407e03a678f3ab6f3fdf4380f4de24443e8e660eeaa3d9c6ecebf78`
 - 경로: `/usr/share/ablestack/v2k/winpe/winpe-ablestack-v2k-v0.9.5-amd64.iso`
-- current.json과 호환 링크를 함께 구성하고 설치된 resolver의 WinPE/VirtIO 경로 선택을 확인한다.
+- current.json과 호환 링크를 함께 구성하고 설치된 resolver의 WinPE/VirtIO 경로 선택을 확인했다.
 - ISO 설치는 Windows 실제 boot·driver injection 성공 검증과 구분한다.
 
 RBD preserve용 Linux/Windows guest payload/appliance의 신규 배치·자격은 adapter 구현과 함께
