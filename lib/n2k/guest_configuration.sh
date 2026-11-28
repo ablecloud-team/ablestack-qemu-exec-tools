@@ -83,12 +83,13 @@ n2k_guest_config_preflight_cloud() {
 
 }
 n2k_guest_config_stage() {
-  local manifest="$1" count idx path format size mode
+  local manifest="$1" endpoint="${2:-}" api_key="${3:-}" secret_key="${4:-}" cred_file="${5:-}"
+  local count idx path format size mode
   [[ "$(jq -r '.target.guest_config_policy // empty' "$manifest")" == preserve ]] || return 0
   n2k_cloud_require_unmanaged_target "$manifest" || return $?
   if [[ "$(jq -r '.target.storage.type' "$manifest")" == rbd ]]; then
     local rt ep key secret pool uri visible
-    rt="$(n2k_cloud_target_resolve_runtime_json "$manifest" '' '' '')" || return $?
+    rt="$(n2k_cloud_target_resolve_runtime_json "$manifest" "$endpoint" "$api_key" "$secret_key" "$cred_file")" || return $?
     ep="$(jq -r .endpoint <<<"$rt")";key="$(jq -r .api_key <<<"$rt")";secret="$(jq -r .secret_key <<<"$rt")";pool="$(jq -r '.target.cloud.storage_id' "$manifest")"
     while IFS= read -r uri; do
       visible="$(n2k_cloud_api_get "$ep" "$key" "$secret" listVolumesForImport "$(jq -nc --arg pool "$pool" --arg path "${uri#rbd:}" '{storageid:$pool,path:$path}')")" || return $?

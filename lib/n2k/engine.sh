@@ -1629,7 +1629,7 @@ n2k_cmd_run() {
   fi
 
   if ! n2k_cloud_handoff_started "$N2K_MANIFEST" && ! jq -e '.runtime.guest_configuration.status=="STAGED"' "$N2K_MANIFEST" >/dev/null; then
-    n2k_guest_config_stage "$N2K_MANIFEST" || return $?
+    n2k_guest_config_stage "$N2K_MANIFEST" "$cloud_endpoint" "$cloud_api_key" "$cloud_secret_key" "$cloud_cred_file" || return $?
   fi
 
   local -a cutover_args=()
