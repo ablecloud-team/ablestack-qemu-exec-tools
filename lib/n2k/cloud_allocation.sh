@@ -176,3 +176,30 @@ migration_cloud_allocation_check_manifest() {
       "$("${tool}_cloud_target_disk_offering_storage_type_from_pool" "$pool")" || return $?
   fi
 }
+
+# Return an optional identity from the one matching Cloud pool/path.
+# Older API responses may omit this receipt; their positional path remains unchanged.
+migration_cloud_import_identity() {
+  local response="$1" storage_id="$2" import_path="$3" backend="$4" expected_format="$5"
+  jq -er --arg storage "$storage_id" --arg path "$import_path" --arg backend "$backend" --arg format "$expected_format" '
+    (.listvolumesforimportresponse // to_entries[0].value) as $body
+    | ($body.volumeforimport // $body.volume // $body.volumes // []) as $rows
+    | if ($rows | type) != "array" then error("invalid Cloud import list") else $rows end
+    | map(select((.path // .name // "") == $path or (.fullpath // "") == $path))
+    | if length != 1 then error("expected one import candidate for the selected path") else .[0] end
+    | . as $source
+    | (($source.storagetype // $source.storagepooltype // "") | ascii_downcase) as $pool_type
+    | (($source.format // "") | ascii_downcase) as $disk_format
+    | ($source.details.SOURCE_IDENTITY // "") as $identity
+    | if (($source.storageid // $storage) != $storage)
+        or ($pool_type != "" and $backend != "" and (($backend == "rbd") != ($pool_type == "rbd")))
+        or ($disk_format != "" and $format != "" and $disk_format != $format)
+        or ($source.virtualsize != null and (($source.virtualsize | tonumber) <= 0))
+      then error("import candidate differs from the selected pool or inspected format")
+      elif $identity != "" and
+           (if $backend == "rbd" then ($identity | test("^rbd:[A-Za-z0-9_-]+$"))
+            else ($identity | test("^file:[0-9a-f]{64}$")) end | not)
+      then error("invalid Cloud import source identity")
+      else $identity end
+  ' <<<"${response}"
+}

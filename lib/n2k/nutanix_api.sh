@@ -18,11 +18,15 @@
 set -euo pipefail
 
 n2k_nutanix_pc_base_url() {
-  local pc="$1"
+  local pc="${1%/}"
   if [[ "${pc}" =~ ^https?:// ]]; then
-    printf '%s' "${pc%/}"
-  else
+    printf '%s' "${pc}"
+  elif [[ "${pc}" =~ ^[^:]+:[0-9]+$ || "${pc}" =~ ^\[[^]]+\]:[0-9]+$ ]]; then
+    printf 'https://%s' "${pc}"
+  elif [[ "${pc}" =~ ^\[[^]]+\]$ || "${pc}" != *:* ]]; then
     printf 'https://%s:9440' "${pc}"
+  else
+    printf 'https://[%s]:9440' "${pc}"
   fi
 }
 

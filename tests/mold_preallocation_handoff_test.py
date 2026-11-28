@@ -31,7 +31,7 @@ elif api=='createDiskOffering':
     state['offerings'].append(value);out=result(api.lower(),{'diskoffering':value})
 elif api=='listVolumesForImport':
     if state['vm'].get('state')=='Running':raise RuntimeError('Offline unmanaged image probe is forbidden after first start')
-    out=result(api.lower(),{'volume':[{'path':p.get('path'),'fullpath':p.get('path'),'name':Path(p.get('path','disk')).name,'format':'QCOW2'}]})
+    out=result(api.lower(),{'volume':[{'path':p.get('path'),'fullpath':p.get('path'),'name':Path(p.get('path','disk')).name,'format':Path(p.get('path','disk.qcow2')).suffix.lstrip('.').upper()}]})
 elif api=='importVolume':
     id=p['allocationrequestid'];policy=p['allocationpolicy'];fmt=p['allocationformat'];copy=policy in ['metadata','full']
     allocation={'contractversion':'1','requestedpolicy':policy,'requestedformat':fmt,'policyorigin':'explicit','fixedpolicy':policy,'effectivepolicy':policy,'actualformat':fmt,'evidence':'verified','appliedbackend':'GFS2','appliedoperation':'copy' if copy else 'import','appliedmethod':('qemu-preallocation-' if copy else 'import-adopt-')+policy,'evidencescope':'creation-or-copy-time' if copy else 'import-time','importrequestid':id,'importidentity':'0'*64,'importpool':'pool','importverifiedat':'2026-11-26T00:00:00Z','importstrategy':'copy' if copy else 'adopt','observedallocatedbytes':'1075838976'}

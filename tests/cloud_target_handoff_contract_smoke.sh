@@ -183,11 +183,15 @@ run_v2k_submission_checkpoint() (
   local manifest="${WORK_DIR}/v2k-submitted.json"
   printf '%s\n' '{"runtime":{"cloud":{}}}' >"${manifest}"
   # shellcheck disable=SC2317
-  v2k_cloud_api_get() { printf '%s' '{"importvolumeresponse":{"jobid":"job-v2k-submitted"}}'; }
+  v2k_cloud_api_get() {
+    [[ "$4" == importVolume ]]
+    jq -e '.sourceidentity == "rbd:ceph-image-id" and .storageid == "storage" and .path == "root"' <<<"$5" >/dev/null || return 1
+    printf '%s' '{"importvolumeresponse":{"jobid":"job-v2k-submitted"}}'
+  }
   # shellcheck disable=SC2317
   v2k_cloud_wait_job() { return 1; }
   if v2k_cloud_target_import_volume \
-      endpoint key secret storage offering root name '{}' "${manifest}" 0; then
+      endpoint key secret storage offering root name '{}' "${manifest}" 0 rbd:ceph-image-id; then
     echo "[ERR] v2k accepted a failed submitted import job" >&2
     exit 1
   fi
@@ -205,11 +209,15 @@ run_n2k_submission_checkpoint() (
   local manifest="${WORK_DIR}/n2k-submitted.json"
   printf '%s\n' '{"runtime":{"cloud":{}}}' >"${manifest}"
   # shellcheck disable=SC2317
-  n2k_cloud_api_get() { printf '%s' '{"importvolumeresponse":{"jobid":"job-n2k-submitted"}}'; }
+  n2k_cloud_api_get() {
+    [[ "$4" == importVolume ]]
+    jq -e '.sourceidentity == "rbd:ceph-image-id" and .storageid == "storage" and .path == "root"' <<<"$5" >/dev/null || return 1
+    printf '%s' '{"importvolumeresponse":{"jobid":"job-n2k-submitted"}}'
+  }
   # shellcheck disable=SC2317
   n2k_cloud_wait_job() { return 1; }
   if n2k_cloud_target_import_volume \
-      endpoint key secret storage offering root name '{}' "${manifest}" 0; then
+      endpoint key secret storage offering root name '{}' "${manifest}" 0 rbd:ceph-image-id; then
     echo "[ERR] n2k accepted a failed submitted import job" >&2
     exit 1
   fi
@@ -219,10 +227,68 @@ run_n2k_submission_checkpoint() (
   ' "${manifest}" >/dev/null
 )
 
+run_import_candidate_contract() (
+  local tool="$1" response expected
+  # shellcheck source=/dev/null
+  source "${ROOT_DIR}/lib/${tool}/cloud_allocation.sh"
+  response='{"listvolumesforimportresponse":{"volumeforimport":[{"path":"root","storageid":"pool","format":"RAW","storagetype":"RBD","virtualsize":1024,"details":{"SOURCE_IDENTITY":"rbd:ceph-image-id"}}]}}'
+  expected="$(migration_cloud_import_identity "$response" pool root rbd raw)"
+  [[ "$expected" == rbd:ceph-image-id ]]
+  ! migration_cloud_import_identity "$response" other root rbd raw 2>/dev/null
+  ! migration_cloud_import_identity "$response" pool different rbd raw 2>/dev/null
+  ! migration_cloud_import_identity "$response" pool root file raw 2>/dev/null
+  ! migration_cloud_import_identity "$response" pool root rbd qcow2 2>/dev/null
+  ! migration_cloud_import_identity '{"listvolumesforimportresponse":{"count":1}}' pool root rbd raw 2>/dev/null
+  response='{"listvolumesforimportresponse":{"volumeforimport":[{"path":"old.qcow2","fullpath":"/pool/old.qcow2","format":"QCOW2","virtualsize":1024}]}}'
+  expected="$(migration_cloud_import_identity "$response" pool /pool/old.qcow2 file qcow2)"
+  [[ -z "$expected" ]]
+  response='{"listvolumesforimportresponse":{"volumeforimport":[{"path":"new.raw","format":"RAW","virtualsize":1024,"details":{"SOURCE_IDENTITY":"file:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}]}}'
+  expected="$(migration_cloud_import_identity "$response" pool new.raw file raw)"
+  [[ "$expected" == file:* ]]
+)
+
+run_import_candidate_contract v2k
+run_import_candidate_contract n2k
+
 run_v2k_contract
 run_n2k_contract
 run_v2k_contract start-failure
 run_n2k_contract start-failure
 run_v2k_submission_checkpoint
 run_n2k_submission_checkpoint
+run_n2k_guest_stage_with_credential_file() (
+  # shellcheck source=/dev/null
+  source "${ROOT_DIR}/lib/n2k/cloudstack_api.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT_DIR}/lib/n2k/target_cloud.sh"
+  # shellcheck source=/dev/null
+  source "${ROOT_DIR}/lib/n2k/guest_configuration.sh"
+
+  local manifest="${WORK_DIR}/n2k-guest-stage.json" creds="${WORK_DIR}/n2k-test.env"
+  cat >"$manifest" <<'JSON'
+{"target":{"guest_config_policy":"preserve","storage":{"type":"rbd"},"format":"raw","cloud":{"storage_id":"pool-id"}},"disks":[{"size_bytes":1024,"transfer":{"target_path":"rbd:pool/root"}}]}
+JSON
+  cat >"$creds" <<'ENV'
+N2K_CLOUD_ENDPOINT=https://mold.example.test/client/api
+N2K_CLOUD_API_KEY=test-key
+N2K_CLOUD_SECRET_KEY=test-secret
+ENV
+  unset N2K_CLOUD_ENDPOINT N2K_CLOUD_API_KEY N2K_CLOUD_SECRET_KEY
+
+  # shellcheck disable=SC2317
+  n2k_cloud_require_unmanaged_target() { return 0; }
+  # shellcheck disable=SC2317
+  n2k_guest_config_python() { return 0; }
+  # shellcheck disable=SC2317
+  n2k_cloud_api_get() {
+    [[ "$1" == https://mold.example.test/client/api && "$2" == test-key && "$3" == test-secret ]]
+    [[ "$4" == listVolumesForImport ]]
+    jq -e '.storageid=="pool-id" and .path=="pool/root"' <<<"$5" >/dev/null
+    printf '%s' '{"listvolumesforimportresponse":{"volumeforimport":[{"path":"pool/root"}]}}'
+  }
+  n2k_guest_config_stage "$manifest" "" "" "" "$creds"
+)
+
+run_n2k_guest_stage_with_credential_file
+
 echo "[OK] v2k/n2k Cloud inspection handoff contract passed"

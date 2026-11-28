@@ -52,6 +52,25 @@ custom_params="$(v2k_cloud_target_source_deploy_params_json \
   "${manifest}" '{"id":"offering-custom","cpuspeed":null,"iscustomized":true}')"
 jq -e '.["details[0].cpuSpeed"] == "1000"' <<<"${custom_params}" >/dev/null
 
+
+# Both providers may pass source values only for dimensions the chosen offering
+# leaves configurable. Firmware and disk settings remain available in all cases.
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/lib/n2k/target_cloud.sh"
+fixed='{"id":"offering-static","cpunumber":2,"cpuspeed":2000,"memory":4096,"iscustomized":false}'
+mixed='{"id":"offering-dynamic","cpunumber":2,"cpuspeed":2000,"iscustomized":true}'
+for deploy_params in v2k_cloud_target_source_deploy_params_json n2k_cloud_target_source_deploy_params_json; do
+  params="$("$deploy_params" "$manifest" "$fixed")"
+  jq -e '
+    (has("details[0].cpuSpeed") or has("details[0].cpuNumber") or has("details[0].memory") | not)
+    and ."details[0].rootdisksize" == "20" and .boottype == "BIOS"
+  ' <<<"$params" >/dev/null
+  params="$("$deploy_params" "$manifest" "$mixed")"
+  jq -e '
+    (has("details[0].cpuSpeed") or has("details[0].cpuNumber") | not) and ."details[0].memory" == "4096"
+  ' <<<"$params" >/dev/null
+done
+
 manifest_without_speed="${WORK_DIR}/manifest-without-speed.json"
 jq 'del(.target.cloud.cpu_speed)' "${manifest}" >"${manifest_without_speed}"
 optional_params="$(v2k_cloud_target_source_deploy_params_json \

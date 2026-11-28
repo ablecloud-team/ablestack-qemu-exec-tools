@@ -562,6 +562,9 @@ v2k_cloud_target_source_deploy_params_legacy_json() {
     | (if $root_size_bytes > 0 then ((($root_size_bytes + 1073741823) / 1073741824) | floor) else 0 end) as $root_size_gib
     | ((.target.cloud.cpu_speed // "") | tostring) as $cpu_speed
     | ((($offering.cpuspeed // 0) | tonumber?) // 0) as $offering_cpu_speed
+    | ((($offering.cpunumber // 0) | tonumber?) // 0) as $offering_cpu
+    | ((($offering.memory // 0) | tonumber?) // 0) as $offering_memory
+    | ($offering.iscustomized == false or $offering.customized == false) as $static_offering
     | (($vm.firmware // "") | tostring | ascii_downcase) as $firmware
     | (($vm.secure_boot // false) == true) as $secure_boot
     | ((.runtime.bootstrap_fallback.bus // "") | tostring | ascii_downcase) as $fallback_bus
@@ -585,11 +588,11 @@ v2k_cloud_target_source_deploy_params_legacy_json() {
         end
       ) as $data_controller
     | {}
-      + (if $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
-      + (if $offering_cpu_speed <= 0 and ($cpu_speed | length) > 0 then {"details[0].cpuSpeed": $cpu_speed} else {} end)
+      + (if ($static_offering | not) and $offering_cpu <= 0 and $cpu > 0 then {"details[0].cpuNumber": ($cpu | floor | tostring)} else {} end)
+      + (if ($static_offering | not) and $offering_cpu_speed <= 0 and ($cpu_speed | length) > 0 then {"details[0].cpuSpeed": $cpu_speed} else {} end)
       + {"details[0].io.policy": "io_uring"}
       + {"details[0].iothreads": "true"}
-      + (if $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
+      + (if ($static_offering | not) and $offering_memory <= 0 and $memory_mb > 0 then {"details[0].memory": ($memory_mb | floor | tostring)} else {} end)
       + (if $root_size_gib > 0 then {"details[0].rootdisksize": ($root_size_gib | tostring)} else {} end)
       + (if ($root_controller | length) > 0 then {"details[0].rootDiskController": $root_controller} else {} end)
       + (if ($data_controller | length) > 0 then {"details[0].dataDiskController": $data_controller} else {} end)
@@ -666,18 +669,12 @@ v2k_cloud_target_deploy_params_json() {
 
 v2k_cloud_target_validate_import_visible() {
   local endpoint="$1" api_key="$2" secret_key="$3" storage_id="$4" import_path="$5"
-  local response
+  local backend="${6:-}" expected_format="${7:-}" response
   if ! response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "listVolumesForImport" \
     "$(jq -nc --arg storageid "${storage_id}" --arg path "${import_path}" '{storageid:$storageid,path:$path}')")"; then
     return 1
   fi
-  printf '%s' "${response}" | jq -e '
-    to_entries[0].value as $body
-    | (
-        (($body.count // 0 | tonumber) > 0)
-        or (($body.volume // $body.volumes // $body.volumeforimport // []) | length > 0)
-      )
-  ' >/dev/null
+  migration_cloud_import_identity "${response}" "${storage_id}" "${import_path}" "${backend}" "${expected_format}"
 }
 
 v2k_cloud_target_storage_pool_json() {
@@ -951,16 +948,18 @@ v2k_cloud_target_disk_name() {
 v2k_cloud_target_import_volume() {
   local endpoint="$1" api_key="$2" secret_key="$3" storage_id="$4" disk_offering_id="$5"
   local import_path="$6" name="$7" owner_params="$8"
-  local manifest="${9:-}" disk_index="${10:-0}"
+  local manifest="${9:-}" disk_index="${10:-0}" source_identity="${11:-}"
   local params response job_id job volume_id checkpoint_patch checkpoint_stage
   params="$(jq -nc \
     --arg path "${import_path}" \
     --arg storageid "${storage_id}" \
     --arg name "${name}" \
     --arg diskofferingid "${disk_offering_id}" \
+    --arg sourceidentity "${source_identity}" \
     --argjson owner "${owner_params}" \
     '{path:$path,storageid:$storageid,name:$name} + $owner
-     + (if ($diskofferingid | length) > 0 then {diskofferingid:$diskofferingid} else {} end)')"
+     + (if ($diskofferingid | length) > 0 then {diskofferingid:$diskofferingid} else {} end)
+     + (if $sourceidentity != "" then {sourceidentity:$sourceidentity} else {} end)')"
   params="$(migration_cloud_allocation_import_params "${manifest}" "${disk_index}" "${params}")" || return $?
   response="$(v2k_cloud_api_get "${endpoint}" "${api_key}" "${secret_key}" "importVolume" "${params}")" || return $?
   job_id="$(printf '%s' "${response}" | v2k_cloud_response_job_id)"
@@ -1424,6 +1423,9 @@ v2k_cloud_target_cutover_impl() {
     v2k_cloud_target_validate_file_paths_for_pool "${manifest}" "${pool_path}" || return $?
   fi
 
+  local -a import_identities=()
+  local import_format
+  import_format="$(jq -r '.target.format // "" | ascii_downcase' "${manifest}")"
   for ((idx=0; idx<disk_count; idx++)); do
     target_path="$(jq -r ".disks[${idx}].transfer.target_path // \"\"" "${manifest}")"
     [[ -n "${target_path}" ]] || {
@@ -1440,7 +1442,8 @@ v2k_cloud_target_cutover_impl() {
         | length > 0' "${manifest}" >/dev/null; then
       continue
     fi
-    v2k_cloud_target_validate_import_visible "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${import_path}" || {
+    import_identities[idx]="$(v2k_cloud_target_validate_import_visible "${endpoint}" "${api_key}" "${secret_key}" \
+      "${storage_id}" "${import_path}" "${storage}" "${import_format}")" || {
       echo "Cloud import source is not visible: ${import_path}" >&2
       if [[ "${storage}" == "file" && -n "${pool_path:-}" ]]; then
         echo "Selected Cloud storage path: ${pool_path}" >&2
@@ -1542,7 +1545,7 @@ v2k_cloud_target_cutover_impl() {
       "$(jq -r '.root_import_job_id' <<<"${checkpoint}")")" || return $?
     root_volume_id="$(jq -r '.id' <<<"${root_import}")"
   else
-    root_import="$(v2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}" "${manifest}" 0)" || return $?
+    root_import="$(v2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}" "${manifest}" 0 "${import_identities[0]:-}")" || return $?
     root_volume_id="$(jq -r '.id' <<<"${root_import}")"
     [[ -n "${root_volume_id}" ]] || {
       echo "Cloud root import did not return a volume id." >&2
@@ -1662,7 +1665,7 @@ v2k_cloud_target_cutover_impl() {
         continue
       }
       import_volume_id="$(jq -r '.id // empty' <<<"${import_result}")"
-    elif import_result="$(v2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}" "${manifest}" "${idx}")"; then
+    elif import_result="$(v2k_cloud_target_import_volume "${endpoint}" "${api_key}" "${secret_key}" "${storage_id}" "${disk_offering_id}" "${import_path}" "${disk_name}" "${owner_params}" "${manifest}" "${idx}" "${import_identities[$idx]:-}")"; then
       import_volume_id="$(jq -r '.id // empty' <<<"${import_result}")"
       if [[ -z "${import_volume_id}" ]]; then
         inspection_required=true
